@@ -1,0 +1,244 @@
+# IR and middle end
+
+This document covers Draconian's intermediate representation and every pass that
+runs on it. For sources and status labels, see the [index](README.md).
+
+## 1. The IR
+
+Draconian reads and writes LLVM's textual IR (`.ll`) as described in the
+[Language Reference](https://llvm.org/docs/LangRef.html). The bitcode format
+(`.bc`) comes later.
+
+The IR is arranged as a hierarchy:
+
+- **Module**: global variables, functions, aliases, metadata, data layout and
+  target triple.
+- **Function**: a list of basic blocks plus attributes and a calling
+  convention.
+- **Basic block**: a list of instructions ending in exactly one terminator.
+- **Instruction**: produces at most one SSA value.
+
+### Rules that the verifier enforces
+
+These come from the `-verify` entry on the Passes page:
+
+- Operand and result types agree.
+- Every value is defined before it is used, as SSA requires.
+- PHI nodes sit at the top of their block and have one entry per
+  predecessor.
+
+### Open questions
+
+- **Open:** how values, uses and blocks are stored in Rust. The simplest
+  choices are arenas with index handles, or reference counting. Arenas make
+  replace-all-uses and deletion cheap and avoid borrow checker fights, so
+  they are the likely choice.
+- **Open:** whether to intern types and constants per context, as the
+  documentation's `LLVMContext` model suggests.
+
+## 2. Pass manager
+
+Draconian follows the design of LLVM's new pass manager. The legacy pass manager
+is not cloned.
+
+### Levels and adaptors
+
+Passes run at four levels, nested from outermost to innermost:
+
+1. Module
+2. CGSCC, an optional level that walks strongly connected components of the
+   call graph bottom-up
+3. Function
+4. Loop
+
+A pass manager is itself a pass at its own level. Adaptors run an inner
+pipeline inside an outer one, for example module to function or function to
+loop. Grouping passes under one adaptor runs them all on each unit before
+moving on, which is better for cache locality.
+
+### Analyses
+
+- There is one analysis manager per level. Results are computed when first
+  asked for, then cached.
+- A pass can only ask for cached results from an outer level, and must not
+  change them. Loop passes get a fixed set of function analyses.
+- Each pass returns a preserved-analyses set: all, none, specific analyses,
+  or the set of CFG-only analyses. Anything not preserved is invalidated.
+- An analysis can decide for itself whether it stays valid, and must check
+  the analyses it depends on.
+- Cached results for deleted IR must be cleared, because the memory may be
+  reused.
+
+### Pipeline text
+
+`draconian-opt -passes=` takes LLVM's textual pipeline syntax:
+
+- Passes nest by level, for example `module(cgscc(function(loop(licm))))`.
+- If the first pass is not a module pass, the outer levels are added
+  automatically.
+- `require<name>` forces an analysis to run.
+- `--print-passes` lists every pass, and `-debug-pass-manager` prints the
+  order passes run in.
+
+### Default pipelines
+
+The documentation shows that `-O2` comes from building a default per-module
+pipeline, and that extension points let extra passes be added at fixed
+places in it.
+
+- **Open:** the documentation does not list what `-O1`, `-O2`, `-O3`, `-Os`,
+  `-Oz` or the LTO pipelines contain. Draconian will design its own pipelines
+  from the passes below and compare output quality, not pass order.
+
+## 3. Analysis passes
+
+| Pass | What it does | Status |
+| --- | --- | --- |
+| `domtree` | Builds the dominator tree. | Planned |
+| `postdomtree` | Builds the post-dominator tree. | Planned |
+| `domfrontier` | Computes dominance frontiers. Needed by `mem2reg`. | Planned |
+| `loops` | Finds natural loops and the loop depth of each block. | Planned |
+| `scalar-evolution` | Describes scalar expressions in loops, including induction variables and trip counts. | Planned |
+| `basic-aa` | Stateless alias analysis from simple facts, such as two distinct globals never aliasing. | Planned |
+| `globals-aa` | Alias and mod/ref facts for globals whose address is never taken, plus pure functions. | Later |
+| `scev-aa` | Alias analysis using scalar evolution, within one loop iteration. | Later |
+| `memdep` | Finds the earlier memory operations a memory operation depends on, computed lazily. | Planned |
+| `lazy-value-info` | Computes value range facts on demand. Used by jump threading. | Planned |
+| `da` | Dependence analysis between memory accesses. | Later |
+| `iv-users` | Tracks the uses of induction-variable expressions. Used by `loop-reduce`. | Later |
+| `regions` | Finds single-entry, single-exit regions and builds a region tree. | Later |
+| `basiccg` | Builds the call graph. The Passes page says this entry is not yet written. | Planned |
+| `stack-safety` | Works out whether stack allocations are safe from memory errors. Mainly for sanitizers. | Later |
+| `instcount` | Counts instructions by kind. | Planned |
+| `lint` | Warns about IR that is probably undefined or unintended. | Later |
+| `aa-eval` | Checks every pointer pair and reports how precise alias analysis is. | Later |
+| `kernel-info` | Reports statistics for GPU kernels. | Skip |
+
+### Printers and viewers
+
+These print or draw an analysis. They are cheap to write once the analysis
+exists.
+
+| Pass | What it does | Status |
+| --- | --- | --- |
+| `print<module-debuginfo>` | Prints module debug info in readable form. | Later |
+| `print<alias-sets>` | Prints alias sets. The Passes page says this entry is not yet written. | Later |
+| `print-callgraph` | Prints the call graph. | Later |
+| `print-callgraph-sccs` | Prints the call graph's strongly connected components. | Later |
+| `print<cfg-sccs>` | Prints each function's CFG strongly connected components. | Later |
+| `function(print)` | Prints each function as the pipeline reaches it. | Planned |
+| `module(print)` | Prints the whole module. | Planned |
+| `dot-callgraph` | Writes the call graph as a `.dot` file. | Later |
+| `dot-cfg`, `dot-cfg-only` | Writes each function's CFG as a `.dot` file, with or without instructions. | Later |
+| `dot-dom`, `dot-dom-only` | Writes the dominator tree as a `.dot` file. | Later |
+| `dot-post-dom`, `dot-post-dom-only` | Writes the post-dominator tree as a `.dot` file. | Later |
+
+## 4. Transform passes
+
+### Scalar cleanup
+
+| Pass | What it does | Status |
+| --- | --- | --- |
+| `instcombine` | Combines and simplifies instructions into a canonical form. | Planned |
+| `aggressive-instcombine` | Matches larger expression patterns and may change the CFG. | Later |
+| `simplifycfg` | Removes unreachable blocks, merges blocks, removes trivial PHIs and branch-only blocks. | Planned |
+| `dce` | Removes dead instructions, and anything that becomes dead as a result. | Planned |
+| `adce` | Aggressive dead code elimination: everything is dead until proven live. | Planned |
+| `dse` | Removes stores that are overwritten before being read. | Planned |
+| `sccp` | Sparse conditional constant propagation. Finds constants and dead blocks. | Planned |
+| `reassociate` | Reorders commutative expressions to help constant folding, CSE and LICM. | Planned |
+| `gvn` | Removes fully and partially redundant instructions and loads. | Planned |
+| `jump-threading` | Routes edges past blocks whose branch result is already known. | Planned |
+| `sink` | Moves instructions into the successor blocks that need them. | Later |
+| `memcpyopt` | Removes `memcpy` calls and turns runs of stores into `memset`. | Later |
+| `tailcallelim` | Turns self-recursive tail calls into loops. | Planned |
+| `normalize` | Renames and reorders instructions into a form that diffs well. | Later |
+
+### Memory to registers
+
+| Pass | What it does | Status |
+| --- | --- | --- |
+| `mem2reg` | Promotes allocas that are only loaded and stored into SSA values. | Planned |
+| `sroa` | Splits aggregate allocas into one per field, then promotes them. | Planned |
+| `reg2mem` | Demotes values back to stack slots, the reverse of `mem2reg`. | Later |
+
+### Loops
+
+| Pass | What it does | Status |
+| --- | --- | --- |
+| `loop-simplify` | Gives every loop a preheader, dedicated exits and a single backedge. | Planned |
+| `lcssa` | Adds PHIs at loop exits for values used outside the loop. | Planned |
+| `loop-rotate` | Rotates loops into a simpler form. | Planned |
+| `licm` | Moves loop-invariant code out of loops and promotes memory to registers. | Planned |
+| `indvars` | Canonicalises induction variables and exit conditions. | Planned |
+| `loop-deletion` | Removes finite loops with no side effects and no used results. | Planned |
+| `loop-unroll` | Unrolls loops. Works best after `indvars`. | Planned |
+| `loop-reduce` | Strength-reduces array addressing that uses the induction variable. | Later |
+| `simple-loop-unswitch` | Moves loop-invariant branches out by copying the loop, within a size limit. | Later |
+| `loop-unroll-and-jam` | Unrolls an outer loop and fuses the inner copies, using dependence analysis. | Later |
+| `loop-fusion` | Fuses adjacent loops when that keeps the meaning. | Later |
+
+### Interprocedural
+
+| Pass | What it does | Status |
+| --- | --- | --- |
+| `inline` | Inlines calls, walking the call graph bottom-up. | Planned |
+| `always-inline` | Inlines only functions marked `alwaysinline`. | Planned |
+| `partial-inliner` | Inlines the part of a function that wraps its body, such as an early-return `if`. | Later |
+| `function-attrs` | Infers attributes such as `readnone`, `readonly` and `nocapture`. | Planned |
+| `argpromotion` | Turns read-only pointer arguments into value arguments. | Later |
+| `deadargelim` | Removes unused arguments of internal functions. | Planned |
+| `ipsccp` | Interprocedural sparse conditional constant propagation. | Later |
+| `globalopt` | Optimises globals whose address is never taken. | Planned |
+| `globaldce` | Deletes unreachable internal globals, including cycles of them. | Planned |
+| `constmerge` | Merges identical global constants. | Planned |
+| `mergefunc` | Finds identical functions and folds them into one. | Later |
+| `internalize` | Makes every global except `main` internal. | Later |
+
+### Lowering
+
+These rewrite IR into simpler forms for code generation or for targets that
+lack a feature.
+
+| Pass | What it does | Status |
+| --- | --- | --- |
+| `codegenprepare` | Rewrites IR to suit instruction selection. Runs at the start of codegen. | Planned |
+| `lower-switch` | Rewrites `switch` as a chain of branches. | Planned |
+| `lower-invoke` | Turns `invoke` into `call` for targets without unwinding. | Planned |
+| `lower-atomic` | Turns atomics into plain operations for single-threaded targets. | Later |
+| `lower-global-dtors` | Turns global destructors into constructors that register them with `__cxa_atexit`. | Later |
+| `break-crit-edges` | Splits critical edges by adding empty blocks. | Planned |
+| `rel-lookup-table-converter` | Turns lookup tables into position-independent relative tables. | Later |
+| `block-placement` | Orders blocks so the likely branch falls through, using profile data. | Later |
+
+### Stripping
+
+| Pass | What it does | Status |
+| --- | --- | --- |
+| `strip` | Removes value names, internal symbols and debug info. | Later |
+| `strip-dead-debug-info` | Removes debug info for unused symbols only. | Later |
+| `strip-dead-prototypes` | Removes unused declarations of functions with no body. | Later |
+| `strip-debug-declare` | Removes `llvm.dbg.declare` calls and `#dbg_declare` records. | Later |
+| `strip-nondebug` | Removes all symbols except debug info. | Later |
+
+## 5. Utility passes
+
+| Pass | What it does | Status |
+| --- | --- | --- |
+| `verify` | Checks that IR is well-formed. Runs before and after every pipeline in debug builds. | Planned |
+| `instnamer` | Names unnamed instructions so diffs are readable. | Planned |
+| `extract-blocks` | Moves each basic block into its own function. | Later |
+| `transform-warning` | Warns when a forced transform, such as `#pragma omp simd`, did not happen. | Later |
+| `view-cfg`, `view-cfg-only`, `view-dom`, `view-dom-only`, `view-post-dom`, `view-post-dom-only` | Open GraphViz windows. The `dot-*` passes cover the same need. | Skip |
+
+## 6. Build order
+
+The minimum useful path is: parse `.ll`, then verify, then run `mem2reg` and
+`simplifycfg`, then print `.ll`. After that, passes are added by what they
+depend on:
+
+1. `domtree`, `domfrontier`, `loops`, `postdomtree`
+2. `mem2reg`, `sroa`, `simplifycfg`, `dce`, `instcombine`
+3. `basic-aa`, `memdep`, then `gvn`, `dse`, `licm`
+4. `scalar-evolution`, then `indvars`, `loop-unroll`, `loop-deletion`
+5. Call graph, then `inline`, `function-attrs`, `globalopt`, `globaldce`

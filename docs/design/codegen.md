@@ -1,0 +1,212 @@
+# Code generation
+
+This document covers how Draconian turns IR into machine code. For sources and
+status labels, see the [index](README.md).
+
+The code generator documentation marks several parts as "To Be Written". Those
+parts are marked **Open** here, and Draconian designs them itself.
+
+## 1. Phases
+
+The code generator runs these phases in order:
+
+1. **Instruction selection**: turns IR into target instructions that use
+   virtual registers in SSA form.
+2. **Scheduling and formation**: puts the selected instructions in order and
+   builds machine instructions.
+3. **SSA machine code optimisations**: optional. **Open**, not described in
+   the documentation.
+4. **Register allocation**: maps virtual registers to physical ones and adds
+   spill code.
+5. **Prologue and epilogue insertion**: builds the stack frame and replaces
+   abstract stack references with real offsets. **Open**, not described.
+6. **Late machine code optimisations**: **Open**, not described.
+7. **Code emission**: writes assembly text or an object file.
+
+IR passes `codegenprepare`, `lower-switch`, `lower-invoke` and
+`break-crit-edges` (see [ir.md](ir.md)) run before phase 1.
+
+## 2. Machine code data structures
+
+| Structure | Role |
+| --- | --- |
+| Machine function | One per IR function. Holds its blocks, constant pool, frame info, target-specific info and register info. |
+| Machine basic block | A list of machine instructions. One IR block can become several machine blocks. |
+| Machine instruction | An opcode and operands. Operands that define values come first. |
+| Bundle | A group of instructions under a `BUNDLE` header, with each member flagged as inside it. Used for VLIW packets and Thumb2 `IT` blocks. |
+| Register info | Tracks virtual registers, their classes and, for GlobalISel, their types. |
+| Register mask operand | Lists the registers a call clobbers. |
+
+### Target description
+
+A target provides these pieces. Only the target machine and data layout are
+required.
+
+| Piece | Role |
+| --- | --- |
+| Target machine | Entry point. Gives access to every other piece. |
+| Data layout | Type sizes, alignment, endianness and pointer size. |
+| Lowering | How IR operations and calls map onto the target. |
+| Register info | Registers, register classes and aliases. |
+| Instruction info | Instructions, plus helpers such as copying, spilling and analysing branches. |
+| Frame lowering | Stack layout, prologue and epilogue. |
+| Subtarget | CPU and feature flags, from `-mcpu=` and `-mattr=`. |
+| Calling convention | Where arguments and return values go. |
+| Assembly printer | Turns machine instructions into text or MC instructions. |
+
+LLVM describes most of this in TableGen files. **Open:** Draconian needs its own
+way to describe targets. The likely options are a Rust DSL in macros or a
+build script, or data files read at build time. We should not reuse
+TableGen's `.td` format unless it is clearly documented.
+
+## 3. Instruction selection
+
+Draconian will have both selectors, as LLVM does. SelectionDAG comes first
+because it is the most fully documented.
+
+### SelectionDAG
+
+The DAG is made of nodes connected by value edges. Value edges carry types.
+Chain edges, of type `Other`, keep side effects in order.
+
+Phases, in order:
+
+1. **Build**: translate IR into a naive DAG.
+2. **Combine**: simplify the DAG.
+3. **Legalise types**: promote or expand types the target lacks. Vectors can
+   also be widened, split or scalarised.
+4. **Combine** again.
+5. **Legalise operations**: expand, promote or custom-lower operations the
+   target lacks.
+6. **Combine** again.
+7. **Select**: match DAG patterns to target instructions.
+8. **Schedule**: put the DAG in a line and emit machine instructions.
+
+The combiner runs after the build and after each legalisation step.
+
+### GlobalISel
+
+GlobalISel works on generic machine IR (gMIR). gMIR uses the same structures
+as machine IR but with looser rules: a virtual register can have a type
+without a register class. Types are kept in a table that is dropped after
+selection.
+
+| Pass | What it does | Status |
+| --- | --- | --- |
+| IRTranslator | Translates IR into gMIR. | Later |
+| Legalizer | Replaces operations the target lacks with ones it has. | Later |
+| RegBankSelect | Puts each virtual register in a register bank, grouping code to avoid copies between banks. | Later |
+| InstructionSelect | Selects target instructions. No gMIR may remain afterwards. | Later |
+| Combiner | Optional. Replaces instruction patterns with better ones. | Later |
+
+**Open:** the details of generic opcodes, low-level types and the known-bits
+analysis are on GlobalISel subpages we have not read yet.
+
+## 4. Register allocation
+
+### Before allocation
+
+| Pass | What it does | Status |
+| --- | --- | --- |
+| Live variables | Finds where each register is killed or dead. Uses SSA for virtual registers and tracks physical registers within a block. | Planned |
+| PHI elimination | Replaces PHI instructions with copies. | Planned |
+| Two-address | Rewrites three-address instructions into two-address form where the target needs it. | Planned |
+| Live intervals | Numbers instructions and builds a live range for each virtual register. The documentation is incomplete here. | Planned |
+
+### Allocators
+
+Chosen with `-regalloc=`.
+
+| Allocator | What it does | Status |
+| --- | --- | --- |
+| `fast` | Works one block at a time. The default for debug builds. | Planned |
+| `basic` | Allocates live ranges one by one in a heuristic order. Useful for finding bugs. | Planned |
+| `greedy` | The default. Like `basic`, plus splitting live ranges across the function. | Later |
+| `pbqp` | Solves allocation as a partitioned boolean quadratic problem. | Later |
+
+### Allocation support
+
+- **Pre-coloured registers**: physical registers already in the code, either
+  as operands or as implicit uses and definitions.
+- **Rewriting**: either change operands directly, or record a
+  virtual-to-physical map and let a spiller rewrite the code.
+- **Spiller**: adds loads and stores for spilled registers.
+- **Folding**: folds a spill load or store into the instruction that uses it,
+  to remove copies.
+
+## 5. Machine passes after selection
+
+The documentation names only a few of these. **Open:** the rest of the
+pipeline is ours to design.
+
+| Pass | Source | What it does | Status |
+| --- | --- | --- | --- |
+| Branch folder | Writing an LLVM Backend | Merges and simplifies branches using the target's branch analysis. | Planned |
+| If-converter | Writing an LLVM Backend | Turns branches into predicated instructions using branch analysis. | Later |
+| VLIW packetiser | Code generator | Groups instructions into packets using a resource state machine. | Later |
+| Tail call optimisation | Code generator | Guaranteed tail calls for `fastcc`, `tailcc`, or with `-tailcallopt`. | Later |
+| Sibling call optimisation | Code generator | A narrower tail call that needs no flag, when conventions and stack arguments allow. | Planned |
+
+Targets can add passes at fixed points in the pipeline. The documented hooks
+are "add instruction selector" and "add before emission".
+
+## 6. Code emission (MC layer)
+
+| Piece | Role |
+| --- | --- |
+| Streamer | An assembler-like interface with one method per directive. It writes either a `.s` file or a `.o` file. Targets can add their own directives. |
+| Context | Owns symbols and sections and makes sure each exists once. |
+| Symbol | A label. Temporary labels are dropped from object files. |
+| Section | An object-format section: ELF, Mach-O or COFF. |
+| MC instruction | An opcode plus operands. Each operand is an immediate, a register or an expression. |
+| Expression | A symbolic value used as an operand. |
+
+To emit code, a target needs:
+
+- An assembly printer.
+- An instruction printer.
+- Lowering from machine instructions to MC instructions. This also expands
+  pseudo-instructions.
+- An encoder, which turns MC instructions into bytes and relocations. Only
+  needed for object files.
+
+The assembler matches mnemonic aliases first, then instruction aliases.
+
+### Optional sections
+
+| Flag | What it adds |
+| --- | --- |
+| `-stack-size-section` | Pairs of function symbol and stack size. Only counts the prologue, and leaves out functions with dynamic stack allocations. |
+| `--call-graph-section` | Call graph information. The layout has its own document. |
+
+## 7. Targets
+
+**Open:** which target comes first. The suggestion is AArch64 or RISC-V,
+because their encodings are regular and they are well documented by their
+vendors. x86-64 should follow.
+
+The code generator documentation also has notes on X86, PowerPC, NVPTX, eBPF
+and AMDGPU, including x86-64 compact unwind encoding. These get their own
+documents when we reach those targets.
+
+## 8. Debugging options
+
+These options show the DAG at each step. Draconian should support them as text
+or `.dot` output: `-view-dag-combine1-dags`, `-view-legalize-dags`,
+`-view-dag-combine2-dags`, `-view-isel-dags`, `-view-sched-dags`,
+`-view-sunit-dags` and `-filter-view-dags`. `-debug-only=isel` and
+`-filter-print-funcs=` control text dumps.
+
+## 9. Build order
+
+1. Machine IR data structures and a text printer for them.
+2. A first target description: registers, instructions and calling
+   convention.
+3. SelectionDAG: build, then select, for already-legal code only.
+4. Scheduling in source order.
+5. PHI elimination, two-address, then the `fast` allocator.
+6. Prologue and epilogue, then assembly output.
+7. Type and operation legalisation, and the DAG combiner.
+8. Live intervals, then `basic`, then `greedy`.
+9. Object file output.
+10. GlobalISel.
