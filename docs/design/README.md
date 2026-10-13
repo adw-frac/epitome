@@ -7,6 +7,8 @@ split into two halves:
   manager, and the analysis and transform passes that run on IR.
 - [Code generation](codegen.md): lowering IR to machine code, from
   instruction selection to object file emission.
+- [Debug info](debug-info.md): the plan for a typed debug-info model,
+  parser, printer and verifier.
 
 ## Clean-room rules
 
@@ -16,6 +18,11 @@ implementing them.
 
 When the documentation leaves something out, the gap is marked **Open** and
 Draconian decides for itself. We do not fill a gap by looking at LLVM's source.
+
+We may also run LLVM's tools, such as `clang -S -emit-llvm -x ir`, on our
+own inputs and record what they print. Rules found this way are listed with
+how they were found in
+[observed behaviour](../llvm-ir/08-observed-behaviour.md).
 
 ### Sources
 

@@ -18,6 +18,7 @@ LLVM's development branch, not a numbered release.
 | [Intrinsics, part 1](05-intrinsics-a.md) | Intrinsic naming rules, varargs, GC, codegen, C library, bit manipulation, overflow and saturating arithmetic, vector and matrix intrinsics |
 | [Intrinsics, part 2](06-intrinsics-b.md) | Vector predication, masked memory, constrained floating point, general intrinsics, stack maps, element-wise atomics, Objective-C ARC |
 | [Bitcode format](07-bitcode.md) | The bitstream container and how IR is encoded in it |
+| [Observed behaviour](08-observed-behaviour.md) | Rules the documents leave out, found from clang's output: metadata numbering and merging, attachment order, debug intrinsic upgrade |
 
 ## Sources
 
@@ -25,6 +26,7 @@ LLVM's development branch, not a numbered release.
 | --- | --- |
 | LLVM Language Reference Manual | https://llvm.org/docs/LangRef.html |
 | LLVM Bitcode File Format | https://llvm.org/docs/BitCodeFormat.html |
+| Output of `clang -S -emit-llvm -x ir` for hand-written inputs | Chapter 8 only |
 
 ## Still to read
 

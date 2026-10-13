@@ -1,0 +1,8 @@
+[package]
+name = "draconian-ir"
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/andy-thomason/draconian-measurement-with-love"
+description = "LLVM IR data structures with a text (.ll) parser and printer"
+
+[dependencies]

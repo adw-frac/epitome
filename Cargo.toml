@@ -5,3 +5,7 @@ edition = "2024"
 repository = "https://github.com/andy-thomason/draconian-measurement-with-love"
 
 [dependencies]
+draconian-ir = { path = "ir" }
+
+[workspace]
+members = ["ir"]
