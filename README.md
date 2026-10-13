@@ -1,4 +1,4 @@
-# wyvern-of-the-white-room
+# wyvern-of-the-mist
 
 A clean-room, functional clone of LLVM, written in Rust.
 
