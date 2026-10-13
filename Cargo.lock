@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "wyvern"
+name = "draconian"
 version = "0.1.0"
