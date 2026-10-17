@@ -1,10 +1,10 @@
 # Code generation
 
-This document covers how Draconian turns IR into machine code. For sources and
+This document covers how Smaugian turns IR into machine code. For sources and
 status labels, see the [index](README.md).
 
 The code generator documentation marks several parts as "To Be Written". Those
-parts are marked **Open** here, and Draconian designs them itself.
+parts are marked **Open** here, and Smaugian designs them itself.
 
 ## 1. Phases
 
@@ -54,14 +54,14 @@ required.
 | Calling convention | Where arguments and return values go. |
 | Assembly printer | Turns machine instructions into text or MC instructions. |
 
-LLVM describes most of this in TableGen files. **Open:** Draconian needs its own
+LLVM describes most of this in TableGen files. **Open:** Smaugian needs its own
 way to describe targets. The likely options are a Rust DSL in macros or a
 build script, or data files read at build time. We should not reuse
 TableGen's `.td` format unless it is clearly documented.
 
 ## 3. Instruction selection
 
-Draconian will have both selectors, as LLVM does. SelectionDAG comes first
+Smaugian will have both selectors, as LLVM does. SelectionDAG comes first
 because it is the most fully documented.
 
 ### SelectionDAG
@@ -191,7 +191,7 @@ documents when we reach those targets.
 
 ## 8. Debugging options
 
-These options show the DAG at each step. Draconian should support them as text
+These options show the DAG at each step. Smaugian should support them as text
 or `.dot` output: `-view-dag-combine1-dags`, `-view-legalize-dags`,
 `-view-dag-combine2-dags`, `-view-isel-dags`, `-view-sched-dags`,
 `-view-sunit-dags` and `-filter-view-dags`. `-debug-only=isel` and

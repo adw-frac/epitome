@@ -16,7 +16,7 @@ new operations without changing every pass, the parser, or the bitcode reader an
   address is illegal.
 - **Must be documented.** Any intrinsic added to LLVM must be documented in the reference.
 
-**Draconian note:** the verifier should reject a `define` of an `llvm.*` name, a non-intrinsic
+**Smaugian note:** the verifier should reject a `define` of an `llvm.*` name, a non-intrinsic
 function with that prefix, and any use of an intrinsic other than as a direct callee.
 
 ### Overloading
@@ -56,7 +56,7 @@ Type encodings shown in the examples:
 Encodings for named structs, arrays, function types, `bfloat`, target types and nested
 vectors are not given in this range.
 
-**Draconian note:** the parser must map a mangled name back to an intrinsic ID by stripping
+**Smaugian note:** the parser must map a mangled name back to an intrinsic ID by stripping
 suffixes, then check the suffixes against the actual call types. The printer must produce the
 same suffixes, including the `.<number>` suffix for unnamed types.
 
@@ -88,7 +88,7 @@ pointer address space. A `va_list` must not outlive the function that created it
 | `llvm.va_end.*` | `void (ptr %arglist)` | Destroy a `va_list`. Every `va_start` and `va_copy` must be matched by exactly one `va_end`. |
 | `llvm.va_copy.*` | `void (ptr %dest, ptr %src)` | Copy the current argument position from `src` to `dest`. Both pointers must be in the same address space. |
 
-**Draconian note:** the reference says `llvm.va_copy` is equivalent to `memcpy` on all currently
+**Smaugian note:** the reference says `llvm.va_copy` is equivalent to `memcpy` on all currently
 supported targets, so a `memcpy` of the `va_list` is a valid lowering.
 
 ## Accurate garbage collection
@@ -204,7 +204,7 @@ Notes:
 - `preallocated.arg` with a token whose call already happened, or after another setup was
   made, is UB.
 
-**Draconian note:** `llvm.clear_cache` lowers by default to a call to `__clear_cache` from the
+**Smaugian note:** `llvm.clear_cache` lowers by default to a call to `__clear_cache` from the
 runtime library. `readcyclecounter` and `readsteadycounter` lower to constant 0 on targets
 without support. `prefetch` and `pcmarker` may be dropped.
 
@@ -252,7 +252,7 @@ Shared rules:
 **Experimental:** `llvm.experimental.memset.pattern`. Its `isvolatile` is not shown as
 `immarg`.
 
-**Draconian note:** `memcpy`, `memmove` and `memset` may be lowered to libc calls. The `.inline`
+**Smaugian note:** `memcpy`, `memmove` and `memset` may be lowered to libc calls. The `.inline`
 forms must always be expanded inline. `memset.pattern` may become an inline loop, a store
 sequence, or a libcall.
 
@@ -333,7 +333,7 @@ Other notes:
 - **Not documented:** whether `lround`, `lrint` and `llrint` truly accept vectors. The overview
   says vectors are allowed but every example is scalar.
 
-**Draconian note:** most of these have no instruction on common targets and must be lowered to
+**Smaugian note:** most of these have no instruction on common targets and must be lowered to
 libm calls (`sin`, `cos`, `pow`, `exp`, `log`, and so on). The default lowering of
 `llvm.sincospi` relies on `sincospi`, `sincospif` or `sincospil` existing in the target runtime.
 
@@ -440,7 +440,7 @@ by `scale`; divide by shifting `a` left by `scale` in double width, then dividin
 - May be removed if the input is already canonical, or if only floating-point operations use
   the result.
 
-**Draconian note:** `llvm.canonicalize` can be implemented as a multiply by 1.0 (if not
+**Smaugian note:** `llvm.canonicalize` can be implemented as a multiply by 1.0 (if not
 constant-folded), a divide by 1.0, `minnum(x, x)`, or adding -0.0 (unless rounding toward
 minus infinity).
 
@@ -462,7 +462,7 @@ The trip-count operand is the loop trip count, not the back-edge count.
 | `llvm.loop.decrement.reg.*` | `iN (iN %counter, iN %step)` | `counter - step`, which must not wrap. Returns the remaining count. Passes may treat it as a `sub`. Not duplicable. |
 | `llvm.loop.decrement.*` | `i1 (iN %step)` | Decrement the hidden loop counter by `step`; return false when the loop should exit. Must not wrap. |
 
-"Not duplicable" refers to an internal `IntrNoDuplicate` property. **Draconian note:** passes that
+"Not duplicable" refers to an internal `IntrNoDuplicate` property. **Smaugian note:** passes that
 clone code (unrolling, tail duplication) must not duplicate these calls.
 
 ## Vector reduction
@@ -659,7 +659,7 @@ The reference only names these families here. Their members are defined in other
 | Exception handling | `llvm.eh.*` | "LLVM Exception Handling" |
 | Pointer authentication | `llvm.ptrauth.*` | "Pointer Authentication" |
 
-**Not documented:** in the Language Reference. Draconian needs those separate documents to
+**Not documented:** in the Language Reference. Smaugian needs those separate documents to
 implement these families. Convergence intrinsics are **Experimental:**.
 
 ## Trampoline intrinsics
@@ -679,5 +679,5 @@ This implements GCC nested-function addresses.
 - Modifying the trampoline memory after `init.trampoline` makes later calls through it
   undefined.
 
-**Draconian note:** the front end or Draconian itself must know each target's trampoline size and
+**Smaugian note:** the front end or Smaugian itself must know each target's trampoline size and
 alignment; there is no IR-level query.

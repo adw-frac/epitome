@@ -1,11 +1,11 @@
 [package]
-name = "draconian"
+name = "smaugian"
 version = "0.1.0"
 edition = "2024"
-repository = "https://github.com/andy-thomason/draconian-measurement-with-love"
+repository = "https://github.com/andy-thomason/smaugian-reduction"
 
 [dependencies]
-draconian-ir = { path = "ir" }
+smaugian-ir = { path = "ir" }
 
 [workspace]
 members = ["ir"]

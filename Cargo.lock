@@ -3,12 +3,12 @@
 version = 4
 
 [[package]]
-name = "draconian"
+name = "smaugian"
 version = "0.1.0"
 dependencies = [
- "draconian-ir",
+ "smaugian-ir",
 ]
 
 [[package]]
-name = "draconian-ir"
+name = "smaugian-ir"
 version = "0.1.0"

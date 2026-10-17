@@ -33,7 +33,7 @@ the stream is an unsigned integer built from these bits.
 Multi-bit fields are also little-endian at the bit level: the first bit read
 is the lowest bit of the value.
 
-**Draconian note:** A reader can load the stream as little-endian 32-bit or
+**Smaugian note:** A reader can load the stream as little-endian 32-bit or
 64-bit words and shift bits out from the bottom. A writer accumulates bits at
 the top of a current word and flushes full words as little-endian bytes.
 
@@ -147,7 +147,7 @@ The length lets a reader jump over the block without parsing it.
 
 Because of this padding, every block is a whole number of 32-bit words long.
 
-**Draconian note:** A writer does not know `blocklen` until the block is done.
+**Smaugian note:** A writer does not know `blocklen` until the block is done.
 Write a placeholder word, remember its position, and back-patch it at
 `END_BLOCK`. The document does not say exactly where counting starts and
 stops; the natural reading is "words after the `blocklen` word, up to and
@@ -182,7 +182,7 @@ The **record code is the first operand** of the abbreviation. It can be a
 literal in the abbreviation (so it is not written in each record), or a fixed
 or VBR field written in each record.
 
-**Draconian note:** After decoding an abbreviated record, treat the first
+**Smaugian note:** After decoding an abbreviated record, treat the first
 decoded value as the record code and the rest as operands. Then the same
 record-handling code works for both abbreviated and unabbreviated records.
 
@@ -230,7 +230,7 @@ Placement rules:
 The document does not give extra-data presence by any rule other than this
 table: Fixed and VBR carry data; Array, Char6 and Blob do not.
 
-**Draconian note:** Blobs are aligned so that a reader can point straight into
+**Smaugian note:** Blobs are aligned so that a reader can point straight into
 a memory-mapped file without copying. In Rust this maps well to returning a
 `&[u8]` borrowed from the input buffer.
 
@@ -274,7 +274,7 @@ with a code.
 Although `BLOCKINFO` is described as "metadata", its abbreviations are needed
 to parse later blocks. A reader **must not skip** it.
 
-**Draconian note:** Keep a map from block ID to a list of BLOCKINFO
+**Smaugian note:** Keep a map from block ID to a list of BLOCKINFO
 abbreviations at the reader level, not per block instance. When entering a
 block, seed its abbreviation list from that map before any local
 `DEFINE_ABBREV`. The document allows a `BLOCKINFO` block inside
@@ -303,7 +303,7 @@ The header is five 32-bit fields, all **little-endian** (20 bytes total):
 The document does not name this the "Darwin" wrapper and does not say which
 platforms produce it or what CPUType values mean.
 
-**Draconian note:** A reader should check the first four bytes: `DE C0 17 0B`
+**Smaugian note:** A reader should check the first four bytes: `DE C0 17 0B`
 means wrapper, then read `[Offset, Offset + Size)` as the bitstream.
 `42 43 C0 DE` means a raw IR bitstream.
 
@@ -368,7 +368,7 @@ Where it is used, per the document:
 - Operands of `phi` instructions when the module version is 1 or later
   (relative operand encoding; see [3.4](#version-values)).
 
-**Draconian note:** The document does not say how the most negative 64-bit
+**Smaugian note:** The document does not say how the most negative 64-bit
 value is encoded, since `-v` overflows. Handle it explicitly in both reader
 and writer.
 
@@ -456,7 +456,7 @@ The relative example from the document, in version 1 form:
 br #1, label #(bb1), label #(bb2) ; labels stay absolute
 ```
 
-**Draconian note:** A writer targeting current LLVM should emit version 2.
+**Smaugian note:** A writer targeting current LLVM should emit version 2.
 A reader should accept 0, 1 and 2, and keep the version in its parse state
 because it changes both operand decoding and name lookup.
 
@@ -520,7 +520,7 @@ The prose also describes an **unnamed_addr** field (optional, same codes as
 for globals), but the field list does not include it, so its position is
 not documented. See [Gaps](#gaps).
 
-**Draconian note:** Function bodies appear later as `FUNCTION_BLOCK`s. The
+**Smaugian note:** Function bodies appear later as `FUNCTION_BLOCK`s. The
 document does not say how a body is matched to its `FUNCTION` record. The
 natural guess is: in order, to the records with `isproto = 0`. Verify
 against real files.
@@ -685,7 +685,7 @@ function itself, and N (1-based) for parameter N. The `attr` bitmap is:
 | 36 | `inlinehint` |
 | 37-39 | `alignstack n`, stored as log2(n) + 1 |
 
-**Draconian note:** A writer only needs code 2. Supporting `ENTRY_OLD` in the
+**Smaugian note:** A writer only needs code 2. Supporting `ENTRY_OLD` in the
 reader is only needed for very old files.
 
 ### 3.6 PARAMATTR_GROUP_BLOCK (ID 10)
@@ -730,9 +730,9 @@ Two attributes pack two 32-bit arguments into one 64-bit integer value:
 | `allocsize` | `(EltSizeParam << 32) \| NumEltsParam` | `NumEltsParam` is -1 (all ones in 32 bits) when not given. |
 | `vscale_range` | `(Min << 32) \| Max` | `Max` equals `Min` when not given. |
 
-**Draconian note:** Because string attributes end with a 0 operand, a reader
+**Smaugian note:** Because string attributes end with a 0 operand, a reader
 walks the operand list one attribute at a time; there is no per-attribute
-length. Draconian needs its own full table of attribute kind codes, which this
+length. Smaugian needs its own full table of attribute kind codes, which this
 document does not provide.
 
 ### 3.7 TYPE_BLOCK (ID 17)
@@ -782,7 +782,7 @@ record documented here is the old typed `POINTER` (code 8), which names a
 pointee type. The document does not give the record for `ptr` /
 `ptr addrspace(N)`. See [Gaps](#gaps).
 
-**Draconian note:** Struct element types can refer forward to later entries
+**Smaugian note:** Struct element types can refer forward to later entries
 (for recursive types). The document does not discuss this, so a reader
 should allow forward type references and resolve them after the block ends.
 
@@ -841,7 +841,7 @@ function) are documented.
 - A file normally has one string table. It can have more if several bitcode
   files were joined byte-for-byte.
 
-**Draconian note:** A reader cannot resolve global names while reading
+**Smaugian note:** A reader cannot resolve global names while reading
 `MODULE_BLOCK`, because the string table comes later. Either scan ahead
 for the `STRTAB_BLOCK` first (block lengths make skipping cheap), or store
 `(offset, size)` pairs and resolve names once the string table is read. A
@@ -889,7 +889,7 @@ contain.
 ## Gaps
 
 The source document is explicitly incomplete. To read or write real LLVM
-bitcode, Draconian needs the following, none of which is in the document.
+bitcode, Smaugian needs the following, none of which is in the document.
 
 **Container**
 
@@ -973,4 +973,4 @@ the attribute tables (given a kind-code table) and most of the type table.
 It is not enough to read or write function bodies, constants, metadata or
 symbol tables. Those parts need another clean-room source, or must be
 worked out from observing tool output (for example `llvm-bcanalyzer`
-dumps of files Draconian did not write), if the clean-room rules allow it.
+dumps of files Smaugian did not write), if the clean-room rules allow it.

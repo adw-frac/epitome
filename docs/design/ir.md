@@ -1,11 +1,11 @@
 # IR and middle end
 
-This document covers Draconian's intermediate representation and every pass that
+This document covers Smaugian's intermediate representation and every pass that
 runs on it. For sources and status labels, see the [index](README.md).
 
 ## 1. The IR
 
-Draconian reads and writes LLVM's textual IR (`.ll`) as described in the
+Smaugian reads and writes LLVM's textual IR (`.ll`) as described in the
 [Language Reference](https://llvm.org/docs/LangRef.html). The bitcode format
 (`.bc`) comes later.
 
@@ -38,7 +38,7 @@ These come from the `-verify` entry on the Passes page:
 
 ## 2. Pass manager
 
-Draconian follows the design of LLVM's new pass manager. The legacy pass manager
+Smaugian follows the design of LLVM's new pass manager. The legacy pass manager
 is not cloned.
 
 ### Levels and adaptors
@@ -71,7 +71,7 @@ moving on, which is better for cache locality.
 
 ### Pipeline text
 
-`draconian-opt -passes=` takes LLVM's textual pipeline syntax:
+`smaugian-opt -passes=` takes LLVM's textual pipeline syntax:
 
 - Passes nest by level, for example `module(cgscc(function(loop(licm))))`.
 - If the first pass is not a module pass, the outer levels are added
@@ -87,7 +87,7 @@ pipeline, and that extension points let extra passes be added at fixed
 places in it.
 
 - **Open:** the documentation does not list what `-O1`, `-O2`, `-O3`, `-Os`,
-  `-Oz` or the LTO pipelines contain. Draconian will design its own pipelines
+  `-Oz` or the LTO pipelines contain. Smaugian will design its own pipelines
   from the passes below and compare output quality, not pass order.
 
 ## 3. Analysis passes

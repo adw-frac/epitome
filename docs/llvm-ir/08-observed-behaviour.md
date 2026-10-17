@@ -135,8 +135,8 @@ same way. The record is attached to the instruction after the call.
   and printed with a `; Unknown intrinsic` comment.
 - **Debug-info fields are printed in a fixed order**, with some defaults
   always written. `!DICompileUnit` always shows `isOptimized:` and
-  `runtimeVersion:`. Draconian keeps fields as written; see
+  `runtimeVersion:`. Smaugian keeps fields as written; see
   `docs/design/debug-info.md`.
 - **`zeroinitializer` for target types.** It is rejected for
-  `target("spirv.Image", void, 1)`: `invalid type for null constant`. Draconian
+  `target("spirv.Image", void, 1)`: `invalid type for null constant`. Smaugian
   accepts it today.
