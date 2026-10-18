@@ -54,10 +54,10 @@ required.
 | Calling convention | Where arguments and return values go. |
 | Assembly printer | Turns machine instructions into text or MC instructions. |
 
-LLVM describes most of this in TableGen files. **Open:** Smaugian needs its own
-way to describe targets. The likely options are a Rust DSL in macros or a
-build script, or data files read at build time. We should not reuse
-TableGen's `.td` format unless it is clearly documented.
+LLVM describes most of this in TableGen files. Smaugian describes targets in
+LLVM IR instead: each instruction is a function whose body says what it does,
+with its encoding and assembly in attributes, read as data at start-up. See
+[machine descriptions and instruction selection](isel.md).
 
 ## 3. Instruction selection
 
@@ -109,9 +109,9 @@ analysis are on GlobalISel subpages we have not read yet.
 | Pass | What it does | Status |
 | --- | --- | --- |
 | Live variables | Finds where each register is killed or dead. Uses SSA for virtual registers and tracks physical registers within a block. | Planned |
-| PHI elimination | Replaces PHI instructions with copies. | Planned |
+| PHI elimination | Replaces PHI instructions with copies. Copies go at the end of each predecessor, through temporaries; see [isel](isel.md). | Done |
 | Two-address | Rewrites three-address instructions into two-address form where the target needs it. | Planned |
-| Live intervals | Numbers instructions and builds a live range for each virtual register. The documentation is incomplete here. | Planned |
+| Live intervals | Numbers instructions and builds a live range for each virtual register. The documentation is incomplete here. Smaugian keeps one segment per block; see [isel](isel.md). | Done |
 
 ### Allocators
 
@@ -121,6 +121,7 @@ Chosen with `-regalloc=`.
 | --- | --- | --- |
 | `fast` | Works one block at a time. The default for debug builds. | Planned |
 | `basic` | Allocates live ranges one by one in a heuristic order. Useful for finding bugs. | Planned |
+| linear scan | Smaugian's first allocator: live ranges in order of start, copy hints, callee-saved registers for values live across calls, spills through scratch registers. See [isel](isel.md). | Done |
 | `greedy` | The default. Like `basic`, plus splitting live ranges across the function. | Later |
 | `pbqp` | Solves allocation as a partitioned boolean quadratic problem. | Later |
 
@@ -141,7 +142,7 @@ pipeline is ours to design.
 
 | Pass | Source | What it does | Status |
 | --- | --- | --- | --- |
-| Branch folder | Writing an LLVM Backend | Merges and simplifies branches using the target's branch analysis. | Planned |
+| Branch folder | Writing an LLVM Backend | Merges and simplifies branches using the target's branch analysis. Smaugian skips blocks that only branch and drops branches to the next block. | Partial |
 | If-converter | Writing an LLVM Backend | Turns branches into predicated instructions using branch analysis. | Later |
 | VLIW packetiser | Code generator | Groups instructions into packets using a resource state machine. | Later |
 | Tail call optimisation | Code generator | Guaranteed tail calls for `fastcc`, `tailcc`, or with `-tailcallopt`. | Later |

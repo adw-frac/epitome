@@ -17,6 +17,9 @@ split into two halves:
 - [mem2reg](mem2reg.md): promoting allocas to SSA values.
 - [Simplifying the CFG](simplifycfg.md): branch rules in the combiner, and
   the passes that change the graph's shape.
+- [Machine descriptions and instruction selection](isel.md): targets
+  described in LLVM IR, longest-match selection with a trie, register
+  allocation, and assembly, binary and disassembly from one description.
 - [Loops](loops.md): finding loops, rotation, induction variables and
   trip counts.
 - [CSE](cse.md): common-subexpression elimination by hashing a canonical

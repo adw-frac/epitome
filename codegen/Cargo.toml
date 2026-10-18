@@ -1,0 +1,16 @@
+[package]
+name = "smaugian-codegen"
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/andy-thomason/smaugian-reduction"
+description = "Instruction selection from machine descriptions written in LLVM IR, register allocation, and assembly, binary and disassembly output"
+
+[dependencies]
+smaugian-ir = { path = "../ir" }
+
+[[bin]]
+name = "smaugian-llc"
+path = "src/main.rs"
+
+[dev-dependencies]
+smaugian-opt = { path = "../opt" }

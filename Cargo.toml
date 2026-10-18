@@ -8,4 +8,4 @@ repository = "https://github.com/andy-thomason/smaugian-reduction"
 smaugian-ir = { path = "ir" }
 
 [workspace]
-members = ["ir", "opt"]
+members = ["ir", "opt", "codegen"]
