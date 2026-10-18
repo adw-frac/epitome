@@ -9,14 +9,14 @@
 //! has no frame at all.
 
 use crate::mir::*;
-use crate::regalloc::CALLEE_SAVED;
 use crate::target::Target;
 
 const SP: u8 = 31;
-const FP: u8 = 29;
-const LR: u8 = 30;
 
 pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
+    let (fp_reg, lr_reg) = (f.abi.fp, f.abi.lr);
+    let mut callee_saved = f.abi.callee_saved();
+    callee_saved.extend(f.abi.fp_callee_saved());
     // Callee-saved registers written anywhere.
     let mut saved: Vec<u8> = Vec::new();
     for b in &f.blocks {
@@ -24,7 +24,7 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
             let (defs, _) = inst.defs_uses(t);
             for k in defs {
                 if let MOp::Reg(Reg::P(r)) = inst.ops[k]
-                    && CALLEE_SAVED.contains(&r)
+                    && callee_saved.contains(&r)
                     && !saved.contains(&r)
                 {
                     saved.push(r);
@@ -33,7 +33,8 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
         }
     }
     saved.sort();
-    let mut off: i64 = 0;
+    // Arguments for calls go at the bottom, where the callee finds them.
+    let mut off: i64 = f.out_size;
     for s in &mut f.slots {
         let a = s.align as i64;
         off = (off + a - 1) / a * a;
@@ -48,7 +49,9 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     let size = (off + record + 15) / 16 * 16;
     let fp_at = size - 16;
     f.frame_size = size;
-    if size > 4095 {
+    // Offsets from sp of up to 32760 reach saved registers with one
+    // scaled store; adjusting sp takes one or two immediates of 12 bits.
+    if size > 32760 {
         return Err(format!("{}: a frame of {size} bytes is too big for now", f.name));
     }
 
@@ -56,40 +59,41 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     for b in &mut f.blocks {
         for inst in &mut b.insts {
             for op in &mut inst.ops {
-                if let MOp::Frame(s, o) = op {
-                    *op = MOp::Imm(f.slots[*s].offset + *o);
+                match op {
+                    MOp::Frame(s, o) => *op = MOp::Imm(f.slots[*s].offset + *o),
+                    MOp::Incoming(o) => *op = MOp::Imm(size + *o),
+                    _ => {}
                 }
             }
         }
     }
 
-    let sub = t.by_role("subi");
-    let add = t.by_role("addi");
     let ldr = t.by_role("load.x");
     let str_ = t.by_role("store.x");
     let r = |n: u8| MOp::Reg(Reg::P(n));
     let mut prologue = Vec::new();
     if size > 0 {
-        prologue.push(MInst::new(sub, vec![r(SP), r(SP), MOp::Imm(size)]));
+        adjust(t, &mut prologue, SP, SP, -size);
     }
     if calls {
-        prologue.push(MInst::new(str_, vec![r(FP), r(SP), MOp::Imm(fp_at)]));
-        prologue.push(MInst::new(str_, vec![r(LR), r(SP), MOp::Imm(fp_at + 8)]));
-        prologue.push(MInst::new(add, vec![r(FP), r(SP), MOp::Imm(fp_at)]));
+        prologue.push(MInst::new(str_, vec![r(fp_reg), r(SP), MOp::Imm(fp_at)]));
+        prologue.push(MInst::new(str_, vec![r(lr_reg), r(SP), MOp::Imm(fp_at + 8)]));
+        adjust(t, &mut prologue, fp_reg, SP, fp_at);
     }
+    let (ldr_d, str_d) = (t.by_role("load.d"), t.by_role("store.d"));
     for &(reg, at) in &save_at {
-        prologue.push(MInst::new(str_, vec![r(reg), r(SP), MOp::Imm(at)]));
+        prologue.push(MInst::new(if reg >= 32 { str_d } else { str_ }, vec![r(reg), r(SP), MOp::Imm(at)]));
     }
     let mut epilogue = Vec::new();
     for &(reg, at) in &save_at {
-        epilogue.push(MInst::new(ldr, vec![r(reg), r(SP), MOp::Imm(at)]));
+        epilogue.push(MInst::new(if reg >= 32 { ldr_d } else { ldr }, vec![r(reg), r(SP), MOp::Imm(at)]));
     }
     if calls {
-        epilogue.push(MInst::new(ldr, vec![r(FP), r(SP), MOp::Imm(fp_at)]));
-        epilogue.push(MInst::new(ldr, vec![r(LR), r(SP), MOp::Imm(fp_at + 8)]));
+        epilogue.push(MInst::new(ldr, vec![r(fp_reg), r(SP), MOp::Imm(fp_at)]));
+        epilogue.push(MInst::new(ldr, vec![r(lr_reg), r(SP), MOp::Imm(fp_at + 8)]));
     }
     if size > 0 {
-        epilogue.push(MInst::new(add, vec![r(SP), r(SP), MOp::Imm(size)]));
+        adjust(t, &mut epilogue, SP, SP, size);
     }
 
     let ret = t.by_name["RET"];
@@ -106,6 +110,24 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     entry.splice(0..0, prologue);
     tidy_branches(t, f);
     Ok(())
+}
+
+/// `dst = src + amount`, for a frame's sizes: an immediate shifted by 12
+/// for the 4KB pages, then one for the rest.
+fn adjust(t: &Target, out: &mut Vec<MInst>, dst: u8, src: u8, amount: i64) {
+    let r = |n: u8| MOp::Reg(Reg::P(n));
+    let (op, op12) =
+        if amount < 0 { (t.by_role("subi"), t.by_role("subi12")) } else { (t.by_role("addi"), t.by_role("addi12")) };
+    let a = amount.abs();
+    let (pages, rest) = (a & !0xfff, a & 0xfff);
+    let mut from = src;
+    if pages != 0 {
+        out.push(MInst::new(op12, vec![r(dst), r(from), MOp::Imm(pages)]));
+        from = dst;
+    }
+    if rest != 0 || pages == 0 {
+        out.push(MInst::new(op, vec![r(dst), r(from), MOp::Imm(rest)]));
+    }
 }
 
 /// A block holding only `b X` is skipped: branches to it go to `X`. Blocks

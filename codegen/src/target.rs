@@ -23,6 +23,10 @@ pub enum Class {
     /// Like `W`, but 31 is the stack pointer.
     Wsp,
     Xsp,
+    /// Floating-point and SIMD registers, as 64 and 32 bits. Physical
+    /// registers 32-63 are v0-v31.
+    D,
+    S,
 }
 
 impl Class {
@@ -32,12 +36,18 @@ impl Class {
             "x" => Class::X,
             "wsp" => Class::Wsp,
             "xsp" => Class::Xsp,
+            "d" => Class::D,
+            "s" => Class::S,
             _ => return None,
         })
     }
 
     pub fn is_64(self) -> bool {
-        matches!(self, Class::X | Class::Xsp)
+        matches!(self, Class::X | Class::Xsp | Class::D)
+    }
+
+    pub fn is_fp(self) -> bool {
+        matches!(self, Class::D | Class::S)
     }
 
     /// The register name for number `r`.
@@ -47,6 +57,8 @@ impl Class {
             (Class::X, 31) => "xzr".into(),
             (Class::Wsp, 31) => "wsp".into(),
             (Class::Xsp, 31) => "sp".into(),
+            (Class::D, r) => format!("d{}", r.wrapping_sub(32)),
+            (Class::S, r) => format!("s{}", r.wrapping_sub(32)),
             (c, r) if c.is_64() => format!("x{r}"),
             (_, r) => format!("w{r}"),
         }
@@ -59,6 +71,8 @@ impl Class {
             (Class::W | Class::X, true) => Class::X,
             (Class::Wsp | Class::Xsp, false) => Class::Wsp,
             (Class::Wsp | Class::Xsp, true) => Class::Xsp,
+            (Class::D | Class::S, false) => Class::S,
+            (Class::D | Class::S, true) => Class::D,
         }
     }
 }
@@ -148,6 +162,9 @@ pub struct CondForm {
     pub asm: String,
     pub reads: String,
     pub func: GlobalId,
+    /// The type of the flags it reads: integer or floating-point
+    /// comparisons set them differently.
+    pub flags_ty: TypeId,
 }
 
 /// The operation at a pattern node or IR instruction, with the bit widths
@@ -166,8 +183,16 @@ pub enum Head {
     Br,
     Ret,
     Unreachable,
+    /// A load with acquire (or stronger) ordering.
+    LoadAcq(u32),
+    /// A store with release (or stronger) ordering.
+    StoreRel(u32),
+    /// A fence: `true` if it orders only loads (acquire).
+    Fence(bool),
     /// A call to an intrinsic, by its index in `Target::intrinsics`.
     Intrinsic(u16, u32),
+    FCmp(FCmpPred, u32),
+    FNeg(u32),
 }
 
 impl Head {
@@ -246,6 +271,16 @@ fn mk(h: Head, kids: Vec<Tree>) -> Tree {
             mk(Head::ICmp(p, *a), vec![x[0].clone(), Tree::Lit(*k, *a)])
         }
         (Head::Cast(CastOp::SExt, _, to), [Tree::Lit(k, _)]) => Tree::Lit(*k, to),
+        // Floating-point comparisons of two values widened from the same
+        // width are comparisons of the values: widening is exact.
+        (
+            Head::FCmp(p, _),
+            [Tree::Op(Head::Cast(CastOp::FPExt, a, _), x), Tree::Op(Head::Cast(CastOp::FPExt, b, _), y)],
+        ) if a == b => mk(Head::FCmp(p, *a & !FP), vec![x[0].clone(), y[0].clone()]),
+        // ... and with +0.0, which is +0.0 at any width.
+        (Head::FCmp(p, _), [Tree::Op(Head::Cast(CastOp::FPExt, a, _), x), Tree::Lit(0, _)]) => {
+            mk(Head::FCmp(p, *a & !FP), vec![x[0].clone(), Tree::Lit(0, *a)])
+        }
         // Identities left by putting 0 in for an operand.
         (Head::Gep, [p, Tree::Lit(0, _)]) => p.clone(),
         (Head::Bin(BinOp::Add | BinOp::Shl | BinOp::Or | BinOp::Xor, _), [x, Tree::Lit(0, _)]) => x.clone(),
@@ -313,6 +348,8 @@ pub struct Target {
     pub trie: Trie,
     /// Intrinsics the description's bodies call, such as `llvm.smax.i32`.
     pub intrinsics: Vec<String>,
+    /// Calling conventions and platforms.
+    pub abis: Vec<crate::abi::Abi>,
     fits_cache: std::sync::Mutex<HashMap<FitsKey, bool>>,
 }
 
@@ -329,8 +366,23 @@ fn type_bits(m: &Module, ty: TypeId) -> u32 {
     match m.types.get(ty) {
         Type::Int(b) => *b,
         Type::Ptr(_) => 64,
+        Type::Double => 64,
+        Type::Float => 32,
         _ => 0,
     }
+}
+
+pub fn is_fp_type(m: &Module, ty: TypeId) -> bool {
+    matches!(m.types.get(ty), Type::Double | Type::Float)
+}
+
+/// Set in the widths of pattern heads for floating-point values, so that a
+/// `double` load and an `i64` load are told apart.
+pub const FP: u32 = 0x1000;
+
+/// The width a pattern head records for a value of type `ty`.
+pub fn head_bits(m: &Module, ty: TypeId) -> u32 {
+    type_bits(m, ty) | if is_fp_type(m, ty) { FP } else { 0 }
 }
 
 impl Target {
@@ -350,9 +402,11 @@ impl Target {
             copies: HashMap::new(),
             trie: Trie::default(),
             intrinsics: Vec::new(),
+            abis: Vec::new(),
             fits_cache: Default::default(),
         };
         t.read()?;
+        t.abis = crate::abi::read(&t.module, "aarch64.abi.")?;
         t.build_patterns()?;
         let mut trie = Trie::default();
         for (i, p) in t.patterns.iter().enumerate() {
@@ -377,16 +431,35 @@ impl Target {
     /// The condition that holds when condition `value` does not: the form
     /// whose comparison is the inverse of this one's.
     pub fn inverse_cond(&self, value: i64) -> Option<i64> {
-        let pred_of = |form: &CondForm| -> Option<ICmpPred> {
+        #[derive(PartialEq)]
+        enum P {
+            I(ICmpPred),
+            F(FCmpPred),
+        }
+        let pred_of = |form: &CondForm| -> Option<P> {
             let f = self.func(form.func);
             f.insts.iter().find_map(|i| match i.op {
-                Op::ICmp { pred, .. } => Some(pred),
+                Op::ICmp { pred, .. } => Some(P::I(pred)),
+                Op::FCmp { pred, .. } => Some(P::F(pred)),
                 _ => None,
             })
         };
         let form = self.conds.iter().find(|c| c.value == value)?;
-        let want = inverse(pred_of(form)?);
-        self.conds.iter().find(|c| pred_of(c) == Some(want)).map(|c| c.value)
+        let want = match pred_of(form)? {
+            P::I(p) => P::I(inverse(p)),
+            P::F(p) => P::F(inverse_f(p)?),
+        };
+        self.conds.iter().find(|c| pred_of(c).as_ref() == Some(&want)).map(|c| c.value)
+    }
+
+    pub fn abi(&self, name: &str) -> Option<&crate::abi::Abi> {
+        self.abis.iter().find(|a| a.name == name)
+    }
+
+    /// The convention for a module's target triple: the first whose
+    /// substrings it contains.
+    pub fn abi_for_triple(&self, triple: &str) -> Option<&crate::abi::Abi> {
+        self.abis.iter().find(|a| a.triples.iter().any(|s| triple.contains(s.as_str())))
     }
 
     pub fn instr(&self, name: &str) -> &Instr {
@@ -428,6 +501,7 @@ impl Target {
                     asm: attr(&f.fn_attrs, "asm").flatten().unwrap_or("").to_string(),
                     reads: attr(&f.fn_attrs, "reads").flatten().unwrap_or("nzcv").to_string(),
                     func: g,
+                    flags_ty: f.locals[f.params[0].local.index()].ty,
                 });
                 continue;
             }
@@ -439,7 +513,7 @@ impl Target {
             // the value and the written-back base of a post-increment load.
             let aggregate = matches!(m.types.get(ret), Type::Named(_) | Type::Struct { .. });
             let flags = aggregate && attr(&f.fn_attrs, "sets").is_some();
-            let ret_bits = if aggregate && !flags {
+            let res_ty = if aggregate && !flags {
                 let fields = match m.types.get(ret) {
                     Type::Struct { fields, .. } => fields.clone(),
                     Type::Named(n) => {
@@ -447,16 +521,20 @@ impl Target {
                     }
                     _ => vec![],
                 };
-                fields.first().map_or(0, |&t| type_bits(m, t))
+                fields.first().copied()
             } else {
-                type_bits(m, ret)
+                Some(ret)
             };
+            let ret_bits = res_ty.map_or(0, |t| type_bits(m, t));
+            let res_fp = res_ty.is_some_and(|t| is_fp_type(m, t));
             let writeback_ret = f.params.iter().any(|p| attr(&p.attrs, "writeback").is_some()) && !aggregate;
             let has_result = ret_bits > 0 && !flags && !writeback_ret;
             let mut operands = Vec::new();
             if has_result {
                 let class = match attr(&f.fn_attrs, "dclass").flatten() {
                     Some(c) => Class::parse(c).ok_or_else(|| format!("@{name}: bad dclass"))?,
+                    None if res_fp && ret_bits <= 32 => Class::S,
+                    None if res_fp => Class::D,
                     None if ret_bits <= 32 => Class::W,
                     None => Class::X,
                 };
@@ -536,6 +614,7 @@ impl Target {
                 let bits = type_bits(&self.module, k.ty);
                 Ok(match &k.kind {
                     ConstKind::Int(a) => Tree::Lit(sext(a.low_u64(), bits), bits),
+                    ConstKind::Float(raw) => Tree::Lit(*raw as i64, bits | FP),
                     ConstKind::Poison | ConstKind::Undef => Tree::Poison,
                     ConstKind::Zero | ConstKind::Null => Tree::Lit(0, bits),
                     other => return Err(format!("unsupported constant {other:?} in a body")),
@@ -564,14 +643,23 @@ impl Target {
             _ => 0,
         };
         let res_bits = f.insts[i.index()].result.map(|r| type_bits(m, f.locals[r.index()].ty)).unwrap_or(0);
+        let res_hbits = f.insts[i.index()].result.map(|r| head_bits(m, f.locals[r.index()].ty)).unwrap_or(0);
+        let hb = |v: Value| match v {
+            Value::Local(x) => head_bits(m, f.locals[x.index()].ty),
+            Value::Const(c) => head_bits(m, m.constant(c).ty),
+            _ => 0,
+        };
         Ok(match &f.insts[i.index()].op {
             Op::Binary { op, lhs, rhs, .. } => mk(Head::Bin(*op, bin_bits(*op, res_bits)), vec![ev(*lhs)?, ev(*rhs)?]),
             Op::ICmp { pred, lhs, rhs, .. } => mk(Head::ICmp(*pred, ty_bits(*lhs)), vec![ev(*lhs)?, ev(*rhs)?]),
             Op::Select { cond, then_value, else_value, .. } => {
-                mk(Head::Select(wide_bits(res_bits)), vec![ev(*cond)?, ev(*then_value)?, ev(*else_value)?])
+                mk(Head::Select(wide_bits(res_hbits)), vec![ev(*cond)?, ev(*then_value)?, ev(*else_value)?])
             }
-            Op::Cast { op, value, .. } => mk(Head::Cast(*op, ty_bits(*value), wide_bits(res_bits)), vec![ev(*value)?]),
-            Op::Load { ptr, .. } => mk(Head::Load(res_bits), vec![ev(*ptr)?]),
+            Op::Cast { op, value, .. } => mk(Head::Cast(*op, hb(*value), wide_bits(res_hbits)), vec![ev(*value)?]),
+            Op::FCmp { pred, lhs, rhs, .. } => mk(Head::FCmp(*pred, ty_bits(*lhs)), vec![ev(*lhs)?, ev(*rhs)?]),
+            Op::FNeg { value, .. } => mk(Head::FNeg(res_hbits), vec![ev(*value)?]),
+            Op::Load { ptr, atomic, .. } if acquires(atomic) => mk(Head::LoadAcq(res_hbits), vec![ev(*ptr)?]),
+            Op::Load { ptr, .. } => mk(Head::Load(res_hbits), vec![ev(*ptr)?]),
             Op::Gep { ptr, indices, source_ty, .. }
                 if indices.len() == 1 && matches!(m.types.get(*source_ty), Type::Int(8)) =>
             {
@@ -670,17 +758,22 @@ impl Target {
                     .insts
                     .iter()
                     .rev()
-                    .find(|&&i| matches!(f.insts[i.index()].op, Op::Store { .. }));
+                    .find(|&&i| matches!(f.insts[i.index()].op, Op::Store { .. } | Op::Fence { .. }));
                 match store {
+                    Some(&s) if matches!(f.insts[s.index()].op, Op::Fence { .. }) => {
+                        let Op::Fence { ordering, .. } = f.insts[s.index()].op else { unreachable!() };
+                        Tree::Op(Head::Fence(ordering == Ordering::Acquire), vec![])
+                    }
                     Some(&s) => {
-                        let Op::Store { value, ptr, .. } = f.insts[s.index()].op else { unreachable!() };
+                        let Op::Store { value, ptr, ref atomic, .. } = f.insts[s.index()].op else { unreachable!() };
+                        let release = releases(atomic);
                         let bits = match value {
-                            Value::Local(x) => type_bits(&self.module, f.locals[x.index()].ty),
-                            Value::Const(c) => type_bits(&self.module, self.module.constant(c).ty),
+                            Value::Local(x) => head_bits(&self.module, f.locals[x.index()].ty),
+                            Value::Const(c) => head_bits(&self.module, self.module.constant(c).ty),
                             _ => 0,
                         };
                         mk(
-                            Head::Store(bits),
+                            if release { Head::StoreRel(bits) } else { Head::Store(bits) },
                             vec![self.eval_value(f, value, env, base)?, self.eval_value(f, ptr, env, base)?],
                         )
                     }
@@ -769,7 +862,7 @@ impl Target {
                             (Some(&st), next) => {
                                 let Op::Store { value, ptr, .. } = f.insts[st.index()].op else { unreachable!() };
                                 let bits = match value {
-                                    Value::Local(x) => type_bits(&self.module, f.locals[x.index()].ty),
+                                    Value::Local(x) => head_bits(&self.module, f.locals[x.index()].ty),
                                     _ => 0,
                                 };
                                 let ev = |v| self.eval_value(f, v, &HashMap::new(), 0);
@@ -798,6 +891,12 @@ impl Target {
                             let prod = &self.instrs[pi];
                             let sets = prod.sets.as_deref().unwrap_or("");
                             if !form.reads.chars().all(|c| sets.contains(c)) {
+                                continue;
+                            }
+                            let Type::Function { ret, .. } = self.module.types.get(self.func(prod.func).ty) else {
+                                continue;
+                            };
+                            if *ret != form.flags_ty {
                                 continue;
                             }
                             let base = params.len();
@@ -1018,6 +1117,41 @@ impl Target {
         }
         Ok(emit)
     }
+}
+
+/// An atomic access ordered at least as strongly as acquire: it needs
+/// `ldar`. Weaker atomic loads are plain loads, which are single-copy
+/// atomic when aligned.
+pub fn acquires(a: &Option<Atomic>) -> bool {
+    a.as_ref().is_some_and(|a| matches!(a.ordering, Ordering::Acquire | Ordering::AcqRel | Ordering::SeqCst))
+}
+
+/// An atomic store at least as strong as release: it needs `stlr`.
+pub fn releases(a: &Option<Atomic>) -> bool {
+    a.as_ref().is_some_and(|a| matches!(a.ordering, Ordering::Release | Ordering::AcqRel | Ordering::SeqCst))
+}
+
+/// The floating-point comparison true exactly when `p` is false.
+pub fn inverse_f(p: FCmpPred) -> Option<FCmpPred> {
+    use FCmpPred::*;
+    Some(match p {
+        Oeq => Une,
+        Une => Oeq,
+        Ogt => Ule,
+        Ule => Ogt,
+        Oge => Ult,
+        Ult => Oge,
+        Olt => Uge,
+        Uge => Olt,
+        Ole => Ugt,
+        Ugt => Ole,
+        One => Ueq,
+        Ueq => One,
+        Ord => Uno,
+        Uno => Ord,
+        False => True,
+        True => False,
+    })
 }
 
 pub fn inverse(p: ICmpPred) -> ICmpPred {

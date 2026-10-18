@@ -212,3 +212,81 @@ pub fn place(t: &Target, f: &mut MFunc) {
         f.blocks.push(block);
     }
 }
+
+/// Whether `inst`, at byte `pc`, can reach a block starting at `target`:
+/// a field too narrow for the distance does not encode.
+fn reaches(t: &Target, inst: &MInst, pc: i64, target: i64) -> bool {
+    let Opcode::Instr(k) = inst.op else { return true };
+    let ins = &t.instrs[k];
+    let mut env = crate::enc::Env::new();
+    for (o, op) in ins.operands.iter().zip(&inst.ops) {
+        let v = match op {
+            MOp::Reg(Reg::P(r)) => (*r & 31) as i64,
+            MOp::Imm(v) => *v,
+            MOp::Label(_) => target - pc,
+            _ => 0,
+        };
+        env.insert(o.name.clone(), v);
+    }
+    ins.enc.encode(&env).is_some()
+}
+
+/// Branch relaxation: a conditional branch whose target is out of its
+/// range (19 bits of words for `b.cond` and `cbz`, 14 for `tbz`) becomes
+/// the opposite branch around an unconditional one, which reaches 128MB.
+pub fn relax(t: &Target, f: &mut MFunc) {
+    let b_op = t.by_name["B"];
+    for _ in 0..16 {
+        let mut starts = Vec::new();
+        let mut n = 0i64;
+        for b in &f.blocks {
+            starts.push(n * 4);
+            n += b.insts.len() as i64;
+        }
+        let mut changed = false;
+        for bi in 0..f.blocks.len() {
+            let len = f.blocks[bi].insts.len();
+            for k in 0..len {
+                let inst = &f.blocks[bi].insts[k];
+                let Opcode::Instr(op) = inst.op else { continue };
+                if op == b_op {
+                    continue;
+                }
+                let Some(target) = inst.ops.iter().find_map(|o| if let MOp::Label(x) = o { Some(*x) } else { None })
+                else {
+                    continue;
+                };
+                let pc = starts[bi] + 4 * k as i64;
+                if reaches(t, inst, pc, starts[target]) {
+                    continue;
+                }
+                let Some(mut inv) = invert(t, inst) else { continue };
+                // Where the branch goes when not taken: the jump after it,
+                // or else the next block.
+                let after = f.blocks[bi].insts.get(k + 1).cloned();
+                let not_taken = match &after {
+                    Some(j) if j.op == Opcode::Instr(b_op) => {
+                        j.ops.iter().find_map(|o| if let MOp::Label(x) = o { Some(*x) } else { None })
+                    }
+                    Some(_) => None,
+                    None => Some(bi + 1),
+                };
+                let Some(not_taken) = not_taken else { continue };
+                for o in &mut inv.ops {
+                    if let MOp::Label(x) = o {
+                        *x = not_taken;
+                    }
+                }
+                let far = MInst::new(b_op, vec![MOp::Label(target)]);
+                f.blocks[bi].insts.truncate(k);
+                f.blocks[bi].insts.push(inv);
+                f.blocks[bi].insts.push(far);
+                changed = true;
+                break;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}

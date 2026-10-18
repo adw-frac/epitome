@@ -51,9 +51,6 @@ pub mod stats {
     }
 }
 
-/// Registers arguments and results are passed in.
-pub const ARG_REGS: usize = 8;
-
 pub struct Sel<'a, 'b> {
     t: &'a Target,
     cx: &'a mut Ctx<'b>,
@@ -78,15 +75,34 @@ pub struct Sel<'a, 'b> {
     /// Constants made once in the entry block, for use in loops.
     hoisted: HashMap<(i64, bool), VReg>,
     hoisted_addr: HashMap<ConstId, VReg>,
+    /// The registers holding each part of a small struct parameter.
+    agg_params: HashMap<LocalId, Vec<VReg>>,
+    /// Where a variadic function's variable arguments start, from the
+    /// stack pointer on entry.
+    va_offset: i64,
 }
 
 fn side_effects(op: &Op) -> bool {
-    matches!(op, Op::Store { .. } | Op::Call(_) | Op::Fence { .. } | Op::AtomicRmw { .. } | Op::CmpXchg { .. })
-        || matches!(op, Op::Load { volatile: true, .. })
+    matches!(
+        op,
+        Op::Store { .. }
+            | Op::Call(_)
+            | Op::Fence { .. }
+            | Op::AtomicRmw { .. }
+            | Op::CmpXchg { .. }
+            | Op::VaArg { .. }
+    ) || matches!(op, Op::Load { volatile: true, .. } | Op::Load { atomic: Some(_), .. })
 }
 
 impl<'a, 'b> Sel<'a, 'b> {
-    pub fn new(t: &'a Target, cx: &'a mut Ctx<'b>, f: &'a Function, fname: &str, global: bool) -> Self {
+    pub fn new(
+        t: &'a Target,
+        abi: &crate::abi::Abi,
+        cx: &'a mut Ctx<'b>,
+        f: &'a Function,
+        fname: &str,
+        global: bool,
+    ) -> Self {
         let mut uses = vec![0u32; f.locals.len()];
         for i in f.insts_in_order() {
             f.insts[i.index()].op.for_each_value(|v| {
@@ -107,8 +123,11 @@ impl<'a, 'b> Sel<'a, 'b> {
             global,
             blocks: Vec::new(),
             vwide: Vec::new(),
+            vfp: Vec::new(),
             slots: Vec::new(),
             frame_size: 0,
+            out_size: 0,
+            abi: abi.clone(),
         };
         let mut bmap = HashMap::new();
         for (k, &b) in f.layout.iter().enumerate() {
@@ -134,6 +153,8 @@ impl<'a, 'b> Sel<'a, 'b> {
             in_loop: Vec::new(),
             hoisted: HashMap::new(),
             hoisted_addr: HashMap::new(),
+            agg_params: HashMap::new(),
+            va_offset: 0,
         }
     }
 
@@ -152,7 +173,8 @@ impl<'a, 'b> Sel<'a, 'b> {
     fn bits(&self, ty: TypeId) -> u32 {
         match self.cx.m.types.get(ty) {
             Type::Int(b) => *b,
-            Type::Ptr(_) => 64,
+            Type::Ptr(_) | Type::Double => 64,
+            Type::Float => 32,
             _ => 0,
         }
     }
@@ -161,12 +183,35 @@ impl<'a, 'b> Sel<'a, 'b> {
         self.bits(self.ty_of(v))
     }
 
+    fn is_fp(&self, ty: TypeId) -> bool {
+        crate::target::is_fp_type(self.cx.m, ty)
+    }
+
+    fn hbits(&self, ty: TypeId) -> u32 {
+        crate::target::head_bits(self.cx.m, ty)
+    }
+
+    fn vhbits(&self, v: Value) -> u32 {
+        self.hbits(self.ty_of(v))
+    }
+
+    /// The register class a value of this type lives in.
+    fn class_of_ty(&self, ty: TypeId) -> Class {
+        let wide = self.bits(ty) > 32;
+        if self.is_fp(ty) { Class::D.with_width(wide) } else { Class::X.with_width(wide) }
+    }
+
+    fn class_of(&self, v: Value) -> Class {
+        self.class_of_ty(self.ty_of(v))
+    }
+
     fn vreg_of(&mut self, x: LocalId) -> VReg {
         if let Some(&v) = self.vreg.get(&x) {
             return v;
         }
-        let wide = self.bits(self.f.locals[x.index()].ty) > 32;
-        let v = self.mf.new_vreg(wide);
+        let ty = self.f.locals[x.index()].ty;
+        let wide = self.bits(ty) > 32;
+        let v = if self.is_fp(ty) { self.mf.new_fp_vreg(wide) } else { self.mf.new_vreg(wide) };
         self.vreg.insert(x, v);
         v
     }
@@ -201,16 +246,26 @@ impl<'a, 'b> Sel<'a, 'b> {
         let f = self.f;
         let inst = &f.insts[i.index()];
         let res_bits = inst.result.map(|r| self.bits(f.locals[r.index()].ty)).unwrap_or(0);
+        let res_hbits = inst.result.map(|r| self.hbits(f.locals[r.index()].ty)).unwrap_or(0);
         let v = Term::V;
         Some(match &inst.op {
+            Op::FCmp { pred, lhs, rhs, .. } => (Head::FCmp(*pred, self.vbits(*lhs)), vec![v(*lhs), v(*rhs)]),
+            Op::FNeg { value, .. } => (Head::FNeg(res_hbits), vec![v(*value)]),
             Op::Binary { op, lhs, rhs, .. } => (Head::Bin(*op, bin_bits(*op, res_bits)), vec![v(*lhs), v(*rhs)]),
             Op::ICmp { pred, lhs, rhs, .. } => (Head::ICmp(*pred, self.vbits(*lhs)), vec![v(*lhs), v(*rhs)]),
             Op::Select { cond, then_value, else_value, .. } => {
-                (Head::Select(wide_bits(res_bits)), vec![v(*cond), v(*then_value), v(*else_value)])
+                (Head::Select(wide_bits(res_hbits)), vec![v(*cond), v(*then_value), v(*else_value)])
             }
-            Op::Cast { op, value, .. } => (Head::Cast(*op, self.vbits(*value), wide_bits(res_bits)), vec![v(*value)]),
-            Op::Load { ptr, .. } => (Head::Load(res_bits), vec![v(*ptr)]),
-            Op::Store { value, ptr, .. } => (Head::Store(self.vbits(*value)), vec![v(*value), v(*ptr)]),
+            Op::Cast { op, value, .. } => (Head::Cast(*op, self.vhbits(*value), wide_bits(res_hbits)), vec![v(*value)]),
+            Op::Load { ptr, atomic, .. } if crate::target::acquires(atomic) => {
+                (Head::LoadAcq(res_hbits), vec![v(*ptr)])
+            }
+            Op::Load { ptr, .. } => (Head::Load(res_hbits), vec![v(*ptr)]),
+            Op::Store { value, ptr, atomic, .. } if crate::target::releases(atomic) => {
+                (Head::StoreRel(self.vhbits(*value)), vec![v(*value), v(*ptr)])
+            }
+            Op::Store { value, ptr, .. } => (Head::Store(self.vhbits(*value)), vec![v(*value), v(*ptr)]),
+            Op::Fence { ordering, .. } => (Head::Fence(*ordering == Ordering::Acquire), vec![]),
             Op::Gep { ptr, indices, .. } if indices.len() == 1 => (Head::Gep, vec![v(*ptr), v(indices[0])]),
             Op::CondBr { cond, then_dest, else_dest } => {
                 (Head::CondBr, vec![v(*cond), Term::B(*then_dest), Term::B(*else_dest)])
@@ -273,7 +328,9 @@ impl<'a, 'b> Sel<'a, 'b> {
         let bits = self.bits(k.ty);
         match &k.kind {
             ConstKind::Int(a) => Some(Key::Lit(sext(a.low_u64(), bits), bits)),
-            ConstKind::Null | ConstKind::Zero => Some(Key::Lit(0, bits)),
+            ConstKind::Null | ConstKind::Zero if !self.is_fp(k.ty) => Some(Key::Lit(0, bits)),
+            ConstKind::Float(raw) => Some(Key::Lit(*raw as i64, bits | crate::target::FP)),
+            ConstKind::Zero => Some(Key::Lit(0, bits | crate::target::FP)),
             _ => None,
         }
     }
@@ -434,8 +491,9 @@ impl<'a, 'b> Sel<'a, 'b> {
             match pp.kind {
                 Kind::Reg(class) => {
                     let Term::V(v) = t else { return None };
-                    let bits = self.vbits(v);
-                    if bits == 0 || bits > 64 || (bits > 32) != (pp.bits > 32) {
+                    let ty = self.ty_of(v);
+                    let bits = self.bits(ty);
+                    if bits == 0 || bits > 64 || (bits > 32) != (pp.bits > 32) || self.is_fp(ty) != class.is_fp() {
                         return None;
                     }
                     if let Value::Const(_) = v {
@@ -513,6 +571,11 @@ impl<'a, 'b> Sel<'a, 'b> {
 
     fn is_free_cast(&self, i: InstId) -> bool {
         match &self.f.insts[i.index()].op {
+            // Between the register files, a bit-cast is an fmov.
+            Op::Cast { op: CastOp::BitCast, value, .. } => {
+                let r = self.f.insts[i.index()].result.unwrap();
+                self.is_fp(self.ty_of(*value)) == self.is_fp(self.f.locals[r.index()].ty)
+            }
             Op::Cast { op, .. } => {
                 matches!(
                     op,
@@ -550,6 +613,15 @@ impl<'a, 'b> Sel<'a, 'b> {
                 Op::Call(call) if self.intrinsic_id(call).is_none() => {
                     for a in &call.args {
                         self.need_value(a.value);
+                        // The parts of a small struct argument.
+                        let mut cur = a.value;
+                        while let Value::Local(x) = cur
+                            && let LocalDef::Inst(d) = f.locals[x.index()].def
+                            && let Op::InsertValue { aggregate, element, .. } = &f.insts[d.index()].op
+                        {
+                            self.need_value(*element);
+                            cur = *aggregate;
+                        }
                     }
                     self.need_value(call.callee);
                     continue;
@@ -560,6 +632,27 @@ impl<'a, 'b> Sel<'a, 'b> {
                 }
                 Op::Br(_) => continue,
                 Op::Alloca { .. } => continue,
+                Op::VaArg { list } => {
+                    self.need_value(*list);
+                    continue;
+                }
+                // Small structs live as their parts: building one is done
+                // by whatever uses it, and taking a part out is a copy.
+                Op::InsertValue { .. } => continue,
+                Op::ExtractValue { aggregate, indices } => {
+                    let mut cur = *aggregate;
+                    while let Value::Local(x) = cur
+                        && let LocalDef::Inst(d) = f.locals[x.index()].def
+                        && let Op::InsertValue { aggregate, element, indices: here } = &f.insts[d.index()].op
+                    {
+                        if here == indices {
+                            self.need_value(*element);
+                            break;
+                        }
+                        cur = *aggregate;
+                    }
+                    continue;
+                }
                 _ => {}
             }
             // A cast that a pattern covers with more (smulh ends in a
@@ -636,6 +729,20 @@ impl<'a, 'b> Sel<'a, 'b> {
 
     fn const_reg(&mut self, c: ConstId, class: Class) -> Result<Reg, String> {
         let k = self.cx.m.constant(c).clone();
+        // A floating-point constant: its bits, made in an integer register
+        // and moved across (zero from the zero register).
+        if class.is_fp() {
+            let raw = match &k.kind {
+                ConstKind::Float(raw) => *raw as u64,
+                ConstKind::Zero | ConstKind::Undef | ConstKind::Poison => 0,
+                other => return self.err(format!("unsupported floating-point constant {other:?}")),
+            };
+            let wide = class == Class::D;
+            let g = self.int_reg(raw as i64, wide, true)?;
+            let d = self.mf.new_fp_vreg(wide);
+            self.push(MInst::copy(Reg::V(d), g));
+            return Ok(Reg::V(d));
+        }
         let bits = self.bits(k.ty);
         let wide = class.is_64() || bits > 32;
         let zr_ok = matches!(class, Class::W | Class::X);
@@ -645,6 +752,13 @@ impl<'a, 'b> Sel<'a, 'b> {
                 self.int_reg(v, wide, zr_ok)
             }
             ConstKind::Null | ConstKind::Zero | ConstKind::Undef | ConstKind::Poison => self.int_reg(0, wide, zr_ok),
+            // An integer made a pointer is the integer.
+            ConstKind::Expr(ConstExpr::Cast { op: CastOp::IntToPtr, value })
+                if matches!(self.cx.m.constant(*value).kind, ConstKind::Int(_)) =>
+            {
+                let ConstKind::Int(a) = &self.cx.m.constant(*value).kind else { unreachable!() };
+                self.int_reg(a.low_u64() as i64, true, zr_ok)
+            }
             _ => {
                 let Some((g, off)) = prepare::const_address(self.cx, c) else {
                     return self.err(format!("unsupported constant {:?}", k.kind));
@@ -662,12 +776,29 @@ impl<'a, 'b> Sel<'a, 'b> {
                     }
                     return Ok(r);
                 }
-                let name = self.cx.m.global(g).name.clone().unwrap_or_default();
+                let gl = self.cx.m.global(g);
+                let name = gl.name.clone().unwrap_or_default();
+                // Symbols defined elsewhere (another library) are reached
+                // through the global offset table, which the loader fills in.
+                let declared_only = match &gl.kind {
+                    GlobalKind::Function(f) => !f.has_body,
+                    GlobalKind::Variable(v) => v.init.is_none(),
+                    _ => false,
+                };
+                let via_got = declared_only
+                    || (!gl.props.dso_local && !matches!(gl.props.linkage, Linkage::Internal | Linkage::Private));
                 let d = self.mf.new_vreg(true);
-                let adrp = self.t.by_role("adrp");
-                let pageoff = self.t.by_role("pageoff");
-                self.push(MInst::new(adrp, vec![MOp::Reg(Reg::V(d)), MOp::Sym(name.clone())]));
-                self.push(MInst::new(pageoff, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(d)), MOp::Sym(name)]));
+                if via_got {
+                    let adrp = self.t.by_role("adrp.got");
+                    let ldr = self.t.by_role("ldr.got");
+                    self.push(MInst::new(adrp, vec![MOp::Reg(Reg::V(d)), MOp::Sym(name.clone())]));
+                    self.push(MInst::new(ldr, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(d)), MOp::Sym(name)]));
+                } else {
+                    let adrp = self.t.by_role("adrp");
+                    let pageoff = self.t.by_role("pageoff");
+                    self.push(MInst::new(adrp, vec![MOp::Reg(Reg::V(d)), MOp::Sym(name.clone())]));
+                    self.push(MInst::new(pageoff, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(d)), MOp::Sym(name)]));
+                }
                 if off == 0 {
                     return Ok(Reg::V(d));
                 }
@@ -841,6 +972,90 @@ impl<'a, 'b> Sel<'a, 'b> {
         Ok(())
     }
 
+    /// How many 64-bit parts a small struct type passed in registers has:
+    /// `[2 x i64]` and the like, as clang passes structs of up to 16 bytes.
+    fn parts_of(&self, ty: TypeId) -> Option<usize> {
+        let i64t = |t: &TypeId| matches!(self.cx.m.types.get(*t), Type::Int(64));
+        match self.cx.m.types.get(ty) {
+            Type::Array { len, elem } if *len <= 2 && i64t(elem) => Some(*len as usize),
+            Type::Struct { fields, .. } if fields.len() <= 2 && fields.iter().all(i64t) => Some(fields.len()),
+            _ => None,
+        }
+    }
+
+    /// The parts of a small struct value: from the `insertvalue`s that
+    /// built it, from a constant, or from a parameter's registers.
+    fn parts(&mut self, v: Value, n: usize) -> Result<Vec<Reg>, String> {
+        if let Value::Local(x) = v
+            && let Some(regs) = self.agg_params.get(&x)
+        {
+            return Ok(regs.iter().map(|&r| Reg::V(r)).collect());
+        }
+        let mut found: Vec<Option<Value>> = vec![None; n];
+        let mut cur = v;
+        loop {
+            match cur {
+                Value::Local(x) => {
+                    let LocalDef::Inst(d) = self.f.locals[x.index()].def else {
+                        return self.err("a struct value of unknown parts");
+                    };
+                    match &self.f.insts[d.index()].op {
+                        Op::InsertValue { aggregate, element, indices } if indices.len() == 1 => {
+                            let k = indices[0] as usize;
+                            if k < n && found[k].is_none() {
+                                found[k] = Some(*element);
+                            }
+                            cur = *aggregate;
+                        }
+                        op => return self.err(format!("a struct value made by {op:?}")),
+                    }
+                }
+                Value::Const(c) => {
+                    if let ConstKind::Array(elems) | ConstKind::Struct(elems) = &self.cx.m.constant(c).kind.clone() {
+                        for (k, e) in elems.iter().enumerate().take(n) {
+                            if found[k].is_none() {
+                                found[k] = Some(Value::Const(*e));
+                            }
+                        }
+                    }
+                    break;
+                }
+                Value::Metadata(_) => break,
+            }
+        }
+        let mut regs = Vec::new();
+        for part in found {
+            regs.push(match part {
+                Some(p) => self.reg_for(p, Class::X)?,
+                None => Reg::P(31),
+            });
+        }
+        Ok(regs)
+    }
+
+    /// The size in bytes of a value passed as an argument.
+    fn arg_size(&self, v: Value) -> u64 {
+        match self.vbits(v) {
+            0..=8 => 1,
+            9..=16 => 2,
+            17..=32 => 4,
+            _ => 8,
+        }
+    }
+
+    /// A store of `r`, `size` bytes wide, at `off` from the stack pointer.
+    fn store_to_stack(&mut self, r: Reg, size: u64, off: i64, fp: bool) {
+        let name = match (size, fp) {
+            (4, true) => "STRSui",
+            (_, true) => "STRDui",
+            (1, _) => "STRBui",
+            (2, _) => "STRHui",
+            (4, _) => "STRWui",
+            _ => "STRXui",
+        };
+        self.push(MInst::new(self.t.by_name[name], vec![MOp::Reg(r), MOp::Reg(Reg::P(31)), MOp::Imm(off)]));
+    }
+
     fn emit_call(&mut self, i: InstId) -> Result<(), String> {
         let f = self.f;
         let inst = &f.insts[i.index()];
@@ -860,46 +1075,123 @@ impl<'a, 'b> Sel<'a, 'b> {
                     self.push(MInst::new(brk, vec![]));
                     return Ok(());
                 }
+                // A va_list is a pointer to the next variable argument.
+                s if s.starts_with("llvm.va_start") => {
+                    let ap = self.reg_for(args[0].value, Class::X)?;
+                    let p = self.mf.new_vreg(true);
+                    self.push(MInst::new(
+                        self.t.by_name["ADDXri"],
+                        vec![MOp::Reg(Reg::V(p)), MOp::Reg(Reg::P(31)), MOp::Incoming(self.va_offset)],
+                    ));
+                    self.push(MInst::new(
+                        self.t.by_name["STRXui"],
+                        vec![MOp::Reg(Reg::V(p)), MOp::Reg(ap), MOp::Imm(0)],
+                    ));
+                    return Ok(());
+                }
+                s if s.starts_with("llvm.va_end") => return Ok(()),
+                s if s.starts_with("llvm.va_copy") => {
+                    let dst = self.reg_for(args[0].value, Class::X)?;
+                    let src = self.reg_for(args[1].value, Class::X)?;
+                    let p = self.mf.new_vreg(true);
+                    self.push(MInst::new(
+                        self.t.by_name["LDRXui"],
+                        vec![MOp::Reg(Reg::V(p)), MOp::Reg(src), MOp::Imm(0)],
+                    ));
+                    self.push(MInst::new(
+                        self.t.by_name["STRXui"],
+                        vec![MOp::Reg(Reg::V(p)), MOp::Reg(dst), MOp::Imm(0)],
+                    ));
+                    return Ok(());
+                }
                 s => return self.err(format!("intrinsic {s} is not supported yet")),
             });
             args.truncate(3);
         }
-        if let Type::Function { varargs: true, .. } = self.cx.m.types.get(call.fn_ty) {
-            return self.err("calls to variadic functions are not supported yet");
-        }
-        if args.len() > ARG_REGS {
-            return self.err("calls with more than eight arguments are not supported yet");
-        }
-        // Arguments into x0-x7, extended as their attributes say.
-        let mut regs = Vec::new();
+        // Named arguments are the callee type's parameters; the rest of a
+        // variadic call's are variable.
+        let named = match self.cx.m.types.get(call.fn_ty) {
+            Type::Function { params, varargs: true, .. } => params.len(),
+            _ => args.len(),
+        };
+        let mut shapes: Vec<Vec<crate::abi::Part>> = Vec::new();
         for a in &args {
+            let ty = self.ty_of(a.value);
+            shapes.push(match self.parts_of(ty) {
+                Some(n) => vec![crate::abi::Part { size: 8, fp: false }; n],
+                None => vec![crate::abi::Part { size: self.arg_size(a.value), fp: self.is_fp(ty) }],
+            });
+        }
+        let (part_locs, stack) = self.mf.abi.assign_parts(&shapes, named);
+        self.mf.out_size = self.mf.out_size.max(stack);
+        // Each argument in registers, extended as its attributes say; a
+        // small struct in one register per part.
+        let mut regs = Vec::new();
+        let mut locs = Vec::new();
+        let mut sizes = Vec::new();
+        let mut fps = Vec::new();
+        let mut is_named = Vec::new();
+        for (k, a) in args.iter().enumerate() {
+            let ty = self.ty_of(a.value);
+            if let Some(n) = self.parts_of(ty) {
+                for (p, r) in self.parts(a.value, n)?.into_iter().enumerate() {
+                    regs.push(r);
+                    locs.push(part_locs[k][p]);
+                    sizes.push(8);
+                    fps.push(false);
+                    is_named.push(k < named);
+                }
+                continue;
+            }
             let bits = self.vbits(a.value);
-            let wide = bits > 32;
-            let mut r = self.reg_for(a.value, if wide { Class::X } else { Class::W })?;
-            r = self.extend_for_abi(r, bits, &a.attrs)?;
-            regs.push((r, wide));
+            let class = self.class_of(a.value);
+            let mut r = self.reg_for(a.value, class)?;
+            if !class.is_fp() {
+                r = self.extend_for_abi(r, bits, &a.attrs)?;
+            }
+            regs.push(r);
+            locs.push(part_locs[k][0]);
+            sizes.push(shapes[k][0].size);
+            fps.push(class.is_fp());
+            is_named.push(k < named);
         }
         let callee_reg = match (&target, call.callee) {
             (Some(_), _) => None,
             (None, v) => Some(self.reg_for(v, Class::X)?),
         };
-        for (k, (r, wide)) in regs.iter().enumerate() {
-            let _ = wide;
-            self.push(MInst::copy(Reg::P(k as u8), *r));
+        // Stack arguments first, while every argument register is free;
+        // a variable argument takes a whole 8-byte slot.
+        let mut in_regs = Vec::new();
+        for (k, (&loc, &r)) in locs.iter().zip(&regs).enumerate() {
+            match loc {
+                crate::abi::ArgLoc::Stack(off) => {
+                    let size = if !is_named[k] && self.mf.abi.variadic == crate::abi::Variadic::Stack {
+                        sizes[k].max(4)
+                    } else {
+                        sizes[k]
+                    };
+                    self.store_to_stack(r, if fps[k] { sizes[k] } else { size }, off, fps[k]);
+                }
+                crate::abi::ArgLoc::Reg(p) => in_regs.push((p, r)),
+            }
+        }
+        for &(p, r) in &in_regs {
+            self.push(MInst::copy(Reg::P(p), r));
         }
         let mut inst_m = match (&target, callee_reg) {
             (Some(s), _) => MInst::new(self.t.by_role("call"), vec![MOp::Sym(s.clone())]),
             (None, Some(r)) => MInst::new(self.t.by_role("callr"), vec![MOp::Reg(r)]),
             _ => unreachable!(),
         };
-        inst_m.imp_uses = (0..regs.len() as u8).collect();
-        inst_m.imp_defs = crate::regalloc::CALL_CLOBBERS.to_vec();
+        inst_m.imp_uses = in_regs.iter().map(|&(p, _)| p).collect();
+        inst_m.imp_defs = self.mf.abi.all_clobbers();
         self.push(inst_m);
         if let Some(r) = inst.result
             && self.uses[r.index()] > 0
         {
             let d = self.vreg_of(r);
-            self.push(MInst::copy(Reg::V(d), Reg::P(0)));
+            let from = if self.is_fp(self.f.locals[r.index()].ty) { self.mf.abi.fp_result } else { self.mf.abi.result };
+            self.push(MInst::copy(Reg::V(d), Reg::P(from)));
         }
         Ok(())
     }
@@ -944,18 +1236,69 @@ impl<'a, 'b> Sel<'a, 'b> {
                     continue;
                 }
                 Op::Ret(v) => {
+                    let mut result = None;
                     if let Some(v) = v {
                         let bits = self.vbits(*v);
-                        let wide = bits > 32;
-                        let r = self.reg_for(*v, if wide { Class::X } else { Class::W })?;
-                        let r = self.extend_for_abi(r, bits, &f.ret_attrs)?;
-                        self.push(MInst::copy(Reg::P(0), r));
+                        let class = self.class_of(*v);
+                        let mut r = self.reg_for(*v, class)?;
+                        let to = if class.is_fp() {
+                            self.mf.abi.fp_result
+                        } else {
+                            r = self.extend_for_abi(r, bits, &f.ret_attrs)?;
+                            self.mf.abi.result
+                        };
+                        self.push(MInst::copy(Reg::P(to), r));
+                        result = Some(to);
                     }
                     let mut ret = MInst::new(self.t.by_name["RET"], vec![]);
-                    if v.is_some() {
-                        ret.imp_uses = vec![0];
-                    }
+                    ret.imp_uses = result.into_iter().collect();
                     self.push(ret);
+                    continue;
+                }
+                // The next variable argument: load it through the pointer,
+                // and step the pointer over its 8-byte slot.
+                Op::VaArg { list } => {
+                    let ap = self.reg_for(*list, Class::X)?;
+                    let p = self.mf.new_vreg(true);
+                    self.push(MInst::new(
+                        self.t.by_name["LDRXui"],
+                        vec![MOp::Reg(Reg::V(p)), MOp::Reg(ap), MOp::Imm(0)],
+                    ));
+                    if let Some(r) = inst.result {
+                        let size = self.arg_size(Value::Local(r));
+                        let load = match (size, self.is_fp(self.f.locals[r.index()].ty)) {
+                            (4, true) => "LDRSui",
+                            (_, true) => "LDRDui",
+                            (1, _) => "LDRBui",
+                            (2, _) => "LDRHui",
+                            (4, _) => "LDRWui",
+                            _ => "LDRXui",
+                        };
+                        let d = self.vreg_of(r);
+                        self.push(MInst::new(
+                            self.t.by_name[load],
+                            vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(p)), MOp::Imm(0)],
+                        ));
+                    }
+                    let q = self.mf.new_vreg(true);
+                    self.push(MInst::new(
+                        self.t.by_name["ADDXri"],
+                        vec![MOp::Reg(Reg::V(q)), MOp::Reg(Reg::V(p)), MOp::Imm(8)],
+                    ));
+                    self.push(MInst::new(
+                        self.t.by_name["STRXui"],
+                        vec![MOp::Reg(Reg::V(q)), MOp::Reg(ap), MOp::Imm(0)],
+                    ));
+                    continue;
+                }
+                Op::InsertValue { .. } => continue,
+                Op::ExtractValue { aggregate, indices } if indices.len() == 1 => {
+                    let Some(r) = inst.result else { continue };
+                    let ty = self.ty_of(*aggregate);
+                    let n = self.parts_of(ty).ok_or("extractvalue from an unsupported aggregate")?;
+                    let parts = self.parts(*aggregate, n)?;
+                    let d = self.vreg_of(r);
+                    self.push(MInst::copy(Reg::V(d), parts[indices[0] as usize]));
                     continue;
                 }
                 Op::Br(d) => {
@@ -995,8 +1338,8 @@ impl<'a, 'b> Sel<'a, 'b> {
                 if self.alias(r, v) {
                     continue;
                 }
-                let bits = self.vbits(v);
-                let s = self.reg_for(v, if bits > 32 { Class::X } else { Class::W })?;
+                let class = self.class_of(v);
+                let s = self.reg_for(v, class)?;
                 let d = self.vreg_of(r);
                 self.push(MInst::copy(Reg::V(d), s));
                 continue;
@@ -1041,9 +1384,10 @@ impl<'a, 'b> Sel<'a, 'b> {
                         continue;
                     }
                     let Some(&(v, _)) = incoming.iter().find(|(_, from)| *from == p) else { continue };
-                    let wide = self.bits(f.locals[r.index()].ty) > 32;
-                    let src = self.reg_for(v, if wide { Class::X } else { Class::W })?;
-                    let tmp = self.mf.new_vreg(wide);
+                    let ty = f.locals[r.index()].ty;
+                    let wide = self.bits(ty) > 32;
+                    let src = self.reg_for(v, self.class_of_ty(ty))?;
+                    let tmp = if self.is_fp(ty) { self.mf.new_fp_vreg(wide) } else { self.mf.new_vreg(wide) };
                     self.push(MInst::copy(Reg::V(tmp), src));
                     let d = self.vreg_of(r);
                     finals.push(MInst::copy(Reg::V(d), Reg::V(tmp)));
@@ -1083,17 +1427,78 @@ impl<'a, 'b> Sel<'a, 'b> {
             let next = layout.get(k + 1).copied();
             self.choose_block(b, next)?;
         }
-        // Arguments arrive in x0-x7.
+        // Parameters arrive where the convention puts them: registers, then
+        // the caller's stack.
         self.cur = 0;
-        if f.params.len() > ARG_REGS {
-            return self.err("functions with more than eight parameters are not supported yet");
+        let mut shapes: Vec<Vec<crate::abi::Part>> = Vec::new();
+        for p in &f.params {
+            let ty = f.locals[p.local.index()].ty;
+            shapes.push(match self.parts_of(ty) {
+                Some(n) => vec![crate::abi::Part { size: 8, fp: false }; n],
+                None => vec![crate::abi::Part { size: self.arg_size(Value::Local(p.local)), fp: self.is_fp(ty) }],
+            });
+        }
+        let (part_locs, _) = self.mf.abi.assign_parts(&shapes, shapes.len());
+        let sizes: Vec<u64> = shapes.iter().map(|s| s[0].size).collect();
+        // A variadic function's variable arguments follow its named ones on
+        // the stack, 8-aligned, under conventions that put them there.
+        if let Type::Function { varargs: true, .. } = self.cx.m.types.get(f.ty) {
+            if self.mf.abi.variadic != crate::abi::Variadic::Stack {
+                return self
+                    .err(format!("defining variadic functions under {} is not supported yet", self.mf.abi.name));
+            }
+            let end = part_locs
+                .iter()
+                .flatten()
+                .zip(shapes.iter().flatten())
+                .filter_map(|(l, part)| match l {
+                    crate::abi::ArgLoc::Stack(off) => Some(off + part.size as i64),
+                    _ => None,
+                })
+                .max()
+                .unwrap_or(0);
+            self.va_offset = (end + 7) / 8 * 8;
         }
         for (k, p) in f.params.iter().enumerate() {
             if self.uses[p.local.index()] == 0 {
                 continue;
             }
+            if self.parts_of(f.locals[p.local.index()].ty).is_some() {
+                // A small struct: a register for each part.
+                let mut regs = Vec::new();
+                for &loc in &part_locs[k] {
+                    let d = self.mf.new_vreg(true);
+                    match loc {
+                        crate::abi::ArgLoc::Reg(r) => self.push(MInst::copy(Reg::V(d), Reg::P(r))),
+                        crate::abi::ArgLoc::Stack(off) => {
+                            let ld = self.t.by_name["LDRXui"];
+                            self.push(MInst::new(
+                                ld,
+                                vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::P(31)), MOp::Incoming(off)],
+                            ));
+                        }
+                    }
+                    regs.push(d);
+                }
+                self.agg_params.insert(p.local, regs);
+                continue;
+            }
             let d = self.vreg_of(p.local);
-            self.push(MInst::copy(Reg::V(d), Reg::P(k as u8)));
+            match part_locs[k][0] {
+                crate::abi::ArgLoc::Reg(r) => self.push(MInst::copy(Reg::V(d), Reg::P(r))),
+                crate::abi::ArgLoc::Stack(off) => {
+                    let name = match (sizes[k], shapes[k][0].fp) {
+                        (4, true) => "LDRSui",
+                        (_, true) => "LDRDui",
+                        (1, _) => "LDRBui",
+                        (2, _) => "LDRHui",
+                        (4, _) => "LDRWui",
+                        _ => "LDRXui",
+                    };
+                    let ld = self.t.by_name[name];
+                    self.push(MInst::new(ld, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::P(31)), MOp::Incoming(off)]));
+                }
+            }
         }
         // Which blocks are on a cycle: those that reach themselves.
         let n = layout.len();

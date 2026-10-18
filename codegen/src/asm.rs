@@ -1,25 +1,28 @@
-//! Assembly output, in the dialect of Apple's assembler: functions from
-//! their machine IR, and global variables as data directives.
+//! Assembly output, in the dialect of the platform's assembler (Mach-O or
+//! ELF): functions from their machine IR, and global variables as data
+//! directives.
 
 use std::fmt::Write;
 
 use smaugian_ir::module::*;
 use smaugian_ir::types::{Type, TypeId};
 
+use crate::abi::{Abi, Syntax};
 use crate::mir::*;
 use crate::prepare::{self, Ctx};
 use crate::target::{Target, sext};
 
-pub fn symbol(name: &str) -> String {
-    format!("_{name}")
-}
-
 pub fn function(t: &Target, f: &MFunc, out: &mut String) {
+    let abi = &f.abi;
+    let sym = abi.symbol(&f.name);
     let _ = writeln!(out, "\t.p2align 2");
     if f.global {
-        let _ = writeln!(out, "\t.globl {}", symbol(&f.name));
+        let _ = writeln!(out, "\t.globl {sym}");
     }
-    let _ = writeln!(out, "{}:", symbol(&f.name));
+    if abi.syntax == Syntax::Elf {
+        let _ = writeln!(out, "\t.type {sym},%function");
+    }
+    let _ = writeln!(out, "{sym}:");
     let mut referenced = vec![false; f.blocks.len()];
     for b in &f.blocks {
         for i in &b.insts {
@@ -41,7 +44,8 @@ pub fn function(t: &Target, f: &MFunc, out: &mut String) {
     out.push('\n');
 }
 
-pub fn globals(cx: &Ctx, out: &mut String) -> Result<(), String> {
+pub fn globals(cx: &Ctx, abi: &Abi, out: &mut String) -> Result<(), String> {
+    let symbol = |n: &str| abi.symbol(n);
     let m = &*cx.m;
     for &g in &m.global_order {
         let gl = m.global(g);
@@ -49,20 +53,39 @@ pub fn globals(cx: &Ctx, out: &mut String) -> Result<(), String> {
         let Some(init) = v.init else { continue };
         let name = gl.name.clone().unwrap_or_else(|| format!("g{}", g.0));
         let align = v.align.or_else(|| cx.dl.abi_align(&m.types, v.ty)).unwrap_or(8).max(1);
-        let section = if v.constant { "__TEXT,__const" } else { "__DATA,__data" };
-        let _ = writeln!(out, "\t.section {section}");
+        let _ = writeln!(out, "\t{}", abi.data_section(v.constant, has_addresses(m, init)));
         if !matches!(gl.props.linkage, Linkage::Private | Linkage::Internal) {
             let _ = writeln!(out, "\t.globl {}", symbol(&name));
         }
         let _ = writeln!(out, "\t.p2align {}", align.trailing_zeros());
+        if abi.syntax == Syntax::Elf {
+            let _ = writeln!(out, "\t.type {},%object", symbol(&name));
+        }
         let _ = writeln!(out, "{}:", symbol(&name));
-        data(cx, v.ty, init, out)?;
+        data(cx, abi, v.ty, init, out)?;
         out.push('\n');
     }
     Ok(())
 }
 
-fn data(cx: &Ctx, ty: TypeId, c: ConstId, out: &mut String) -> Result<(), String> {
+/// Does constant `c` contain the address of anything?
+fn has_addresses(m: &Module, c: ConstId) -> bool {
+    match &m.constant(c).kind {
+        ConstKind::Global(_)
+        | ConstKind::BlockAddress { .. }
+        | ConstKind::DsoLocalEquivalent(_)
+        | ConstKind::NoCfi(_) => true,
+        ConstKind::Array(e) | ConstKind::Struct(e) | ConstKind::Vector(e) => e.iter().any(|&x| has_addresses(m, x)),
+        ConstKind::Splat(x) => has_addresses(m, *x),
+        ConstKind::Expr(ConstExpr::Cast { value, .. }) => has_addresses(m, *value),
+        ConstKind::Expr(ConstExpr::Gep { ptr, .. }) => has_addresses(m, *ptr),
+        ConstKind::Expr(_) => true,
+        _ => false,
+    }
+}
+
+fn data(cx: &Ctx, abi: &Abi, ty: TypeId, c: ConstId, out: &mut String) -> Result<(), String> {
+    let symbol = |n: &str| abi.symbol(n);
     let m = &*cx.m;
     let size = cx.size_of(ty)?;
     let k = m.constant(c);
@@ -102,7 +125,7 @@ fn data(cx: &Ctx, ty: TypeId, c: ConstId, out: &mut String) -> Result<(), String
         }
         (ConstKind::Array(elems) | ConstKind::Vector(elems), Type::Array { elem, .. } | Type::Vector { elem, .. }) => {
             for &e in elems {
-                data(cx, elem, e, out)?;
+                data(cx, abi, elem, e, out)?;
             }
         }
         (ConstKind::Struct(elems), _) => {
@@ -114,12 +137,19 @@ fn data(cx: &Ctx, ty: TypeId, c: ConstId, out: &mut String) -> Result<(), String
                 if o > at {
                     let _ = writeln!(out, "\t.space {}", o - at);
                 }
-                data(cx, fields[n], e, out)?;
+                data(cx, abi, fields[n], e, out)?;
                 at = o + cx.size_of(fields[n])?;
             }
             if layout.size > at {
                 let _ = writeln!(out, "\t.space {}", layout.size - at);
             }
+        }
+        // An integer made a pointer: the integer.
+        (ConstKind::Expr(ConstExpr::Cast { op: CastOp::IntToPtr, value }), _)
+            if matches!(m.constant(*value).kind, ConstKind::Int(_)) =>
+        {
+            let ConstKind::Int(a) = &m.constant(*value).kind else { unreachable!() };
+            let _ = writeln!(out, "\t.quad {}", a.low_u64());
         }
         _ => match prepare::const_address(cx, c) {
             Some((g, off)) => {

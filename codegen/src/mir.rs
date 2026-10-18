@@ -28,6 +28,9 @@ pub enum MOp {
     /// An offset in the frame, known once the frame is laid out: the slot
     /// and a byte offset in it.
     Frame(usize, i64),
+    /// An offset from the stack pointer on entry: an argument the caller
+    /// put on the stack. Known once the frame's size is.
+    Incoming(i64),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -116,13 +119,26 @@ pub struct MFunc {
     pub blocks: Vec<MBlock>,
     /// For each virtual register: is it 64 bits wide?
     pub vwide: Vec<bool>,
+    /// For each virtual register: is it a floating-point register?
+    pub vfp: Vec<bool>,
     pub slots: Vec<Slot>,
     pub frame_size: i64,
+    /// Bytes at the bottom of the frame for arguments to calls.
+    pub out_size: i64,
+    pub abi: crate::abi::Abi,
 }
 
 impl MFunc {
     pub fn new_vreg(&mut self, wide: bool) -> VReg {
         self.vwide.push(wide);
+        self.vfp.push(false);
+        (self.vwide.len() - 1) as VReg
+    }
+
+    /// A floating-point virtual register: `double` if wide, else `float`.
+    pub fn new_fp_vreg(&mut self, wide: bool) -> VReg {
+        self.vwide.push(wide);
+        self.vfp.push(true);
         (self.vwide.len() - 1) as VReg
     }
 }
@@ -133,7 +149,15 @@ impl MFunc {
 pub fn reg_name(r: Reg, class: Class) -> String {
     match r {
         Reg::P(n) => class.name(n),
-        Reg::V(v) => format!("%{}{v}", if class.is_64() { "x" } else { "w" }),
+        Reg::V(v) => format!(
+            "%{}{v}",
+            match class {
+                Class::D => "d",
+                Class::S => "s",
+                c if c.is_64() => "x",
+                _ => "w",
+            }
+        ),
     }
 }
 
@@ -141,11 +165,13 @@ pub fn reg_name(r: Reg, class: Class) -> String {
 pub fn format_inst(t: &Target, f: &MFunc, inst: &MInst) -> String {
     match inst.op {
         Opcode::Copy => {
-            let wide = match &inst.ops[0] {
-                MOp::Reg(Reg::V(v)) => f.vwide[*v as usize],
-                _ => true,
+            let (wide, fp) = match &inst.ops[0] {
+                MOp::Reg(Reg::V(v)) => (f.vwide[*v as usize], f.vfp[*v as usize]),
+                MOp::Reg(Reg::P(p)) => (true, *p >= 32),
+                _ => (true, false),
             };
-            let c = if wide { Class::X } else { Class::W };
+            let c = Class::X.with_width(wide);
+            let c = if fp { Class::D.with_width(wide) } else { c };
             let r = |o: &MOp| if let MOp::Reg(r) = o { reg_name(*r, c) } else { "?".into() };
             format!("COPY {}, {}", r(&inst.ops[0]), r(&inst.ops[1]))
         }
@@ -155,11 +181,12 @@ pub fn format_inst(t: &Target, f: &MFunc, inst: &MInst) -> String {
                     MOp::Reg(r) => Operand::Reg(*r),
                     MOp::Imm(v) => Operand::Imm(*v),
                     MOp::Label(b) => Operand::Text(f.blocks[*b].label.clone()),
-                    MOp::Sym(s) => Operand::Text(format!("_{s}")),
+                    MOp::Sym(s) => Operand::Sym(s.clone()),
                     MOp::Frame(s, o) => Operand::Text(format!("frame{s}+{o}")),
+                    MOp::Incoming(o) => Operand::Text(format!("incoming+{o}")),
                 }
             };
-            fill_template(t, i, value)
+            fill_template(t, Some(&f.abi), i, value)
         }
     }
 }
@@ -168,10 +195,14 @@ pub enum Operand {
     Reg(Reg),
     Imm(i64),
     Text(String),
+    /// A symbol, written as the platform writes it.
+    Sym(String),
 }
 
 /// Fills in instruction `i`'s template, with `value(k)` for operand `k`.
-pub fn fill_template(t: &Target, i: usize, value: impl Fn(usize) -> Operand) -> String {
+/// `abi` says how to write symbols (`{s:page}` and `{s:pageoff}` are the
+/// page holding a symbol and its offset in it).
+pub fn fill_template(t: &Target, abi: Option<&crate::abi::Abi>, i: usize, value: impl Fn(usize) -> Operand) -> String {
     let ins = &t.instrs[i];
     let tpl = &ins.asm;
     let mut out = String::new();
@@ -225,6 +256,14 @@ pub fn fill_template(t: &Target, i: usize, value: impl Fn(usize) -> Operand) -> 
                 }
             },
             (Operand::Text(s), _) => out.push_str(&s),
+            (Operand::Sym(s), _) => out.push_str(&match (abi, modifier) {
+                (Some(a), Some("page")) => a.page(&s),
+                (Some(a), Some("pageoff")) => a.pageoff(&s),
+                (Some(a), Some("gotpage")) => a.got_page(&s),
+                (Some(a), Some("gotpageoff")) => a.got_pageoff(&s),
+                (Some(a), _) => a.symbol(&s),
+                (None, _) => s,
+            }),
             (Operand::Reg(r), _) => out.push_str(&reg_name(r, Class::X)),
         }
     }
@@ -261,7 +300,8 @@ pub fn encode_function(t: &Target, f: &MFunc) -> Result<(Vec<u32>, Vec<Fixup>), 
             let mut env = Env::new();
             for (o, op) in ins.operands.iter().zip(&inst.ops) {
                 let v = match op {
-                    MOp::Reg(Reg::P(r)) => *r as i64,
+                    // v0-v31 are physical registers 32-63.
+                    MOp::Reg(Reg::P(r)) => (*r & 31) as i64,
                     MOp::Reg(Reg::V(_)) => return Err(format!("{}: a virtual register left after allocation", f.name)),
                     MOp::Imm(v) => *v,
                     MOp::Label(target) => starts[*target] as i64 - pc as i64,
@@ -269,7 +309,9 @@ pub fn encode_function(t: &Target, f: &MFunc) -> Result<(Vec<u32>, Vec<Fixup>), 
                         fixups.push(Fixup { offset: pc, symbol: s.clone(), instr: ins.name.clone() });
                         0
                     }
-                    MOp::Frame(..) => return Err(format!("{}: a frame offset left after layout", f.name)),
+                    MOp::Frame(..) | MOp::Incoming(_) => {
+                        return Err(format!("{}: a frame offset left after layout", f.name));
+                    }
                 };
                 env.insert(o.name.clone(), v);
             }
@@ -312,10 +354,11 @@ pub fn disassemble(t: &Target, word: u32, pc: u64) -> String {
         None => format!(".word 0x{word:08x}"),
         Some((i, env)) => {
             let ins = &t.instrs[i];
-            fill_template(t, i, |k| {
+            fill_template(t, None, i, |k| {
                 let o = &ins.operands[k];
                 let v = env[&o.name];
                 match o.kind {
+                    Kind::Reg(c) if c.is_fp() => Operand::Reg(Reg::P(v as u8 + 32)),
                     Kind::Reg(_) => Operand::Reg(Reg::P(v as u8)),
                     Kind::Label => Operand::Text(format!("0x{:x}", (pc as i64 + v) as u64)),
                     Kind::Sym => Operand::Text("<symbol>".into()),

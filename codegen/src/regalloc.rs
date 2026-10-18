@@ -21,16 +21,6 @@ use std::collections::{HashMap, HashSet};
 use crate::mir::*;
 use crate::target::Target;
 
-/// Registers a call may change: x0-x18 and the link register.
-pub const CALL_CLOBBERS: [u8; 20] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 30];
-const CALLER_SAVED: [u8; 15] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
-pub const CALLEE_SAVED: [u8; 10] = [19, 20, 21, 22, 23, 24, 25, 26, 27, 28];
-const SCRATCH: [u8; 3] = [16, 17, 15];
-
-fn allocatable(r: u8) -> bool {
-    CALLER_SAVED.contains(&r) || CALLEE_SAVED.contains(&r)
-}
-
 /// The registers an instruction reads and writes, including implicit ones.
 fn regs_of(t: &Target, inst: &MInst) -> (Vec<Reg>, Vec<Reg>) {
     let (d, u) = inst.defs_uses(t);
@@ -56,6 +46,17 @@ fn overlaps(a: Interval, b: Interval) -> bool {
 
 pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
     record_copy_widths(f);
+    let abi = f.abi.clone();
+    let caller_saved = abi.caller_saved();
+    let callee_saved = abi.callee_saved();
+    let fp_caller_saved = abi.fp_caller_saved();
+    let fp_callee_saved = abi.fp_callee_saved();
+    let allocatable = |r: u8| {
+        caller_saved.contains(&r)
+            || callee_saved.contains(&r)
+            || fp_caller_saved.contains(&r)
+            || fp_callee_saved.contains(&r)
+    };
     let nv = f.vwide.len();
     // Positions.
     let mut block_range: Vec<Interval> = Vec::new();
@@ -210,12 +211,16 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
             }
             frontier = next;
         }
+        // Only registers of the value's own file.
+        let fp = f.vfp[v as usize];
+        cands.retain(|&p| (p >= 32) == fp);
+        let (caller, callee) = if fp { (&fp_caller_saved, &fp_callee_saved) } else { (&caller_saved, &callee_saved) };
         if across_call {
-            cands.extend(CALLEE_SAVED);
-            cands.extend(CALLER_SAVED);
+            cands.extend(callee.iter().copied());
+            cands.extend(caller.iter().copied());
         } else {
-            cands.extend(CALLER_SAVED);
-            cands.extend(CALLEE_SAVED);
+            cands.extend(caller.iter().copied());
+            cands.extend(callee.iter().copied());
         }
         let free = cands
             .into_iter()
@@ -235,32 +240,49 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
         f.slots.push(Slot { size: 8, align: 8, offset: 0 });
         slot_of.insert(v, f.slots.len() - 1);
     }
-    let ldr = t.by_role("load.x");
-    let str_ = t.by_role("store.x");
+    let (ldr, str_) = (t.by_role("load.x"), t.by_role("store.x"));
+    let (ldr_d, str_d) = (t.by_role("load.d"), t.by_role("store.d"));
+    let vfp = f.vfp.clone();
+    let fname = f.name.clone();
     for b in &mut f.blocks {
         let old = std::mem::take(&mut b.insts);
         let mut new = Vec::with_capacity(old.len());
         for mut inst in old {
             let (defs, uses) = regs_of(t, &inst);
             let mut scratch: HashMap<VReg, u8> = HashMap::new();
-            let mut next = 0;
+            let (mut next, mut next_fp) = (0, 0);
             let mut after = Vec::new();
+            // Operands read first, then results: a result whose scratch
+            // registers have run out can share one an operand used, since
+            // operands are read before results are written (but not one
+            // that is both, such as a written-back base).
+            let both: Vec<Reg> = uses.iter().filter(|r| defs.contains(r)).copied().collect();
             for r in uses.iter().chain(defs.iter()) {
                 if let Reg::V(v) = r
                     && let Some(&slot) = slot_of.get(v)
                     && !scratch.contains_key(v)
                 {
-                    let s = *SCRATCH.get(next).ok_or("more spilled operands than scratch registers")?;
-                    next += 1;
+                    let fp = vfp[*v as usize];
+                    let (pool, k) = if fp { (&abi.fp_scratch, &mut next_fp) } else { (&abi.scratch, &mut next) };
+                    let s = match pool.get(*k) {
+                        Some(&s) => {
+                            *k += 1;
+                            s
+                        }
+                        None if !uses.contains(r) => *pool
+                            .iter()
+                            .find(|&&s| !both.iter().any(|b| matches!(b, Reg::V(w) if scratch.get(w) == Some(&s))))
+                            .ok_or_else(|| format!("{fname}: more spilled operands than scratch registers"))?,
+                        None => return Err(format!("{fname}: more spilled operands than scratch registers")),
+                    };
                     scratch.insert(*v, s);
+                    let (ld, st) = if fp { (ldr_d, str_d) } else { (ldr, str_) };
                     if uses.contains(r) {
-                        new.push(MInst::new(ldr, vec![MOp::Reg(Reg::P(s)), MOp::Reg(Reg::P(31)), MOp::Frame(slot, 0)]));
+                        new.push(MInst::new(ld, vec![MOp::Reg(Reg::P(s)), MOp::Reg(Reg::P(31)), MOp::Frame(slot, 0)]));
                     }
                     if defs.contains(r) {
-                        after.push(MInst::new(
-                            str_,
-                            vec![MOp::Reg(Reg::P(s)), MOp::Reg(Reg::P(31)), MOp::Frame(slot, 0)],
-                        ));
+                        after
+                            .push(MInst::new(st, vec![MOp::Reg(Reg::P(s)), MOp::Reg(Reg::P(31)), MOp::Frame(slot, 0)]));
                     }
                 }
             }
@@ -283,8 +305,7 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
 
 /// Turns copies into moves, dropping those between the same register.
 fn lower_copies(t: &Target, f: &mut MFunc) {
-    let movw = t.copies[&crate::target::Class::W];
-    let movx = t.copies[&crate::target::Class::X];
+    use crate::target::Class;
     for b in &mut f.blocks {
         let old = std::mem::take(&mut b.insts);
         for inst in old {
@@ -300,7 +321,18 @@ fn lower_copies(t: &Target, f: &mut MFunc) {
                 continue;
             }
             let wide = inst.wide;
-            b.insts.push(MInst::new(if wide { movx } else { movw }, vec![MOp::Reg(Reg::P(*d)), MOp::Reg(Reg::P(*s))]));
+            // Within a register file, or across it with fmov.
+            let op = match (*d >= 32, *s >= 32, wide) {
+                (false, false, true) => t.copies[&Class::X],
+                (false, false, false) => t.copies[&Class::W],
+                (true, true, true) => t.copies[&Class::D],
+                (true, true, false) => t.copies[&Class::S],
+                (true, false, true) => t.by_role("fmov.d.x"),
+                (true, false, false) => t.by_role("fmov.s.w"),
+                (false, true, true) => t.by_role("fmov.x.d"),
+                (false, true, false) => t.by_role("fmov.w.s"),
+            };
+            b.insts.push(MInst::new(op, vec![MOp::Reg(Reg::P(*d)), MOp::Reg(Reg::P(*s))]));
         }
     }
 }

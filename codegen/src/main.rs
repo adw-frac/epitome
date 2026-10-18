@@ -3,24 +3,31 @@
 use std::process::ExitCode;
 
 use smaugian_codegen::target::Target;
-use smaugian_codegen::{Stop, compile, mir};
+use smaugian_codegen::{Options, Stop, compile, mir};
 
 const USAGE: &str = "usage: smaugian-llc [options] <file.ll>
 
   -o <file>               write the assembly here instead of stdout
   --target=<file.ll>      read the machine description from this file
                           (default: the built-in AArch64 description)
+  --abi=darwin|aapcs64    the calling convention and platform (default:
+                          from the module's target triple, else darwin)
+  --reserve=x18,...       keep these registers out of allocation
+  --syntax=macho|elf      the assembler dialect, if not the convention's
   --stop-after=isel|ra    print machine IR after selection or allocation
   --hex                   print each function's machine code in hex
   --disasm                disassemble each function's machine code
   --patterns              list the selection patterns and exit
-  --stats                 print matching counts and timings to stderr";
+  --stats                 print matching counts and timings to stderr
+  --keep-going            report every function that cannot be compiled,
+                          and compile the rest";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (mut input, mut output, mut target_file) = (None, None, None);
     let (mut hex, mut disasm, mut patterns, mut stats) = (false, false, false, false);
     let mut stop = Stop::Done;
+    let mut opts = Options::default();
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -29,9 +36,24 @@ fn main() -> ExitCode {
             "--disasm" => disasm = true,
             "--patterns" => patterns = true,
             "--stats" => stats = true,
+            "--keep-going" => opts.keep_going = true,
             "--stop-after=isel" => stop = Stop::AfterSelection,
             "--stop-after=ra" => stop = Stop::AfterAllocation,
             s if s.starts_with("--target=") => target_file = Some(s["--target=".len()..].to_string()),
+            s if s.starts_with("--abi=") => opts.abi = Some(s["--abi=".len()..].to_string()),
+            "--syntax=macho" => opts.syntax = Some(smaugian_codegen::abi::Syntax::MachO),
+            "--syntax=elf" => opts.syntax = Some(smaugian_codegen::abi::Syntax::Elf),
+            s if s.starts_with("--reserve=") => {
+                for r in s["--reserve=".len()..].split(',') {
+                    match r.strip_prefix('x').and_then(|n| n.parse::<u8>().ok()) {
+                        Some(n) if n <= 30 => opts.reserve.push(n),
+                        _ => {
+                            eprintln!("smaugian-llc: bad register {r}");
+                            return ExitCode::FAILURE;
+                        }
+                    }
+                }
+            }
             s if s.starts_with('-') => {
                 eprintln!("smaugian-llc: unknown option {s}\n\n{USAGE}");
                 return ExitCode::FAILURE;
@@ -76,13 +98,17 @@ fn main() -> ExitCode {
         }
     };
     let started = std::time::Instant::now();
-    let compiled = match compile(&target, &mut module, stop) {
+    opts.stop = stop;
+    let compiled = match compile(&target, &mut module, &opts) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("smaugian-llc: {e}");
             return ExitCode::FAILURE;
         }
     };
+    for e in &compiled.errors {
+        eprintln!("smaugian-llc: {e}");
+    }
     if stats {
         use smaugian_codegen::isel::stats::*;
         let total = started.elapsed();

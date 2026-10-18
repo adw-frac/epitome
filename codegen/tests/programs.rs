@@ -17,7 +17,11 @@
 //!    code against our own encoder, except where we leave a fixup;
 //! 3. disassembles each word with the description and checks it encodes
 //!    back to the same word, and that the mnemonic is objdump's, or an
-//!    alias of it.
+//!    alias of it;
+//! 4. does the same for Linux: IR from clang for `aarch64-linux-gnu`,
+//!    compiled with the AAPCS64 convention to ELF assembly, assembled by
+//!    clang for Linux and checked word by word. (It is not run: there is
+//!    no Linux here. `tests/abi.rs` runs AAPCS64 code against clang's.)
 //!
 //! The test is skipped when `clang` is not installed.
 
@@ -25,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use smaugian_codegen::target::Target;
-use smaugian_codegen::{Stop, compile, mir};
+use smaugian_codegen::{Options, compile, mir};
 
 fn have_tools() -> bool {
     let ok = |c: &str, a: &str| Command::new(c).arg(a).output().is_ok_and(|o| o.status.success());
@@ -74,7 +78,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
             let text = m.to_string();
             m = smaugian_ir::parse_module(&text).map_err(|e| format!("{stem}: reparse: {e:?}"))?;
         }
-        let compiled = compile(t, &mut m, Stop::Done).map_err(|e| format!("{stem}: {e}"))?;
+        let compiled = compile(t, &mut m, &Options::default()).map_err(|e| format!("{stem}: {e}"))?;
         let s = tmp.join(format!("{stem}.s"));
         std::fs::write(&s, &compiled.asm).unwrap();
 
@@ -90,18 +94,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         let obj = tmp.join(format!("{stem}.o"));
         run(Command::new("clang").arg("-c").arg(&s).arg("-o").arg(&obj))?;
         let dump = run(Command::new("objdump").arg("-d").arg(&obj))?;
-        let theirs: Vec<(u32, String)> = dump
-            .lines()
-            .filter_map(|l| {
-                let mut it = l.split_whitespace();
-                let addr = it.next()?;
-                if !addr.ends_with(':') || !addr.trim_end_matches(':').chars().all(|c| c.is_ascii_hexdigit()) {
-                    return None;
-                }
-                let word = u32::from_str_radix(it.next()?, 16).ok()?;
-                Some((word, it.next().unwrap_or("").to_string()))
-            })
-            .collect();
+        let theirs = words_of(&dump);
         let mut ours: Vec<(u32, bool)> = Vec::new();
         for f in &compiled.funcs {
             let (words, fixups) = mir::encode_function(t, f)?;
@@ -135,8 +128,73 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
             }
         }
         report.push(format!("{stem}: {} instructions", ours.len()));
+
+        // 4. The same for Linux (AAPCS64, ELF): built from clang's IR for
+        // that target, assembled by clang for it, checked word by word.
+        // Programs that use what only Apple's convention has so far say so.
+        if std::fs::read_to_string(&src).unwrap().contains("// darwin-only") {
+            continue;
+        }
+        let elf_stem = format!("{stem}.linux");
+        let ll = tmp.join(format!("{elf_stem}.ll"));
+        run(Command::new("clang")
+            .args(["--target=aarch64-linux-gnu"])
+            .args(wrap)
+            .args(*flags)
+            .args(["-S", "-emit-llvm"])
+            .arg(&src)
+            .arg("-o")
+            .arg(&ll))?;
+        let text = std::fs::read_to_string(&ll).unwrap();
+        let mut m = smaugian_ir::parse_module(&text).map_err(|e| format!("{elf_stem}: {e:?}"))?;
+        if *config == "opt" {
+            smaugian_opt::pipeline::run(&mut m, &smaugian_opt::pipeline::Options { threads: 1, ..Default::default() });
+            let text = m.to_string();
+            m = smaugian_ir::parse_module(&text).map_err(|e| format!("{elf_stem}: reparse: {e:?}"))?;
+        }
+        let compiled = compile(t, &mut m, &Options::default()).map_err(|e| format!("{elf_stem}: {e}"))?;
+        if compiled.funcs.first().is_some_and(|f| f.abi.name != "aapcs64") {
+            return Err(format!("{elf_stem}: the Linux triple did not select aapcs64"));
+        }
+        let s = tmp.join(format!("{elf_stem}.s"));
+        std::fs::write(&s, &compiled.asm).unwrap();
+        let obj = tmp.join(format!("{elf_stem}.o"));
+        run(Command::new("clang").args(["--target=aarch64-linux-gnu", "-c"]).arg(&s).arg("-o").arg(&obj))?;
+        let dump = run(Command::new("objdump").arg("-d").arg(&obj))?;
+        let theirs = words_of(&dump);
+        let mut ours: Vec<(u32, bool)> = Vec::new();
+        for f in &compiled.funcs {
+            let (words, fixups) = mir::encode_function(t, f)?;
+            for (k, w) in words.into_iter().enumerate() {
+                ours.push((w, fixups.iter().any(|x| x.offset == 4 * k)));
+            }
+        }
+        if ours.len() != theirs.len() {
+            return Err(format!("{elf_stem}: {} words from us, {} from the assembler", ours.len(), theirs.len()));
+        }
+        for (k, ((w, fixup), (tw, mnemonic))) in ours.iter().zip(&theirs).enumerate() {
+            if w != tw && !fixup {
+                return Err(format!("{elf_stem}: word {k} is {w:08x}, the assembler's is {tw:08x} ({mnemonic})"));
+            }
+        }
+        report.push(format!("{elf_stem}: {} instructions", ours.len()));
     }
     Ok(report)
+}
+
+/// The words and mnemonics in objdump's disassembly.
+fn words_of(dump: &str) -> Vec<(u32, String)> {
+    dump.lines()
+        .filter_map(|l| {
+            let mut it = l.split_whitespace();
+            let addr = it.next()?;
+            if !addr.ends_with(':') || !addr.trim_end_matches(':').chars().all(|c| c.is_ascii_hexdigit()) {
+                return None;
+            }
+            let word = u32::from_str_radix(it.next()?, 16).ok()?;
+            Some((word, it.next().unwrap_or("").to_string()))
+        })
+        .collect()
 }
 
 #[test]

@@ -13,6 +13,14 @@
 //!   bits are done on 32-bit extensions of them: a narrow value lives in a
 //!   W register with its upper bits undefined, so these operations, which
 //!   read every bit, need them made right first.
+//! - Loads and stores of small structs (`[2 x i64]`) become one per part.
+//! - Intrinsics the description has no instruction for are written out:
+//!   minimum, maximum and absolute value of narrow integers as a comparison
+//!   and a select, and population count as bit arithmetic.
+//! - Conversions between floating point and integers narrower than 32
+//!   bits go through `i32`; `fcmp one` and `fcmp ueq`, which no single
+//!   condition tests after AArch64's `fcmp`, are split into two; a store of
+//!   a floating-point constant stores its bits as an integer.
 //! - Division and remainder by constants become multiplications and
 //!   shifts (see `divconst`).
 //! - Integers of other widths below 64 (`i33`, say) are held in the next
@@ -76,9 +84,12 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     check(cx, &f, fname)?;
     drop_noop_calls(cx, &mut f);
     lower_switches(cx, &mut f);
+    expand_intrinsics(cx, &mut f);
+    split_aggregate_memory(cx, &mut f);
     lower_geps(cx, &mut f)?;
     promote_odd(cx, &mut f)?;
     widen_narrow(cx, &mut f);
+    legalize_fp(cx, &mut f)?;
     lower_const_divs(cx, &mut f);
     split_phi_edges(&mut f);
     Ok(f)
@@ -86,11 +97,19 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
 
 /// Rejects what the code generator cannot do yet.
 fn check(cx: &Ctx, f: &Function, fname: &str) -> Result<(), String> {
+    // Small structs, as clang passes them ([2 x i64]), live as their parts.
+    let small_struct = |ty: &Type| match ty {
+        Type::Array { len, elem } => *len <= 2 && matches!(cx.m.types.get(*elem), Type::Int(64)),
+        Type::Struct { fields, .. } => {
+            fields.len() <= 2 && fields.iter().all(|f| matches!(cx.m.types.get(*f), Type::Int(64)))
+        }
+        _ => false,
+    };
     let bad_type = |ty: TypeId| match cx.m.types.get(ty) {
         Type::Int(b) => *b > 64,
         Type::Ptr(a) => *a != 0,
-        Type::Void | Type::Label => false,
-        _ => true,
+        Type::Void | Type::Label | Type::Double | Type::Float => false,
+        t => !small_struct(t),
     };
     for p in &f.params {
         if bad_type(f.locals[p.local.index()].ty) {
@@ -115,13 +134,9 @@ fn check(cx: &Ctx, f: &Function, fname: &str) -> Result<(), String> {
             Op::Alloca { count: Some(c), .. } if cx.const_int(*c).is_none() => {
                 return Err(format!("@{fname}: dynamic allocas are not supported yet"));
             }
-            Op::AtomicRmw { .. } | Op::CmpXchg { .. } | Op::Fence { .. } => {
-                return Err(format!("@{fname}: atomics are not supported yet"));
+            Op::AtomicRmw { .. } | Op::CmpXchg { .. } => {
+                return Err(format!("@{fname}: atomic read-modify-write is not supported yet"));
             }
-            Op::Load { atomic: Some(_), .. } | Op::Store { atomic: Some(_), .. } => {
-                return Err(format!("@{fname}: atomics are not supported yet"));
-            }
-            Op::VaArg { .. } => return Err(format!("@{fname}: va_arg is not supported yet")),
             _ => {}
         }
     }
@@ -507,6 +522,204 @@ fn promote_odd(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     Ok(())
 }
 
+fn split_aggregate_memory(cx: &mut Ctx, f: &mut Function) {
+    let i64t = cx.m.types.int(64);
+    let i8t = cx.m.types.int(8);
+    let parts_of = |cx: &Ctx, ty: TypeId| -> Option<u32> {
+        match cx.m.types.get(ty) {
+            Type::Array { len, elem } if *len <= 2 && matches!(cx.m.types.get(*elem), Type::Int(64)) => {
+                Some(*len as u32)
+            }
+            Type::Struct { fields, .. }
+                if fields.len() <= 2 && fields.iter().all(|t| matches!(cx.m.types.get(*t), Type::Int(64))) =>
+            {
+                Some(fields.len() as u32)
+            }
+            _ => None,
+        }
+    };
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let mut s = Seq { f, new: Vec::new() };
+            let done = match s.f.insts[i.index()].op.clone() {
+                Op::Store { value, ptr, volatile: false, atomic: None, .. } => {
+                    let ty = cx.value_ty(s.f, value);
+                    match parts_of(cx, ty) {
+                        Some(n) => {
+                            let ptr_ty = cx.m.types.ptr(0);
+                            for part in 0..n {
+                                let e = s.op(Op::ExtractValue { aggregate: value, indices: vec![part] }, i64t);
+                                let off = cx.int(i64t, 8 * part as i64);
+                                let p = s.op(gep8(i8t, ptr, off), ptr_ty);
+                                let st = s.f.add_inst(
+                                    Op::Store { volatile: false, atomic: None, value: e, ptr: p, align: Some(8) },
+                                    None,
+                                );
+                                s.new.push(st);
+                            }
+                            true
+                        }
+                        None => false,
+                    }
+                }
+                Op::Load { ptr, volatile: false, atomic: None, .. } => {
+                    let r = s.f.insts[i.index()].result.unwrap();
+                    let ty = s.f.locals[r.index()].ty;
+                    match parts_of(cx, ty) {
+                        Some(n) => {
+                            let ptr_ty = cx.m.types.ptr(0);
+                            let mut agg = Value::Const(cx.m.consts.intern(Constant { ty, kind: ConstKind::Poison }));
+                            for part in 0..n {
+                                let off = cx.int(i64t, 8 * part as i64);
+                                let p = s.op(gep8(i8t, ptr, off), ptr_ty);
+                                let v = s.op(Op::Load { volatile: false, atomic: None, ptr: p, align: Some(8) }, i64t);
+                                agg = s.op(Op::InsertValue { aggregate: agg, element: v, indices: vec![part] }, ty);
+                            }
+                            s.f.replace_uses(Value::Local(r), agg);
+                            true
+                        }
+                        None => false,
+                    }
+                }
+                _ => false,
+            };
+            let new = std::mem::take(&mut s.new);
+            if done {
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+            } else {
+                k += 1;
+            }
+        }
+    }
+}
+
+fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::Call(call) = &f.insts[i.index()].op else {
+                k += 1;
+                continue;
+            };
+            let Some(name) = callee_name(cx.m, call) else {
+                k += 1;
+                continue;
+            };
+            let args: Vec<Value> = call.args.iter().map(|a| a.value).collect();
+            let Some(r) = f.insts[i.index()].result else {
+                k += 1;
+                continue;
+            };
+            let ty = f.locals[r.index()].ty;
+            let bits = match cx.m.types.get(ty) {
+                Type::Int(b) => *b,
+                _ => 0,
+            };
+            let i1 = cx.m.types.int(1);
+            let mut s = Seq { f, new: Vec::new() };
+            let base = name.split('.').take(2).collect::<Vec<_>>().join(".");
+            let minmax = match base.as_str() {
+                "llvm.smax" => Some(ICmpPred::Sgt),
+                "llvm.smin" => Some(ICmpPred::Slt),
+                "llvm.umax" => Some(ICmpPred::Ugt),
+                "llvm.umin" => Some(ICmpPred::Ult),
+                _ => None,
+            };
+            // ctlz and cttz may say a zero input gives poison; giving the
+            // full width instead is always allowed, and is what clz does.
+            if (base == "llvm.ctlz" || base == "llvm.cttz") && args.len() == 2 {
+                let no = cx.int(i1, 0);
+                if let Op::Call(c) = &mut s.f.insts[i.index()].op {
+                    c.args[1].value = no;
+                }
+            }
+            let value = match (minmax, base.as_str()) {
+                // Narrow minimum and maximum: compare and select.
+                (Some(pred), _) if bits < 32 => {
+                    let c = s.op(Op::ICmp { pred, samesign: false, lhs: args[0], rhs: args[1] }, i1);
+                    Some(s.op(
+                        Op::Select { fmf: FastMath::default(), cond: c, then_value: args[0], else_value: args[1] },
+                        ty,
+                    ))
+                }
+                // The size of the object a pointer points into, when it is
+                // not known here: "unknown" is -1, or 0 if a lower bound
+                // is asked for. (An optimiser folds the known cases.)
+                (_, "llvm.objectsize") => {
+                    let min = cx.const_int(args[1]).unwrap_or(0) != 0;
+                    Some(cx.int(ty, if min { 0 } else { -1 }))
+                }
+                // Saturating subtraction: a > b ? a - b : 0.
+                (_, "llvm.usub") if name.starts_with("llvm.usub.sat") => {
+                    let zero = cx.int(ty, 0);
+                    let diff = s.bin(BinOp::Sub, args[0], args[1], ty);
+                    let c = s.op(Op::ICmp { pred: ICmpPred::Ugt, samesign: false, lhs: args[0], rhs: args[1] }, i1);
+                    Some(s.op(Op::Select { fmf: FastMath::default(), cond: c, then_value: diff, else_value: zero }, ty))
+                }
+                (_, "llvm.abs") => {
+                    let zero = cx.int(ty, 0);
+                    let neg = s.bin(BinOp::Sub, zero, args[0], ty);
+                    let c = s.op(Op::ICmp { pred: ICmpPred::Slt, samesign: false, lhs: args[0], rhs: zero }, i1);
+                    Some(
+                        s.op(
+                            Op::Select { fmf: FastMath::default(), cond: c, then_value: neg, else_value: args[0] },
+                            ty,
+                        ),
+                    )
+                }
+                // Population count: sums of bits in pairs, nibbles and
+                // bytes, then a multiply to add the bytes up.
+                (_, "llvm.ctpop") if bits > 0 => {
+                    let w = if bits <= 32 { 32 } else { 64 };
+                    let wt = cx.m.types.int(w);
+                    let mut x = if bits < w { s.cast(CastOp::ZExt, args[0], wt) } else { args[0] };
+                    let rep = |byte: u64| -> i64 { (0..w / 8).fold(0u64, |acc, k| acc | (byte << (8 * k))) as i64 };
+                    let c = |cx: &mut Ctx, v: i64| cx.int(wt, v);
+                    let one = c(cx, 1);
+                    let half = s.bin(BinOp::LShr, x, one, wt);
+                    let m1 = c(cx, rep(0x55));
+                    let half = s.bin(BinOp::And, half, m1, wt);
+                    x = s.bin(BinOp::Sub, x, half, wt);
+                    let m2 = c(cx, rep(0x33));
+                    let lo = s.bin(BinOp::And, x, m2, wt);
+                    let two = c(cx, 2);
+                    let hi = s.bin(BinOp::LShr, x, two, wt);
+                    let hi = s.bin(BinOp::And, hi, m2, wt);
+                    x = s.bin(BinOp::Add, lo, hi, wt);
+                    let four = c(cx, 4);
+                    let sh = s.bin(BinOp::LShr, x, four, wt);
+                    x = s.bin(BinOp::Add, x, sh, wt);
+                    let m4 = c(cx, rep(0x0f));
+                    x = s.bin(BinOp::And, x, m4, wt);
+                    let ones = c(cx, rep(0x01));
+                    x = s.bin(BinOp::Mul, x, ones, wt);
+                    let top = c(cx, w as i64 - 8);
+                    x = s.bin(BinOp::LShr, x, top, wt);
+                    Some(if bits < w { s.cast(CastOp::Trunc, x, ty) } else { x })
+                }
+                _ => None,
+            };
+            let new = std::mem::take(&mut s.new);
+            match value {
+                Some(v) => {
+                    f.replace_uses(Value::Local(r), v);
+                    let n = new.len();
+                    f.blocks[b.index()].insts.splice(k..=k, new);
+                    k += n;
+                }
+                None => k += 1,
+            }
+        }
+    }
+}
+
 /// Builds instructions to go before another, of one integer type.
 struct Seq<'f> {
     f: &'f mut Function,
@@ -659,6 +872,99 @@ fn lower_const_divs(cx: &mut Ctx, f: &mut Function) {
             k += n;
         }
     }
+}
+
+fn legalize_fp(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
+    let i32t = cx.m.types.int(32);
+    let i1 = cx.m.types.int(1);
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let res = f.insts[i.index()].result;
+            let mut s = Seq { f, new: Vec::new() };
+            let bits_of = |cx: &Ctx, ty: TypeId| match cx.m.types.get(ty) {
+                Type::Int(b) => *b,
+                _ => 0,
+            };
+            let mut replace: Option<Value> = None;
+            match s.f.insts[i.index()].op.clone() {
+                Op::Cast { op: op @ (CastOp::SIToFP | CastOp::UIToFP), value, .. } => {
+                    let from = bits_of(cx, cx.value_ty(s.f, value));
+                    if from < 32 {
+                        let ext = if op == CastOp::SIToFP { CastOp::SExt } else { CastOp::ZExt };
+                        let w = s.cast(ext, value, i32t);
+                        if let Op::Cast { value, .. } = &mut s.f.insts[i.index()].op {
+                            *value = w;
+                        }
+                    }
+                }
+                Op::Cast { op: op @ (CastOp::FPToSI | CastOp::FPToUI), value, .. } => {
+                    let r = res.unwrap();
+                    let to_ty = s.f.locals[r.index()].ty;
+                    if bits_of(cx, to_ty) < 32 {
+                        // Convert to 32 bits, then take the low bits.
+                        let w = s.op(Op::Cast { op, flags: IntFlags::NONE, fmf: FastMath::default(), value }, i32t);
+                        replace = Some(s.cast(CastOp::Trunc, w, to_ty));
+                    }
+                }
+                Op::FCmp {
+                    pred: pred @ (FCmpPred::One | FCmpPred::Ueq | FCmpPred::True | FCmpPred::False),
+                    lhs,
+                    rhs,
+                    fmf,
+                } => {
+                    replace = Some(match pred {
+                        FCmpPred::True => cx.int(i1, 1),
+                        FCmpPred::False => cx.int(i1, 0),
+                        _ => {
+                            // one: ordered and not equal; ueq: unordered or equal.
+                            let (a, b, op) = if pred == FCmpPred::One {
+                                (FCmpPred::Ord, FCmpPred::Une, BinOp::And)
+                            } else {
+                                (FCmpPred::Uno, FCmpPred::Oeq, BinOp::Or)
+                            };
+                            let x = s.op(Op::FCmp { pred: a, fmf, lhs, rhs }, i1);
+                            let y = s.op(Op::FCmp { pred: b, fmf, lhs, rhs }, i1);
+                            s.bin(op, x, y, i1)
+                        }
+                    });
+                }
+                Op::Store { value: Value::Const(c), ptr, volatile, atomic, align } => {
+                    let k = cx.m.constant(c);
+                    if let ConstKind::Float(raw) = k.kind {
+                        let bits = match cx.m.types.get(k.ty) {
+                            Type::Double => 64,
+                            Type::Float => 32,
+                            _ => 0,
+                        };
+                        if bits > 0 {
+                            let ity = cx.m.types.int(bits);
+                            let v = cx.int(ity, crate::target::sext(raw as u64, bits));
+                            s.f.insts[i.index()].op = Op::Store { value: v, ptr, volatile, atomic, align };
+                        }
+                    }
+                }
+                Op::Binary { op: BinOp::FRem, .. } => return Err("frem is not supported yet".into()),
+                _ => {}
+            }
+            let new = std::mem::take(&mut s.new);
+            let n = new.len();
+            match replace {
+                Some(v) => {
+                    f.replace_uses(Value::Local(res.unwrap()), v);
+                    f.blocks[b.index()].insts.splice(k..=k, new);
+                    k += n;
+                }
+                None => {
+                    f.blocks[b.index()].insts.splice(k..k, new);
+                    k += n + 1;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn widen_narrow(cx: &mut Ctx, f: &mut Function) {

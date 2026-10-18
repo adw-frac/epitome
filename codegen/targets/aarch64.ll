@@ -404,6 +404,17 @@ define i64 @ADDXri(i64 "reg"="xsp" %n, i64 "imm" %imm) "enc"="1 0 0 100010 0 imm
   ret i64 %r
 }
 
+; Immediates of whole 4KB pages, for large frames.
+define i64 @ADDXri12(i64 "reg"="xsp" %n, i64 "imm" %imm) "enc"="1 0 0 100010 1 imm12:12=imm/4096 n:5 d:5" "asm"="add {d}, {n}, #{=imm/4096}, lsl #12" "dclass"="xsp" "role"="addi12" {
+  %r = add i64 %n, %imm
+  ret i64 %r
+}
+
+define i64 @SUBXri12(i64 "reg"="xsp" %n, i64 "imm" %imm) "enc"="1 1 0 100010 1 imm12:12=imm/4096 n:5 d:5" "asm"="sub {d}, {n}, #{=imm/4096}, lsl #12" "dclass"="xsp" "role"="subi12" {
+  %r = sub i64 %n, %imm
+  ret i64 %r
+}
+
 ; add with a negative immediate is sub.
 define i32 @SUBWri_neg(i32 "reg"="wsp" %n, i32 "imm" %imm) "enc"="0 1 0 100010 0 imm12:12=0-imm n:5 d:5" "asm"="sub {d}, {n}, #{=0-imm}" "dclass"="wsp" "nodecode" {
   %r = add i32 %n, %imm
@@ -843,12 +854,23 @@ define i64 @MOVKXi(i64 "reg"="x" "tied" %old, i64 "imm" %imm, i64 "imm" %sh) "en
 }
 
 ; Addresses of symbols: the 4KB page, then the offset in it.
-define ptr @ADRP(ptr "sym" %s) "enc"="1 immlo:2=s%4 10000 immhi:19=s/4 d:5" "asm"="adrp {d}, {s}@PAGE" "role"="adrp" "nomatch" {
+define ptr @ADRP(ptr "sym" %s) "enc"="1 immlo:2=s%4 10000 immhi:19=s/4 d:5" "asm"="adrp {d}, {s:page}" "role"="adrp" "nomatch" {
   ret ptr %s
 }
 
-define ptr @ADDpageoff(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="1 0 0 100010 0 imm12:12=s n:5 d:5" "asm"="add {d}, {n}, {s}@PAGEOFF" "dclass"="xsp" "role"="pageoff" "nomatch" "nodecode" {
+define ptr @ADDpageoff(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="1 0 0 100010 0 imm12:12=s n:5 d:5" "asm"="add {d}, {n}, {s:pageoff}" "dclass"="xsp" "role"="pageoff" "nomatch" "nodecode" {
   ret ptr %n
+}
+
+; Addresses of symbols defined in other libraries, from the global offset
+; table: the table entry's page, then a load of the entry.
+define ptr @ADRPgot(ptr "sym" %s) "enc"="1 immlo:2=s%4 10000 immhi:19=s/4 d:5" "asm"="adrp {d}, {s:gotpage}" "role"="adrp.got" "nomatch" "nodecode" {
+  ret ptr %s
+}
+
+define ptr @LDRgot(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="11 111 0 01 01 imm12:12=s/8 n:5 d:5" "asm"="ldr {d}, [{n}, {s:gotpageoff}]" "role"="ldr.got" "nomatch" "nodecode" {
+  %v = load ptr, ptr %n
+  ret ptr %v
 }
 
 ; ===========================================================================
@@ -1268,6 +1290,603 @@ define void @STRWroW(i32 "reg"="w" %t, ptr "reg"="xsp" %n, i32 "reg"="w" %m) "en
 }
 
 ; ===========================================================================
+; Atomics: acquire loads, release stores and fences. (Weaker atomic loads and
+; stores are plain ones, which are single-copy atomic when aligned.)
+
+define i8 @LDARB(ptr "reg"="xsp" %n) "enc"="00 001000 1 1 0 11111 1 11111 n:5 d:5" "asm"="ldarb {d}, [{n}]" {
+  %v = load atomic i8, ptr %n acquire, align 1
+  ret i8 %v
+}
+
+define void @STLRB(i8 "reg"="w" %t, ptr "reg"="xsp" %n) "enc"="00 001000 1 0 0 11111 1 11111 n:5 t:5" "asm"="stlrb {t}, [{n}]" {
+  store atomic i8 %t, ptr %n release, align 1
+  ret void
+}
+
+define i16 @LDARH(ptr "reg"="xsp" %n) "enc"="01 001000 1 1 0 11111 1 11111 n:5 d:5" "asm"="ldarh {d}, [{n}]" {
+  %v = load atomic i16, ptr %n acquire, align 2
+  ret i16 %v
+}
+
+define void @STLRH(i16 "reg"="w" %t, ptr "reg"="xsp" %n) "enc"="01 001000 1 0 0 11111 1 11111 n:5 t:5" "asm"="stlrh {t}, [{n}]" {
+  store atomic i16 %t, ptr %n release, align 2
+  ret void
+}
+
+define i32 @LDARW(ptr "reg"="xsp" %n) "enc"="10 001000 1 1 0 11111 1 11111 n:5 d:5" "asm"="ldar {d}, [{n}]" {
+  %v = load atomic i32, ptr %n acquire, align 4
+  ret i32 %v
+}
+
+define void @STLRW(i32 "reg"="w" %t, ptr "reg"="xsp" %n) "enc"="10 001000 1 0 0 11111 1 11111 n:5 t:5" "asm"="stlr {t}, [{n}]" {
+  store atomic i32 %t, ptr %n release, align 4
+  ret void
+}
+
+define i64 @LDARX(ptr "reg"="xsp" %n) "enc"="11 001000 1 1 0 11111 1 11111 n:5 d:5" "asm"="ldar {d}, [{n}]" {
+  %v = load atomic i64, ptr %n acquire, align 8
+  ret i64 %v
+}
+
+define void @STLRX(i64 "reg"="x" %t, ptr "reg"="xsp" %n) "enc"="11 001000 1 0 0 11111 1 11111 n:5 t:5" "asm"="stlr {t}, [{n}]" {
+  store atomic i64 %t, ptr %n release, align 8
+  ret void
+}
+
+define ptr @LDARP(ptr "reg"="xsp" %n) "enc"="11 001000 1 1 0 11111 1 11111 n:5 d:5" "asm"="ldar {d}, [{n}]" "nodecode" {
+  %v = load atomic ptr, ptr %n acquire, align 8
+  ret ptr %v
+}
+
+define void @STLRP(ptr "reg"="x" %t, ptr "reg"="xsp" %n) "enc"="11 001000 1 0 0 11111 1 11111 n:5 t:5" "asm"="stlr {t}, [{n}]" "nodecode" {
+  store atomic ptr %t, ptr %n release, align 8
+  ret void
+}
+
+define void @DMBISH() "enc"="11010101000000110011 1011 1 01 11111" "asm"="dmb ish" {
+  fence seq_cst
+  ret void
+}
+
+define void @DMBISHLD() "enc"="11010101000000110011 1001 1 01 11111" "asm"="dmb ishld" {
+  fence acquire
+  ret void
+}
+
+; ===========================================================================
+; Bit manipulation
+
+declare i32 @llvm.bswap.i32(i32)
+declare i64 @llvm.bswap.i64(i64)
+declare i16 @llvm.bswap.i16(i16)
+declare i32 @llvm.fshl.i32(i32, i32, i32)
+declare i64 @llvm.fshl.i64(i64, i64, i64)
+declare i32 @llvm.fshr.i32(i32, i32, i32)
+declare i64 @llvm.fshr.i64(i64, i64, i64)
+
+declare i32 @llvm.ctlz.i32(i32, i1)
+declare i64 @llvm.ctlz.i64(i64, i1)
+
+; Count leading zeros. Selection form makes the second operand false: a
+; count of all the bits for zero, which is what clz gives.
+define i32 @CLZW(i32 "reg"="w" %n) "enc"="0 1 0 11010110 00000 00010 0 n:5 d:5" "asm"="clz {d}, {n}" {
+  %r = call i32 @llvm.ctlz.i32(i32 %n, i1 false)
+  ret i32 %r
+}
+
+define i64 @CLZX(i64 "reg"="x" %n) "enc"="1 1 0 11010110 00000 00010 0 n:5 d:5" "asm"="clz {d}, {n}" {
+  %r = call i64 @llvm.ctlz.i64(i64 %n, i1 false)
+  ret i64 %r
+}
+
+define i32 @REVW(i32 "reg"="w" %n) "enc"="0 1 0 11010110 00000 0000 10 n:5 d:5" "asm"="rev {d}, {n}" {
+  %r = call i32 @llvm.bswap.i32(i32 %n)
+  ret i32 %r
+}
+
+define i64 @REVX(i64 "reg"="x" %n) "enc"="1 1 0 11010110 00000 0000 11 n:5 d:5" "asm"="rev {d}, {n}" {
+  %r = call i64 @llvm.bswap.i64(i64 %n)
+  ret i64 %r
+}
+
+; Swapping the bytes of each half: the low half is the 16-bit byte swap.
+define i16 @REV16W(i16 "reg"="w" %n) "enc"="0 1 0 11010110 00000 0000 01 n:5 d:5" "asm"="rev16 {d}, {n}" {
+  %r = call i16 @llvm.bswap.i16(i16 %n)
+  ret i16 %r
+}
+
+; extr d, n, m, #lsb is the low half of n:m shifted right by lsb: a funnel
+; shift by a constant, and a rotation when n and m are the same.
+define i32 @EXTRWl(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %c) "enc"="0 00 100111 0 0 m:5 imms:6=(32-c)%32 n:5 d:5" "asm"="extr {d}, {n}, {m}, #{=32-c}" "nodecode" {
+  %r = call i32 @llvm.fshl.i32(i32 %n, i32 %m, i32 %c)
+  ret i32 %r
+}
+
+define i64 @EXTRXl(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %c) "enc"="1 00 100111 1 0 m:5 imms:6=(64-c)%64 n:5 d:5" "asm"="extr {d}, {n}, {m}, #{=64-c}" "nodecode" {
+  %r = call i64 @llvm.fshl.i64(i64 %n, i64 %m, i64 %c)
+  ret i64 %r
+}
+
+define i32 @EXTRW(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %c) "enc"="0 00 100111 0 0 m:5 imms:6=c%32 n:5 d:5" "asm"="extr {d}, {n}, {m}, #{c}" {
+  %r = call i32 @llvm.fshr.i32(i32 %n, i32 %m, i32 %c)
+  ret i32 %r
+}
+
+define i64 @EXTRX(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %c) "enc"="1 00 100111 1 0 m:5 imms:6=c%64 n:5 d:5" "asm"="extr {d}, {n}, {m}, #{c}" {
+  %r = call i64 @llvm.fshr.i64(i64 %n, i64 %m, i64 %c)
+  ret i64 %r
+}
+
+; ===========================================================================
+; Floating point. d registers hold doubles, s registers floats; physical
+; registers 32-63 are v0-v31.
+
+; The flags after a floating-point comparison, lazily: the values compared.
+; They are set differently from an integer comparison's (an unordered
+; result, with a NaN, sets C and V), so these condition forms differ too:
+; olt is mi, not lt, which would be true for unordered values.
+%fnzcv = type { double, double }
+
+define i1 @cc.f.oeq(%fnzcv %f) "cond"="0" "asm"="eq" "reads"="nzcv" {
+  %a = extractvalue %fnzcv %f, 0
+  %b = extractvalue %fnzcv %f, 1
+  %c = fcmp oeq double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.une(%fnzcv %f) "cond"="1" "asm"="ne" "reads"="nzcv" {
+  %a = extractvalue %fnzcv %f, 0
+  %b = extractvalue %fnzcv %f, 1
+  %c = fcmp une double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.ogt(%fnzcv %f) "cond"="12" "asm"="gt" "reads"="nzcv" {
+  %a = extractvalue %fnzcv %f, 0
+  %b = extractvalue %fnzcv %f, 1
+  %c = fcmp ogt double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.oge(%fnzcv %f) "cond"="10" "asm"="ge" "reads"="nzcv" {
+  %a = extractvalue %fnzcv %f, 0
+  %b = extractvalue %fnzcv %f, 1
+  %c = fcmp oge double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.olt(%fnzcv %f) "cond"="4" "asm"="mi" "reads"="nzcv" {
+  %a = extractvalue %fnzcv %f, 0
+  %b = extractvalue %fnzcv %f, 1
+  %c = fcmp olt double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.ole(%fnzcv %f) "cond"="9" "asm"="ls" "reads"="nzcv" {
+  %a = extractvalue %fnzcv %f, 0
+  %b = extractvalue %fnzcv %f, 1
+  %c = fcmp ole double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.ugt(%fnzcv %f) "cond"="8" "asm"="hi" "reads"="nzcv" {
+  %a = extractvalue %fnzcv %f, 0
+  %b = extractvalue %fnzcv %f, 1
+  %c = fcmp ugt double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.uge(%fnzcv %f) "cond"="5" "asm"="pl" "reads"="nzcv" {
+  %a = extractvalue %fnzcv %f, 0
+  %b = extractvalue %fnzcv %f, 1
+  %c = fcmp uge double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.ult(%fnzcv %f) "cond"="11" "asm"="lt" "reads"="nzcv" {
+  %a = extractvalue %fnzcv %f, 0
+  %b = extractvalue %fnzcv %f, 1
+  %c = fcmp ult double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.ule(%fnzcv %f) "cond"="13" "asm"="le" "reads"="nzcv" {
+  %a = extractvalue %fnzcv %f, 0
+  %b = extractvalue %fnzcv %f, 1
+  %c = fcmp ule double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.ord(%fnzcv %f) "cond"="7" "asm"="vc" "reads"="nzcv" {
+  %a = extractvalue %fnzcv %f, 0
+  %b = extractvalue %fnzcv %f, 1
+  %c = fcmp ord double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.uno(%fnzcv %f) "cond"="6" "asm"="vs" "reads"="nzcv" {
+  %a = extractvalue %fnzcv %f, 0
+  %b = extractvalue %fnzcv %f, 1
+  %c = fcmp uno double %a, %b
+  ret i1 %c
+}
+
+define %fnzcv @FCMPDrr(double "reg"="d" %n, double "reg"="d" %m) "enc"="0 0 0 11110 01 1 m:5 00 1000 n:5 00000" "asm"="fcmp {n}, {m}" "sets"="nzcv" {
+  %f0 = insertvalue %fnzcv poison, double %n, 0
+  %f = insertvalue %fnzcv %f0, double %m, 1
+  ret %fnzcv %f
+}
+
+define %fnzcv @FCMPDr0(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 00000 00 1000 n:5 01000" "asm"="fcmp {n}, #0.0" "sets"="nzcv" {
+  %f0 = insertvalue %fnzcv poison, double %n, 0
+  %f = insertvalue %fnzcv %f0, double 0.0, 1
+  ret %fnzcv %f
+}
+
+define double @FADDD(double "reg"="d" %n, double "reg"="d" %m) "enc"="0 0 0 11110 01 1 m:5 0010 10 n:5 d:5" "asm"="fadd {d}, {n}, {m}" {
+  %r = fadd double %n, %m
+  ret double %r
+}
+
+define double @FSUBD(double "reg"="d" %n, double "reg"="d" %m) "enc"="0 0 0 11110 01 1 m:5 0011 10 n:5 d:5" "asm"="fsub {d}, {n}, {m}" {
+  %r = fsub double %n, %m
+  ret double %r
+}
+
+define double @FMULD(double "reg"="d" %n, double "reg"="d" %m) "enc"="0 0 0 11110 01 1 m:5 0000 10 n:5 d:5" "asm"="fmul {d}, {n}, {m}" {
+  %r = fmul double %n, %m
+  ret double %r
+}
+
+define double @FDIVD(double "reg"="d" %n, double "reg"="d" %m) "enc"="0 0 0 11110 01 1 m:5 0001 10 n:5 d:5" "asm"="fdiv {d}, {n}, {m}" {
+  %r = fdiv double %n, %m
+  ret double %r
+}
+
+define double @FNEGD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 000010 10000 n:5 d:5" "asm"="fneg {d}, {n}" {
+  %r = fneg double %n
+  ret double %r
+}
+
+declare double @llvm.fabs.f64(double)
+declare double @llvm.sqrt.f64(double)
+declare double @llvm.fmuladd.f64(double, double, double)
+
+define double @FABSD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 000001 10000 n:5 d:5" "asm"="fabs {d}, {n}" {
+  %r = call double @llvm.fabs.f64(double %n)
+  ret double %r
+}
+
+define double @FSQRTD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 000011 10000 n:5 d:5" "asm"="fsqrt {d}, {n}" {
+  %r = call double @llvm.sqrt.f64(double %n)
+  ret double %r
+}
+
+define double @FMADDD(double "reg"="d" %n, double "reg"="d" %m, double "reg"="d" %a) "enc"="0 0 0 11111 01 0 m:5 0 a:5 n:5 d:5" "asm"="fmadd {d}, {n}, {m}, {a}" {
+  %r = call double @llvm.fmuladd.f64(double %n, double %m, double %a)
+  ret double %r
+}
+
+define double @FCSELD(i1 "cond" %c, double "reg"="d" %n, double "reg"="d" %m) "enc"="0 0 0 11110 01 1 m:5 c:4 11 n:5 d:5" "asm"="fcsel {d}, {n}, {m}, {c}" {
+  %r = select i1 %c, double %n, double %m
+  ret double %r
+}
+
+define double @FMOVDr(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 000000 10000 n:5 d:5" "asm"="fmov {d}, {n}" "copy"="d" {
+  ret double %n
+}
+
+define double @SCVTFDX(i64 "reg"="x" %n) "enc"="1 0 0 11110 01 1 00 010 000000 n:5 d:5" "asm"="scvtf {d}, {n}" {
+  %r = sitofp i64 %n to double
+  ret double %r
+}
+
+define double @UCVTFDX(i64 "reg"="x" %n) "enc"="1 0 0 11110 01 1 00 011 000000 n:5 d:5" "asm"="ucvtf {d}, {n}" {
+  %r = uitofp i64 %n to double
+  ret double %r
+}
+
+define i64 @FCVTZSXD(double "reg"="d" %n) "enc"="1 0 0 11110 01 1 11 000 000000 n:5 d:5" "asm"="fcvtzs {d}, {n}" {
+  %r = fptosi double %n to i64
+  ret i64 %r
+}
+
+define i64 @FCVTZUXD(double "reg"="d" %n) "enc"="1 0 0 11110 01 1 11 001 000000 n:5 d:5" "asm"="fcvtzu {d}, {n}" {
+  %r = fptoui double %n to i64
+  ret i64 %r
+}
+
+define double @SCVTFDW(i32 "reg"="w" %n) "enc"="0 0 0 11110 01 1 00 010 000000 n:5 d:5" "asm"="scvtf {d}, {n}" {
+  %r = sitofp i32 %n to double
+  ret double %r
+}
+
+define double @UCVTFDW(i32 "reg"="w" %n) "enc"="0 0 0 11110 01 1 00 011 000000 n:5 d:5" "asm"="ucvtf {d}, {n}" {
+  %r = uitofp i32 %n to double
+  ret double %r
+}
+
+define i32 @FCVTZSWD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 11 000 000000 n:5 d:5" "asm"="fcvtzs {d}, {n}" {
+  %r = fptosi double %n to i32
+  ret i32 %r
+}
+
+define i32 @FCVTZUWD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 11 001 000000 n:5 d:5" "asm"="fcvtzu {d}, {n}" {
+  %r = fptoui double %n to i32
+  ret i32 %r
+}
+
+define double @LDRDui(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="11 111 1 01 01 imm12:12=off/8 n:5 d:5" "asm"="ldr {d}, [{n}, #{off}]" "role"="load.d" {
+  %p = getelementptr i8, ptr %n, i64 %off
+  %v = load double, ptr %p
+  ret double %v
+}
+
+define void @STRDui(double "reg"="d" %t, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="11 111 1 01 00 imm12:12=off/8 n:5 t:5" "asm"="str {t}, [{n}, #{off}]" "role"="store.d" {
+  %p = getelementptr i8, ptr %n, i64 %off
+  store double %t, ptr %p
+  ret void
+}
+
+define double @LDURDi(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="11 111 1 00 01 0 off:s9 00 n:5 d:5" "asm"="ldur {d}, [{n}, #{off}]" {
+  %p = getelementptr i8, ptr %n, i64 %off
+  %v = load double, ptr %p
+  ret double %v
+}
+
+define void @STURDi(double "reg"="d" %t, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="11 111 1 00 00 0 off:s9 00 n:5 t:5" "asm"="stur {t}, [{n}, #{off}]" {
+  %p = getelementptr i8, ptr %n, i64 %off
+  store double %t, ptr %p
+  ret void
+}
+
+define double @LDRDroX(ptr "reg"="xsp" %n, i64 "reg"="x" %m) "enc"="11 111 1 00 01 1 m:5 011 1 10 n:5 d:5" "asm"="ldr {d}, [{n}, {m}, lsl #3]" {
+  %o = shl i64 %m, 3
+  %p = getelementptr i8, ptr %n, i64 %o
+  %v = load double, ptr %p
+  ret double %v
+}
+
+define void @STRDroX(double "reg"="d" %t, ptr "reg"="xsp" %n, i64 "reg"="x" %m) "enc"="11 111 1 00 00 1 m:5 011 1 10 n:5 t:5" "asm"="str {t}, [{n}, {m}, lsl #3]" {
+  %o = shl i64 %m, 3
+  %p = getelementptr i8, ptr %n, i64 %o
+  store double %t, ptr %p
+  ret void
+}
+
+define { double, ptr } @LDRDpost(ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="11 111 1 00 01 0 off:s9 01 n:5 d:5" "asm"="ldr {d}, [{n}], #{off}" {
+  %v = load double, ptr %n
+  %next = getelementptr i8, ptr %n, i64 %off
+  %a = insertvalue { double, ptr } poison, double %v, 0
+  %b = insertvalue { double, ptr } %a, ptr %next, 1
+  ret { double, ptr } %b
+}
+
+define ptr @STRDpost(double "reg"="d" %t, ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="11 111 1 00 00 0 off:s9 01 n:5 t:5" "asm"="str {t}, [{n}], #{off}" {
+  store double %t, ptr %n
+  %next = getelementptr i8, ptr %n, i64 %off
+  ret ptr %next
+}
+
+define double @select.d(i1 "reg"="w" %c, double "reg"="d" %a, double "reg"="d" %b) "recipe"="select.d.expand" {
+  %r = select i1 %c, double %a, double %b
+  ret double %r
+}
+
+define double @select.d.expand(i1 %c, double %a, double %b) {
+  %c32 = zext i1 %c to i32
+  %f = call %nzcv @TSTWri(i32 %c32, i32 1)
+  %ne = call i1 @cc.ne(%nzcv %f)
+  %r = call double @FCSELD(i1 %ne, double %a, double %b)
+  ret double %r
+}
+
+define %fnzcv @FCMPSrr(float "reg"="s" %n, float "reg"="s" %m) "enc"="0 0 0 11110 00 1 m:5 00 1000 n:5 00000" "asm"="fcmp {n}, {m}" "sets"="nzcv" {
+  %a = fpext float %n to double
+  %b = fpext float %m to double
+  %f0 = insertvalue %fnzcv poison, double %a, 0
+  %f = insertvalue %fnzcv %f0, double %b, 1
+  ret %fnzcv %f
+}
+
+define %fnzcv @FCMPSr0(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 00000 00 1000 n:5 01000" "asm"="fcmp {n}, #0.0" "sets"="nzcv" {
+  %a = fpext float %n to double
+  %f0 = insertvalue %fnzcv poison, double %a, 0
+  %f = insertvalue %fnzcv %f0, double 0.0, 1
+  ret %fnzcv %f
+}
+
+define float @FADDS(float "reg"="s" %n, float "reg"="s" %m) "enc"="0 0 0 11110 00 1 m:5 0010 10 n:5 d:5" "asm"="fadd {d}, {n}, {m}" {
+  %r = fadd float %n, %m
+  ret float %r
+}
+
+define float @FSUBS(float "reg"="s" %n, float "reg"="s" %m) "enc"="0 0 0 11110 00 1 m:5 0011 10 n:5 d:5" "asm"="fsub {d}, {n}, {m}" {
+  %r = fsub float %n, %m
+  ret float %r
+}
+
+define float @FMULS(float "reg"="s" %n, float "reg"="s" %m) "enc"="0 0 0 11110 00 1 m:5 0000 10 n:5 d:5" "asm"="fmul {d}, {n}, {m}" {
+  %r = fmul float %n, %m
+  ret float %r
+}
+
+define float @FDIVS(float "reg"="s" %n, float "reg"="s" %m) "enc"="0 0 0 11110 00 1 m:5 0001 10 n:5 d:5" "asm"="fdiv {d}, {n}, {m}" {
+  %r = fdiv float %n, %m
+  ret float %r
+}
+
+define float @FNEGS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 000010 10000 n:5 d:5" "asm"="fneg {d}, {n}" {
+  %r = fneg float %n
+  ret float %r
+}
+
+declare float @llvm.fabs.f32(float)
+declare float @llvm.sqrt.f32(float)
+declare float @llvm.fmuladd.f32(float, float, float)
+
+define float @FABSS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 000001 10000 n:5 d:5" "asm"="fabs {d}, {n}" {
+  %r = call float @llvm.fabs.f32(float %n)
+  ret float %r
+}
+
+define float @FSQRTS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 000011 10000 n:5 d:5" "asm"="fsqrt {d}, {n}" {
+  %r = call float @llvm.sqrt.f32(float %n)
+  ret float %r
+}
+
+define float @FMADDS(float "reg"="s" %n, float "reg"="s" %m, float "reg"="s" %a) "enc"="0 0 0 11111 00 0 m:5 0 a:5 n:5 d:5" "asm"="fmadd {d}, {n}, {m}, {a}" {
+  %r = call float @llvm.fmuladd.f32(float %n, float %m, float %a)
+  ret float %r
+}
+
+define float @FCSELS(i1 "cond" %c, float "reg"="s" %n, float "reg"="s" %m) "enc"="0 0 0 11110 00 1 m:5 c:4 11 n:5 d:5" "asm"="fcsel {d}, {n}, {m}, {c}" {
+  %r = select i1 %c, float %n, float %m
+  ret float %r
+}
+
+define float @FMOVSr(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 000000 10000 n:5 d:5" "asm"="fmov {d}, {n}" "copy"="s" {
+  ret float %n
+}
+
+define float @SCVTFSX(i64 "reg"="x" %n) "enc"="1 0 0 11110 00 1 00 010 000000 n:5 d:5" "asm"="scvtf {d}, {n}" {
+  %r = sitofp i64 %n to float
+  ret float %r
+}
+
+define float @UCVTFSX(i64 "reg"="x" %n) "enc"="1 0 0 11110 00 1 00 011 000000 n:5 d:5" "asm"="ucvtf {d}, {n}" {
+  %r = uitofp i64 %n to float
+  ret float %r
+}
+
+define i64 @FCVTZSXS(float "reg"="s" %n) "enc"="1 0 0 11110 00 1 11 000 000000 n:5 d:5" "asm"="fcvtzs {d}, {n}" {
+  %r = fptosi float %n to i64
+  ret i64 %r
+}
+
+define i64 @FCVTZUXS(float "reg"="s" %n) "enc"="1 0 0 11110 00 1 11 001 000000 n:5 d:5" "asm"="fcvtzu {d}, {n}" {
+  %r = fptoui float %n to i64
+  ret i64 %r
+}
+
+define float @SCVTFSW(i32 "reg"="w" %n) "enc"="0 0 0 11110 00 1 00 010 000000 n:5 d:5" "asm"="scvtf {d}, {n}" {
+  %r = sitofp i32 %n to float
+  ret float %r
+}
+
+define float @UCVTFSW(i32 "reg"="w" %n) "enc"="0 0 0 11110 00 1 00 011 000000 n:5 d:5" "asm"="ucvtf {d}, {n}" {
+  %r = uitofp i32 %n to float
+  ret float %r
+}
+
+define i32 @FCVTZSWS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 11 000 000000 n:5 d:5" "asm"="fcvtzs {d}, {n}" {
+  %r = fptosi float %n to i32
+  ret i32 %r
+}
+
+define i32 @FCVTZUWS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 11 001 000000 n:5 d:5" "asm"="fcvtzu {d}, {n}" {
+  %r = fptoui float %n to i32
+  ret i32 %r
+}
+
+define float @LDRSui(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="10 111 1 01 01 imm12:12=off/4 n:5 d:5" "asm"="ldr {d}, [{n}, #{off}]"  {
+  %p = getelementptr i8, ptr %n, i64 %off
+  %v = load float, ptr %p
+  ret float %v
+}
+
+define void @STRSui(float "reg"="s" %t, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="10 111 1 01 00 imm12:12=off/4 n:5 t:5" "asm"="str {t}, [{n}, #{off}]"  {
+  %p = getelementptr i8, ptr %n, i64 %off
+  store float %t, ptr %p
+  ret void
+}
+
+define float @LDURSi(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="10 111 1 00 01 0 off:s9 00 n:5 d:5" "asm"="ldur {d}, [{n}, #{off}]" {
+  %p = getelementptr i8, ptr %n, i64 %off
+  %v = load float, ptr %p
+  ret float %v
+}
+
+define void @STURSi(float "reg"="s" %t, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="10 111 1 00 00 0 off:s9 00 n:5 t:5" "asm"="stur {t}, [{n}, #{off}]" {
+  %p = getelementptr i8, ptr %n, i64 %off
+  store float %t, ptr %p
+  ret void
+}
+
+define float @LDRSroX(ptr "reg"="xsp" %n, i64 "reg"="x" %m) "enc"="10 111 1 00 01 1 m:5 011 1 10 n:5 d:5" "asm"="ldr {d}, [{n}, {m}, lsl #2]" {
+  %o = shl i64 %m, 2
+  %p = getelementptr i8, ptr %n, i64 %o
+  %v = load float, ptr %p
+  ret float %v
+}
+
+define void @STRSroX(float "reg"="s" %t, ptr "reg"="xsp" %n, i64 "reg"="x" %m) "enc"="10 111 1 00 00 1 m:5 011 1 10 n:5 t:5" "asm"="str {t}, [{n}, {m}, lsl #2]" {
+  %o = shl i64 %m, 2
+  %p = getelementptr i8, ptr %n, i64 %o
+  store float %t, ptr %p
+  ret void
+}
+
+define { float, ptr } @LDRSpost(ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="10 111 1 00 01 0 off:s9 01 n:5 d:5" "asm"="ldr {d}, [{n}], #{off}" {
+  %v = load float, ptr %n
+  %next = getelementptr i8, ptr %n, i64 %off
+  %a = insertvalue { float, ptr } poison, float %v, 0
+  %b = insertvalue { float, ptr } %a, ptr %next, 1
+  ret { float, ptr } %b
+}
+
+define ptr @STRSpost(float "reg"="s" %t, ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="10 111 1 00 00 0 off:s9 01 n:5 t:5" "asm"="str {t}, [{n}], #{off}" {
+  store float %t, ptr %n
+  %next = getelementptr i8, ptr %n, i64 %off
+  ret ptr %next
+}
+
+define float @select.s(i1 "reg"="w" %c, float "reg"="s" %a, float "reg"="s" %b) "recipe"="select.s.expand" {
+  %r = select i1 %c, float %a, float %b
+  ret float %r
+}
+
+define float @select.s.expand(i1 %c, float %a, float %b) {
+  %c32 = zext i1 %c to i32
+  %f = call %nzcv @TSTWri(i32 %c32, i32 1)
+  %ne = call i1 @cc.ne(%nzcv %f)
+  %r = call float @FCSELS(i1 %ne, float %a, float %b)
+  ret float %r
+}
+
+; Between the two widths.
+define double @FCVTDS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 0001 01 10000 n:5 d:5" "asm"="fcvt {d}, {n}" {
+  %r = fpext float %n to double
+  ret double %r
+}
+
+define float @FCVTSD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 0001 00 10000 n:5 d:5" "asm"="fcvt {d}, {n}" {
+  %r = fptrunc double %n to float
+  ret float %r
+}
+
+; Between the register files, bit for bit.
+define double @FMOVDX(i64 "reg"="x" %n) "enc"="1 00 11110 01 1 00 111 000000 n:5 d:5" "asm"="fmov {d}, {n}" "role"="fmov.d.x" {
+  %r = bitcast i64 %n to double
+  ret double %r
+}
+
+define i64 @FMOVXD(double "reg"="d" %n) "enc"="1 00 11110 01 1 00 110 000000 n:5 d:5" "asm"="fmov {d}, {n}" "role"="fmov.x.d" {
+  %r = bitcast double %n to i64
+  ret i64 %r
+}
+
+define float @FMOVSW(i32 "reg"="w" %n) "enc"="0 00 11110 00 1 00 111 000000 n:5 d:5" "asm"="fmov {d}, {n}" "role"="fmov.s.w" {
+  %r = bitcast i32 %n to float
+  ret float %r
+}
+
+define i32 @FMOVWS(float "reg"="s" %n) "enc"="0 00 11110 00 1 00 110 000000 n:5 d:5" "asm"="fmov {d}, {n}" "role"="fmov.w.s" {
+  %r = bitcast float %n to i32
+  ret i32 %r
+}
+
+; ===========================================================================
 ; Recipes: IR with no single instruction.
 
 define i32 @srem.w(i32 "reg"="w" %a, i32 "reg"="w" %b) "recipe"="srem.w.expand" {
@@ -1467,3 +2086,70 @@ define i64 @umin.x.expand(i64 %a, i64 %b) {
   %r = call i64 @CSELX(i1 %c, i64 %a, i64 %b)
   ret i64 %r
 }
+
+; ===========================================================================
+; Calling conventions and platforms
+;
+; Each is a list of properties, each a tuple of strings: the property's
+; name, then its values. Registers are named as in assembly; "x0-x7" is a
+; range.
+;
+;   args          registers for integer and pointer arguments, in order
+;   result        the register an integer or pointer result comes back in
+;   clobbers      registers a call may change
+;   saved         registers a function must preserve, saving them if used
+;   reserved      registers never allocated (the platform's)
+;   scratch       registers kept free for spill code
+;   frame         the frame pointer and the link register
+;   stack-args    how arguments past the registers are laid out on the
+;                 stack: "natural" (each at its own size and alignment,
+;                 packed) or "slots" (each in an 8-byte slot)
+;   variadic      where the variable arguments of a variadic call go:
+;                 "stack" (always, in 8-byte slots) or "named" (as named
+;                 arguments are)
+;   syntax        the assembler's dialect: "macho" or "elf"
+;   triples       substrings of a module's target triple that select it
+;   fp-args, fp-result, fp-clobbers, fp-saved, fp-scratch
+;                 the same, for floating-point values in d0-d31 (only
+;                 the low 64 bits of d8-d15 are preserved)
+
+; Apple's arm64 ABI: AAPCS64 with x18 reserved, stack arguments packed,
+; variadic arguments on the stack.
+!aarch64.abi.darwin = !{!100, !101, !102, !103, !104, !105, !106, !107, !108, !109, !110, !111, !112, !113, !114, !115}
+!100 = !{!"args", !"x0-x7"}
+!101 = !{!"result", !"x0"}
+!102 = !{!"clobbers", !"x0-x18", !"x30"}
+!103 = !{!"saved", !"x19-x28"}
+!104 = !{!"reserved", !"x18"}
+!105 = !{!"scratch", !"x15-x17"}
+!106 = !{!"frame", !"x29", !"x30"}
+!107 = !{!"stack-args", !"natural"}
+!108 = !{!"variadic", !"stack"}
+!109 = !{!"syntax", !"macho"}
+!110 = !{!"triples", !"apple", !"darwin", !"macos", !"ios"}
+!111 = !{!"fp-args", !"d0-d7"}
+!112 = !{!"fp-result", !"d0"}
+!113 = !{!"fp-clobbers", !"d0-d7", !"d16-d31"}
+!114 = !{!"fp-saved", !"d8-d15"}
+!115 = !{!"fp-scratch", !"d29-d31"}
+
+; The Procedure Call Standard for the Arm 64-bit Architecture, as used by
+; Linux: x18 is an ordinary temporary, stack arguments take 8-byte slots,
+; and variadic arguments go where named ones would.
+!aarch64.abi.aapcs64 = !{!200, !201, !202, !203, !204, !205, !206, !207, !208, !209, !210, !211, !212, !213, !214, !215}
+!200 = !{!"args", !"x0-x7"}
+!201 = !{!"result", !"x0"}
+!202 = !{!"clobbers", !"x0-x18", !"x30"}
+!203 = !{!"saved", !"x19-x28"}
+!204 = !{!"reserved"}
+!205 = !{!"scratch", !"x15-x17"}
+!206 = !{!"frame", !"x29", !"x30"}
+!207 = !{!"stack-args", !"slots"}
+!208 = !{!"variadic", !"named"}
+!209 = !{!"syntax", !"elf"}
+!210 = !{!"triples", !"linux", !"elf", !"none"}
+!211 = !{!"fp-args", !"d0-d7"}
+!212 = !{!"fp-result", !"d0"}
+!213 = !{!"fp-clobbers", !"d0-d7", !"d16-d31"}
+!214 = !{!"fp-saved", !"d8-d15"}
+!215 = !{!"fp-scratch", !"d29-d31"}
