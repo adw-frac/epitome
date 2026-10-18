@@ -2,25 +2,28 @@
 ; @walk: mem2reg: 1 allocas promoted (1 loads, 2 stores removed)
 ; @walk: recursion: 1 accumulator call(s) now jump back to the start, folding with add
 ; @walk: combine: add_zero x1, sub_const x1
+; @walk: rotate: 1 loops rotated
+; @walk: combine: icmp_eq_add x1
+; @walk: simplifycfg: 0 unreachable blocks removed, 0 empty blocks bypassed, 0 selects made, 1 blocks merged
+; @walk: indvars: loop %recur runs %n.arg times when entered
 
 
 define i32 @walk(i32 %n.arg) {
 entry.rec:
-  br label %entry
+  %stop1 = icmp eq i32 %n.arg, 0
+  br i1 %stop1, label %done, label %recur
 
-entry:                                            ; preds = %recur, %entry.rec
-  %n = phi i32 [ %n.arg, %entry.rec ], [ %m, %recur ]
+recur:                                            ; preds = %recur, %entry.rec
   %acc = phi i32 [ 0, %entry.rec ], [ %sum, %recur ]
-  %stop = icmp eq i32 %n, 0
-  br i1 %stop, label %done, label %recur
-
-recur:                                            ; preds = %entry
+  %n = phi i32 [ %n.arg, %entry.rec ], [ %m, %recur ]
   %m = add i32 %n, -1
   %sum = add i32 %acc, %n
-  br label %entry
+  %stop = icmp eq i32 %n, 1
+  br i1 %stop, label %done, label %recur
 
-done:                                             ; preds = %entry
-  ret i32 %acc
+done:                                             ; preds = %recur, %entry.rec
+  %acc1 = phi i32 [ 0, %entry.rec ], [ %sum, %recur ]
+  ret i32 %acc1
 }
 
 define i32 @main() {

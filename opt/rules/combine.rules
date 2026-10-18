@@ -116,6 +116,10 @@ icmp_ult_zero:    icmp.ult(x, 0) -> false
 icmp_uge_zero:    icmp.uge(x, 0) -> true
 icmp_ugt_ones:    icmp.ugt(x, -1) -> false
 icmp_ule_ones:    icmp.ule(x, -1) -> true
+icmp_ugt_zero:    icmp.ugt(x, 0) -> icmp.ne(x, 0)
+icmp_ule_zero:    icmp.ule(x, 0) -> icmp.eq(x, 0)
+icmp_ult_one:     icmp.ult(x, 1) -> icmp.eq(x, 0)
+icmp_uge_one:     icmp.uge(x, 1) -> icmp.ne(x, 0)
 icmp_eq_add:      icmp.eq(add(x, C1), C2) -> icmp.eq(x, C2 - C1)
 icmp_ne_add:      icmp.ne(add(x, C1), C2) -> icmp.ne(x, C2 - C1)
 icmp_eq_xor:      icmp.eq(xor(x, C1), C2) -> icmp.eq(x, C1 ^ C2)

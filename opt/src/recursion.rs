@@ -1204,7 +1204,7 @@ fn size_estimate(sh: &Shared, ty: TypeId) -> u64 {
 /// Updates the values in debug records after SSA has been rebuilt. A
 /// record that names a variable gets the value reaching it; a record whose
 /// value no longer dominates it gets `poison`, which means "optimised out".
-fn fix_debug_records(
+pub(crate) fn fix_debug_records(
     sh: &Shared,
     f: &mut Function,
     up: &SsaUpdater,

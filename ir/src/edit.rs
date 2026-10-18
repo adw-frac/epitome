@@ -388,4 +388,9 @@ impl Names {
     pub fn reserve(&mut self, name: &str) {
         self.used.insert(name.to_string());
     }
+
+    /// Makes a name free again, once nothing that will be printed has it.
+    pub fn release(&mut self, name: &str) {
+        self.used.remove(name);
+    }
 }

@@ -97,7 +97,7 @@ places in it.
 | `domtree` | Builds the dominator tree. | Planned |
 | `postdomtree` | Builds the post-dominator tree. | Planned |
 | `domfrontier` | Computes dominance frontiers. The classic way to place phis for `mem2reg`; ours uses the on-demand SSA updater instead, which does not need them. | Later |
-| `loops` | Finds natural loops and the loop depth of each block. | Planned |
+| `loops` | Finds natural loops and the loop depth of each block. Natural loops, latches and preheaders; see [loops](loops.md). Loop depth not yet. | Partial |
 | `scalar-evolution` | Describes scalar expressions in loops, including induction variables and trip counts. | Planned |
 | `basic-aa` | Stateless alias analysis from simple facts, such as two distinct globals never aliasing. See [alias analysis](aa.md). | Done |
 | `globals-aa` | Alias and mod/ref facts for globals whose address is never taken, plus pure functions. | Later |
@@ -169,9 +169,9 @@ exists.
 | --- | --- | --- |
 | `loop-simplify` | Gives every loop a preheader, dedicated exits and a single backedge. | Planned |
 | `lcssa` | Adds PHIs at loop exits for values used outside the loop. | Planned |
-| `loop-rotate` | Rotates loops into a simpler form. | Planned |
+| `loop-rotate` | Rotates loops into a simpler form. See [loops](loops.md). | Done |
 | `licm` | Moves loop-invariant code out of loops and promotes memory to registers. | Planned |
-| `indvars` | Canonicalises induction variables and exit conditions. | Planned |
+| `indvars` | Canonicalises induction variables and exit conditions. Exact exit tests, exit values, widening and trip counts for constant steps, without scalar evolution; see [loops](loops.md). | Partial |
 | `loop-deletion` | Removes finite loops with no side effects and no used results. | Planned |
 | `loop-unroll` | Unrolls loops. Works best after `indvars`. | Planned |
 | `loop-reduce` | Strength-reduces array addressing that uses the induction variable. | Later |

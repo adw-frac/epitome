@@ -2,31 +2,32 @@
 ; @is_even: recursion: inlined @is_odd to break the cycle
 ; @is_even: recursion: 1 tail call(s) now jump back to the start
 ; @is_even: combine: (dead) x1, add_add_const x1, icmp_eq_add x1, sub_const x2
+; @is_even: rotate: 1 loops rotated
+; @is_even: combine: icmp_eq_add x1
+; @is_even: simplifycfg: 0 unreachable blocks removed, 0 empty blocks bypassed, 0 selects made, 1 blocks merged
 ; @is_odd: combine: sub_const x1
 ; @is_odd: deleted, no longer used
 
 
 define i1 @is_even(i32 %n.arg) {
 entry.rec:
-  br label %entry
+  %zero1 = icmp eq i32 %n.arg, 0
+  br i1 %zero1, label %yes, label %recur
 
-entry:                                            ; preds = %recur.i, %entry.rec
+recur:                                            ; preds = %recur.i, %entry.rec
   %n = phi i32 [ %n.arg, %entry.rec ], [ %m.i, %recur.i ]
-  %zero = icmp eq i32 %n, 0
-  br i1 %zero, label %yes, label %recur
-
-recur:                                            ; preds = %entry
   %zero.i = icmp eq i32 %n, 1
   br i1 %zero.i, label %no.i, label %recur.i
 
 recur.i:                                          ; preds = %recur
   %m.i = add i32 %n, -2
-  br label %entry
+  %zero = icmp eq i32 %n, 2
+  br i1 %zero, label %yes, label %recur
 
 no.i:                                             ; preds = %recur
   ret i1 false
 
-yes:                                              ; preds = %entry
+yes:                                              ; preds = %recur.i, %entry.rec
   ret i1 true
 }
 

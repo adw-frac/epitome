@@ -17,6 +17,8 @@ split into two halves:
 - [mem2reg](mem2reg.md): promoting allocas to SSA values.
 - [Simplifying the CFG](simplifycfg.md): branch rules in the combiner, and
   the passes that change the graph's shape.
+- [Loops](loops.md): finding loops, rotation, induction variables and
+  trip counts.
 - [CSE](cse.md): common-subexpression elimination by hashing a canonical
   key for each instruction.
 - [Combines](combine.md): the rule language, the discrimination tree that
@@ -60,4 +62,5 @@ Each pass or component has one of these labels:
 - **Planned**: in scope, not started.
 - **Later**: in scope, but after the core works end to end.
 - **Skip**: not needed for a functional clone, such as GraphViz viewers.
+- **Partial**: started; the entry says what is missing.
 - **Done**: implemented and tested.

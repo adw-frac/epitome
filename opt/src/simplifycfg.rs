@@ -62,6 +62,7 @@ pub fn run(sh: &Shared, f: &mut Function, block_addresses: bool) -> Outcome {
         cleanup::remove_unreachable(f);
         out.stats.unreachable += n - f.layout.len();
         while bypass_all(f, &mut out) {}
+        fold_same_targets(f, &mut out);
         while select_one(sh, f, &mut out) {}
         let n = f.layout.len();
         cleanup::merge_blocks(f);
@@ -94,6 +95,36 @@ fn forwards_to(f: &Function, b: BlockId) -> Option<BlockId> {
         // Debug records on the branch would have nowhere to go.
         Op::Br(next) if next != b && inst.debug_records.is_empty() => Some(next),
         _ => None,
+    }
+}
+
+/// A conditional branch whose targets bypassing made the same is a plain
+/// branch; one of its two edges' phi entries goes. The combiner's
+/// `br_same` rule does this for branches it visits, but bypassing makes
+/// new ones after it has run. The condition may now be unused, so it is
+/// handed back to the combiner.
+fn fold_same_targets(f: &mut Function, out: &mut Outcome) {
+    for k in 0..f.layout.len() {
+        let b = f.layout[k];
+        let Some(t) = f.terminator(b) else { continue };
+        let Op::CondBr { cond, then_dest, else_dest } = f.insts[t.index()].op else { continue };
+        if then_dest != else_dest {
+            continue;
+        }
+        f.insts[t.index()].op = Op::Br(then_dest);
+        for phi in phis(f, then_dest) {
+            if let Op::Phi { incoming, .. } = &mut f.insts[phi.index()].op
+                && let Some(at) = incoming.iter().position(|(_, from)| *from == b)
+            {
+                incoming.remove(at);
+            }
+        }
+        if let Value::Local(l) = cond
+            && let LocalDef::Inst(d) = f.locals[l.index()].def
+        {
+            out.touched.push(d);
+        }
+        out.stats.bypassed += 1;
     }
 }
 
