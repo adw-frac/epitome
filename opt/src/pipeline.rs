@@ -39,6 +39,7 @@ pub struct Options {
     pub combine: bool,
     pub cse: bool,
     pub mem2reg: bool,
+    pub sroa: bool,
     pub recursion: RecursionMode,
 }
 
@@ -51,6 +52,7 @@ impl Default for Options {
             combine: true,
             cse: true,
             mem2reg: true,
+            sroa: true,
             recursion: RecursionMode::Tail,
         }
     }
@@ -70,6 +72,8 @@ pub struct Report {
     pub cse: crate::cse::Stats,
     /// What mem2reg promoted, over the whole module.
     pub mem2reg: crate::mem2reg::Stats,
+    /// What SROA split, over the whole module.
+    pub sroa: crate::sroa::Stats,
     pub tail_calls: usize,
     pub accumulator_calls: usize,
     pub frame_calls: usize,
@@ -118,6 +122,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     let combines = std::sync::Mutex::new(crate::combine::Stats::default());
     let cse_stats = std::sync::Mutex::new(crate::cse::Stats::default());
     let m2r_stats = std::sync::Mutex::new(crate::mem2reg::Stats::default());
+    let sroa_stats = std::sync::Mutex::new(crate::sroa::Stats::default());
     let matcher = crate::combine::standard();
     let tail_calls = AtomicUsize::new(0);
     let accumulator_calls = AtomicUsize::new(0);
@@ -137,6 +142,18 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
             // sees them; and again after inlining, which often makes an
             // alloca promotable by bringing in the code it was passed to.
             let promote = |g: GlobalId, f: &mut Function| {
+                if opts.sroa {
+                    let s = crate::sroa::run(sh, f);
+                    if s.split > 0 {
+                        sh.remark(g, format!("sroa: {} allocas split into {} pieces", s.split, s.pieces));
+                        let mut all = sroa_stats.lock().unwrap();
+                        all.split += s.split;
+                        all.pieces += s.pieces;
+                    }
+                }
+                if !opts.mem2reg {
+                    return;
+                }
                 let s = crate::mem2reg::run(sh, f);
                 if s.promoted > 0 {
                     sh.remark(
@@ -152,7 +169,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                     all.stores += s.stores;
                 }
             };
-            if opts.mem2reg {
+            if opts.mem2reg || opts.sroa {
                 for (g, f) in &mut bodies {
                     promote(*g, f);
                 }
@@ -161,7 +178,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                 for (g, f) in &mut bodies {
                     let n = inliner.run_on(sh, *g, f);
                     inlined.fetch_add(n, Ordering::Relaxed);
-                    if n > 0 && opts.mem2reg {
+                    if n > 0 && (opts.mem2reg || opts.sroa) {
                         promote(*g, f);
                     }
                 }
@@ -294,6 +311,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     report.combines = combines.into_inner().unwrap();
     report.cse = cse_stats.into_inner().unwrap();
     report.mem2reg = m2r_stats.into_inner().unwrap();
+    report.sroa = sroa_stats.into_inner().unwrap();
     report.tail_calls = tail_calls.into_inner();
     report.accumulator_calls = accumulator_calls.into_inner();
     report.frame_calls = frame_calls.into_inner();

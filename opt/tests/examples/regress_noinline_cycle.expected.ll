@@ -4,7 +4,8 @@
 ; @b: recursion: 1 call(s) now push a frame on an explicit stack (values saved per frame: 1)
 ; @b: recursion: cycle not collapsed: @c is noinline
 ; @b: combine: sub_const x2
-; @c: cse: 0 merged, 0 loads reused, 1 stores forwarded
+; @c: sroa: 1 allocas split into 1 pieces
+; @c: mem2reg: 1 allocas promoted (1 loads, 1 stores removed)
 ; @main: not inlined @a: noinline
 ; @main: not inlined @b: noinline
 
@@ -156,8 +157,6 @@ rec.pop:                                          ; preds = %rec.shrink, %rec.re
 
 define internal i32 @c(i32 %n) noinline {
 entry:
-  %buf = alloca [4 x i32]
-  store i32 %n, ptr %buf
   %x = call i32 @a(i32 %n)
   %s = add i32 %x, %n
   ret i32 %s

@@ -38,8 +38,8 @@ An alloca is promoted when:
 
 Anything else (an offset into it, passing it to a call, storing its
 address, a load of another type) means the memory could be reached some
-other way or is not one value, so the alloca stays. `sroa` is the planned
-pass for splitting aggregates and mismatched accesses into promotable
+other way or is not one value, so the alloca stays. [SROA](sroa.md) runs
+first and splits aggregates and mismatched accesses into promotable
 pieces.
 
 ## How

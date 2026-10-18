@@ -160,7 +160,7 @@ exists.
 | Pass | What it does | Status |
 | --- | --- | --- |
 | `mem2reg` | Promotes allocas that are only loaded and stored into SSA values. See [mem2reg](mem2reg.md). | Done |
-| `sroa` | Splits aggregate allocas into one per field, then promotes them. | Planned |
+| `sroa` | Splits aggregate allocas into one per field, then promotes them. See [SROA](sroa.md). | Done |
 | `reg2mem` | Demotes values back to stack slots, the reverse of `mem2reg`. | Later |
 
 ### Loops

@@ -13,6 +13,7 @@ split into two halves:
   the inliner and its cost model, and turning recursion into loops with an
   explicit stack.
 - [Alias analysis](aa.md): the data layout, and basic alias analysis.
+- [SROA](sroa.md): splitting allocas into pieces mem2reg can promote.
 - [mem2reg](mem2reg.md): promoting allocas to SSA values.
 - [CSE](cse.md): common-subexpression elimination by hashing a canonical
   key for each instruction.
