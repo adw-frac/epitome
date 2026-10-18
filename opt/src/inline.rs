@@ -39,7 +39,7 @@
 //! call of a function that is then deleted is exempt, because the module
 //! does not grow; it is only held to `HARD_SIZE_LIMIT`.
 
-use std::collections::HashMap;
+use crate::fx::FxHashMap as HashMap;
 use std::sync::OnceLock;
 
 use smaugian_ir::edit::Names;
@@ -566,7 +566,7 @@ pub fn inline_call(
     let caller_entry = caller.entry();
     let mut alloca_at = 0;
     let mut returns: Vec<(Option<Value>, BlockId)> = Vec::new();
-    let mut loops: HashMap<MdId, MdId> = HashMap::new();
+    let mut loops: HashMap<MdId, MdId> = HashMap::default();
     for (cb, ni) in copies {
         let nb = bmap[cb.index()].unwrap();
         let copy = &mut caller.insts[ni.index()];

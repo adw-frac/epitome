@@ -33,7 +33,7 @@
 //! `freeze` is never merged: two freezes of the same poison may give
 //! different values.
 
-use std::collections::HashMap;
+use crate::fx::FxHashMap as HashMap;
 use std::hash::Hash;
 
 use smaugian_ir::module::*;
@@ -195,7 +195,7 @@ struct Scoped<K, V> {
 
 impl<K: Hash + Eq + Clone, V> Scoped<K, V> {
     fn new() -> Self {
-        Scoped { map: HashMap::new(), log: Vec::new() }
+        Scoped { map: HashMap::default(), log: Vec::new() }
     }
 
     fn get(&self, k: &K) -> Option<&V> {
@@ -278,7 +278,7 @@ pub fn run(sh: &Shared, f: &mut Function) -> Outcome {
     let children = dom.children();
     let preds = f.predecessors();
     // What each merged value was replaced by.
-    let mut map: HashMap<LocalId, Value> = HashMap::new();
+    let mut map: HashMap<LocalId, Value> = HashMap::default();
     let resolve = |map: &HashMap<LocalId, Value>, mut v: Value| {
         while let Value::Local(l) = v {
             match map.get(&l) {

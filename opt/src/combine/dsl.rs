@@ -47,14 +47,32 @@ pub enum Head {
     Cast(CastOp),
     FNeg,
     Freeze,
+    /// `br label`: one block operand.
+    Br,
+    /// `br i1 cond, label, label`: a condition and two blocks.
+    CondBr,
 }
 
 impl Head {
     pub fn arity(self) -> usize {
         match self {
             Head::Bin(_) | Head::ICmp(_) => 2,
-            Head::Select => 3,
-            Head::Cast(_) | Head::FNeg | Head::Freeze => 1,
+            Head::Select | Head::CondBr => 3,
+            Head::Cast(_) | Head::FNeg | Head::Freeze | Head::Br => 1,
+        }
+    }
+
+    /// Terminators: rules rooted at them change control flow.
+    pub fn is_terminator(self) -> bool {
+        matches!(self, Head::Br | Head::CondBr)
+    }
+
+    /// True if operand `k` is a block.
+    pub fn is_block_operand(self, k: usize) -> bool {
+        match self {
+            Head::Br => true,
+            Head::CondBr => k > 0,
+            _ => false,
         }
     }
 
@@ -83,6 +101,8 @@ impl Head {
             "select" => Some(Head::Select),
             "fneg" => Some(Head::FNeg),
             "freeze" => Some(Head::Freeze),
+            "br" => Some(Head::Br),
+            "condbr" => Some(Head::CondBr),
             _ => None,
         }
     }
@@ -97,6 +117,8 @@ impl fmt::Display for Head {
             Head::Cast(op) => f.write_str(op.keyword()),
             Head::FNeg => f.write_str("fneg"),
             Head::Freeze => f.write_str("freeze"),
+            Head::Br => f.write_str("br"),
+            Head::CondBr => f.write_str("condbr"),
         }
     }
 }
@@ -123,6 +145,8 @@ pub enum Pat {
     /// Any integer constant.
     Const(usize),
     Lit(Lit),
+    /// Any block, as `^a`. Only in block operands.
+    Block(usize),
     Op(Head, Vec<Pat>),
 }
 
@@ -161,6 +185,7 @@ pub enum Expr {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Repl {
     Var(usize),
+    Block(usize),
     Lit(Lit),
     Const(Expr),
     Op(Head, Vec<Repl>),
@@ -241,12 +266,24 @@ fn parse_rule(text: &str, line: usize) -> Result<Rule, String> {
     let tokens = tokenize(rest)?;
     let mut p = Parser { tokens, pos: 0, vars: Vec::new() };
     let pat = p.pattern(true)?;
-    if !matches!(pat, Pat::Op(..)) {
+    let Pat::Op(root, _) = &pat else {
         return Err("a pattern must start with an operation".into());
-    }
+    };
+    let root = *root;
+    check_blocks_pat(&pat)?;
     p.expect("->")?;
     let pattern_vars = p.vars.len();
     let repl = p.replacement()?;
+    check_blocks_repl(&repl)?;
+    // A terminator becomes a terminator, and a value a value.
+    let repl_is_terminator = matches!(&repl, Repl::Op(h, _) if h.is_terminator());
+    if root.is_terminator() != repl_is_terminator {
+        return Err(if root.is_terminator() {
+            "a branch must be replaced by a branch".into()
+        } else {
+            "only a branch can be replaced by a branch".into()
+        });
+    }
     let mut conds = Vec::new();
     if p.eat("if") {
         conds.push(p.cond()?);
@@ -263,6 +300,40 @@ fn parse_rule(text: &str, line: usize) -> Result<Rule, String> {
     Ok(Rule { name: name.to_string(), line, pat, repl, conds, vars: p.vars })
 }
 
+/// Blocks may only appear as block operands, and block operands must be
+/// blocks.
+fn check_blocks_pat(p: &Pat) -> Result<(), String> {
+    if let Pat::Op(h, args) = p {
+        for (k, a) in args.iter().enumerate() {
+            if h.is_block_operand(k) != matches!(a, Pat::Block(_)) {
+                return Err(format!(
+                    "operand {} of '{h}' must {}be a block (`^name`)",
+                    k + 1,
+                    if h.is_block_operand(k) { "" } else { "not " }
+                ));
+            }
+            check_blocks_pat(a)?;
+        }
+    }
+    Ok(())
+}
+
+fn check_blocks_repl(r: &Repl) -> Result<(), String> {
+    if let Repl::Op(h, args) = r {
+        for (k, a) in args.iter().enumerate() {
+            if h.is_block_operand(k) != matches!(a, Repl::Block(_)) {
+                return Err(format!(
+                    "operand {} of '{h}' must {}be a block (`^name`)",
+                    k + 1,
+                    if h.is_block_operand(k) { "" } else { "not " }
+                ));
+            }
+            check_blocks_repl(a)?;
+        }
+    }
+    Ok(())
+}
+
 fn tokenize(text: &str) -> Result<Vec<String>, String> {
     let chars: Vec<char> = text.chars().collect();
     let mut out = Vec::new();
@@ -277,6 +348,16 @@ fn tokenize(text: &str) -> Result<Vec<String>, String> {
         if ["->", "&&", "<=", ">=", "==", "!=", "<<", ">>"].contains(&two.as_str()) {
             out.push(two);
             i += 2;
+            continue;
+        }
+        // `^name` is a block variable; `^` alone is xor in an expression.
+        if c == '^' && chars.get(i + 1).is_some_and(|n| n.is_ascii_alphabetic()) {
+            let start = i;
+            i += 1;
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            out.push(chars[start..i].iter().collect());
             continue;
         }
         if c.is_ascii_alphanumeric() || c == '_' || c == '.' {
@@ -406,6 +487,9 @@ impl Parser {
             return Ok(Pat::Op(head, args));
         }
         let _ = top;
+        if t.starts_with('^') {
+            return Ok(Pat::Block(self.var(&t, true)?));
+        }
         if is_const_name(&t) {
             return Ok(Pat::Const(self.var(&t, true)?));
         }
@@ -417,6 +501,10 @@ impl Parser {
 
     fn replacement(&mut self) -> Result<Repl, String> {
         let t = self.peek().ok_or("expected a replacement")?.to_string();
+        if t.starts_with('^') {
+            self.pos += 1;
+            return Ok(Repl::Block(self.var(&t, false)?));
+        }
         if let Some(head) = Head::parse(&t)
             && self.peek_at(1) == Some("(")
         {
@@ -570,6 +658,20 @@ mod tests {
             )
         );
         assert_eq!(r.conds.len(), 1);
+    }
+
+    #[test]
+    fn parses_branch_rules() {
+        let r = &parse_rules("b: condbr(xor(c, true), ^a, ^b) -> condbr(c, ^b, ^a)").unwrap()[0];
+        assert_eq!(r.vars, vec!["c", "^a", "^b"]);
+        assert_eq!(
+            parse_rules("b: condbr(c, x, ^b) -> br(^b)").unwrap_err().to_string(),
+            "line 1: operand 2 of 'condbr' must be a block (`^name`)"
+        );
+        assert_eq!(
+            parse_rules("b: condbr(c, ^a, ^b) -> c").unwrap_err().to_string(),
+            "line 1: a branch must be replaced by a branch"
+        );
     }
 
     #[test]

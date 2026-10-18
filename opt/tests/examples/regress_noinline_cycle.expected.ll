@@ -1,9 +1,11 @@
 ; @a: recursion: 1 call(s) now push a frame on an explicit stack (values saved per frame: 1)
 ; @a: recursion: cycle not collapsed: @b is noinline
 ; @a: combine: sub_const x2
+; @a: simplifycfg: 0 unreachable blocks removed, 1 empty blocks bypassed, 0 selects made, 0 blocks merged
 ; @b: recursion: 1 call(s) now push a frame on an explicit stack (values saved per frame: 1)
 ; @b: recursion: cycle not collapsed: @c is noinline
 ; @b: combine: sub_const x2
+; @b: simplifycfg: 0 unreachable blocks removed, 1 empty blocks bypassed, 0 selects made, 0 blocks merged
 ; @c: sroa: 1 allocas split into 1 pieces
 ; @c: mem2reg: 1 allocas promoted (1 loads, 1 stores removed)
 ; @main: not inlined @a: noinline
@@ -39,10 +41,7 @@ entry:                                            ; preds = %rec.grow, %rec.head
   %chunk = phi ptr [ %chunk.top, %rec.header ], [ %chunk.new, %rec.grow ]
   %index = phi i32 [ %index.top, %rec.header ], [ 0, %rec.grow ]
   %c = icmp sle i32 %n, 0
-  br i1 %c, label %base, label %rec
-
-base:                                             ; preds = %entry
-  br label %rec.return
+  br i1 %c, label %rec.return, label %rec
 
 rec:                                              ; preds = %entry
   %m = add i32 %n, -1
@@ -52,10 +51,10 @@ rec:                                              ; preds = %entry
   %index.next = add nuw i32 %index, 1
   br label %rec.header
 
-rec.return:                                       ; preds = %rec.pop, %base
-  %chunk1 = phi ptr [ %chunk, %base ], [ %chunk.pop, %rec.pop ]
-  %index1 = phi i32 [ %index, %base ], [ %index.prev, %rec.pop ]
-  %result = phi i32 [ 1, %base ], [ %s2, %rec.pop ]
+rec.return:                                       ; preds = %rec.pop, %entry
+  %chunk1 = phi ptr [ %chunk.pop, %rec.pop ], [ %chunk, %entry ]
+  %index1 = phi i32 [ %index.prev, %rec.pop ], [ %index, %entry ]
+  %result = phi i32 [ %s2, %rec.pop ], [ 1, %entry ]
   %chunk.empty = icmp eq i32 %index1, 0
   br i1 %chunk.empty, label %rec.underflow, label %rec.pop
 
@@ -109,10 +108,7 @@ entry:                                            ; preds = %rec.grow, %rec.head
   %chunk = phi ptr [ %chunk.top, %rec.header ], [ %chunk.new, %rec.grow ]
   %index = phi i32 [ %index.top, %rec.header ], [ 0, %rec.grow ]
   %c = icmp sle i32 %n, 0
-  br i1 %c, label %base, label %rec
-
-base:                                             ; preds = %entry
-  br label %rec.return
+  br i1 %c, label %rec.return, label %rec
 
 rec:                                              ; preds = %entry
   %m = add i32 %n, -1
@@ -123,10 +119,10 @@ rec:                                              ; preds = %entry
   %index.next = add nuw i32 %index, 1
   br label %rec.header
 
-rec.return:                                       ; preds = %rec.pop, %base
-  %chunk1 = phi ptr [ %chunk, %base ], [ %chunk.pop, %rec.pop ]
-  %index1 = phi i32 [ %index, %base ], [ %index.prev, %rec.pop ]
-  %result = phi i32 [ 2, %base ], [ %s2, %rec.pop ]
+rec.return:                                       ; preds = %rec.pop, %entry
+  %chunk1 = phi ptr [ %chunk.pop, %rec.pop ], [ %chunk, %entry ]
+  %index1 = phi i32 [ %index.prev, %rec.pop ], [ %index, %entry ]
+  %result = phi i32 [ %s2, %rec.pop ], [ 2, %entry ]
   %chunk.empty = icmp eq i32 %index1, 0
   br i1 %chunk.empty, label %rec.underflow, label %rec.pop
 

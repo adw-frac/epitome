@@ -27,7 +27,9 @@ pub mod dsl;
 pub mod eval;
 pub mod tree;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+
+use crate::fx::FxHashMap as HashMap;
 use std::sync::OnceLock;
 
 use smaugian_ir::apint::ApInt;
@@ -56,6 +58,8 @@ pub fn standard() -> &'static Matcher {
 #[derive(Default, Debug, Clone)]
 pub struct Stats {
     pub fired: BTreeMap<String, usize>,
+    /// A branch was changed, so blocks may now be unreachable.
+    pub cfg_changed: bool,
 }
 
 impl Stats {
@@ -71,6 +75,7 @@ impl Stats {
         for (k, v) in &other.fired {
             *self.fired.entry(k.clone()).or_default() += v;
         }
+        self.cfg_changed |= other.cfg_changed;
     }
 }
 
@@ -141,9 +146,16 @@ fn is_pure(op: &Op) -> bool {
 }
 
 /// The operation and operands the matcher sees for an instruction.
-fn head_of(op: &Op) -> Option<(Head, [Value; 3])> {
+/// A block's label, as the matcher sees a block operand.
+fn label(f: &Function, b: BlockId) -> Value {
+    Value::Local(f.blocks[b.index()].local)
+}
+
+fn head_of(f: &Function, op: &Op) -> Option<(Head, [Value; 3])> {
     let pad = Value::Const(ConstId(0));
     Some(match *op {
+        Op::Br(b) => (Head::Br, [label(f, b), pad, pad]),
+        Op::CondBr { cond, then_dest, else_dest } => (Head::CondBr, [cond, label(f, then_dest), label(f, else_dest)]),
         Op::Binary { op, lhs, rhs, .. } => (Head::Bin(op), [lhs, rhs, pad]),
         Op::ICmp { pred, lhs, rhs, .. } => (Head::ICmp(pred), [lhs, rhs, pad]),
         Op::Select { cond, then_value, else_value, .. } => (Head::Select, [cond, then_value, else_value]),
@@ -168,7 +180,7 @@ impl Subject for View<'_> {
         match v {
             Value::Local(l) => match self.f.locals[l.index()].def {
                 LocalDef::Inst(i) if !self.erased.get(i.index()).copied().unwrap_or(false) => {
-                    match head_of(&self.f.insts[i.index()].op) {
+                    match head_of(self.f, &self.f.insts[i.index()].op) {
                         Some((h, ops)) => Shape::Op(h, ops),
                         None => Shape::Opaque,
                     }
@@ -196,10 +208,10 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
             uses: vec![Vec::new(); f.locals.len()],
             erased: vec![false; f.insts.len()],
             block_of: f.inst_blocks(),
-            before: HashMap::new(),
+            before: HashMap::default(),
             work: Vec::new(),
             queued: vec![false; f.insts.len()],
-            replaced: HashMap::new(),
+            replaced: HashMap::default(),
             pending_records: Vec::new(),
             stats: Stats::default(),
             f,
@@ -300,7 +312,179 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
         {
             self.stats.hit(&name);
             self.replace(i, v);
+            return;
         }
+        if self.f.insts[i.index()].op.is_terminator() {
+            if let Some(new) = self.fold_switch(i) {
+                self.stats.hit("(switch folded)");
+                self.retarget(i, new);
+            } else if let Some((name, new)) = self.apply_branch_rules(i) {
+                self.stats.hit(&name);
+                self.retarget(i, new);
+            }
+        }
+    }
+
+    /// A `switch` on a constant, or whose targets are all the same block,
+    /// as a plain branch. Written here rather than as a rule because a
+    /// switch has any number of operands.
+    fn fold_switch(&self, i: InstId) -> Option<Op> {
+        let Op::Switch { value, default, cases } = &self.f.insts[i.index()].op else { return None };
+        if cases.iter().all(|(_, b)| b == default) {
+            return Some(Op::Br(*default));
+        }
+        let Value::Const(c) = value else { return None };
+        let v = self.int(*c)?;
+        let target =
+            cases.iter().find(|(k, _)| self.int(*k).is_some_and(|k| k.value == v.value)).map_or(*default, |(_, b)| *b);
+        Some(Op::Br(target))
+    }
+
+    /// Tries the branch rules matching terminator `i`.
+    fn apply_branch_rules(&mut self, i: InstId) -> Option<(String, Op)> {
+        let (head, ops) = head_of(self.f, &self.f.insts[i.index()].op)?;
+        let matches = {
+            let consts = self.sh.consts();
+            let types = self.sh.types();
+            let view = View { f: self.f, erased: &self.erased, consts, types };
+            self.matcher.find_op(&view, head, ops)
+        };
+        for m in matches {
+            if let Some(op) = self.try_branch_match(i, &m) {
+                let rule = &self.matcher.rules[self.matcher.variants[m.variant].rule];
+                return Some((rule.name.clone(), op));
+            }
+        }
+        None
+    }
+
+    fn try_branch_match(&mut self, i: InstId, m: &Match) -> Option<Op> {
+        let variant = &self.matcher.variants[m.variant];
+        let rule = &self.matcher.rules[variant.rule];
+        let mut bound: Vec<Option<Value>> = vec![None; rule.vars.len()];
+        for (slot, &v) in variant.slots.iter().zip(&m.captures) {
+            match bound[*slot] {
+                Some(prev) if prev != v => return None,
+                _ => bound[*slot] = Some(v),
+            }
+        }
+        let consts: Vec<Option<IntConst>> = {
+            let (cs, ts) = (self.sh.consts(), self.sh.types());
+            bound
+                .iter()
+                .map(|b| match b {
+                    Some(Value::Const(c)) => eval::int_const(cs, ts, *c),
+                    _ => None,
+                })
+                .collect()
+        };
+        let widths = vec![None; rule.vars.len()];
+        let env = Env { consts: &consts, widths: &widths, bw: None };
+        let same_type = |_: Who, _: Who| false;
+        if !rule.conds.iter().all(|c| eval::check(c, &env, &same_type)) {
+            return None;
+        }
+        // The new branch replaces the old; anything else it makes must be
+        // paid for by instructions the match leaves unused.
+        let made = count_ops(&rule.repl) - 1;
+        let freed =
+            m.interior.iter().filter(|v| matches!(v, Value::Local(l) if self.uses[l.index()].len() == 1)).count();
+        if made > freed {
+            return None;
+        }
+        let Repl::Op(head, args) = &rule.repl else { return None };
+        let block = |v: &Repl| -> Option<BlockId> {
+            let Repl::Block(k) = v else { return None };
+            match bound[*k]? {
+                Value::Local(l) => match self.f.locals[l.index()].def {
+                    LocalDef::Block(b) => Some(b),
+                    _ => None,
+                },
+                _ => None,
+            }
+        };
+        match head {
+            Head::Br => Some(Op::Br(block(&args[0])?)),
+            Head::CondBr => {
+                let (then_dest, else_dest) = (block(&args[1])?, block(&args[2])?);
+                let i1 = self.sh.intern_type(Type::Int(1));
+                let mut created = Vec::new();
+                match self.build(&args[0], &bound, &env, i1, i, &mut created) {
+                    Some(cond) => {
+                        for c in created {
+                            self.push(c);
+                        }
+                        Some(Op::CondBr { cond, then_dest, else_dest })
+                    }
+                    None => {
+                        for c in created.into_iter().rev() {
+                            self.erase(c);
+                        }
+                        None
+                    }
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Replaces terminator `i` with `new`. Each edge the new terminator no
+    /// longer has takes one entry out of the target's phis, since phis
+    /// have one entry per edge; the phis go back on the list, as they may
+    /// now fold.
+    fn retarget(&mut self, i: InstId, new: Op) {
+        let b = self.block_of[i.index()].expect("terminator not in a block");
+        let old_succs = self.f.insts[i.index()].op.successors();
+        let mut removed = old_succs.clone();
+        for s in new.successors() {
+            if let Some(k) = removed.iter().position(|&x| x == s) {
+                removed.remove(k);
+            }
+        }
+        // Operand uses: the old ones go, the new ones come.
+        let mut old_ops = Vec::new();
+        self.f.insts[i.index()].op.for_each_value(|v| old_ops.push(*v));
+        for v in old_ops {
+            if let Value::Local(l) = v {
+                let list = &mut self.uses[l.index()];
+                if let Some(k) = list.iter().position(|&x| x == i) {
+                    list.swap_remove(k);
+                }
+                self.push_def(v);
+            }
+        }
+        self.f.insts[i.index()].op = new;
+        self.add_uses(i);
+        for s in removed {
+            for k in 0..self.f.blocks[s.index()].insts.len() {
+                let p = self.f.blocks[s.index()].insts[k];
+                let Op::Phi { incoming, .. } = &mut self.f.insts[p.index()].op else { break };
+                if let Some(at) = incoming.iter().position(|(_, from)| *from == b) {
+                    let (v, _) = incoming.remove(at);
+                    if let Value::Local(l) = v {
+                        let list = &mut self.uses[l.index()];
+                        if let Some(k) = list.iter().position(|&x| x == p) {
+                            list.swap_remove(k);
+                        }
+                    }
+                    self.push_def(v);
+                }
+            }
+        }
+        let mut succs = old_succs;
+        succs.dedup();
+        for s in succs {
+            let phis: Vec<InstId> = self.f.blocks[s.index()]
+                .insts
+                .iter()
+                .copied()
+                .take_while(|&p| self.f.insts[p.index()].op.is_phi())
+                .collect();
+            for p in phis {
+                self.push(p);
+            }
+        }
+        self.stats.cfg_changed = true;
     }
 
     /// Moves a constant left operand of a commutative operation or a
@@ -581,6 +765,7 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
                 let x = bound[*v]?;
                 (self.value_type(x) == Some(ty)).then_some(x)
             }
+            Repl::Block(_) => None,
             Repl::Lit(Lit::Poison) => Some(sh.poison(ty)),
             Repl::Lit(Lit::Float(f)) => self.float_value(ty, *f),
             Repl::Lit(Lit::Int(n)) => self.int_value(ty, *n as u64),
@@ -608,6 +793,7 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
                         vec![t, t]
                     }
                     Head::Cast(_) => vec![var_ty(&args[0])?],
+                    Head::Br | Head::CondBr => return None,
                 };
                 let mut ops = Vec::new();
                 for (a, &t) in args.iter().zip(&operand_tys) {
@@ -624,6 +810,7 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
                     Head::Cast(op) => Op::Cast { op, flags: IntFlags::NONE, fmf: FastMath::default(), value: ops[0] },
                     Head::FNeg => Op::FNeg { fmf: FastMath::default(), value: ops[0] },
                     Head::Freeze => Op::Freeze(ops[0]),
+                    Head::Br | Head::CondBr => unreachable!("branches are built by try_branch_match"),
                 };
                 let new = self.f.add_inst(op, Some((None, ty)));
                 self.grow();

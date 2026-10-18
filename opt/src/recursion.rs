@@ -43,7 +43,7 @@
 //! Mutual recursion is first reduced to self-recursion by inlining: see
 //! `collapse_scc`.
 
-use std::collections::{HashMap, HashSet};
+use crate::fx::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use smaugian_ir::edit::Names;
 use smaugian_ir::module::*;
@@ -657,7 +657,7 @@ impl<'s, 'm> Transform<'s, 'm> {
             // for each type, as many fields as the most any site saves.
             let mut fields: Vec<TypeId> = if many_sites { vec![self.i32] } else { vec![] };
             for set in &saved {
-                let mut used: HashMap<TypeId, usize> = HashMap::new();
+                let mut used: HashMap<TypeId, usize> = HashMap::default();
                 let mut mine = Vec::new();
                 for &l in set {
                     let ty = f.locals[l.index()].ty;
@@ -1085,7 +1085,7 @@ impl<'s, 'm> Transform<'s, 'm> {
         // Rebuild SSA form.
         let preds = f.predecessors();
         let mut up = SsaUpdater::new(preds);
-        let mut var_of: HashMap<LocalId, usize> = HashMap::new();
+        let mut var_of: HashMap<LocalId, usize> = HashMap::default();
         let def_blocks = f.inst_blocks();
         let mut new_var = |up: &mut SsaUpdater, f: &Function, l: LocalId| -> usize {
             *var_of.entry(l).or_insert_with(|| {
@@ -1100,7 +1100,7 @@ impl<'s, 'm> Transform<'s, 'm> {
         }
         // Call results: the returned value, at the continuation. The call
         // itself is gone.
-        let mut call_results = HashSet::new();
+        let mut call_results = HashSet::default();
         for s in &pushed {
             if let (Some(r), Some(v)) = (s.result, rv) {
                 let var = new_var(&mut up, f, r);

@@ -12,6 +12,7 @@
 
 use smaugian_ir::module::*;
 
+use crate::fx::FxHashMap as HashMap;
 use crate::par;
 
 pub struct CallGraph {
@@ -230,7 +231,7 @@ impl CallGraph {
         if self.callees[start].contains(&start) {
             return vec![start, start];
         }
-        let mut prev = std::collections::HashMap::new();
+        let mut prev: HashMap<usize, usize> = HashMap::default();
         let mut queue = std::collections::VecDeque::from([start]);
         while let Some(v) = queue.pop_front() {
             for &c in &self.callees[v] {

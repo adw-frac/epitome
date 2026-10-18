@@ -15,6 +15,8 @@ split into two halves:
 - [Alias analysis](aa.md): the data layout, and basic alias analysis.
 - [SROA](sroa.md): splitting allocas into pieces mem2reg can promote.
 - [mem2reg](mem2reg.md): promoting allocas to SSA values.
+- [Simplifying the CFG](simplifycfg.md): branch rules in the combiner, and
+  the passes that change the graph's shape.
 - [CSE](cse.md): common-subexpression elimination by hashing a canonical
   key for each instruction.
 - [Combines](combine.md): the rule language, the discrimination tree that

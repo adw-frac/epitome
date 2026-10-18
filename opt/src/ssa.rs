@@ -13,7 +13,7 @@
 //! every use in a block with a definition must come after it. Passes keep
 //! to this by putting new definitions at the start of fresh blocks.
 
-use std::collections::{HashMap, HashSet};
+use crate::fx::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use smaugian_ir::edit::Names;
 use smaugian_ir::module::*;
@@ -46,9 +46,9 @@ impl SsaUpdater {
         SsaUpdater {
             preds,
             vars: Vec::new(),
-            defs: HashMap::new(),
-            own: HashSet::new(),
-            entries: HashMap::new(),
+            defs: HashMap::default(),
+            own: HashSet::default(),
+            entries: HashMap::default(),
             phis: Vec::new(),
         }
     }
@@ -112,7 +112,7 @@ impl SsaUpdater {
         // block where paths meet. A chain that comes back on itself without
         // meeting another path is unreachable.
         let mut chain = Vec::new();
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         let mut b = block;
         let v = loop {
             if let Some(&v) = self.defs.get(&(var, b)) {
@@ -182,7 +182,7 @@ impl SsaUpdater {
 /// Only the phis in `candidates` are considered. Returns the replacements
 /// made, so callers can update references held elsewhere.
 pub fn remove_trivial_phis(f: &mut Function, candidates: &[(BlockId, InstId)]) -> HashMap<LocalId, Value> {
-    let mut replaced: HashMap<LocalId, Value> = HashMap::new();
+    let mut replaced: HashMap<LocalId, Value> = HashMap::default();
     let mut live: Vec<(BlockId, InstId)> = candidates.to_vec();
     loop {
         let mut changed = false;

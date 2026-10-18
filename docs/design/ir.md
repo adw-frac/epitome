@@ -141,7 +141,7 @@ exists.
 | --- | --- | --- |
 | `instcombine` | Combines and simplifies instructions into a canonical form. The rule-driven combiner covers arithmetic, comparisons, selects, casts and constant folding; see [combines](combine.md). | Done |
 | `aggressive-instcombine` | Matches larger expression patterns and may change the CFG. | Later |
-| `simplifycfg` | Removes unreachable blocks, merges blocks, removes trivial PHIs and branch-only blocks. | Planned |
+| `simplifycfg` | Removes unreachable blocks, merges blocks, removes trivial PHIs and branch-only blocks. Branch folding is in the combiner; see [simplifying the CFG](simplifycfg.md). | Done |
 | `dce` | Removes dead instructions, and anything that becomes dead as a result. | Planned |
 | `adce` | Aggressive dead code elimination: everything is dead until proven live. | Planned |
 | `dse` | Removes stores that are overwritten before being read. | Planned |

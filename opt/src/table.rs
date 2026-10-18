@@ -11,7 +11,7 @@
 //! value. With a read-write lock instead, every read was an atomic update
 //! of the lock's cache line, which made eight threads slower than one.
 
-use std::collections::HashMap;
+use crate::fx::FxHashMap as HashMap;
 use std::hash::Hash;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -80,7 +80,7 @@ struct Grown<T: Clone + Eq + Hash> {
 
 impl<T: Clone + Eq + Hash> Grown<T> {
     fn new() -> Self {
-        Grown { added: AppendOnly::new(), map: Mutex::new(HashMap::new()) }
+        Grown { added: AppendOnly::new(), map: Mutex::new(HashMap::default()) }
     }
 
     /// The index among the added entries, adding it if new.

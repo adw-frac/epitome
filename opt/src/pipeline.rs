@@ -40,6 +40,7 @@ pub struct Options {
     pub cse: bool,
     pub mem2reg: bool,
     pub sroa: bool,
+    pub simplifycfg: bool,
     pub recursion: RecursionMode,
 }
 
@@ -53,6 +54,7 @@ impl Default for Options {
             cse: true,
             mem2reg: true,
             sroa: true,
+            simplifycfg: true,
             recursion: RecursionMode::Tail,
         }
     }
@@ -74,6 +76,8 @@ pub struct Report {
     pub mem2reg: crate::mem2reg::Stats,
     /// What SROA split, over the whole module.
     pub sroa: crate::sroa::Stats,
+    /// What CFG simplification did, over the whole module.
+    pub simplifycfg: crate::simplifycfg::Stats,
     pub tail_calls: usize,
     pub accumulator_calls: usize,
     pub frame_calls: usize,
@@ -123,6 +127,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     let cse_stats = std::sync::Mutex::new(crate::cse::Stats::default());
     let m2r_stats = std::sync::Mutex::new(crate::mem2reg::Stats::default());
     let sroa_stats = std::sync::Mutex::new(crate::sroa::Stats::default());
+    let cfg_stats = std::sync::Mutex::new(crate::simplifycfg::Stats::default());
     let matcher = crate::combine::standard();
     let tail_calls = AtomicUsize::new(0);
     let accumulator_calls = AtomicUsize::new(0);
@@ -270,6 +275,36 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                 if opts.combine {
                     combine(*g, f, None);
                 }
+                // Then the CFG, and the combiner again on what that touched,
+                // which may fold more branches. A few rounds at most.
+                if opts.simplifycfg {
+                    let block_addresses = cg.node(*g).is_some_and(|n| cg.has_blockaddress[n]);
+                    for _ in 0..3 {
+                        let out = crate::simplifycfg::run(sh, f, block_addresses);
+                        let s = out.stats;
+                        if s.total() == 0 {
+                            break;
+                        }
+                        sh.remark(
+                            *g,
+                            format!(
+                                "simplifycfg: {} unreachable blocks removed, {} empty blocks bypassed, {} selects made, {} blocks merged",
+                                s.unreachable, s.bypassed, s.selects, s.merged
+                            ),
+                        );
+                        {
+                            let mut all = cfg_stats.lock().unwrap();
+                            all.unreachable += s.unreachable;
+                            all.bypassed += s.bypassed;
+                            all.selects += s.selects;
+                            all.merged += s.merged;
+                        }
+                        if !opts.combine || out.touched.is_empty() {
+                            break;
+                        }
+                        combine(*g, f, Some(&out.touched));
+                    }
+                }
                 if opts.cse {
                     let crate::cse::Outcome { stats: s, changed } = crate::cse::run(sh, f);
                     if s.total() > 0 {
@@ -312,6 +347,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     report.cse = cse_stats.into_inner().unwrap();
     report.mem2reg = m2r_stats.into_inner().unwrap();
     report.sroa = sroa_stats.into_inner().unwrap();
+    report.simplifycfg = cfg_stats.into_inner().unwrap();
     report.tail_calls = tail_calls.into_inner();
     report.accumulator_calls = accumulator_calls.into_inner();
     report.frame_calls = frame_calls.into_inner();

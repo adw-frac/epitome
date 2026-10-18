@@ -22,7 +22,7 @@
 //! through `Subject`. Extending combines to memory operations or control
 //! flow means adding operations to `Head`, not changing the matcher.
 
-use std::collections::HashMap;
+use crate::fx::FxHashMap as HashMap;
 
 use smaugian_ir::module::{ConstId, Value};
 
@@ -147,8 +147,15 @@ impl Matcher {
     /// Every candidate match for the instruction `root`, best first: rules
     /// earlier in the file come first.
     pub fn find(&self, s: &dyn Subject, root: Value) -> Vec<Match> {
+        let Shape::Op(head, ops) = s.shape(root) else { return Vec::new() };
+        self.find_op(s, head, ops)
+    }
+
+    /// Like `find`, for an instruction given by its operation and operands
+    /// rather than its value, such as a branch, which has none. A block
+    /// operand is passed as the block's label.
+    pub fn find_op(&self, s: &dyn Subject, head: Head, ops: [Value; 3]) -> Vec<Match> {
         let mut out = Vec::new();
-        let Shape::Op(head, ops) = s.shape(root) else { return out };
         let Some(&start) = self.nodes[0].heads.get(&head) else { return out };
         let mut todo: Vec<Value> = ops[..head.arity()].iter().rev().copied().collect();
         let mut captures = Vec::new();
@@ -227,7 +234,7 @@ enum Sym {
 
 fn flatten(p: &Pat, out: &mut Vec<Sym>) {
     match p {
-        Pat::Var(_) => out.push(Sym::Any),
+        Pat::Var(_) | Pat::Block(_) => out.push(Sym::Any),
         Pat::Const(_) => out.push(Sym::AnyConst),
         Pat::Lit(l) => out.push(Sym::Lit(*l)),
         Pat::Op(h, args) => {
@@ -239,7 +246,7 @@ fn flatten(p: &Pat, out: &mut Vec<Sym>) {
 
 fn collect_slots(p: &Pat, out: &mut Vec<usize>) {
     match p {
-        Pat::Var(v) | Pat::Const(v) => out.push(*v),
+        Pat::Var(v) | Pat::Const(v) | Pat::Block(v) => out.push(*v),
         Pat::Lit(_) => {}
         Pat::Op(_, args) => args.iter().for_each(|a| collect_slots(a, out)),
     }

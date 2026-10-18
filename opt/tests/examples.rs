@@ -30,6 +30,7 @@ fn options(src: &str) -> (Options, bool) {
             "--no-cse" => opts.cse = false,
             "--no-mem2reg" => opts.mem2reg = false,
             "--no-sroa" => opts.sroa = false,
+            "--no-simplifycfg" => opts.simplifycfg = false,
             s if s.starts_with("--passes=") => {
                 let list: Vec<&str> = s["--passes=".len()..].split(',').collect();
                 opts.inline = list.contains(&"inline");
@@ -37,6 +38,7 @@ fn options(src: &str) -> (Options, bool) {
                 opts.cse = list.contains(&"cse");
                 opts.mem2reg = list.contains(&"mem2reg");
                 opts.sroa = list.contains(&"sroa");
+                opts.simplifycfg = list.contains(&"simplifycfg");
                 if !list.contains(&"recursion") {
                     opts.recursion = RecursionMode::Off;
                 }

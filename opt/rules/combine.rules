@@ -173,3 +173,14 @@ fsub_neg_zero:    fsub(-0.0, x) -> fneg(x)
 # Freeze
 
 freeze_freeze:    freeze(freeze(x)) -> freeze(x)
+
+# ---------------------------------------------------------------------------
+# Branches. Block operands are written `^name`. A rule rooted at a branch
+# replaces it with another branch; the combiner removes the phi entries of
+# edges that go away. Branching on poison is undefined behaviour, so these
+# only need to agree where the condition is defined.
+
+br_true:          condbr(true, ^a, ^b) -> br(^a)
+br_false:         condbr(false, ^a, ^b) -> br(^b)
+br_same:          condbr(c, ^a, ^a) -> br(^a)
+br_not:           condbr(xor(c, true), ^a, ^b) -> condbr(c, ^b, ^a)

@@ -23,7 +23,7 @@
 //! store. (**Open:** also at the phis the pass adds, as the variable's value
 //! changes there too.)
 
-use std::collections::HashMap;
+use crate::fx::FxHashMap as HashMap;
 
 use smaugian_ir::edit::Names;
 use smaugian_ir::module::*;
@@ -60,7 +60,7 @@ pub fn run(sh: &Shared, f: &mut Function) -> Stats {
         return stats;
     }
     let entry = f.entry();
-    let mut users: HashMap<LocalId, Vec<InstId>> = HashMap::new();
+    let mut users: HashMap<LocalId, Vec<InstId>> = HashMap::default();
     for i in f.insts_in_order() {
         f.insts[i.index()].op.for_each_value(|v| {
             if let Value::Local(l) = v {
@@ -70,7 +70,7 @@ pub fn run(sh: &Shared, f: &mut Function) -> Stats {
     }
 
     // The allocas to promote, and their variable numbers.
-    let mut var_of: HashMap<LocalId, usize> = HashMap::new();
+    let mut var_of: HashMap<LocalId, usize> = HashMap::default();
     let mut allocas: Vec<(InstId, LocalId, TypeId)> = Vec::new();
     for &i in &f.blocks[entry.index()].insts {
         let Op::Alloca { inalloca: false, ty, count, addrspace, .. } = f.insts[i.index()].op else { continue };
@@ -123,7 +123,7 @@ pub fn run(sh: &Shared, f: &mut Function) -> Stats {
     // Each block's last store defines the variable at the block's end.
     let layout = f.layout.clone();
     for &b in &layout {
-        let mut last: HashMap<usize, Value> = HashMap::new();
+        let mut last: HashMap<usize, Value> = HashMap::default();
         for &i in &f.blocks[b.index()].insts {
             if let Op::Store { ptr, value, .. } = f.insts[i.index()].op
                 && let Some(var) = promoted(ptr)
@@ -138,7 +138,7 @@ pub fn run(sh: &Shared, f: &mut Function) -> Stats {
 
     // `#dbg_declare` records of promoted allocas: (variable, expression,
     // location) to describe each stored value with.
-    let mut declared: HashMap<usize, (MdId, MdId, MdId)> = HashMap::new();
+    let mut declared: HashMap<usize, (MdId, MdId, MdId)> = HashMap::default();
     for i in f.insts_in_order() {
         for r in &f.insts[i.index()].debug_records {
             if r.kind == "declare"
@@ -152,13 +152,13 @@ pub fn run(sh: &Shared, f: &mut Function) -> Stats {
     }
 
     // Rewrite each block in order.
-    let mut map: HashMap<LocalId, Value> = HashMap::new();
+    let mut map: HashMap<LocalId, Value> = HashMap::default();
     let mut erased = vec![false; f.insts.len()];
     for &(i, _, _) in &allocas {
         erased[i.index()] = true;
     }
     for &b in &layout {
-        let mut current: HashMap<usize, Value> = HashMap::new();
+        let mut current: HashMap<usize, Value> = HashMap::default();
         let mut pending: Vec<DebugRecord> = Vec::new();
         let insts = f.blocks[b.index()].insts.clone();
         for i in insts {

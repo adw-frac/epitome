@@ -183,10 +183,11 @@ it is an integer constant. Extending combines means adding operations to
   that nothing in between writes memory. That takes a new kind of
   condition, answered by alias analysis, and a way to say "the previous
   store to this address", which is a new kind of edge in the operand tree.
-- **Control flow.** Rules rooted at terminators (`condbr(true, a, b) ->
-  br(a)`) change the CFG, so the replacement is an edit to blocks and phis,
-  not a value. The combiner would hand such matches to a CFG updater, and
-  removing unreachable blocks and merging blocks would follow.
+- **Control flow.** Done for `br` and `condbr`: block operands are `^name`
+  variables, and a rule rooted at a branch is applied as an edit to the
+  branch and the target phis. See [simplifying the CFG](simplifycfg.md).
+  `switch` and other terminators with any number of operands would need
+  variadic patterns.
 - **Target rules.** Instruction selection is the same problem with
   patterns over generic operations and target instructions as
   replacements. The tree can be reused as it is.

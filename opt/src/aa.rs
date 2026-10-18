@@ -24,7 +24,7 @@
 //! may only be accessed through a pointer based on the object it belongs to
 //! (`docs/llvm-ir/01-module-structure.md`, section 14).
 
-use std::collections::{HashMap, HashSet};
+use crate::fx::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use smaugian_ir::module::*;
 use smaugian_ir::types::{Type, TypeId};
@@ -524,7 +524,7 @@ impl MemoryEffects {
 /// Allocas and `noalias` call results whose address never leaves the
 /// function's own loads, stores and offsets.
 fn not_captured(sh: &Shared, f: &Function) -> HashSet<LocalId> {
-    let mut users: HashMap<LocalId, Vec<InstId>> = HashMap::new();
+    let mut users: HashMap<LocalId, Vec<InstId>> = HashMap::default();
     for i in f.insts_in_order() {
         f.insts[i.index()].op.for_each_value(|v| {
             if let Value::Local(l) = v {
@@ -532,7 +532,7 @@ fn not_captured(sh: &Shared, f: &Function) -> HashSet<LocalId> {
             }
         });
     }
-    let mut out = HashSet::new();
+    let mut out = HashSet::default();
     let mut candidates: Vec<LocalId> =
         f.params.iter().filter(|p| crate::attrs::has_named(sh.module, &p.attrs, "noalias")).map(|p| p.local).collect();
     for i in f.insts_in_order() {
@@ -549,7 +549,7 @@ fn not_captured(sh: &Shared, f: &Function) -> HashSet<LocalId> {
     }
     for r in candidates {
         let mut work = vec![r];
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         let mut escapes = false;
         while let Some(p) = work.pop() {
             if !seen.insert(p) {

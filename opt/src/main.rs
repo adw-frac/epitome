@@ -14,13 +14,14 @@ const USAGE: &str = "usage: smaugian-opt [options] <file.ll>
   -j <n>                  threads (default: one per core)
   -o <file>               write the result here instead of stdout
   --passes=<list>         which passes to run, from sroa, mem2reg, inline,
-                          recursion, combine and cse, separated by commas
-                          (default: all)
+                          recursion, combine, simplifycfg and cse,
+                          separated by commas (default: all)
   --no-inline             do not inline
   --no-combine            do not run the combiner
   --no-cse                do not run common-subexpression elimination
   --no-mem2reg            do not promote allocas to SSA values
   --no-sroa               do not split allocas into pieces
+  --no-simplifycfg        do not simplify the control-flow graph
   --recursion=<mode>      off; tail (default): tail and accumulator calls
                           become loops, other recursion stays; or stack:
                           all recursion, with an explicit stack
@@ -48,10 +49,12 @@ fn main() -> ExitCode {
             "--no-cse" => opts.cse = false,
             "--no-mem2reg" => opts.mem2reg = false,
             "--no-sroa" => opts.sroa = false,
+            "--no-simplifycfg" => opts.simplifycfg = false,
             s if s.starts_with("--passes=") => {
                 let list: Vec<&str> = s["--passes=".len()..].split(',').collect();
-                if let Some(bad) =
-                    list.iter().find(|p| !["sroa", "mem2reg", "inline", "recursion", "combine", "cse"].contains(p))
+                if let Some(bad) = list
+                    .iter()
+                    .find(|p| !["sroa", "mem2reg", "inline", "recursion", "combine", "simplifycfg", "cse"].contains(p))
                 {
                     return usage(&format!("unknown pass {bad}"));
                 }
@@ -60,6 +63,7 @@ fn main() -> ExitCode {
                 opts.cse = list.contains(&"cse");
                 opts.mem2reg = list.contains(&"mem2reg");
                 opts.sroa = list.contains(&"sroa");
+                opts.simplifycfg = list.contains(&"simplifycfg");
                 if !list.contains(&"recursion") {
                     opts.recursion = RecursionMode::Off;
                 }
@@ -142,6 +146,13 @@ fn main() -> ExitCode {
             report.frame_calls,
             report.deleted.len()
         );
+        let c = report.simplifycfg;
+        if c.total() > 0 {
+            eprintln!(
+                "; simplifycfg: {} unreachable blocks removed, {} empty blocks bypassed, {} selects made, {} blocks merged",
+                c.unreachable, c.bypassed, c.selects, c.merged
+            );
+        }
         if report.sroa.split > 0 {
             eprintln!("; sroa: {} allocas split into {} pieces", report.sroa.split, report.sroa.pieces);
         }

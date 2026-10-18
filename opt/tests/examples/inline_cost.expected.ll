@@ -9,7 +9,9 @@
 ; @main: inlined @big_once: cost 83, bonus 94, threshold 100
 ; @main: not inlined @never: noinline
 ; @main: not inlined @big: cost 83 - bonus 6 > threshold 0
-; @main: combine: add_add_const x1
+; @main: combine: (switch folded) x1, add_add_const x1
+; @main: simplifycfg: 2 unreachable blocks removed, 0 empty blocks bypassed, 0 selects made, 2 blocks merged
+; @main: cse: 1 merged, 0 loads reused, 0 stores forwarded
 ; @tiny: deleted, no longer used
 ; @mode_op: deleted, no longer used
 ; @big_once: deleted, no longer used
@@ -115,45 +117,26 @@ define i32 @main(i32 %argc) {
 entry:
   %y.i = add i32 %argc, 1
   %y.i1 = add i32 %argc, 2
-  switch i32 0, label %other.i [
-    i32 0, label %add.i
-    i32 1, label %sub.i
-  ]
-
-add.i:                                            ; preds = %entry
   %s.i = add i32 %y.i, %y.i1
-  br label %mode_op.exit
-
-sub.i:                                            ; preds = %entry
-  %d.i = sub i32 %y.i, %y.i1
-  br label %mode_op.exit
-
-other.i:                                          ; preds = %entry
-  %m.i = mul i32 %y.i, %y.i1
-  br label %mode_op.exit
-
-mode_op.exit:                                     ; preds = %other.i, %sub.i, %add.i
-  %c1 = phi i32 [ %s.i, %add.i ], [ %d.i, %sub.i ], [ %m.i, %other.i ]
   switch i32 %argc, label %other.i1 [
     i32 0, label %add.i1
     i32 1, label %sub.i1
   ]
 
-add.i1:                                           ; preds = %mode_op.exit
-  %s.i1 = add i32 %y.i, %y.i1
+add.i1:                                           ; preds = %entry
   br label %mode_op.exit1
 
-sub.i1:                                           ; preds = %mode_op.exit
+sub.i1:                                           ; preds = %entry
   %d.i1 = sub i32 %y.i, %y.i1
   br label %mode_op.exit1
 
-other.i1:                                         ; preds = %mode_op.exit
+other.i1:                                         ; preds = %entry
   %m.i1 = mul i32 %y.i, %y.i1
   br label %mode_op.exit1
 
 mode_op.exit1:                                    ; preds = %other.i1, %sub.i1, %add.i1
-  %d1 = phi i32 [ %s.i1, %add.i1 ], [ %d.i1, %sub.i1 ], [ %m.i1, %other.i1 ]
-  %t0.i = add i32 %c1, 3
+  %d1 = phi i32 [ %s.i, %add.i1 ], [ %d.i1, %sub.i1 ], [ %m.i1, %other.i1 ]
+  %t0.i = add i32 %s.i, 3
   %t1.i = mul i32 %t0.i, 10
   %t2.i = xor i32 %t1.i, 17
   %t4.i = add i32 %t2.i, 7

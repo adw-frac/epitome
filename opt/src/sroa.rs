@@ -37,7 +37,7 @@
 //!
 //! The pass runs before `mem2reg`, which promotes the new allocas.
 
-use std::collections::HashMap;
+use crate::fx::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use smaugian_ir::apint::ApInt;
 use smaugian_ir::edit::Names;
@@ -329,7 +329,7 @@ fn split_round(sh: &Shared, f: &mut Function, entry: BlockId, stats: &mut Stats)
         let a = f.insts[i.index()].result.unwrap();
         // Uses are found afresh for each alloca: splitting one can add
         // accesses to another, when one was copied into the other.
-        let mut users: HashMap<LocalId, Vec<InstId>> = HashMap::new();
+        let mut users: HashMap<LocalId, Vec<InstId>> = HashMap::default();
         for x in f.insts_in_order() {
             if erased.contains(&x) {
                 continue;
@@ -629,7 +629,7 @@ const MAX_ELEMENTS: u64 = 16;
 /// split a level at a time until none are left.
 fn split_aggregate_accesses(sh: &Shared, f: &mut Function) {
     let entry = f.entry();
-    let allocas: std::collections::HashSet<LocalId> = f.blocks[entry.index()]
+    let allocas: HashSet<LocalId> = f.blocks[entry.index()]
         .insts
         .iter()
         .filter(|&&i| matches!(f.insts[i.index()].op, Op::Alloca { .. }))

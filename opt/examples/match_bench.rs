@@ -94,7 +94,7 @@ fn random_rule(k: usize, rng: &mut Lcg, general: bool) -> String {
 /// Matching by trying one pattern after another.
 fn naive(s: &Dag, p: &Pat, v: Value) -> bool {
     match p {
-        Pat::Var(_) => true,
+        Pat::Var(_) | Pat::Block(_) => true,
         Pat::Const(_) => matches!(v, Value::Const(_)),
         Pat::Lit(l) => matches!(v, Value::Const(c) if s.lits(c).contains(l)),
         Pat::Op(h, args) => match s.shape(v) {

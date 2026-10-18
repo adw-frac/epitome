@@ -43,6 +43,8 @@ fn rules() -> Vec<Rule> {
 enum V {
     Int(u64),
     Poison,
+    /// The block a branch goes to: a block variable's number.
+    Block(usize),
 }
 
 /// An integer evaluation: `None` is undefined behaviour.
@@ -58,6 +60,7 @@ impl IntEval<'_> {
             Pat::Lit(Lit::Int(n)) => Some(V::Int(*n as u64 & mask(w))),
             Pat::Lit(Lit::Poison) => Some(V::Poison),
             Pat::Lit(Lit::Float(_)) => unreachable!(),
+            Pat::Block(v) => Some(V::Block(*v)),
             Pat::Op(h, args) => {
                 let vals: Vec<Option<V>> =
                     args.iter().zip(operand_widths(*h, w, self.inner(args))).map(|(a, aw)| self.pat(a, aw)).collect();
@@ -72,6 +75,7 @@ impl IntEval<'_> {
             Repl::Lit(Lit::Int(n)) => Some(V::Int(*n as u64 & mask(w))),
             Repl::Lit(Lit::Poison) => Some(V::Poison),
             Repl::Lit(Lit::Float(_)) => unreachable!(),
+            Repl::Block(v) => Some(V::Block(*v)),
             Repl::Const(e) => Some(V::Int(eval::eval(e, env)? as u64 & mask(w))),
             Repl::Op(h, args) => {
                 let inner = self.inner_repl(args);
@@ -107,7 +111,7 @@ impl IntEval<'_> {
 fn operand_widths(h: Head, w: u32, inner: u32) -> Vec<u32> {
     match h {
         Head::ICmp(_) => vec![inner, inner],
-        Head::Select => vec![1, w, w],
+        Head::Select | Head::CondBr => vec![1, w, w],
         _ => vec![w; h.arity()],
     }
 }
@@ -116,9 +120,17 @@ fn apply(h: Head, vals: &[Option<V>], w: u32, inner: u32) -> Option<V> {
     // Undefined behaviour anywhere below makes the whole thing undefined.
     let vals: Vec<V> = vals.iter().copied().collect::<Option<_>>()?;
     match h {
+        Head::Br => Some(vals[0]),
+        // Branching on poison is undefined behaviour.
+        Head::CondBr => match vals[0] {
+            V::Poison => None,
+            V::Int(c) => Some(if c & 1 == 1 { vals[1] } else { vals[2] }),
+            V::Block(_) => unreachable!(),
+        },
         Head::Select => match vals[0] {
             V::Poison => Some(V::Poison),
             V::Int(c) => Some(if c & 1 == 1 { vals[1] } else { vals[2] }),
+            V::Block(_) => unreachable!(),
         },
         Head::Bin(op) => {
             // Dividing by poison is undefined behaviour.
@@ -130,6 +142,7 @@ fn apply(h: Head, vals: &[Option<V>], w: u32, inner: u32) -> Option<V> {
                     Folded::Int(v) => Some(V::Int(v)),
                     Folded::Poison => Some(V::Poison),
                 },
+                _ => unreachable!("a block in arithmetic"),
             }
         }
         Head::ICmp(p) => match (vals[0], vals[1]) {
@@ -157,7 +170,7 @@ fn is_float(r: &Rule) -> bool {
 fn var_widths(r: &Rule, w: u32) -> Vec<u32> {
     fn walk(p: &Pat, w: u32, out: &mut [Option<u32>], inner: u32) {
         match p {
-            Pat::Var(v) | Pat::Const(v) => {
+            Pat::Var(v) | Pat::Const(v) | Pat::Block(v) => {
                 out[*v].get_or_insert(w);
             }
             Pat::Op(h, args) => {
@@ -314,6 +327,7 @@ fn float_eval(p: &Pat, vals: &[f64], single: bool) -> f64 {
 fn repl_as_pat(r: &Repl) -> Pat {
     match r {
         Repl::Var(v) => Pat::Var(*v),
+        Repl::Block(v) => Pat::Block(*v),
         Repl::Lit(l) => Pat::Lit(*l),
         Repl::Op(h, a) => Pat::Op(*h, a.iter().map(repl_as_pat).collect()),
         Repl::Const(_) => panic!("integer constant in a float rule"),
@@ -363,7 +377,9 @@ fn checker_rejects_wrong_rules() {
         "wrap: icmp.ult(add(x, 1), x) -> false\n\
          off_by_one: add(add(x, C1), C2) -> add(x, C1 + C2 + 1)\n\
          shift: shl(shl(x, C1), C2) -> shl(x, C1 + C2)\n\
-         sign: sdiv(x, 2) -> ashr(x, 1)",
+         sign: sdiv(x, 2) -> ashr(x, 1)\n\
+         branch: condbr(c, ^a, ^b) -> br(^a)\n\
+         swapped: condbr(c, ^a, ^b) -> condbr(c, ^b, ^a)",
     )
     .unwrap();
     for r in &wrong {

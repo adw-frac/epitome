@@ -13,6 +13,8 @@
 //!   whether an instruction can read or write a location.
 //! - `sroa`: splitting allocas into pieces `mem2reg` can promote.
 //! - `mem2reg`: promoting allocas to SSA values.
+//! - `simplifycfg`: unreachable blocks, empty blocks, diamonds to
+//!   selects, straight lines; branches themselves fold in the combiner.
 //! - `cse`: common-subexpression elimination, by hashing a canonical key
 //!   for each instruction, scoped by the dominator tree.
 //! - `cfg`, `ssa`, `cleanup`: analyses and helpers the passes share.
@@ -27,11 +29,13 @@ pub mod cleanup;
 pub mod combine;
 pub mod cse;
 pub mod ctx;
+pub mod fx;
 pub mod inline;
 pub mod mem2reg;
 pub mod par;
 pub mod pipeline;
 pub mod recursion;
+pub mod simplifycfg;
 pub mod sroa;
 pub mod ssa;
 pub mod table;
