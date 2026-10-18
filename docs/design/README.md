@@ -12,6 +12,8 @@ split into two halves:
 - [Parallel passes](parallel.md): how passes run on many functions at once,
   the inliner and its cost model, and turning recursion into loops with an
   explicit stack.
+- [Combines](combine.md): the rule language, the discrimination tree that
+  matches rules, and the combiner pass.
 
 ## Clean-room rules
 

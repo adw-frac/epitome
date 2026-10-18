@@ -33,7 +33,8 @@ function never touches another. What is module-wide is:
 | Part | During the phase |
 | --- | --- |
 | Function bodies | Each moves into its own slot. A task `take`s the bodies it works on, which gives it `&mut Function` with no lock, and `publish`es them when done. A published body is read-only and any task may read it without locking. |
-| Types, constants, metadata | Behind `RwLock`s. Reading takes a read lock. Interning something new takes the write lock briefly. Passes rarely create new entries. |
+| Types and constants | Frozen for the phase, so any thread reads them with no lock. New entries go into an append-only list whose entries never move, so they are read without a lock too; only adding one takes a lock (`table.rs`). |
+| Metadata | Behind a `RwLock`. Passes rarely touch it. |
 | Global headers | Read-only, through a shared `&Module`. A pass that needs a new global (for example an intrinsic declaration) declares it before the phase starts. |
 
 At the end of the phase the bodies go back into the module and identical

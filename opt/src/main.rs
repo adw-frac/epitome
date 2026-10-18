@@ -13,7 +13,10 @@ const USAGE: &str = "usage: smaugian-opt [options] <file.ll>
   -O1 -O2 -O3 -Os -Oz     optimisation level (default -O2)
   -j <n>                  threads (default: one per core)
   -o <file>               write the result here instead of stdout
+  --passes=<list>         which passes to run, from inline, recursion and
+                          combine, separated by commas (default: all)
   --no-inline             do not inline
+  --no-combine            do not run the combiner
   --recursion=<mode>      off, tail or stack (default stack)
   --remarks               print each decision to stderr
   --print-cycles          print the call graph's cycles to stderr
@@ -35,6 +38,18 @@ fn main() -> ExitCode {
             },
             "-o" => output = it.next().cloned(),
             "--no-inline" => opts.inline = false,
+            "--no-combine" => opts.combine = false,
+            s if s.starts_with("--passes=") => {
+                let list: Vec<&str> = s["--passes=".len()..].split(',').collect();
+                if let Some(bad) = list.iter().find(|p| !["inline", "recursion", "combine"].contains(p)) {
+                    return usage(&format!("unknown pass {bad}"));
+                }
+                opts.inline = list.contains(&"inline");
+                opts.combine = list.contains(&"combine");
+                if !list.contains(&"recursion") {
+                    opts.recursion = RecursionMode::Off;
+                }
+            }
             "--remarks" => remarks = true,
             "--print-cycles" => cycles = true,
             "--stats" => stats = true,
@@ -112,6 +127,12 @@ fn main() -> ExitCode {
             report.frame_calls,
             report.deleted.len()
         );
+        if report.combines.total() > 0 {
+            let mut top: Vec<(&String, &usize)> = report.combines.fired.iter().collect();
+            top.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+            let list: Vec<String> = top.iter().take(12).map(|(k, v)| format!("{k} {v}")).collect();
+            eprintln!("; combines: {} in all; most used: {}", report.combines.total(), list.join(", "));
+        }
         eprintln!(
             "; critical path {} of {} instructions: at most {:.1}x faster with threads",
             report.critical_path,

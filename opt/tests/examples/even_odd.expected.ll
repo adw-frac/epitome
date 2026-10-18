@@ -1,6 +1,8 @@
 ; cycle: @is_even -> @is_odd -> @is_even
 ; @is_even: recursion: inlined @is_odd to break the cycle
 ; @is_even: recursion: 1 tail call(s) now jump back to the start
+; @is_even: combine: (dead) x1, add_add_const x1, icmp_eq_add x1, sub_const x2
+; @is_odd: combine: sub_const x1
 ; @is_odd: deleted, no longer used
 
 
@@ -14,12 +16,11 @@ entry:                                            ; preds = %recur.i, %entry.rec
   br i1 %zero, label %yes, label %recur
 
 recur:                                            ; preds = %entry
-  %m = sub i32 %n, 1
-  %zero.i = icmp eq i32 %m, 0
+  %zero.i = icmp eq i32 %n, 1
   br i1 %zero.i, label %no.i, label %recur.i
 
 recur.i:                                          ; preds = %recur
-  %m.i = sub i32 %m, 1
+  %m.i = add i32 %n, -2
   br label %entry
 
 no.i:                                             ; preds = %recur

@@ -26,6 +26,15 @@ fn options(src: &str) -> (Options, bool) {
     for a in args.split_whitespace() {
         match a {
             "--no-inline" => opts.inline = false,
+            "--no-combine" => opts.combine = false,
+            s if s.starts_with("--passes=") => {
+                let list: Vec<&str> = s["--passes=".len()..].split(',').collect();
+                opts.inline = list.contains(&"inline");
+                opts.combine = list.contains(&"combine");
+                if !list.contains(&"recursion") {
+                    opts.recursion = RecursionMode::Off;
+                }
+            }
             "--print-cycles" => cycles = true,
             "--recursion=off" => opts.recursion = RecursionMode::Off,
             "--recursion=tail" => opts.recursion = RecursionMode::Tail,

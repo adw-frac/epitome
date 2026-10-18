@@ -7,6 +7,8 @@
 //! - `inline`: the inliner and its cost model.
 //! - `recursion`: turning recursion into loops with an explicit stack.
 //! - `pipeline`: the passes above, run together.
+//! - `combine`: rewriting instructions into simpler ones, from rules in
+//!   `opt/rules/combine.rules`, matched with a discrimination tree.
 //! - `cfg`, `ssa`, `cleanup`: analyses and helpers the passes share.
 //!
 //! See `docs/design/parallel.md` for the design.
@@ -15,9 +17,11 @@ pub mod attrs;
 pub mod callgraph;
 pub mod cfg;
 pub mod cleanup;
+pub mod combine;
 pub mod ctx;
 pub mod inline;
 pub mod par;
 pub mod pipeline;
 pub mod recursion;
 pub mod ssa;
+pub mod table;

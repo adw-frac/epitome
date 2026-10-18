@@ -1,4 +1,5 @@
 ; @sum: recursion: 1 call(s) now push a frame on an explicit stack (values saved per frame: 1)
+; @sum: combine: sub_const x1
 
 
 %node = type { i32, ptr }
@@ -70,7 +71,7 @@ rec.shrink:                                       ; preds = %rec.underflow
 rec.pop:                                          ; preds = %rec.shrink, %rec.return
   %chunk.pop = phi ptr [ %chunk1, %rec.return ], [ %chunk.prev, %rec.shrink ]
   %index.pop = phi i32 [ %index1, %rec.return ], [ 64, %rec.shrink ]
-  %index.prev = sub nuw i32 %index.pop, 1
+  %index.prev = add i32 %index.pop, -1
   %frame = getelementptr inbounds { ptr, ptr, [64 x { i32 }] }, ptr %chunk.pop, i32 0, i32 2, i32 %index.prev
   %value.saved = load i32, ptr %frame
   %scaled = mul i32 %value.saved, %depth

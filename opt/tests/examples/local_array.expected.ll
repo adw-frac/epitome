@@ -1,4 +1,5 @@
 ; @walk: recursion: 1 call(s) now push a frame on an explicit stack (values saved per frame: 1)
+; @walk: combine: sub_const x1
 
 
 declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)
@@ -17,7 +18,7 @@ entry:                                            ; preds = %recur, %entry.rec
   br i1 %stop, label %done, label %recur
 
 recur:                                            ; preds = %entry
-  %m = sub i32 %n, 1
+  %m = add i32 %n, -1
   %sp = call ptr @llvm.stacksave.p0()
   %frame0 = alloca { ptr, ptr, ptr }
   store ptr %frame.top, ptr %frame0

@@ -1,4 +1,5 @@
 ; @f: recursion: 1 call(s) now push a frame on an explicit stack (values saved per frame: 1)
+; @f: combine: sub_const x2
 
 
 @fmt = private constant [4 x i8] c"%d\0A\00"
@@ -35,7 +36,7 @@ entry:                                            ; preds = %rec.grow, %rec.head
   ]
 
 rec:                                              ; preds = %entry
-  %a = sub i32 %n, 1
+  %a = add i32 %n, -1
   %frame0 = getelementptr inbounds { ptr, ptr, [64 x { i32 }] }, ptr %chunk, i32 0, i32 2, i32 %index
   store i32 %n, ptr %frame0
   %index.next = add nuw i32 %index, 1
@@ -65,7 +66,7 @@ rec.shrink:                                       ; preds = %rec.underflow
 rec.pop:                                          ; preds = %rec.shrink, %done
   %chunk.pop = phi ptr [ %chunk1, %done ], [ %chunk.prev, %rec.shrink ]
   %index.pop = phi i32 [ %index1, %done ], [ 64, %rec.shrink ]
-  %index.prev = sub nuw i32 %index.pop, 1
+  %index.prev = add i32 %index.pop, -1
   %frame = getelementptr inbounds { ptr, ptr, [64 x { i32 }] }, ptr %chunk.pop, i32 0, i32 2, i32 %index.prev
   %n.saved = load i32, ptr %frame
   %s = add i32 %p, %n.saved

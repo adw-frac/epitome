@@ -1,4 +1,5 @@
 ; @fact: recursion: 1 call(s) now push a frame on an explicit stack (values saved per frame: 1)
+; @fact: combine: sub_const x2
 ; @main: inlined @fact: cost 24, bonus 8, threshold 100
 ; @fact: deleted, no longer used
 
@@ -32,7 +33,7 @@ entry.i:                                          ; preds = %rec.grow.i, %rec.he
   br i1 %base.i, label %one.i, label %recur.i
 
 recur.i:                                          ; preds = %entry.i
-  %m.i = sub i64 %n.i, 1
+  %m.i = add i64 %n.i, -1
   %frame0.i = getelementptr inbounds { ptr, ptr, [64 x { i64 }] }, ptr %chunk.i, i32 0, i32 2, i32 %index.i
   store i64 %n.i, ptr %frame0.i
   %index.next.i = add nuw i32 %index.i, 1
@@ -67,7 +68,7 @@ rec.shrink.i:                                     ; preds = %rec.underflow.i
 rec.pop.i:                                        ; preds = %rec.shrink.i, %rec.return.i
   %chunk.pop.i = phi ptr [ %chunk1.i, %rec.return.i ], [ %chunk.prev.i, %rec.shrink.i ]
   %index.pop.i = phi i32 [ %index1.i, %rec.return.i ], [ 64, %rec.shrink.i ]
-  %index.prev.i = sub nuw i32 %index.pop.i, 1
+  %index.prev.i = add i32 %index.pop.i, -1
   %frame.i = getelementptr inbounds { ptr, ptr, [64 x { i64 }] }, ptr %chunk.pop.i, i32 0, i32 2, i32 %index.prev.i
   %n.saved.i = load i64, ptr %frame.i
   %p.i = mul i64 %n.saved.i, %result.i

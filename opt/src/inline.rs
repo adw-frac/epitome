@@ -304,7 +304,6 @@ impl<'a> Inliner<'a> {
                 _ => {}
             }
         }
-        drop(consts);
         let mut last_call = false;
         if let Some(n) = self.cg.node(callee_g) {
             let local = matches!(sh.module.global(callee_g).props.linkage, Linkage::Internal | Linkage::Private);

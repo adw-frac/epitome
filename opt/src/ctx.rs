@@ -11,8 +11,10 @@
 //!   bodies it works on, so it has `&mut Function` with no locking, and
 //!   `publish`es them when done. A published body is read-only from then
 //!   on, so any task can read it without locking.
-//! - The type, constant and metadata tables move behind `RwLock`s. Reads
-//!   take a read lock; interning something new takes the write lock briefly.
+//! - The type and constant tables become `table::TypeTable` and
+//!   `table::ConstTable`, which any thread reads with no lock; adding an
+//!   entry takes a lock briefly. Metadata, which passes rarely touch, goes
+//!   behind a `RwLock`.
 //! - The rest of the module stays behind a shared `&Module`, read-only.
 //!   Global headers cannot change during a phase: a pass that needs a new
 //!   global declares it before the phase starts.
@@ -25,9 +27,11 @@
 
 use std::sync::{Mutex, OnceLock, RwLock, RwLockReadGuard};
 
+use crate::table::{ConstTable, TypeTable};
+
 use smaugian_ir::apint::ApInt;
 use smaugian_ir::module::*;
-use smaugian_ir::types::{Type, TypeId, Types};
+use smaugian_ir::types::{Type, TypeId};
 
 /// One function's body during a parallel phase.
 pub struct FnSlot {
@@ -52,8 +56,8 @@ pub struct Shared<'m> {
     /// Read-only. Its type, constant and metadata tables are empty during
     /// the phase, and function bodies must be read through the slots.
     pub module: &'m Module,
-    types: RwLock<Types>,
-    consts: RwLock<Constants>,
+    types: TypeTable,
+    consts: ConstTable,
     metadata: RwLock<Vec<MdNode>>,
     /// Indexed by `GlobalId`; `None` for globals that are not functions.
     slots: Vec<Option<FnSlot>>,
@@ -92,8 +96,8 @@ pub fn parallel_phase<R>(
 
     let shared = Shared {
         module: m,
-        types: RwLock::new(types),
-        consts: RwLock::new(consts),
+        types: TypeTable::new(types),
+        consts: ConstTable::new(consts),
         metadata: RwLock::new(metadata),
         slots,
         intrinsics,
@@ -101,8 +105,8 @@ pub fn parallel_phase<R>(
     let result = phase(&shared);
     let Shared { types, consts, metadata, slots, .. } = shared;
 
-    m.types = types.into_inner().unwrap();
-    m.consts = consts.into_inner().unwrap();
+    m.types = types.into_inner();
+    m.consts = consts.into_inner();
     m.metadata = metadata.into_inner().unwrap();
     let mut remarks = Vec::new();
     for (i, slot) in slots.into_iter().enumerate() {
@@ -165,8 +169,8 @@ impl Shared<'_> {
 
     // Types
 
-    pub fn types(&self) -> RwLockReadGuard<'_, Types> {
-        self.types.read().unwrap()
+    pub fn types(&self) -> &TypeTable {
+        &self.types
     }
 
     pub fn ty(&self, id: TypeId) -> Type {
@@ -174,23 +178,17 @@ impl Shared<'_> {
     }
 
     pub fn intern_type(&self, ty: Type) -> TypeId {
-        if let Some(id) = self.types().lookup(&ty) {
-            return id;
-        }
-        self.types.write().unwrap().intern(ty)
+        self.types.intern(ty)
     }
 
     // Constants
 
-    pub fn consts(&self) -> RwLockReadGuard<'_, Constants> {
-        self.consts.read().unwrap()
+    pub fn consts(&self) -> &ConstTable {
+        &self.consts
     }
 
     pub fn intern_const(&self, c: Constant) -> ConstId {
-        if let Some(id) = self.consts().lookup(&c) {
-            return id;
-        }
-        self.consts.write().unwrap().intern(c)
+        self.consts.intern(c)
     }
 
     pub fn int(&self, bits: u32, value: i64) -> Value {

@@ -1018,7 +1018,7 @@ fn size_estimate(sh: &Shared, ty: TypeId) -> u64 {
         Type::Array { len, elem } => len * size_estimate(sh, elem),
         Type::Struct { fields, .. } => fields.iter().map(|&t| size_estimate(sh, t)).sum(),
         Type::Named(i) => {
-            let body = sh.types().structs[i as usize].body.clone();
+            let body = sh.types().structs()[i as usize].body.clone();
             body.map_or(8, |b| b.fields.iter().map(|&t| size_estimate(sh, t)).sum())
         }
         _ => 8,

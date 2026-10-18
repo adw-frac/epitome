@@ -1,5 +1,5 @@
-//! The interprocedural pipeline: inlining and recursion removal, run
-//! bottom-up over the call graph on many threads.
+//! The pipeline: inlining, recursion removal and combines, run bottom-up
+//! over the call graph on many threads.
 //!
 //! 1. Build the call graph and find its SCCs (in parallel per function).
 //! 2. Declare the intrinsics the passes may call, while the module can
@@ -10,6 +10,7 @@
 //!    - inlines calls to functions in other, finished SCCs;
 //!    - if the SCC is a cycle, collapses it to one function and turns the
 //!      remaining self-calls into loops;
+//!    - runs the combiner on each function;
 //!    - publishes the bodies, which unblocks the SCCs that call them.
 //! 4. Put the module back together, merge identical metadata, and delete
 //!    internal functions that nothing refers to any more.
@@ -35,12 +36,13 @@ pub struct Options {
     pub threads: usize,
     pub level: OptLevel,
     pub inline: bool,
+    pub combine: bool,
     pub recursion: RecursionMode,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { threads: 0, level: OptLevel::O2, inline: true, recursion: RecursionMode::Stack }
+        Options { threads: 0, level: OptLevel::O2, inline: true, combine: true, recursion: RecursionMode::Stack }
     }
 }
 
@@ -52,6 +54,8 @@ pub struct Report {
     /// One line per call-graph cycle, as found before the passes ran.
     pub cycles: Vec<String>,
     pub inlined: usize,
+    /// How often each combine rule fired, over the whole module.
+    pub combines: crate::combine::Stats,
     pub tail_calls: usize,
     pub frame_calls: usize,
     /// Remarks per function, in module order.
@@ -96,6 +100,8 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     lap("call graph");
     let inliner = Inliner::new(InlineParams::for_level(opts.level), &cg, m.globals.len());
     let inlined = AtomicUsize::new(0);
+    let combines = std::sync::Mutex::new(crate::combine::Stats::default());
+    let matcher = crate::combine::standard();
     let tail_calls = AtomicUsize::new(0);
     let frame_calls = AtomicUsize::new(0);
     let task_nanos: Vec<std::sync::atomic::AtomicU64> = (0..cg.sccs.len()).map(|_| Default::default()).collect();
@@ -174,6 +180,17 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                     }
                 }
             }
+            // Simplify before publishing, so callers see the simpler body.
+            if opts.combine {
+                for (g, f) in &mut bodies {
+                    let stats = crate::combine::run(sh, f, matcher);
+                    if stats.total() > 0 {
+                        let list: Vec<String> = stats.fired.iter().map(|(k, v)| format!("{k} x{v}")).collect();
+                        sh.remark(*g, format!("combine: {}", list.join(", ")));
+                        combines.lock().unwrap().merge(&stats);
+                    }
+                }
+            }
             for (g, f) in bodies {
                 sh.publish(g, f);
             }
@@ -191,6 +208,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     report.task_time = std::time::Duration::from_nanos(nanos.iter().sum());
     report.task_critical_path = std::time::Duration::from_nanos(finish.iter().copied().max().unwrap_or(0));
     report.inlined = inlined.into_inner();
+    report.combines = combines.into_inner().unwrap();
     report.tail_calls = tail_calls.into_inner();
     report.frame_calls = frame_calls.into_inner();
     report.remarks = remarks

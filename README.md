@@ -23,8 +23,10 @@ and run their output with `clang` when it is installed.
 
 - `ir` (`smaugian-ir`): the IR, with a parser and printer for `.ll` files.
 - `opt` (`smaugian-opt`): optimisation passes, run on many functions in
-  parallel. So far: the call graph, an inliner with a cost model, and
-  recursion removal. See `docs/design/parallel.md`.
+  parallel. So far: the call graph, an inliner with a cost model,
+  recursion removal, and a rule-driven combiner whose rules are in
+  `opt/rules/combine.rules`. See `docs/design/parallel.md` and
+  `docs/design/combine.md`.
 
 ## Running
 

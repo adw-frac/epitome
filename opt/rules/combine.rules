@@ -1,0 +1,175 @@
+# The standard combines. See opt/src/combine/dsl.rs for the language.
+#
+# Rules are tried in file order and the first that applies wins, so more
+# specific rules go first. Commutative operations (add, mul, and, or, xor,
+# fadd, fmul, icmp.eq, icmp.ne) match with their operands either way round.
+# Replacements drop flags such as nuw and nsw, which is always sound.
+#
+# Every integer rule is checked by tests/combine_rules.rs, which evaluates
+# the pattern and the replacement on every input at small widths.
+#
+# A replacement must make no more new instructions than the match makes
+# unused; the combiner checks this for each match.
+
+# ---------------------------------------------------------------------------
+# Identities and annihilators
+
+add_zero:         add(x, 0) -> x
+sub_zero:         sub(x, 0) -> x
+sub_self:         sub(x, x) -> 0
+mul_zero:         mul(x, 0) -> 0
+mul_one:          mul(x, 1) -> x
+mul_minus_one:    mul(x, -1) -> sub(0, x)
+udiv_one:         udiv(x, 1) -> x
+sdiv_one:         sdiv(x, 1) -> x
+sdiv_minus_one:   sdiv(x, -1) -> sub(0, x)
+urem_one:         urem(x, 1) -> 0
+srem_one:         srem(x, 1) -> 0
+srem_minus_one:   srem(x, -1) -> 0
+udiv_self:        udiv(x, x) -> 1
+sdiv_self:        sdiv(x, x) -> 1
+urem_self:        urem(x, x) -> 0
+srem_self:        srem(x, x) -> 0
+udiv_of_zero:     udiv(0, x) -> 0
+sdiv_of_zero:     sdiv(0, x) -> 0
+urem_of_zero:     urem(0, x) -> 0
+srem_of_zero:     srem(0, x) -> 0
+and_zero:         and(x, 0) -> 0
+and_ones:         and(x, -1) -> x
+and_self:         and(x, x) -> x
+or_zero:          or(x, 0) -> x
+or_ones:          or(x, -1) -> -1
+or_self:          or(x, x) -> x
+xor_zero:         xor(x, 0) -> x
+xor_self:         xor(x, x) -> 0
+shl_by_zero:      shl(x, 0) -> x
+lshr_by_zero:     lshr(x, 0) -> x
+ashr_by_zero:     ashr(x, 0) -> x
+shl_of_zero:      shl(0, x) -> 0
+lshr_of_zero:     lshr(0, x) -> 0
+ashr_of_zero:     ashr(0, x) -> 0
+ashr_of_ones:     ashr(-1, x) -> -1
+
+# ---------------------------------------------------------------------------
+# Cancellation
+
+add_sub_cancel:   add(sub(x, y), y) -> x
+sub_add_cancel:   sub(add(x, y), y) -> x
+sub_sub_cancel:   sub(x, sub(x, y)) -> y
+sub_sub_swap:     sub(sub(x, y), x) -> sub(0, y)
+neg_neg:          sub(0, sub(0, x)) -> x
+add_neg:          add(x, sub(0, y)) -> sub(x, y)
+sub_neg:          sub(x, sub(0, y)) -> add(x, y)
+xor_xor_cancel:   xor(xor(x, y), y) -> x
+and_not_self:     and(x, xor(x, -1)) -> 0
+or_not_self:      or(x, xor(x, -1)) -> -1
+xor_not_self:     xor(x, xor(x, -1)) -> -1
+and_absorb:       and(x, or(x, y)) -> x
+or_absorb:        or(x, and(x, y)) -> x
+not_sub:          xor(sub(0, x), -1) -> add(x, -1)
+neg_not:          sub(0, xor(x, -1)) -> add(x, 1)
+
+# ---------------------------------------------------------------------------
+# Constants: canonical forms and reassociation
+
+# Subtracting a constant becomes adding its negation, so the add rules
+# below see it.
+sub_const:        sub(x, C) -> add(x, -C)
+add_add_const:    add(add(x, C1), C2) -> add(x, C1 + C2)
+sub_const_add:    sub(C1, add(x, C2)) -> sub(C1 - C2, x)
+add_const_sub:    add(sub(C1, x), C2) -> sub(C1 + C2, x)
+mul_mul_const:    mul(mul(x, C1), C2) -> mul(x, C1 * C2)
+and_and_const:    and(and(x, C1), C2) -> and(x, C1 & C2)
+or_or_const:      or(or(x, C1), C2) -> or(x, C1 | C2)
+xor_xor_const:    xor(xor(x, C1), C2) -> xor(x, C1 ^ C2)
+shl_shl_const:    shl(shl(x, C1), C2) -> shl(x, C1 + C2) if C1 < bw && C2 < bw && C1 + C2 < bw
+shl_shl_out:      shl(shl(x, C1), C2) -> 0 if C1 < bw && C2 < bw && C1 + C2 >= bw
+lshr_lshr_const:  lshr(lshr(x, C1), C2) -> lshr(x, C1 + C2) if C1 < bw && C2 < bw && C1 + C2 < bw
+lshr_lshr_out:    lshr(lshr(x, C1), C2) -> 0 if C1 < bw && C2 < bw && C1 + C2 >= bw
+ashr_ashr_const:  ashr(ashr(x, C1), C2) -> ashr(x, C1 + C2) if C1 < bw && C2 < bw && C1 + C2 < bw
+ashr_ashr_out:    ashr(ashr(x, C1), C2) -> ashr(x, bw - 1) if C1 < bw && C2 < bw && C1 + C2 >= bw
+
+# ---------------------------------------------------------------------------
+# Strength reduction
+
+# Shifting an i1 by 1 is poison, but x + x on i1 is just 0.
+add_self:         add(x, x) -> shl(x, 1) if bw > 1
+add_self_bool:    add(x, x) -> 0 if bw == 1
+mul_pow2:         mul(x, C) -> shl(x, log2(C)) if pow2(C)
+udiv_pow2:        udiv(x, C) -> lshr(x, log2(C)) if pow2(C)
+urem_pow2:        urem(x, C) -> and(x, C - 1) if pow2(C)
+
+# ---------------------------------------------------------------------------
+# Comparisons
+
+icmp_eq_self:     icmp.eq(x, x) -> true
+icmp_ne_self:     icmp.ne(x, x) -> false
+icmp_ult_self:    icmp.ult(x, x) -> false
+icmp_ugt_self:    icmp.ugt(x, x) -> false
+icmp_slt_self:    icmp.slt(x, x) -> false
+icmp_sgt_self:    icmp.sgt(x, x) -> false
+icmp_ule_self:    icmp.ule(x, x) -> true
+icmp_uge_self:    icmp.uge(x, x) -> true
+icmp_sle_self:    icmp.sle(x, x) -> true
+icmp_sge_self:    icmp.sge(x, x) -> true
+icmp_ult_zero:    icmp.ult(x, 0) -> false
+icmp_uge_zero:    icmp.uge(x, 0) -> true
+icmp_ugt_ones:    icmp.ugt(x, -1) -> false
+icmp_ule_ones:    icmp.ule(x, -1) -> true
+icmp_eq_add:      icmp.eq(add(x, C1), C2) -> icmp.eq(x, C2 - C1)
+icmp_ne_add:      icmp.ne(add(x, C1), C2) -> icmp.ne(x, C2 - C1)
+icmp_eq_xor:      icmp.eq(xor(x, C1), C2) -> icmp.eq(x, C1 ^ C2)
+icmp_ne_xor:      icmp.ne(xor(x, C1), C2) -> icmp.ne(x, C1 ^ C2)
+icmp_eq_sub_zero: icmp.eq(sub(x, y), 0) -> icmp.eq(x, y)
+icmp_ne_sub_zero: icmp.ne(sub(x, y), 0) -> icmp.ne(x, y)
+icmp_eq_xor_zero: icmp.eq(xor(x, y), 0) -> icmp.eq(x, y)
+icmp_ne_xor_zero: icmp.ne(xor(x, y), 0) -> icmp.ne(x, y)
+icmp_eq_neg_neg:  icmp.eq(sub(0, x), sub(0, y)) -> icmp.eq(x, y)
+icmp_ne_true:     icmp.ne(x, true) -> xor(x, true) if bw == 1
+icmp_eq_true:     icmp.eq(x, true) -> x if bw == 1
+icmp_ne_false:    icmp.ne(x, false) -> x if bw == 1
+icmp_eq_false:    icmp.eq(x, false) -> xor(x, true) if bw == 1
+
+# ---------------------------------------------------------------------------
+# Selects
+
+select_true:      select(true, x, y) -> x
+select_false:     select(false, x, y) -> y
+select_same:      select(c, x, x) -> x
+select_bool:      select(c, true, false) -> c if bw == 1
+select_not_bool:  select(c, false, true) -> xor(c, true) if bw == 1
+select_not_cond:  select(xor(c, true), x, y) -> select(c, y, x)
+select_eq_pick:   select(icmp.eq(x, y), x, y) -> y
+select_ne_pick:   select(icmp.ne(x, y), x, y) -> x
+
+# ---------------------------------------------------------------------------
+# Casts
+
+zext_zext:        zext(zext(x)) -> zext(x)
+sext_sext:        sext(sext(x)) -> sext(x)
+sext_zext:        sext(zext(x)) -> zext(x)
+trunc_trunc:      trunc(trunc(x)) -> trunc(x)
+trunc_zext_same:  trunc(zext(x)) -> x if sametype(x, @)
+trunc_zext_wide:  trunc(zext(x)) -> trunc(x) if bw(x) > bw
+trunc_zext_narrow: trunc(zext(x)) -> zext(x) if bw(x) < bw
+trunc_sext_same:  trunc(sext(x)) -> x if sametype(x, @)
+trunc_sext_wide:  trunc(sext(x)) -> trunc(x) if bw(x) > bw
+trunc_sext_narrow: trunc(sext(x)) -> sext(x) if bw(x) < bw
+bitcast_same:     bitcast(x) -> x if sametype(x, @)
+bitcast_bitcast:  bitcast(bitcast(x)) -> bitcast(x)
+
+# ---------------------------------------------------------------------------
+# Floating point. Only rules that hold for every input, signed zeros and
+# NaNs included: x + 0.0 is not x when x is -0.0.
+
+fadd_neg_zero:    fadd(x, -0.0) -> x
+fsub_zero:        fsub(x, 0.0) -> x
+fmul_one:         fmul(x, 1.0) -> x
+fdiv_one:         fdiv(x, 1.0) -> x
+fneg_fneg:        fneg(fneg(x)) -> x
+fsub_neg_zero:    fsub(-0.0, x) -> fneg(x)
+
+# ---------------------------------------------------------------------------
+# Freeze
+
+freeze_freeze:    freeze(freeze(x)) -> freeze(x)

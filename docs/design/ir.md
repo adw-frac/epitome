@@ -139,7 +139,7 @@ exists.
 
 | Pass | What it does | Status |
 | --- | --- | --- |
-| `instcombine` | Combines and simplifies instructions into a canonical form. | Planned |
+| `instcombine` | Combines and simplifies instructions into a canonical form. The rule-driven combiner covers arithmetic, comparisons, selects, casts and constant folding; see [combines](combine.md). | Done |
 | `aggressive-instcombine` | Matches larger expression patterns and may change the CFG. | Later |
 | `simplifycfg` | Removes unreachable blocks, merges blocks, removes trivial PHIs and branch-only blocks. | Planned |
 | `dce` | Removes dead instructions, and anything that becomes dead as a result. | Planned |

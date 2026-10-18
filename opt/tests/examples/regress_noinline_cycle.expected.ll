@@ -1,7 +1,9 @@
 ; @a: recursion: 1 call(s) now push a frame on an explicit stack (values saved per frame: 1)
 ; @a: recursion: cycle not collapsed: @b is noinline
+; @a: combine: sub_const x2
 ; @b: recursion: 1 call(s) now push a frame on an explicit stack (values saved per frame: 1)
 ; @b: recursion: cycle not collapsed: @c is noinline
+; @b: combine: sub_const x2
 ; @main: not inlined @a: noinline
 ; @main: not inlined @b: noinline
 
@@ -41,7 +43,7 @@ base:                                             ; preds = %entry
   br label %rec.return
 
 rec:                                              ; preds = %entry
-  %m = sub i32 %n, 1
+  %m = add i32 %n, -1
   %x = call i32 @b(i32 %m)
   %frame0 = getelementptr inbounds { ptr, ptr, [64 x { i32 }] }, ptr %chunk, i32 0, i32 2, i32 %index
   store i32 %x, ptr %frame0
@@ -72,7 +74,7 @@ rec.shrink:                                       ; preds = %rec.underflow
 rec.pop:                                          ; preds = %rec.shrink, %rec.return
   %chunk.pop = phi ptr [ %chunk1, %rec.return ], [ %chunk.prev, %rec.shrink ]
   %index.pop = phi i32 [ %index1, %rec.return ], [ 64, %rec.shrink ]
-  %index.prev = sub nuw i32 %index.pop, 1
+  %index.prev = add i32 %index.pop, -1
   %frame = getelementptr inbounds { ptr, ptr, [64 x { i32 }] }, ptr %chunk.pop, i32 0, i32 2, i32 %index.prev
   %x.saved = load i32, ptr %frame
   %s = add i32 %x.saved, %result
@@ -111,7 +113,7 @@ base:                                             ; preds = %entry
   br label %rec.return
 
 rec:                                              ; preds = %entry
-  %m = sub i32 %n, 1
+  %m = add i32 %n, -1
   %x = call i32 @c(i32 %m)
   %y = mul i32 %x, 3
   %frame0 = getelementptr inbounds { ptr, ptr, [64 x { i32 }] }, ptr %chunk, i32 0, i32 2, i32 %index
@@ -143,7 +145,7 @@ rec.shrink:                                       ; preds = %rec.underflow
 rec.pop:                                          ; preds = %rec.shrink, %rec.return
   %chunk.pop = phi ptr [ %chunk1, %rec.return ], [ %chunk.prev, %rec.shrink ]
   %index.pop = phi i32 [ %index1, %rec.return ], [ 64, %rec.shrink ]
-  %index.prev = sub nuw i32 %index.pop, 1
+  %index.prev = add i32 %index.pop, -1
   %frame = getelementptr inbounds { ptr, ptr, [64 x { i32 }] }, ptr %chunk.pop, i32 0, i32 2, i32 %index.prev
   %y.saved = load i32, ptr %frame
   %s = add i32 %y.saved, %result
