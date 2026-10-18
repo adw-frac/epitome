@@ -1,0 +1,36 @@
+.headers on
+create table t(id integer primary key, name text, score real, grp int, data blob);
+with recursive n(i) as (select 1 union all select i+1 from n where i < 2000)
+insert into t select i, 'name' || (i * 7919 % 1000), (i * 37 % 1000) / 7.0, i % 13, zeroblob(2) || x'0102' from n;
+create index t_grp on t(grp, score);
+select count(*), sum(score), avg(score), min(name), max(name), total(grp) from t;
+select grp, count(*), round(avg(score), 4), group_concat(id % 10, '') from t group by grp order by grp limit 5;
+select id, name, score, rank() over (partition by grp order by score desc) r from t where grp = 3 order by r, id limit 8;
+select a.id, b.id, a.score + b.score from t a join t b on a.grp = b.grp and b.id = a.id + 13 where a.id < 60 order by 1, 2 limit 6;
+with recursive fib(a, b, n) as (select 0, 1, 0 union all select b, a + b, n + 1 from fib where n < 80) select n, a from fib where n % 10 = 0;
+select printf('%.3f %e %g %5.1f|%-6d|%x|%q', 3.14159265, 12345.6789, 1e-7, -2.25, 42, 255, 'it''s');
+select abs(-7), round(2.5), round(-2.5), 7 / 2, 7 % 3, 7.0 / 2, -7 / 2, 1 << 40, ~5, 5 & 3 | 8;
+select upper('hello'), lower('WORLD'), substr('abcdef', 2, 3), replace('aaa', 'a', 'bb'), instr('hello', 'll'), length('héllo'), hex('AZ'), quote(x'00ff');
+select json_object('a', 1, 'b', json_array(1, 2.5, 'x', null)), json_extract('{"x":{"y":[1,2,3]}}', '$.x.y[2]');
+select key, value from json_each('[10, 20.5, "thirty", {"k": true}]');
+select typeof(1), typeof(1.5), typeof('x'), typeof(x'00'), typeof(null), 1 = 1.0, '10' < '9', 10 < 9;
+select cast('123abc' as integer), cast(3.99 as integer), cast(-3.99 as integer), cast('1e3' as real), cast(255 as text);
+select 'abc' like 'A%', 'abc' glob 'a*', 'abc' between 'aaa' and 'abd', coalesce(null, null, 3), nullif(4, 4), iif(1 > 2, 'y', 'n');
+select date('2024-02-28', '+1 day'), datetime('2000-01-01 12:00:00', '+90 minutes'), strftime('%Y-%m-%d %w', '2025-10-18'), julianday('2000-01-01');
+create table log(msg text);
+create trigger t_upd after update of score on t begin insert into log values ('changed ' || old.id || ' ' || round(new.score - old.score, 3)); end;
+update t set score = score * 1.5 where id between 10 and 14;
+select * from log;
+create view v as select grp, max(score) m from t group by grp;
+select * from v where m > 140 order by grp;
+insert into t(id, name, score) values (5, 'dup', 1.0) on conflict(id) do update set name = excluded.name || '!';
+select id, name from t where id = 5;
+begin; delete from t where grp = 0; select count(*) from t; rollback; select count(*) from t;
+select sum(length(data)), count(distinct name), max(score) - min(score) from t;
+select name, score from t order by score desc, name limit 5;
+select id from t where name in (select name from t group by name having count(*) > 3) order by id limit 10;
+select sqrt(2), pow(2, 0.5), ln(10), log10(1000), sin(1), cos(1), exp(1), floor(-1.5), ceil(-1.5), pi();
+select 9223372036854775807 + 0, -9223372036854775808, 9223372036854775807 * 2, 1e308 * 10, -1e308 * 10;
+select total(x), sum(x) from (select 1.5 x union all select 2.25 union all select null);
+select char(72, 105), unicode('é'), zeroblob(3), trim('  x  '), ltrim('xxyx', 'x'), format('%08.3f', -3.5);
+pragma integrity_check;

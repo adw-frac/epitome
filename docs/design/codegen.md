@@ -51,7 +51,7 @@ required.
 | Instruction info | Instructions, plus helpers such as copying, spilling and analysing branches. |
 | Frame lowering | Stack layout, prologue and epilogue. |
 | Subtarget | CPU and feature flags, from `-mcpu=` and `-mattr=`. |
-| Calling convention | Where arguments and return values go. |
+| Calling convention | Where arguments and return values go. Smaugian describes conventions as named metadata in the target description; see [isel](isel.md#calling-conventions). |
 | Assembly printer | Turns machine instructions into text or MC instructions. |
 
 LLVM describes most of this in TableGen files. Smaugian describes targets in

@@ -297,18 +297,67 @@ callee-saved ones. Copies to and from argument registers are hints. When no
 register is free the value is spilled to a stack slot, and reloaded into a
 scratch register (`x16`, `x17`, `x15`) around each use.
 
-### Frames and calls
+### Calling conventions
 
-AAPCS64 as used on Darwin: arguments in `x0`–`x7`, result in `x0`,
-`x19`–`x28` callee-saved, `x18` reserved, `x29` the frame pointer and `x30`
-the link register. Every function saves `x29` and `x30` and any
-callee-saved registers it uses; locals and spill slots are addressed from
-`sp`.
+Conventions are data too: named metadata in the description, one block per
+convention and platform (`codegen/src/abi.rs` reads them).
+
+```llvm
+!aarch64.abi.aapcs64 = !{!200, !201, ...}
+!200 = !{!"args", !"x0-x7"}
+!201 = !{!"result", !"x0"}
+!202 = !{!"clobbers", !"x0-x18", !"x30"}
+!203 = !{!"saved", !"x19-x28"}
+!204 = !{!"reserved"}
+!205 = !{!"scratch", !"x15-x17"}
+!206 = !{!"frame", !"x29", !"x30"}
+!207 = !{!"stack-args", !"slots"}
+!208 = !{!"variadic", !"named"}
+!209 = !{!"syntax", !"elf"}
+!210 = !{!"triples", !"linux", !"elf", !"none"}
+```
+
+Two are described:
+
+| | `darwin` (Apple) | `aapcs64` (Linux) |
+| --- | --- | --- |
+| `x18` | reserved for the platform | an ordinary temporary |
+| Stack arguments | packed, each at its own size and alignment | each in an 8-byte slot |
+| Variadic arguments | always on the stack, in 8-byte slots | where named ones would go |
+| Assembler | Mach-O: `_f`, `_g@PAGE`, `_g@PAGEOFF`, `L` labels | ELF: `f`, `g`, `:lo12:g`, `.L` labels |
+
+The convention comes from the module's target triple (`--abi=` chooses
+one). Arguments past `x0`–`x7` are stored by the caller at the bottom of
+its frame, which is sized for its largest call, and loaded by the callee
+from above its own frame. Narrow arguments marked `zeroext` or `signext`
+are extended by the caller, as Apple requires; values without those marks
+have undefined upper bits, as everywhere. Calls clobber the convention's
+registers, so values live across them get saved ones. A function saves
+`x29` and `x30` only if it makes calls, and any saved registers it uses.
+
+Floating-point arguments and results use `d0`–`d7` and `d0`, counted
+apart from the integer registers, and `d8`–`d15` are saved (the low 64
+bits; the `fp-*` properties). Small structs, which clang passes as
+`[2 x i64]`, take two consecutive registers if both fit, and otherwise go
+on the stack whole. A variadic function under Apple's convention finds its
+variable arguments on the caller's stack: `va_start` points the `va_list`
+just past the named stack arguments, and each `va_arg` loads through it and
+steps it by 8.
+
+Symbols a module only declares (in another library) are reached through
+the global offset table (`adrp` of `@GOTPAGE`, then a load), and constants
+holding addresses go where the loader can write (`__DATA,__const`,
+`.data.rel.ro`).
+
+Not yet: `byval` and `sret` arguments, homogeneous floating-point
+aggregates and vectors, defining variadic functions under AAPCS64 (whose
+`va_list` is a struct with register save areas), and tail calls.
 
 ## Output
 
-- **Assembly** in the Darwin dialect, from the templates. It can be
-  assembled with clang and linked with C.
+- **Assembly** in the convention's dialect (Mach-O or ELF), from the
+  templates, with `{s:page}` and `{s:pageoff}` written as the platform
+  writes them. It can be assembled with clang and linked with C.
 - **Binary**: the encoding of each instruction, with branches within a
   function resolved, and fixups for symbols.
 - **Disassembly**: for each 32-bit word, the entries whose literal bits
@@ -330,18 +379,39 @@ callee-saved registers it uses; locals and spill slots are addressed from
   clang's own build prints. Our assembly is assembled by clang and each word
   checked against our encoder (except where we leave a fixup), and each word
   is disassembled with the description and must encode back to itself, with
-  objdump's mnemonic or an alias of it.
+  objdump's mnemonic or an alias of it. Each program is also built from
+  clang's IR for Linux with the AAPCS64 convention, assembled by clang for
+  Linux, and checked word by word.
+- `codegen/tests/abi.rs`: AAPCS64 code built by us and by clang (for Linux,
+  its assembly rewritten for this machine's assembler) is linked in every
+  pairing of caller and callee and run, so that any difference in how
+  arguments are laid out on the stack shows. With the stack layout set
+  wrongly, the mixed pairings fail and ours with ours does not, which is
+  why the test pairs us with clang.
+
+- `codegen/tests/sqlite.rs`: SQLite, as above (needs the amalgamation).
 
 ## Status
 
-The first version covers enough AArch64 integer code to compile small C
-functions: arithmetic, logic, shifts, multiply-add, division and remainder
-(by constants, without dividing), extensions, loads and stores of 8, 16, 32
-and 64 bits with immediate, register and post-increment addressing,
-comparisons, conditional branches, selects, minimum and maximum, switches,
-calls (up to eight arguments), locals, globals and odd widths such as
-`i33`. The description has 184 instructions, 10 condition forms and 16
-recipes; the table built from it has 703 patterns.
+It compiles SQLite. Every function of the 3.50 amalgamation (1,578, about
+357,000 instructions, in 1.5 seconds) compiles, and the result, linked with
+SQLite's shell built by clang, answers the SQL in `tests/sqlite/` exactly as
+clang's build does: both from clang's `-O2` IR, and from clang's `-O0` IR
+through `smaugian-opt`. It runs those scripts in about twice the time
+clang's build takes. `tests/sqlite.rs` repeats this when `SMAUGIAN_SQLITE`
+names the amalgamation.
+
+Covered: integer and floating-point arithmetic, logic, shifts,
+multiply-add, division and remainder (by constants, without dividing),
+conversions, loads and stores of every scalar width with immediate,
+register and post-increment addressing, integer and floating-point
+comparisons, conditional branches (relaxed when out of range), selects,
+minimum and maximum, byte swaps, bit counts, funnel shifts, atomic loads,
+stores and fences, switches, calls (with arguments on the stack, small
+structs, and to and from variadic functions) under Apple's convention and
+AAPCS64, locals, frames of any size up to 32KB, globals, and odd widths
+such as `i33`. The description has 271 instructions, 22 condition forms
+and 18 recipes; the table built from it has 1,294 patterns.
 
 Instructions in the test programs, built without vectorising or unrolling,
 by LLVM's back end and ours:
@@ -367,6 +437,10 @@ successor that stays in the function, and conditional branches are
 inverted where that lets them fall through. Which branch inverts to which
 is in the description (`"inverse"`); a condition's inverse is the
 condition form with the inverse comparison.
+
+When the layout is final, a conditional branch whose target is out of its
+range (`tbz` reaches 32KB, `b.cond` and `cbz` 1MB) becomes the opposite
+branch around an unconditional `b`, which reaches 128MB.
 
 Selection form also does what LLVM's type legalisation does for the cases
 above: values narrower than 32 bits live in W registers with their upper
