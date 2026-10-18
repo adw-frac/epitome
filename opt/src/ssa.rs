@@ -30,6 +30,11 @@ pub struct SsaUpdater {
     preds: Vec<Vec<BlockId>>,
     vars: Vec<Var>,
     defs: HashMap<(usize, BlockId), Value>,
+    /// Blocks with a definition of their own, as opposed to a cached
+    /// answer.
+    own: HashSet<(usize, BlockId)>,
+    /// Values at the start of blocks with their own definition.
+    entries: HashMap<(usize, BlockId), Value>,
     /// Phis added so far, as (block, instruction).
     pub phis: Vec<(BlockId, InstId)>,
 }
@@ -38,7 +43,14 @@ impl SsaUpdater {
     /// `preds` must describe the final CFG: the updater adds phis but never
     /// changes control flow.
     pub fn new(preds: Vec<Vec<BlockId>>) -> Self {
-        SsaUpdater { preds, vars: Vec::new(), defs: HashMap::new(), phis: Vec::new() }
+        SsaUpdater {
+            preds,
+            vars: Vec::new(),
+            defs: HashMap::new(),
+            own: HashSet::new(),
+            entries: HashMap::new(),
+            phis: Vec::new(),
+        }
     }
 
     pub fn add_var(&mut self, ty: TypeId, name: Option<String>, poison: Value) -> usize {
@@ -49,6 +61,48 @@ impl SsaUpdater {
     /// Records that `value` is the definition of `var` in `block`.
     pub fn def(&mut self, var: usize, block: BlockId, value: Value) {
         self.defs.insert((var, block), value);
+        self.own.insert((var, block));
+    }
+
+    /// The value of `var` at the start of `block`, before any definition
+    /// the block makes itself. For a block without one, the same as
+    /// `value_at`.
+    pub fn value_at_entry(&mut self, f: &mut Function, names: &mut Names, var: usize, block: BlockId) -> Value {
+        if !self.own.contains(&(var, block)) {
+            return self.value_at(f, names, var, block);
+        }
+        if let Some(&v) = self.entries.get(&(var, block)) {
+            return v;
+        }
+        let preds = self.preds[block.index()].clone();
+        let v = match preds.as_slice() {
+            [] => self.vars[var].poison,
+            [p] => self.value_at(f, names, var, *p),
+            _ => {
+                let name = self.vars[var].name.as_ref().map(|n| names.fresh(n));
+                let phi = f.add_inst(
+                    Op::Phi { fmf: FastMath::default(), incoming: Vec::new() },
+                    Some((name, self.vars[var].ty)),
+                );
+                f.blocks[block.index()].insts.insert(0, phi);
+                self.phis.push((block, phi));
+                let value = f.result(phi);
+                // Before visiting predecessors: a loop back here reads the
+                // block's own definition at its end, not this phi.
+                self.entries.insert((var, block), value);
+                let mut incoming = Vec::new();
+                for p in preds {
+                    let v = self.value_at(f, names, var, p);
+                    let edges = f.successors(p).iter().filter(|&&s| s == block).count().max(1);
+                    incoming.extend(std::iter::repeat_n((v, p), edges));
+                }
+                let Op::Phi { incoming: slot, .. } = &mut f.insts[phi.index()].op else { unreachable!() };
+                *slot = incoming;
+                value
+            }
+        };
+        self.entries.insert((var, block), v);
+        v
     }
 
     /// The value of `var` at the end of `block`, which is also its value

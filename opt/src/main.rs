@@ -13,11 +13,13 @@ const USAGE: &str = "usage: smaugian-opt [options] <file.ll>
   -O1 -O2 -O3 -Os -Oz     optimisation level (default -O2)
   -j <n>                  threads (default: one per core)
   -o <file>               write the result here instead of stdout
-  --passes=<list>         which passes to run, from inline, recursion,
-                          combine and cse, separated by commas (default: all)
+  --passes=<list>         which passes to run, from mem2reg, inline,
+                          recursion, combine and cse, separated by commas
+                          (default: all)
   --no-inline             do not inline
   --no-combine            do not run the combiner
   --no-cse                do not run common-subexpression elimination
+  --no-mem2reg            do not promote allocas to SSA values
   --recursion=<mode>      off; tail (default): tail and accumulator calls
                           become loops, other recursion stays; or stack:
                           all recursion, with an explicit stack
@@ -43,14 +45,18 @@ fn main() -> ExitCode {
             "--no-inline" => opts.inline = false,
             "--no-combine" => opts.combine = false,
             "--no-cse" => opts.cse = false,
+            "--no-mem2reg" => opts.mem2reg = false,
             s if s.starts_with("--passes=") => {
                 let list: Vec<&str> = s["--passes=".len()..].split(',').collect();
-                if let Some(bad) = list.iter().find(|p| !["inline", "recursion", "combine", "cse"].contains(p)) {
+                if let Some(bad) =
+                    list.iter().find(|p| !["mem2reg", "inline", "recursion", "combine", "cse"].contains(p))
+                {
                     return usage(&format!("unknown pass {bad}"));
                 }
                 opts.inline = list.contains(&"inline");
                 opts.combine = list.contains(&"combine");
                 opts.cse = list.contains(&"cse");
+                opts.mem2reg = list.contains(&"mem2reg");
                 if !list.contains(&"recursion") {
                     opts.recursion = RecursionMode::Off;
                 }
@@ -133,6 +139,12 @@ fn main() -> ExitCode {
             report.frame_calls,
             report.deleted.len()
         );
+        if report.mem2reg.promoted > 0 {
+            eprintln!(
+                "; mem2reg: {} allocas promoted, {} loads and {} stores removed",
+                report.mem2reg.promoted, report.mem2reg.loads, report.mem2reg.stores
+            );
+        }
         if report.cse.total() > 0 {
             eprintln!(
                 "; cse: {} instructions merged, {} loads reused, {} stores forwarded",

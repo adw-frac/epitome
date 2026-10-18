@@ -28,11 +28,13 @@ fn options(src: &str) -> (Options, bool) {
             "--no-inline" => opts.inline = false,
             "--no-combine" => opts.combine = false,
             "--no-cse" => opts.cse = false,
+            "--no-mem2reg" => opts.mem2reg = false,
             s if s.starts_with("--passes=") => {
                 let list: Vec<&str> = s["--passes=".len()..].split(',').collect();
                 opts.inline = list.contains(&"inline");
                 opts.combine = list.contains(&"combine");
                 opts.cse = list.contains(&"cse");
+                opts.mem2reg = list.contains(&"mem2reg");
                 if !list.contains(&"recursion") {
                     opts.recursion = RecursionMode::Off;
                 }

@@ -100,7 +100,7 @@ before.
 
 ## Next
 
-- `mem2reg` and `sroa`, which promote non-escaping allocas to SSA values.
+- `sroa`, which splits allocas that `mem2reg` cannot promote whole.
 - Dead-store elimination, which needs the reverse question: is a store
   overwritten before anything reads it?
 - Variable terms that differ by a known amount (`a[i]` and `a[j]` with

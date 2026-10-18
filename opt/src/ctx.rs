@@ -209,6 +209,10 @@ impl Shared<'_> {
         Value::Const(self.intern_const(Constant { ty, kind: ConstKind::Null }))
     }
 
+    pub fn undef(&self, ty: TypeId) -> Value {
+        Value::Const(self.intern_const(Constant { ty, kind: ConstKind::Undef }))
+    }
+
     pub fn poison(&self, ty: TypeId) -> Value {
         Value::Const(self.intern_const(Constant { ty, kind: ConstKind::Poison }))
     }

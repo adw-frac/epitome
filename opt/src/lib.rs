@@ -11,6 +11,7 @@
 //!   `opt/rules/combine.rules`, matched with a discrimination tree.
 //! - `aa`: basic alias analysis: whether two accesses can overlap, and
 //!   whether an instruction can read or write a location.
+//! - `mem2reg`: promoting allocas to SSA values.
 //! - `cse`: common-subexpression elimination, by hashing a canonical key
 //!   for each instruction, scoped by the dominator tree.
 //! - `cfg`, `ssa`, `cleanup`: analyses and helpers the passes share.
@@ -26,6 +27,7 @@ pub mod combine;
 pub mod cse;
 pub mod ctx;
 pub mod inline;
+pub mod mem2reg;
 pub mod par;
 pub mod pipeline;
 pub mod recursion;

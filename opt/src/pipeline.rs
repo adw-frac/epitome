@@ -38,6 +38,7 @@ pub struct Options {
     pub inline: bool,
     pub combine: bool,
     pub cse: bool,
+    pub mem2reg: bool,
     pub recursion: RecursionMode,
 }
 
@@ -49,6 +50,7 @@ impl Default for Options {
             inline: true,
             combine: true,
             cse: true,
+            mem2reg: true,
             recursion: RecursionMode::Tail,
         }
     }
@@ -66,6 +68,8 @@ pub struct Report {
     pub combines: crate::combine::Stats,
     /// What CSE removed, over the whole module.
     pub cse: crate::cse::Stats,
+    /// What mem2reg promoted, over the whole module.
+    pub mem2reg: crate::mem2reg::Stats,
     pub tail_calls: usize,
     pub accumulator_calls: usize,
     pub frame_calls: usize,
@@ -113,6 +117,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     let inlined = AtomicUsize::new(0);
     let combines = std::sync::Mutex::new(crate::combine::Stats::default());
     let cse_stats = std::sync::Mutex::new(crate::cse::Stats::default());
+    let m2r_stats = std::sync::Mutex::new(crate::mem2reg::Stats::default());
     let matcher = crate::combine::standard();
     let tail_calls = AtomicUsize::new(0);
     let accumulator_calls = AtomicUsize::new(0);
@@ -128,9 +133,37 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                 .filter(|&g| sh.published(g).is_none())
                 .map(|g| (g, sh.take(g)))
                 .collect();
+            // Locals in memory become SSA values first, so every later pass
+            // sees them; and again after inlining, which often makes an
+            // alloca promotable by bringing in the code it was passed to.
+            let promote = |g: GlobalId, f: &mut Function| {
+                let s = crate::mem2reg::run(sh, f);
+                if s.promoted > 0 {
+                    sh.remark(
+                        g,
+                        format!(
+                            "mem2reg: {} allocas promoted ({} loads, {} stores removed)",
+                            s.promoted, s.loads, s.stores
+                        ),
+                    );
+                    let mut all = m2r_stats.lock().unwrap();
+                    all.promoted += s.promoted;
+                    all.loads += s.loads;
+                    all.stores += s.stores;
+                }
+            };
+            if opts.mem2reg {
+                for (g, f) in &mut bodies {
+                    promote(*g, f);
+                }
+            }
             if opts.inline {
                 for (g, f) in &mut bodies {
-                    inlined.fetch_add(inliner.run_on(sh, *g, f), Ordering::Relaxed);
+                    let n = inliner.run_on(sh, *g, f);
+                    inlined.fetch_add(n, Ordering::Relaxed);
+                    if n > 0 && opts.mem2reg {
+                        promote(*g, f);
+                    }
                 }
             }
             if opts.recursion != RecursionMode::Off && cg.is_recursive(s) && !bodies.is_empty() {
@@ -260,6 +293,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     report.inlined = inlined.into_inner();
     report.combines = combines.into_inner().unwrap();
     report.cse = cse_stats.into_inner().unwrap();
+    report.mem2reg = m2r_stats.into_inner().unwrap();
     report.tail_calls = tail_calls.into_inner();
     report.accumulator_calls = accumulator_calls.into_inner();
     report.frame_calls = frame_calls.into_inner();

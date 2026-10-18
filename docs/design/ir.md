@@ -96,7 +96,7 @@ places in it.
 | --- | --- | --- |
 | `domtree` | Builds the dominator tree. | Planned |
 | `postdomtree` | Builds the post-dominator tree. | Planned |
-| `domfrontier` | Computes dominance frontiers. Needed by `mem2reg`. | Planned |
+| `domfrontier` | Computes dominance frontiers. The classic way to place phis for `mem2reg`; ours uses the on-demand SSA updater instead, which does not need them. | Later |
 | `loops` | Finds natural loops and the loop depth of each block. | Planned |
 | `scalar-evolution` | Describes scalar expressions in loops, including induction variables and trip counts. | Planned |
 | `basic-aa` | Stateless alias analysis from simple facts, such as two distinct globals never aliasing. See [alias analysis](aa.md). | Done |
@@ -159,7 +159,7 @@ exists.
 
 | Pass | What it does | Status |
 | --- | --- | --- |
-| `mem2reg` | Promotes allocas that are only loaded and stored into SSA values. | Planned |
+| `mem2reg` | Promotes allocas that are only loaded and stored into SSA values. See [mem2reg](mem2reg.md). | Done |
 | `sroa` | Splits aggregate allocas into one per field, then promotes them. | Planned |
 | `reg2mem` | Demotes values back to stack slots, the reverse of `mem2reg`. | Later |
 
