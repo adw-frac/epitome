@@ -27,10 +27,12 @@ fn options(src: &str) -> (Options, bool) {
         match a {
             "--no-inline" => opts.inline = false,
             "--no-combine" => opts.combine = false,
+            "--no-cse" => opts.cse = false,
             s if s.starts_with("--passes=") => {
                 let list: Vec<&str> = s["--passes=".len()..].split(',').collect();
                 opts.inline = list.contains(&"inline");
                 opts.combine = list.contains(&"combine");
+                opts.cse = list.contains(&"cse");
                 if !list.contains(&"recursion") {
                     opts.recursion = RecursionMode::Off;
                 }

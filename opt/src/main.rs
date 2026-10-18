@@ -13,11 +13,14 @@ const USAGE: &str = "usage: smaugian-opt [options] <file.ll>
   -O1 -O2 -O3 -Os -Oz     optimisation level (default -O2)
   -j <n>                  threads (default: one per core)
   -o <file>               write the result here instead of stdout
-  --passes=<list>         which passes to run, from inline, recursion and
-                          combine, separated by commas (default: all)
+  --passes=<list>         which passes to run, from inline, recursion,
+                          combine and cse, separated by commas (default: all)
   --no-inline             do not inline
   --no-combine            do not run the combiner
-  --recursion=<mode>      off, tail or stack (default stack)
+  --no-cse                do not run common-subexpression elimination
+  --recursion=<mode>      off; tail (default): tail and accumulator calls
+                          become loops, other recursion stays; or stack:
+                          all recursion, with an explicit stack
   --remarks               print each decision to stderr
   --print-cycles          print the call graph's cycles to stderr
   --stats                 print counts and timings to stderr
@@ -39,13 +42,15 @@ fn main() -> ExitCode {
             "-o" => output = it.next().cloned(),
             "--no-inline" => opts.inline = false,
             "--no-combine" => opts.combine = false,
+            "--no-cse" => opts.cse = false,
             s if s.starts_with("--passes=") => {
                 let list: Vec<&str> = s["--passes=".len()..].split(',').collect();
-                if let Some(bad) = list.iter().find(|p| !["inline", "recursion", "combine"].contains(p)) {
+                if let Some(bad) = list.iter().find(|p| !["inline", "recursion", "combine", "cse"].contains(p)) {
                     return usage(&format!("unknown pass {bad}"));
                 }
                 opts.inline = list.contains(&"inline");
                 opts.combine = list.contains(&"combine");
+                opts.cse = list.contains(&"cse");
                 if !list.contains(&"recursion") {
                     opts.recursion = RecursionMode::Off;
                 }
@@ -117,16 +122,23 @@ fn main() -> ExitCode {
     }
     if stats {
         eprintln!(
-            "; {} functions in {} SCCs ({} cycles) on {} threads: {} calls inlined, {} tail calls and {} other recursive calls removed, {} functions deleted",
+            "; {} functions in {} SCCs ({} cycles) on {} threads: {} calls inlined, {} tail, {} accumulator and {} other recursive calls removed, {} functions deleted",
             report.functions,
             report.sccs,
             report.cycles.len(),
             report.threads,
             report.inlined,
             report.tail_calls,
+            report.accumulator_calls,
             report.frame_calls,
             report.deleted.len()
         );
+        if report.cse.total() > 0 {
+            eprintln!(
+                "; cse: {} instructions merged, {} loads reused, {} stores forwarded",
+                report.cse.merged, report.cse.loads, report.cse.forwarded
+            );
+        }
         if report.combines.total() > 0 {
             let mut top: Vec<(&String, &usize)> = report.combines.fired.iter().collect();
             top.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));

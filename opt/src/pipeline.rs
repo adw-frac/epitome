@@ -37,12 +37,20 @@ pub struct Options {
     pub level: OptLevel,
     pub inline: bool,
     pub combine: bool,
+    pub cse: bool,
     pub recursion: RecursionMode,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { threads: 0, level: OptLevel::O2, inline: true, combine: true, recursion: RecursionMode::Stack }
+        Options {
+            threads: 0,
+            level: OptLevel::O2,
+            inline: true,
+            combine: true,
+            cse: true,
+            recursion: RecursionMode::Tail,
+        }
     }
 }
 
@@ -56,7 +64,10 @@ pub struct Report {
     pub inlined: usize,
     /// How often each combine rule fired, over the whole module.
     pub combines: crate::combine::Stats,
+    /// What CSE removed, over the whole module.
+    pub cse: crate::cse::Stats,
     pub tail_calls: usize,
+    pub accumulator_calls: usize,
     pub frame_calls: usize,
     /// Remarks per function, in module order.
     pub remarks: Vec<(String, Vec<String>)>,
@@ -101,8 +112,10 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     let inliner = Inliner::new(InlineParams::for_level(opts.level), &cg, m.globals.len());
     let inlined = AtomicUsize::new(0);
     let combines = std::sync::Mutex::new(crate::combine::Stats::default());
+    let cse_stats = std::sync::Mutex::new(crate::cse::Stats::default());
     let matcher = crate::combine::standard();
     let tail_calls = AtomicUsize::new(0);
+    let accumulator_calls = AtomicUsize::new(0);
     let frame_calls = AtomicUsize::new(0);
     let task_nanos: Vec<std::sync::atomic::AtomicU64> = (0..cg.sccs.len()).map(|_| Default::default()).collect();
 
@@ -131,7 +144,18 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                     match recursion::eliminate(sh, g, f, mode, block_addresses) {
                         Ok(o) => {
                             tail_calls.fetch_add(o.tail_calls, Ordering::Relaxed);
+                            accumulator_calls.fetch_add(o.accumulator_calls, Ordering::Relaxed);
                             frame_calls.fetch_add(o.frame_calls.len(), Ordering::Relaxed);
+                            if o.accumulator_calls > 0 {
+                                let op = o.accumulator_op.map_or("", |op| op.keyword());
+                                sh.remark(
+                                    g,
+                                    format!(
+                                        "recursion: {} accumulator call(s) now jump back to the start, folding with {op}",
+                                        o.accumulator_calls
+                                    ),
+                                );
+                            }
                             if o.tail_calls > 0 {
                                 sh.remark(
                                     g,
@@ -180,14 +204,40 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                     }
                 }
             }
-            // Simplify before publishing, so callers see the simpler body.
-            if opts.combine {
-                for (g, f) in &mut bodies {
-                    let stats = crate::combine::run(sh, f, matcher);
-                    if stats.total() > 0 {
-                        let list: Vec<String> = stats.fired.iter().map(|(k, v)| format!("{k} x{v}")).collect();
-                        sh.remark(*g, format!("combine: {}", list.join(", ")));
-                        combines.lock().unwrap().merge(&stats);
+            // Simplify before publishing, so callers see the simpler body:
+            // combine, then CSE, then combine again if CSE found anything,
+            // since merged values can make new patterns (`x - y` with
+            // `y` now known to be `x`).
+            let combine = |g: GlobalId, f: &mut Function, seeds: Option<&[InstId]>| {
+                let stats = crate::combine::run_from(sh, f, matcher, seeds);
+                if stats.total() > 0 {
+                    let list: Vec<String> = stats.fired.iter().map(|(k, v)| format!("{k} x{v}")).collect();
+                    sh.remark(g, format!("combine: {}", list.join(", ")));
+                    combines.lock().unwrap().merge(&stats);
+                }
+            };
+            for (g, f) in &mut bodies {
+                if opts.combine {
+                    combine(*g, f, None);
+                }
+                if opts.cse {
+                    let crate::cse::Outcome { stats: s, changed } = crate::cse::run(sh, f);
+                    if s.total() > 0 {
+                        sh.remark(
+                            *g,
+                            format!(
+                                "cse: {} merged, {} loads reused, {} stores forwarded",
+                                s.merged, s.loads, s.forwarded
+                            ),
+                        );
+                        let mut all = cse_stats.lock().unwrap();
+                        all.merged += s.merged;
+                        all.loads += s.loads;
+                        all.forwarded += s.forwarded;
+                        drop(all);
+                        if opts.combine {
+                            combine(*g, f, Some(&changed));
+                        }
                     }
                 }
             }
@@ -209,7 +259,9 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     report.task_critical_path = std::time::Duration::from_nanos(finish.iter().copied().max().unwrap_or(0));
     report.inlined = inlined.into_inner();
     report.combines = combines.into_inner().unwrap();
+    report.cse = cse_stats.into_inner().unwrap();
     report.tail_calls = tail_calls.into_inner();
+    report.accumulator_calls = accumulator_calls.into_inner();
     report.frame_calls = frame_calls.into_inner();
     report.remarks = remarks
         .into_iter()

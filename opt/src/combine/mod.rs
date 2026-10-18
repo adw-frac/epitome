@@ -76,10 +76,17 @@ impl Stats {
 
 /// Runs the combiner on one function.
 pub fn run(sh: &Shared, f: &mut Function, matcher: &Matcher) -> Stats {
+    run_from(sh, f, matcher, None)
+}
+
+/// Runs the combiner starting from only the instructions in `seeds`, or
+/// from every instruction for `None`. Changes still spread from there to
+/// users and operands as usual.
+pub fn run_from(sh: &Shared, f: &mut Function, matcher: &Matcher, seeds: Option<&[InstId]>) -> Stats {
     if !f.has_body {
         return Stats::default();
     }
-    let mut c = Combiner::new(sh, f, matcher);
+    let mut c = Combiner::new(sh, f, matcher, seeds);
     c.run();
     c.finish();
     c.stats
@@ -183,7 +190,7 @@ impl Subject for View<'_> {
 }
 
 impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
-    fn new(sh: &'s Shared<'m>, f: &'f mut Function, matcher: &'s Matcher) -> Self {
+    fn new(sh: &'s Shared<'m>, f: &'f mut Function, matcher: &'s Matcher, seeds: Option<&[InstId]>) -> Self {
         let mut c = Combiner {
             sh,
             uses: vec![Vec::new(); f.locals.len()],
@@ -203,8 +210,9 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
             c.add_uses(i);
         }
         // Visit in program order: the list is a stack.
-        for &i in order.iter().rev() {
-            c.push(i);
+        match seeds {
+            Some(list) => list.iter().rev().for_each(|&i| c.push(i)),
+            None => order.iter().rev().for_each(|&i| c.push(i)),
         }
         c
     }

@@ -60,9 +60,12 @@ use crate::ssa::{self, SsaUpdater};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecursionMode {
     Off,
-    /// Only tail calls, which become plain loops.
+    /// Tail calls and accumulator calls, which become plain loops with no
+    /// stack. Other recursive calls stay calls. The default.
     Tail,
-    /// All direct recursive calls, using an explicit stack.
+    /// All direct recursive calls, using an explicit stack where a loop is
+    /// not enough. For targets without a call stack, or where the stack
+    /// measurably pays.
     Stack,
 }
 
@@ -80,6 +83,9 @@ const MAX_FRAME_VALUES: usize = 64;
 pub struct Outcome {
     /// Tail calls turned into jumps.
     pub tail_calls: usize,
+    /// Accumulator calls turned into jumps, and the operation they fold.
+    pub accumulator_calls: usize,
+    pub accumulator_op: Option<BinOp>,
     /// Calls turned into frame pushes, with the number of values each saves.
     pub frame_calls: Vec<usize>,
     /// Recursive calls left as calls.
@@ -113,20 +119,41 @@ pub fn eliminate(
     let has_alloca = f.insts_in_order().any(|i| matches!(f.insts[i.index()].op, Op::Alloca { .. }));
     let is_tail = |i: InstId| returns_result(f, blocks[i.index()].unwrap(), i);
     let mut jumps = Vec::new();
-    let mut frames = Vec::new();
-    let mut kept = 0;
+    let mut accs: Vec<AccSite> = Vec::new();
+    let mut acc_op: Option<BinOp> = None;
+    let mut others = Vec::new();
     for &s in &sites {
-        let tail = is_tail(s);
         if f.insts[s.index()].op.call().unwrap().tail == TailKind::MustTail && has_alloca {
             return Err("musttail recursion in a function with allocas".into());
         }
-        match (tail && !has_alloca, mode) {
-            (true, _) => jumps.push(s),
-            (false, RecursionMode::Stack) => frames.push(s),
-            (false, _) => kept += 1,
+        if has_alloca {
+            // Jumping back would allocate again without freeing.
+            others.push(s);
+        } else if is_tail(s) {
+            jumps.push(s);
+        } else if let Some((op, u, x)) = accumulator_use(sh, f, blocks[s.index()].unwrap(), s)
+            && acc_op.is_none_or(|o| o == op)
+        {
+            acc_op = Some(op);
+            accs.push((s, u, x));
+        } else {
+            others.push(s);
         }
     }
-    if jumps.is_empty() && frames.is_empty() {
+    // With a stack, every call that is not a tail call pushes a frame; an
+    // accumulator would have to be saved in each frame too, so it is not
+    // used.
+    let mut frames = Vec::new();
+    let mut kept = 0;
+    if mode == RecursionMode::Stack && !others.is_empty() {
+        frames = others;
+        frames.extend(accs.drain(..).map(|(s, _, _)| s));
+        frames.sort_by_key(|s| sites.iter().position(|x| x == s));
+        acc_op = None;
+    } else {
+        kept = others.len();
+    }
+    if jumps.is_empty() && frames.is_empty() && accs.is_empty() {
         return Ok(Outcome { kept, ..Default::default() });
     }
     if f.layout.iter().map(|b| f.blocks[b.index()].insts.len()).sum::<usize>() > MAX_SIZE {
@@ -138,7 +165,11 @@ pub fn eliminate(
     let invariant: Vec<bool> = (0..f.params.len())
         .map(|k| {
             let p = Value::Local(f.params[k].local);
-            jumps.iter().chain(&frames).all(|&s| f.insts[s.index()].op.call().unwrap().args[k].value == p)
+            jumps
+                .iter()
+                .chain(&frames)
+                .chain(accs.iter().map(|(s, _, _)| s))
+                .all(|&s| f.insts[s.index()].op.call().unwrap().args[k].value == p)
         })
         .collect();
     let mut live = live_after(f, &frames);
@@ -161,7 +192,8 @@ pub fn eliminate(
     // instead of allocating each one on the machine stack.
     let pool = !has_alloca;
     let mut t = Transform::new(sh, f);
-    let outcome = t.run(f, &jumps, &frames, &live, &invariant, pool, !block_addresses);
+    let acc = acc_op.map(|op| (op, accs.as_slice()));
+    let outcome = t.run(f, &jumps, acc, &frames, &live, &invariant, pool, !block_addresses);
     Ok(Outcome { kept, ..outcome })
 }
 
@@ -240,6 +272,55 @@ fn check_legal(sh: &Shared, g: GlobalId, f: &Function, sites: &[InstId]) -> Resu
         }
     }
     Ok(())
+}
+
+/// An accumulator call: the call, the instruction that folds its result,
+/// and the other operand.
+type AccSite = (InstId, InstId, Value);
+
+/// If recursive call `site` is an accumulator call, the operation, the
+/// instruction that applies it, and the other operand: the call's only use
+/// is `op(r, x)` with `op` associative and commutative, in the same block,
+/// with only side-effect-free arithmetic between them, and that result is
+/// returned. Then `return x op f(...)` can be computed as a loop that
+/// folds each `x` into an accumulator, the way `n * fact(n - 1)` becomes a
+/// running product.
+fn accumulator_use(sh: &Shared, f: &Function, block: BlockId, site: InstId) -> Option<(BinOp, InstId, Value)> {
+    let r = f.insts[site.index()].result?;
+    if !matches!(sh.ty(f.locals[r.index()].ty), Type::Int(_)) {
+        return None;
+    }
+    let me = Value::Local(r);
+    let mut users = Vec::new();
+    for i in f.insts_in_order() {
+        let mut n = 0;
+        f.insts[i.index()].op.for_each_value(|v| n += (*v == me) as usize);
+        users.extend(std::iter::repeat_n(i, n));
+    }
+    let [u] = users[..] else { return None };
+    let Op::Binary { op, lhs, rhs, .. } = f.insts[u.index()].op else { return None };
+    if !matches!(op, BinOp::Add | BinOp::Mul | BinOp::And | BinOp::Or | BinOp::Xor) {
+        return None;
+    }
+    let x = if lhs == me { rhs } else { lhs };
+    if x == me {
+        return None;
+    }
+    // Only pure arithmetic between the call and its use: those run before
+    // the next activation instead of after it.
+    let insts = &f.blocks[block.index()].insts;
+    let from = insts.iter().position(|&i| i == site)?;
+    let to = insts.iter().position(|&i| i == u)?;
+    if to <= from {
+        return None;
+    }
+    let pure = insts[from + 1..to].iter().all(|&i| {
+        matches!(
+            f.insts[i.index()].op,
+            Op::Binary { .. } | Op::ICmp { .. } | Op::Select { .. } | Op::Cast { .. } | Op::Freeze(_) | Op::Gep { .. }
+        )
+    });
+    (pure && returns_result(f, block, u)).then_some((op, u, x))
 }
 
 /// True if what follows call `site` in `block` only returns its result:
@@ -483,6 +564,7 @@ impl<'s, 'm> Transform<'s, 'm> {
         &mut self,
         f: &mut Function,
         jumps: &[InstId],
+        acc: Option<(BinOp, &[AccSite])>,
         frames: &[InstId],
         live: &[Vec<LocalId>],
         invariant: &[bool],
@@ -667,6 +749,49 @@ impl<'s, 'm> Transform<'s, 'm> {
         };
         let state_values: Vec<Value> = state.iter().map(|&l| Value::Local(l)).collect();
 
+        // An accumulator, for calls whose result is folded with an
+        // associative operation and returned. It starts at the operation's
+        // identity, each such call folds its other operand in, and every
+        // return combines it with the returned value.
+        let mut acc_phi = None;
+        if let Some((op, _)) = acc {
+            let Type::Function { ret, .. } = sh.ty(f.ty) else { unreachable!() };
+            let Type::Int(bits) = sh.ty(ret) else { unreachable!() };
+            let identity = match op {
+                BinOp::Mul => 1,
+                BinOp::And => -1,
+                _ => 0,
+            };
+            let at = header_phis.len() + state_phis.len().min(n_header_state);
+            let phi = self.phi(f, header, at, ret, "acc", vec![(sh.int(bits, identity), new_entry)]);
+            let acc_value = f.result(phi);
+            acc_phi = Some(phi);
+            let rets: Vec<(BlockId, InstId)> = f
+                .layout
+                .iter()
+                .filter_map(|&b| f.terminator(b).map(|t| (b, t)))
+                .filter(|(_, t)| matches!(f.insts[t.index()].op, Op::Ret(Some(_))))
+                .collect();
+            for (b, t) in rets {
+                let Op::Ret(Some(v)) = f.insts[t.index()].op else { unreachable!() };
+                let name = self.name("acc.ret");
+                let combined = f.add_inst(
+                    Op::Binary { op, flags: IntFlags::NONE, fmf: FastMath::default(), lhs: acc_value, rhs: v },
+                    Some((name, ret)),
+                );
+                let k = f.blocks[b.index()].insts.len() - 1;
+                f.blocks[b.index()].insts.insert(k, combined);
+                f.insts[t.index()].op = Op::Ret(Some(f.result(combined)));
+            }
+        }
+        let add_acc_incoming = |f: &mut Function, from: BlockId, value: Value| {
+            if let Some(phi) = acc_phi
+                && let Op::Phi { incoming, .. } = &mut f.insts[phi.index()].op
+            {
+                incoming.push((value, from));
+            }
+        };
+
         // Tail calls: jump to the header, leaving the stack as it is.
         for &site in jumps {
             let b = f.inst_blocks()[site.index()].unwrap();
@@ -685,6 +810,50 @@ impl<'s, 'm> Transform<'s, 'm> {
                 f.remove_phi_entries(s, b);
             }
             add_header_incoming(f, b, &args, &state_values);
+            if let Some(phi) = acc_phi {
+                let unchanged = f.result(phi);
+                add_acc_incoming(f, b, unchanged);
+            }
+        }
+
+        // Accumulator calls: fold the other operand in and jump.
+        if let (Some((op, sites)), Some(phi)) = (acc, acc_phi) {
+            let acc_value = f.result(phi);
+            for &(site, u, x) in sites {
+                // A parameter is now the header phi that replaced it.
+                let x = match x {
+                    Value::Local(l) => Value::Local(param_value(f, l)),
+                    v => v,
+                };
+                let b = f.inst_blocks()[site.index()].unwrap();
+                let args: Vec<Value> = f.insts[site.index()].op.call().unwrap().args.iter().map(|a| a.value).collect();
+                let mut old_succs = f.successors(b);
+                old_succs.dedup();
+                // The call goes; its debug records move to what follows it.
+                let records = std::mem::take(&mut f.insts[site.index()].debug_records);
+                let insts = &mut f.blocks[b.index()].insts;
+                let k = insts.iter().position(|&i| i == site).unwrap();
+                insts.remove(k);
+                let next = insts[k];
+                f.insts[next.index()].debug_records.splice(0..0, records);
+                // The use becomes the new accumulator, without the flags
+                // that held for the old order of operations.
+                f.insts[u.index()].op =
+                    Op::Binary { op, flags: IntFlags::NONE, fmf: FastMath::default(), lhs: acc_value, rhs: x };
+                let insts = &mut f.blocks[b.index()].insts;
+                let at = insts.iter().position(|&i| i == u).unwrap();
+                let removed = insts.split_off(at + 1);
+                let records: Vec<DebugRecord> =
+                    removed.iter().flat_map(|i| f.insts[i.index()].debug_records.clone()).collect();
+                let jump = f.push_inst(b, Op::Br(header), None);
+                f.insts[jump.index()].debug_records = records;
+                for s in old_succs {
+                    f.remove_phi_entries(s, b);
+                }
+                add_header_incoming(f, b, &args, &state_values);
+                let folded = f.result(u);
+                add_acc_incoming(f, b, folded);
+            }
         }
 
         // Other calls: push a frame and jump to the header.
@@ -990,6 +1159,7 @@ impl<'s, 'm> Transform<'s, 'm> {
         // Tidy: drop phis that turned out to have one value.
         let mut candidates = up.phis.clone();
         candidates.extend(header_phis.iter().map(|&p| (header, p)));
+        candidates.extend(acc_phi.map(|p| (header, p)));
         let inst_blocks = f.inst_blocks();
         candidates.extend(state_phis.iter().map(|&p| (inst_blocks[p.index()].unwrap(), p)));
         candidates.extend(dispatch_phis);
@@ -1002,7 +1172,13 @@ impl<'s, 'm> Transform<'s, 'm> {
             crate::cleanup::merge_blocks(f);
         }
 
-        Outcome { tail_calls: jumps.len(), frame_calls: pushed.iter().map(|s| s.saved.len()).collect(), kept: 0 }
+        Outcome {
+            tail_calls: jumps.len(),
+            accumulator_calls: acc.map_or(0, |(_, s)| s.len()),
+            accumulator_op: acc.map(|(op, _)| op),
+            frame_calls: pushed.iter().map(|s| s.saved.len()).collect(),
+            kept: 0,
+        }
     }
 }
 

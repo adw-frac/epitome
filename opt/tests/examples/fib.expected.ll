@@ -1,5 +1,6 @@
 ; @fib: recursion: 2 call(s) now push a frame on an explicit stack (values saved per frame: 1, 1)
 ; @fib: combine: add_add_const x1, add_zero x1, sub_const x3
+; @fib: cse: 2 merged, 0 loads reused, 0 stores forwarded
 
 
 define i32 @fib(i32 %n.arg) {
@@ -73,10 +74,8 @@ rec.pop0:                                         ; preds = %rec.pop
   %frame.slot2 = getelementptr inbounds { i32, i32 }, ptr %frame, i32 0, i32 1
   %n.saved = load i32, ptr %frame.slot2
   %n2 = add i32 %n.saved, -2
-  %frame1 = getelementptr inbounds { ptr, ptr, [64 x { i32, i32 }] }, ptr %chunk.pop, i32 0, i32 2, i32 %index.prev
-  store i32 1, ptr %frame1
-  %frame.slot1 = getelementptr inbounds { i32, i32 }, ptr %frame1, i32 0, i32 1
-  store i32 %r, ptr %frame.slot1
+  store i32 1, ptr %frame
+  store i32 %r, ptr %frame.slot2
   br label %rec.header
 
 rec.pop1:                                         ; preds = %rec.pop

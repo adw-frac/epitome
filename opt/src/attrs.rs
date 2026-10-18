@@ -48,3 +48,12 @@ pub fn definition_is_final(linkage: Linkage) -> bool {
             | Linkage::AvailableExternally
     )
 }
+
+/// The text inside an attribute's parentheses, such as `none` for
+/// `memory(none)`.
+pub fn paren_text<'a>(m: &'a Module, list: &'a [Attr], name: &str) -> Option<&'a str> {
+    expanded(m, list).find_map(|a| match a {
+        Attr::Parens { name: n, text } if n == name => Some(text.as_str()),
+        _ => None,
+    })
+}

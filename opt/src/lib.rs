@@ -9,6 +9,8 @@
 //! - `pipeline`: the passes above, run together.
 //! - `combine`: rewriting instructions into simpler ones, from rules in
 //!   `opt/rules/combine.rules`, matched with a discrimination tree.
+//! - `cse`: common-subexpression elimination, by hashing a canonical key
+//!   for each instruction, scoped by the dominator tree.
 //! - `cfg`, `ssa`, `cleanup`: analyses and helpers the passes share.
 //!
 //! See `docs/design/parallel.md` for the design.
@@ -18,6 +20,7 @@ pub mod callgraph;
 pub mod cfg;
 pub mod cleanup;
 pub mod combine;
+pub mod cse;
 pub mod ctx;
 pub mod inline;
 pub mod par;

@@ -1,4 +1,4 @@
-; smaugian-opt: --no-inline
+; smaugian-opt: --no-inline --recursion=stack
 ; Each activation has its own local array, and its address is live across
 ; the recursive call. The alloca moves into the loop with the old entry
 ; block, so every activation allocates afresh; popping a frame restores

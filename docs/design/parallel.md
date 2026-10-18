@@ -272,7 +272,17 @@ a new entry block branches to it.
 - A **tail call**, whose result is returned without further work (through
   branches and phis if need be), jumps to the header with the new
   arguments. This is tail-recursion elimination.
-- **Any other call** pushes a frame and jumps to the header. Every `ret`
+- An **accumulator call**, whose result is used once, by `add`, `mul`,
+  `and`, `or` or `xor`, and that result is returned, also jumps. An
+  accumulator phi in the header starts at the operation's identity (0, 1
+  or all ones), each such call folds its other operand into it, and every
+  `ret v` returns `acc op v`. `n * fact(n - 1)` becomes a running product.
+  Integer arithmetic wraps, so these operations are associative and
+  commutative and the reordering is exact; flags such as `nsw` are
+  dropped, because they held only for the old order. Only side-effect-free
+  arithmetic may sit between the call and its use, since it now runs
+  before the next activation instead of after it.
+- **Any other call**, in `stack` mode, pushes a frame and jumps to the header. Every `ret`
   goes to a dispatch block: if the frame stack is empty the function
   returns; otherwise it pops a frame, reloads the saved values, and
   continues after the call that pushed the frame, with the returned value
@@ -358,11 +368,29 @@ or `callbr`, or would save a value of a type that cannot be stored. A
 `musttail` self-call in a function with allocas is refused, because it
 would need a frame and so lose `musttail`'s guarantee of bounded stack.
 
-`--recursion=off|tail|stack` chooses what to remove; the default is
-`stack`. Functions marked `minsize` only get tail calls removed, and
-`optnone` functions are left alone.
+`--recursion=off|tail|stack` chooses what to remove:
 
-### Why
+- `tail`, the default, removes tail and accumulator calls, which needs no
+  stack and never makes code slower. Other recursive calls stay calls, so
+  the function stays recursive and the inliner leaves it alone. This is
+  what LLVM's `tailcallelim` does.
+- `stack` also turns every other recursive call into a frame push. It is
+  for targets without a call stack or that forbid recursion, and for
+  functions where it measurably pays (Ackermann below). With frames, an
+  accumulator would have to be saved in each frame, so accumulator calls
+  push frames too.
+
+Functions marked `minsize` get `tail` at most, and `optnone` functions are
+left alone.
+
+**Open:** in unoptimised code every local lives in an alloca, so a call's
+result goes through memory and no call looks like a tail or accumulator
+call. This needs `mem2reg` or `sroa` to run first, as LLVM does.
+
+**Open:** a per-function choice of `stack`, from a cost model or a target
+hook, instead of one setting for the module.
+
+### Why use the stack
 
 - A cycle stops blocking the inliner: the function becomes an ordinary
   callee.

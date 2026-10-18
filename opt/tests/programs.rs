@@ -18,6 +18,7 @@ use std::process::Command;
 
 use smaugian_opt::inline::OptLevel;
 use smaugian_opt::pipeline::{self, Options};
+use smaugian_opt::recursion::RecursionMode;
 
 /// Clang flags for each configuration. `noinline` is removed from the
 /// output of the optimised ones, so our inliner has something to do.
@@ -66,8 +67,15 @@ fn strip_noinline(ir: &str) -> String {
         + "\n"
 }
 
-fn check(program: &Path, config: &str, flags: &[&str], level: OptLevel, tmp: &Path) -> Result<String, String> {
-    let stem = format!("{}.{config}.{level:?}", program.file_stem().unwrap().to_string_lossy());
+fn check(
+    program: &Path,
+    config: &str,
+    flags: &[&str],
+    level: OptLevel,
+    recursion: RecursionMode,
+    tmp: &Path,
+) -> Result<String, String> {
+    let stem = format!("{}.{config}.{level:?}.{recursion:?}", program.file_stem().unwrap().to_string_lossy());
     let src_ll = tmp.join(format!("{stem}.ll"));
     run(Command::new("clang").args(["-S", "-emit-llvm", "-w"]).args(flags).arg(program).arg("-o").arg(&src_ll))?;
     let text = strip_noinline(&std::fs::read_to_string(&src_ll).unwrap());
@@ -78,7 +86,7 @@ fn check(program: &Path, config: &str, flags: &[&str], level: OptLevel, tmp: &Pa
     let mut summary = String::new();
     for threads in [1, 8] {
         let mut m = smaugian_ir::parse_module(&text).map_err(|e| format!("{stem}: parse: {e}"))?;
-        let report = pipeline::run(&mut m, &Options { threads, level, ..Options::default() });
+        let report = pipeline::run(&mut m, &Options { threads, level, recursion, ..Options::default() });
         for (g, f) in m.functions() {
             let errors = smaugian_opt::cfg::verify(f, m.global(g).name.as_deref().unwrap_or(""));
             if !errors.is_empty() {
@@ -89,7 +97,7 @@ fn check(program: &Path, config: &str, flags: &[&str], level: OptLevel, tmp: &Pa
             summary = format!(
                 "{stem}: {} inlined, {} tail and {} other recursive calls removed, {} deleted",
                 report.inlined,
-                report.tail_calls,
+                report.tail_calls + report.accumulator_calls,
                 report.frame_calls,
                 report.deleted.len()
             );
@@ -134,9 +142,13 @@ fn programs_behave_the_same() {
             let levels: &[OptLevel] =
                 if *config == "O2" { &[OptLevel::O2, OptLevel::O3, OptLevel::Oz] } else { &[OptLevel::O2] };
             for &level in levels {
-                match check(p, config, flags, level, &tmp) {
-                    Ok(summary) => eprintln!("ok {summary}"),
-                    Err(e) => failures.push(e),
+                // The default turns only tail and accumulator recursion into
+                // loops; the stack mode turns all of it.
+                for recursion in [RecursionMode::Tail, RecursionMode::Stack] {
+                    match check(p, config, flags, level, recursion, &tmp) {
+                        Ok(summary) => eprintln!("ok {summary}"),
+                        Err(e) => failures.push(e),
+                    }
                 }
             }
         }

@@ -82,6 +82,25 @@ impl DomTree {
         DomTree { idom, order }
     }
 
+    /// The children of each block in the dominator tree, in reverse
+    /// postorder.
+    pub fn children(&self) -> Vec<Vec<BlockId>> {
+        let mut by_order: Vec<(u32, BlockId)> = (0..self.idom.len())
+            .filter(|&i| self.order[i] != u32::MAX)
+            .map(|i| (self.order[i], BlockId(i as u32)))
+            .collect();
+        by_order.sort();
+        let mut children = vec![Vec::new(); self.idom.len()];
+        for (_, b) in by_order {
+            if let Some(p) = self.idom[b.index()]
+                && p != b
+            {
+                children[p.index()].push(b);
+            }
+        }
+        children
+    }
+
     pub fn is_reachable(&self, b: BlockId) -> bool {
         self.order[b.index()] != u32::MAX
     }

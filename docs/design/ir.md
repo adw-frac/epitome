@@ -147,7 +147,8 @@ exists.
 | `dse` | Removes stores that are overwritten before being read. | Planned |
 | `sccp` | Sparse conditional constant propagation. Finds constants and dead blocks. | Planned |
 | `reassociate` | Reorders commutative expressions to help constant folding, CSE and LICM. | Planned |
-| `gvn` | Removes fully and partially redundant instructions and loads. | Planned |
+| `early-cse` | Removes instructions and loads that repeat a dominating one, in one walk of the dominator tree. Not on the Passes page; see [CSE](cse.md). | Done |
+| `gvn` | Removes fully and partially redundant instructions and loads. CSE covers the fully redundant ones within a dominator path. | Planned |
 | `jump-threading` | Routes edges past blocks whose branch result is already known. | Planned |
 | `sink` | Moves instructions into the successor blocks that need them. | Later |
 | `memcpyopt` | Removes `memcpy` calls and turns runs of stores into `memset`. | Later |

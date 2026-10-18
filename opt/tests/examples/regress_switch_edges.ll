@@ -1,4 +1,4 @@
-; smaugian-opt: --no-inline
+; smaugian-opt: --no-inline --recursion=stack
 ; Regression: a switch reaches %done twice from %entry, so every phi the
 ; recursion pass adds there needs two entries for %entry, one per edge.
 declare i32 @printf(ptr, ...)
