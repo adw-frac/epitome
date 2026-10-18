@@ -346,6 +346,19 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                             combine(*g, f, None);
                         }
                     }
+                    let r = crate::lsr::run(sh, f);
+                    if r.changed() {
+                        sh.remark(
+                            *g,
+                            format!(
+                                "lsr: {} arrays stepped by pointer, {} counters counting down",
+                                r.pointers, r.countdowns
+                            ),
+                        );
+                        if opts.combine {
+                            combine(*g, f, None);
+                        }
+                    }
                     let mut all = iv_stats.lock().unwrap();
                     all.trip_counts.extend(s.trip_counts);
                     all.exact_exits += s.exact_exits;

@@ -13,6 +13,8 @@
 ;   "sym"                 symbol (fixed up by the linker)
 ;   "cond"                condition, filled in by a condition form (cc.*)
 ;   "tied"                in the same register as the result
+;   "writeback"           read and written: the base of a post-increment
+;                         access, whose stepped value is a further result
 ;
 ; Other attributes:
 ;   "sets"="nzcv"         returns the flags; which of them are right
@@ -318,6 +320,80 @@ define i64 @ADDXrs(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 0
   ret i64 %r
 }
 
+define i32 @ADDWrs_lsr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 0 0 01011 01 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="add {d}, {n}, {m}, lsr #{sh}" {
+  %s = lshr i32 %m, %sh
+  %r = add i32 %n, %s
+  ret i32 %r
+}
+
+define i32 @ADDWrs_asr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 0 0 01011 10 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="add {d}, {n}, {m}, asr #{sh}" {
+  %s = ashr i32 %m, %sh
+  %r = add i32 %n, %s
+  ret i32 %r
+}
+
+define i32 @SUBWrs_lsr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 1 0 01011 01 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="sub {d}, {n}, {m}, lsr #{sh}" {
+  %s = lshr i32 %m, %sh
+  %r = sub i32 %n, %s
+  ret i32 %r
+}
+
+define i32 @SUBWrs_asr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 1 0 01011 10 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="sub {d}, {n}, {m}, asr #{sh}" {
+  %s = ashr i32 %m, %sh
+  %r = sub i32 %n, %s
+  ret i32 %r
+}
+
+; Multiplying by 2^k + 1 is adding a value to itself shifted left by k;
+; the constant fits when log2(c - 1) is defined.
+define i32 @ADDWmul(i32 "reg"="w" %n, i32 "imm" %c) "enc"="0 0 0 01011 00 0 m:5=n imm6:6=log2(c-1)%32 n:5 d:5" "asm"="add {d}, {n}, {n}, lsl #{=log2(c-1)}" "nodecode" {
+  %r = mul i32 %n, %c
+  ret i32 %r
+}
+
+; And by 1 - 2^k: subtracting it shifted from itself.
+define i32 @SUBWmul(i32 "reg"="w" %n, i32 "imm" %c) "enc"="0 1 0 01011 00 0 m:5=n imm6:6=log2(1-c)%32 n:5 d:5" "asm"="sub {d}, {n}, {n}, lsl #{=log2(1-c)}" "nodecode" {
+  %r = mul i32 %n, %c
+  ret i32 %r
+}
+
+define i64 @ADDXrs_lsr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 0 0 01011 01 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="add {d}, {n}, {m}, lsr #{sh}" {
+  %s = lshr i64 %m, %sh
+  %r = add i64 %n, %s
+  ret i64 %r
+}
+
+define i64 @ADDXrs_asr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 0 0 01011 10 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="add {d}, {n}, {m}, asr #{sh}" {
+  %s = ashr i64 %m, %sh
+  %r = add i64 %n, %s
+  ret i64 %r
+}
+
+define i64 @SUBXrs_lsr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 1 0 01011 01 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="sub {d}, {n}, {m}, lsr #{sh}" {
+  %s = lshr i64 %m, %sh
+  %r = sub i64 %n, %s
+  ret i64 %r
+}
+
+define i64 @SUBXrs_asr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 1 0 01011 10 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="sub {d}, {n}, {m}, asr #{sh}" {
+  %s = ashr i64 %m, %sh
+  %r = sub i64 %n, %s
+  ret i64 %r
+}
+
+; Multiplying by 2^k + 1 is adding a value to itself shifted left by k;
+; the constant fits when log2(c - 1) is defined.
+define i64 @ADDXmul(i64 "reg"="x" %n, i64 "imm" %c) "enc"="1 0 0 01011 00 0 m:5=n imm6:6=log2(c-1)%64 n:5 d:5" "asm"="add {d}, {n}, {n}, lsl #{=log2(c-1)}" "nodecode" {
+  %r = mul i64 %n, %c
+  ret i64 %r
+}
+
+; And by 1 - 2^k: subtracting it shifted from itself.
+define i64 @SUBXmul(i64 "reg"="x" %n, i64 "imm" %c) "enc"="1 1 0 01011 00 0 m:5=n imm6:6=log2(1-c)%64 n:5 d:5" "asm"="sub {d}, {n}, {n}, lsl #{=log2(1-c)}" "nodecode" {
+  %r = mul i64 %n, %c
+  ret i64 %r
+}
+
 define i32 @ADDWri(i32 "reg"="wsp" %n, i32 "imm" %imm) "enc"="0 0 0 100010 0 imm:12 n:5 d:5" "asm"="add {d}, {n}, #{imm}" "dclass"="wsp" {
   %r = add i32 %n, %imm
   ret i32 %r
@@ -417,6 +493,41 @@ define i64 @MSUBX(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "reg"="x" %a) "enc"="1
 
 ; Division by zero gives 0 on AArch64; in IR it is undefined, so either is
 ; a correct reading.
+; Widening and high multiplies, for division by constants. The 64-bit
+; high halves are written with i128, which never needs a register: the
+; whole tree is one instruction.
+define i64 @SMULL(i32 "reg"="w" %n, i32 "reg"="w" %m) "enc"="1 00 11011 001 m:5 0 11111 n:5 d:5" "asm"="smull {d}, {n}, {m}" {
+  %a = sext i32 %n to i64
+  %b = sext i32 %m to i64
+  %r = mul i64 %a, %b
+  ret i64 %r
+}
+
+define i64 @UMULL(i32 "reg"="w" %n, i32 "reg"="w" %m) "enc"="1 00 11011 101 m:5 0 11111 n:5 d:5" "asm"="umull {d}, {n}, {m}" {
+  %a = zext i32 %n to i64
+  %b = zext i32 %m to i64
+  %r = mul i64 %a, %b
+  ret i64 %r
+}
+
+define i64 @SMULH(i64 "reg"="x" %n, i64 "reg"="x" %m) "enc"="1 00 11011 010 m:5 0 11111 n:5 d:5" "asm"="smulh {d}, {n}, {m}" {
+  %a = sext i64 %n to i128
+  %b = sext i64 %m to i128
+  %p = mul i128 %a, %b
+  %h = lshr i128 %p, 64
+  %r = trunc i128 %h to i64
+  ret i64 %r
+}
+
+define i64 @UMULH(i64 "reg"="x" %n, i64 "reg"="x" %m) "enc"="1 00 11011 110 m:5 0 11111 n:5 d:5" "asm"="umulh {d}, {n}, {m}" {
+  %a = zext i64 %n to i128
+  %b = zext i64 %m to i128
+  %p = mul i128 %a, %b
+  %h = lshr i128 %p, 64
+  %r = trunc i128 %h to i64
+  ret i64 %r
+}
+
 define i32 @SDIVW(i32 "reg"="w" %n, i32 "reg"="w" %m) "enc"="0 0 0 11010110 m:5 000011 n:5 d:5" "asm"="sdiv {d}, {n}, {m}" {
   %r = sdiv i32 %n, %m
   ret i32 %r
@@ -909,6 +1020,124 @@ define void @STURPi(ptr "reg"="x" %t, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"=
   %p = getelementptr i8, ptr %n, i64 %off
   store ptr %t, ptr %p
   ret void
+}
+
+; Post-increment: load or store at the base, then step the base. The
+; stepped base is a second result, written back to the base register.
+
+define { i8, ptr } @LDRBpost(ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="00 111 0 00 01 0 off:s9 01 n:5 d:5" "asm"="ldrb {d}, [{n}], #{off}" "zext"="8" {
+  %v = load i8, ptr %n
+  %next = getelementptr i8, ptr %n, i64 %off
+  %a = insertvalue { i8, ptr } poison, i8 %v, 0
+  %b = insertvalue { i8, ptr } %a, ptr %next, 1
+  ret { i8, ptr } %b
+}
+
+define { i16, ptr } @LDRHpost(ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="01 111 0 00 01 0 off:s9 01 n:5 d:5" "asm"="ldrh {d}, [{n}], #{off}" "zext"="16" {
+  %v = load i16, ptr %n
+  %next = getelementptr i8, ptr %n, i64 %off
+  %a = insertvalue { i16, ptr } poison, i16 %v, 0
+  %b = insertvalue { i16, ptr } %a, ptr %next, 1
+  ret { i16, ptr } %b
+}
+
+define { i32, ptr } @LDRWpost(ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="10 111 0 00 01 0 off:s9 01 n:5 d:5" "asm"="ldr {d}, [{n}], #{off}" {
+  %v = load i32, ptr %n
+  %next = getelementptr i8, ptr %n, i64 %off
+  %a = insertvalue { i32, ptr } poison, i32 %v, 0
+  %b = insertvalue { i32, ptr } %a, ptr %next, 1
+  ret { i32, ptr } %b
+}
+
+define { i64, ptr } @LDRXpost(ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="11 111 0 00 01 0 off:s9 01 n:5 d:5" "asm"="ldr {d}, [{n}], #{off}" {
+  %v = load i64, ptr %n
+  %next = getelementptr i8, ptr %n, i64 %off
+  %a = insertvalue { i64, ptr } poison, i64 %v, 0
+  %b = insertvalue { i64, ptr } %a, ptr %next, 1
+  ret { i64, ptr } %b
+}
+
+define { ptr, ptr } @LDRPpost(ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="11 111 0 00 01 0 off:s9 01 n:5 d:5" "asm"="ldr {d}, [{n}], #{off}" "nodecode" {
+  %v = load ptr, ptr %n
+  %next = getelementptr i8, ptr %n, i64 %off
+  %a = insertvalue { ptr, ptr } poison, ptr %v, 0
+  %b = insertvalue { ptr, ptr } %a, ptr %next, 1
+  ret { ptr, ptr } %b
+}
+
+define { i32, ptr } @LDRSBWpost(ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="00 111 0 00 11 0 off:s9 01 n:5 d:5" "asm"="ldrsb {d}, [{n}], #{off}" {
+  %v = load i8, ptr %n
+  %x = sext i8 %v to i32
+  %next = getelementptr i8, ptr %n, i64 %off
+  %a = insertvalue { i32, ptr } poison, i32 %x, 0
+  %b = insertvalue { i32, ptr } %a, ptr %next, 1
+  ret { i32, ptr } %b
+}
+
+define { i64, ptr } @LDRSBXpost(ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="00 111 0 00 10 0 off:s9 01 n:5 d:5" "asm"="ldrsb {d}, [{n}], #{off}" {
+  %v = load i8, ptr %n
+  %x = sext i8 %v to i64
+  %next = getelementptr i8, ptr %n, i64 %off
+  %a = insertvalue { i64, ptr } poison, i64 %x, 0
+  %b = insertvalue { i64, ptr } %a, ptr %next, 1
+  ret { i64, ptr } %b
+}
+
+define { i32, ptr } @LDRSHWpost(ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="01 111 0 00 11 0 off:s9 01 n:5 d:5" "asm"="ldrsh {d}, [{n}], #{off}" {
+  %v = load i16, ptr %n
+  %x = sext i16 %v to i32
+  %next = getelementptr i8, ptr %n, i64 %off
+  %a = insertvalue { i32, ptr } poison, i32 %x, 0
+  %b = insertvalue { i32, ptr } %a, ptr %next, 1
+  ret { i32, ptr } %b
+}
+
+define { i64, ptr } @LDRSHXpost(ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="01 111 0 00 10 0 off:s9 01 n:5 d:5" "asm"="ldrsh {d}, [{n}], #{off}" {
+  %v = load i16, ptr %n
+  %x = sext i16 %v to i64
+  %next = getelementptr i8, ptr %n, i64 %off
+  %a = insertvalue { i64, ptr } poison, i64 %x, 0
+  %b = insertvalue { i64, ptr } %a, ptr %next, 1
+  ret { i64, ptr } %b
+}
+
+define { i64, ptr } @LDRSWpost(ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="10 111 0 00 10 0 off:s9 01 n:5 d:5" "asm"="ldrsw {d}, [{n}], #{off}" {
+  %v = load i32, ptr %n
+  %x = sext i32 %v to i64
+  %next = getelementptr i8, ptr %n, i64 %off
+  %a = insertvalue { i64, ptr } poison, i64 %x, 0
+  %b = insertvalue { i64, ptr } %a, ptr %next, 1
+  ret { i64, ptr } %b
+}
+
+define ptr @STRBpost(i8 "reg"="w" %t, ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="00 111 0 00 00 0 off:s9 01 n:5 t:5" "asm"="strb {t}, [{n}], #{off}" {
+  store i8 %t, ptr %n
+  %next = getelementptr i8, ptr %n, i64 %off
+  ret ptr %next
+}
+
+define ptr @STRHpost(i16 "reg"="w" %t, ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="01 111 0 00 00 0 off:s9 01 n:5 t:5" "asm"="strh {t}, [{n}], #{off}" {
+  store i16 %t, ptr %n
+  %next = getelementptr i8, ptr %n, i64 %off
+  ret ptr %next
+}
+
+define ptr @STRWpost(i32 "reg"="w" %t, ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="10 111 0 00 00 0 off:s9 01 n:5 t:5" "asm"="str {t}, [{n}], #{off}" {
+  store i32 %t, ptr %n
+  %next = getelementptr i8, ptr %n, i64 %off
+  ret ptr %next
+}
+
+define ptr @STRXpost(i64 "reg"="x" %t, ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="11 111 0 00 00 0 off:s9 01 n:5 t:5" "asm"="str {t}, [{n}], #{off}" {
+  store i64 %t, ptr %n
+  %next = getelementptr i8, ptr %n, i64 %off
+  ret ptr %next
+}
+
+define ptr @STRPpost(ptr "reg"="x" %t, ptr "reg"="xsp" "writeback" %n, i64 "imm" %off) "enc"="11 111 0 00 00 0 off:s9 01 n:5 t:5" "asm"="str {t}, [{n}], #{off}" "nodecode" {
+  store ptr %t, ptr %n
+  %next = getelementptr i8, ptr %n, i64 %off
+  ret ptr %next
 }
 
 ; Register offsets, shifted by the size.

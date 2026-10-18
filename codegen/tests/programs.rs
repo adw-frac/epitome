@@ -45,13 +45,17 @@ fn run(cmd: &mut Command) -> Result<String, String> {
 }
 
 /// Mnemonics objdump may print for an instruction we print another way.
-const ALIASES: &[(&str, &str)] = &[("add", "mov"), ("mov", "orr"), ("mov", "movz"), ("mov", "movn")];
+const ALIASES: &[(&str, &str)] = &[("add", "mov"), ("mov", "orr"), ("mov", "movz"), ("mov", "movn"), ("neg", "sub")];
 
 fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<String>, String> {
     let src = dir.join(format!("{name}.c"));
     let main = dir.join(format!("{name}.main.c"));
     let reference_exe = tmp.join(format!("{name}.ref"));
-    run(Command::new("clang").arg("-fwrapv").arg(&src).arg(&main).arg("-o").arg(&reference_exe))?;
+    // Programs whose arithmetic never overflows say so, and are built
+    // without -fwrapv, so that overflow flags reach the optimiser.
+    let wrap: &[&str] =
+        if std::fs::read_to_string(&src).unwrap().contains("// no-fwrapv") { &[] } else { &["-fwrapv"] };
+    run(Command::new("clang").args(wrap).arg(&src).arg(&main).arg("-o").arg(&reference_exe))?;
     let want = run(&mut Command::new(&reference_exe))?;
     let mut report = Vec::new();
     let configs: &[(&str, &[&str])] = &[
@@ -62,7 +66,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
     for (config, flags) in configs {
         let stem = format!("{name}.{config}");
         let ll = tmp.join(format!("{stem}.ll"));
-        run(Command::new("clang").arg("-fwrapv").args(*flags).args(["-S", "-emit-llvm"]).arg(&src).arg("-o").arg(&ll))?;
+        run(Command::new("clang").args(wrap).args(*flags).args(["-S", "-emit-llvm"]).arg(&src).arg("-o").arg(&ll))?;
         let text = std::fs::read_to_string(&ll).unwrap();
         let mut m = smaugian_ir::parse_module(&text).map_err(|e| format!("{stem}: {e:?}"))?;
         if *config == "opt" {

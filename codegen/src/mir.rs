@@ -81,6 +81,9 @@ impl MInst {
                         defs.push(k);
                     } else if matches!(o.kind, Kind::Reg(_)) {
                         uses.push(k);
+                        if o.writeback {
+                            defs.push(k);
+                        }
                     }
                 }
             }

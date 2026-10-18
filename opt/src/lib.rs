@@ -33,6 +33,7 @@ pub mod fx;
 pub mod indvars;
 pub mod inline;
 pub mod loops;
+pub mod lsr;
 pub mod mem2reg;
 pub mod par;
 pub mod pipeline;

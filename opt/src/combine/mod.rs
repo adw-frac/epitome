@@ -40,7 +40,7 @@ use smaugian_ir::types::{Type, TypeId};
 use crate::table::{ConstTable as Constants, TypeTable as Types};
 
 use crate::ctx::Shared;
-use dsl::{FloatLit, Head, Lit, Repl, Subject as Who};
+use dsl::{Cond, FloatLit, Head, Lit, Repl, Subject as Who};
 use eval::{Env, Folded, IntConst};
 use tree::{Match, Matcher, Shape, Subject};
 
@@ -384,6 +384,11 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
         if !rule.conds.iter().all(|c| eval::check(c, &env, &same_type)) {
             return None;
         }
+        if rule.conds.contains(&Cond::OneUse)
+            && m.interior.iter().any(|v| matches!(v, Value::Local(l) if self.uses[l.index()].len() != 1))
+        {
+            return None;
+        }
         // The new branch replaces the old; anything else it makes must be
         // paid for by instructions the match leaves unused.
         let made = count_ops(&rule.repl) - 1;
@@ -712,6 +717,11 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
         };
         let same_type = |a: Who, b: Who| type_of(a).is_some() && type_of(a) == type_of(b);
         if !rule.conds.iter().all(|c| eval::check(c, &env, &same_type)) {
+            return None;
+        }
+        if rule.conds.contains(&Cond::OneUse)
+            && m.interior.iter().any(|v| matches!(v, Value::Local(l) if self.uses[l.index()].len() != 1))
+        {
             return None;
         }
         // Worth it only if no more instructions are made than become unused.

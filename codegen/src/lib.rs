@@ -3,6 +3,7 @@
 //! assembly, binary and disassembly output. See `docs/design/isel.md`.
 
 pub mod asm;
+pub mod divconst;
 pub mod enc;
 pub mod frame;
 pub mod isel;

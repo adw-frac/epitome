@@ -101,7 +101,9 @@ pub fn place(t: &Target, f: &mut MFunc) {
     for k in 0..n {
         let exit = match parts[k].1.clone() {
             Exit::Goto(x) => Exit::Goto(skip(&parts, x)),
-            Exit::Cond { branch, taken, other } => Exit::Cond { branch, taken: skip(&parts, taken), other: skip(&parts, other) },
+            Exit::Cond { branch, taken, other } => {
+                Exit::Cond { branch, taken: skip(&parts, taken), other: skip(&parts, other) }
+            }
             e => e,
         };
         parts[k].1 = exit;
@@ -113,10 +115,10 @@ pub fn place(t: &Target, f: &mut MFunc) {
             continue;
         }
         let tail = parts[r].0.clone();
-        for p in 0..n {
-            if p != r && matches!(parts[p].1, Exit::Goto(x) if x == r) {
-                parts[p].0.extend(tail.iter().cloned());
-                parts[p].1 = Exit::Leaves;
+        for (p, part) in parts.iter_mut().enumerate() {
+            if p != r && matches!(part.1, Exit::Goto(x) if x == r) {
+                part.0.extend(tail.iter().cloned());
+                part.1 = Exit::Leaves;
             }
         }
     }

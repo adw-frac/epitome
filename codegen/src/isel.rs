@@ -26,6 +26,9 @@ struct Match {
     next: Option<BlockId>,
     covered: Vec<InstId>,
     cost: (usize, bool, i64),
+    /// Instructions whose values are further results, and the operand of
+    /// the first emitted instruction that receives each.
+    extras: Vec<(InstId, usize)>,
 }
 
 /// Counters for measuring the matcher: roots matched, trie steps taken,
@@ -353,12 +356,51 @@ impl<'a, 'b> Sel<'a, 'b> {
         self.t.fits_cached(i, vals)
     }
 
+    /// Matches tree `t` against value `v`, binding parameters.
+    fn match_leaves(&self, t: &crate::target::Tree, v: Term, params: &mut [Option<Term>]) -> bool {
+        use crate::target::Tree;
+        match t {
+            Tree::Leaf(p) => match params[*p] {
+                Some(prev) => prev == v,
+                None => {
+                    params[*p] = Some(v);
+                    true
+                }
+            },
+            Tree::Lit(k, bits) => self.lit_key(v) == Some(Key::Lit(*k, *bits)),
+            _ => false,
+        }
+    }
+
+    /// An instruction after `root` in its block that `t` matches with the
+    /// parameters bound so far, binding the rest.
+    fn find_extra(&self, t: &crate::target::Tree, root: InstId, params: &mut Vec<Option<Term>>) -> Option<InstId> {
+        let crate::target::Tree::Op(h, kids) = t else { return None };
+        let b = self.inst_block[root.index()]?;
+        let insts = &self.f.blocks[b.index()].insts;
+        for &x in &insts[self.pos[root.index()] + 1..] {
+            if self.covered.contains(&x) || self.chosen.get(&x).is_some_and(|m| m.covered.len() > 1) {
+                continue;
+            }
+            let Some((xh, terms)) = self.head_of(x) else { continue };
+            if xh != *h || terms.len() != kids.len() {
+                continue;
+            }
+            let mut trial = params.clone();
+            if kids.iter().zip(&terms).all(|(k, &v)| self.match_leaves(k, v, &mut trial)) {
+                *params = trial;
+                return Some(x);
+            }
+        }
+        None
+    }
+
     /// Checks a match from the trie, and scores it.
     fn validate(
         &self,
         pat: usize,
         binds: &[Term],
-        covered: Vec<InstId>,
+        mut covered: Vec<InstId>,
         layout_next: Option<BlockId>,
     ) -> Option<Match> {
         let p = &self.t.patterns[pat];
@@ -378,6 +420,14 @@ impl<'a, 'b> Sel<'a, 'b> {
                 },
             }
         }
+        // Further results: another instruction in the block, after this
+        // one, computing what the instruction also writes back.
+        let mut extras = Vec::new();
+        for (tree, operand) in &p.extra {
+            let x = self.find_extra(tree, covered[0], &mut params)?;
+            covered.push(x);
+            extras.push((x, *operand));
+        }
         let mut materialize = 0i64;
         for (i, pp) in p.params.iter().enumerate() {
             let Some(t) = params[i] else { continue };
@@ -385,7 +435,7 @@ impl<'a, 'b> Sel<'a, 'b> {
                 Kind::Reg(class) => {
                     let Term::V(v) = t else { return None };
                     let bits = self.vbits(v);
-                    if bits == 0 || (bits > 32) != (pp.bits > 32) {
+                    if bits == 0 || bits > 64 || (bits > 32) != (pp.bits > 32) {
                         return None;
                     }
                     if let Value::Const(_) = v {
@@ -425,7 +475,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         }
         let extra_branch = next.is_some() && next != layout_next;
         let cost = (covered.len(), !extra_branch, -(p.emit.len() as i64) - materialize - i64::from(extra_branch));
-        Some(Match { pat, params, next, covered, cost })
+        Some(Match { pat, params, next, covered, cost, extras })
     }
 
     fn best_match(&self, root: InstId, layout_next: Option<BlockId>) -> Option<Match> {
@@ -512,7 +562,31 @@ impl<'a, 'b> Sel<'a, 'b> {
                 Op::Alloca { .. } => continue,
                 _ => {}
             }
+            // A cast that a pattern covers with more (smulh ends in a
+            // truncation) is matched; otherwise it is free.
+            if self.is_free_cast(i)
+                && let Some(m) = self.best_match(i, layout_next)
+                && m.covered.len() > 1
+            {
+                for &c in &m.covered {
+                    if c != i {
+                        self.covered.insert(c);
+                    }
+                }
+                for t in m.params.iter().flatten() {
+                    if let Term::V(v) = t {
+                        self.need_value(*v);
+                    }
+                }
+                self.chosen.insert(i, m);
+                continue;
+            }
             if self.is_free_cast(i) {
+                let mut wide = false;
+                inst.op.for_each_value(|v| wide |= self.vbits(*v) > 64);
+                if wide {
+                    return self.err(format!("no instruction for `{}`", self.describe(i)));
+                }
                 inst.op.for_each_value(|v| {
                     if let Value::Local(x) = v
                         && let LocalDef::Inst(d) = f.locals[x.index()].def
@@ -528,6 +602,9 @@ impl<'a, 'b> Sel<'a, 'b> {
             for &c in &m.covered {
                 if c != i {
                     self.covered.insert(c);
+                    // A further result may have been chosen on its own
+                    // already; this match computes it now.
+                    self.chosen.remove(&c);
                 }
             }
             for t in m.params.iter().flatten() {
@@ -733,6 +810,19 @@ impl<'a, 'b> Sel<'a, 'b> {
                     }
                 });
             }
+            // Further results: the base is copied into the register that
+            // receives the stepped value, which the instruction updates.
+            if k == 0 {
+                for &(x, operand) in &m.extras {
+                    let r = self.f.insts[x.index()].result.ok_or("a further result without a value")?;
+                    let rx = self.vreg_of(r);
+                    let MOp::Reg(src) = ops[operand] else {
+                        return self.err("a write-back operand that is not a register");
+                    };
+                    self.push(MInst::copy(Reg::V(rx), src));
+                    ops[operand] = MOp::Reg(Reg::V(rx));
+                }
+            }
             let z = ins.zext;
             if ins.has_result
                 && let MOp::Reg(r) = ops[0]
@@ -894,7 +984,7 @@ impl<'a, 'b> Sel<'a, 'b> {
                 }
                 _ => {}
             }
-            if self.is_free_cast(i) {
+            if self.is_free_cast(i) && !self.chosen.contains_key(&i) {
                 let Some(r) = inst.result else { continue };
                 if !self.needed.contains(&i) {
                     continue;

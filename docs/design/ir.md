@@ -174,7 +174,7 @@ exists.
 | `indvars` | Canonicalises induction variables and exit conditions. Exact exit tests, exit values, widening and trip counts for constant steps, without scalar evolution; see [loops](loops.md). | Partial |
 | `loop-deletion` | Removes finite loops with no side effects and no used results. | Planned |
 | `loop-unroll` | Unrolls loops. Works best after `indvars`. | Planned |
-| `loop-reduce` | Strength-reduces array addressing that uses the induction variable. | Later |
+| `loop-reduce` | Strength-reduces array addressing that uses the induction variable. Pointers for arrays indexed by a unit-step counter, and counting down to zero; see [loops](loops.md). | Partial |
 | `simple-loop-unswitch` | Moves loop-invariant branches out by copying the loop, within a size limit. | Later |
 | `loop-unroll-and-jam` | Unrolls an outer loop and fuses the inner copies, using dependence analysis. | Later |
 | `loop-fusion` | Fuses adjacent loops when that keeps the meaning. | Later |

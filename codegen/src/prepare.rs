@@ -13,6 +13,8 @@
 //!   bits are done on 32-bit extensions of them: a narrow value lives in a
 //!   W register with its upper bits undefined, so these operations, which
 //!   read every bit, need them made right first.
+//! - Division and remainder by constants become multiplications and
+//!   shifts (see `divconst`).
 //! - Integers of other widths below 64 (`i33`, say) are held in the next
 //!   register width, with the same rule: masked or sign-extended in place
 //!   before an operation that reads their top bits.
@@ -77,6 +79,7 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     lower_geps(cx, &mut f)?;
     promote_odd(cx, &mut f)?;
     widen_narrow(cx, &mut f);
+    lower_const_divs(cx, &mut f);
     split_phi_edges(&mut f);
     Ok(f)
 }
@@ -502,6 +505,160 @@ fn promote_odd(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Builds instructions to go before another, of one integer type.
+struct Seq<'f> {
+    f: &'f mut Function,
+    new: Vec<InstId>,
+}
+
+impl Seq<'_> {
+    fn op(&mut self, op: Op, ty: TypeId) -> Value {
+        let i = self.f.add_inst(op, Some((None, ty)));
+        self.new.push(i);
+        self.f.result(i)
+    }
+
+    fn bin(&mut self, op: BinOp, lhs: Value, rhs: Value, ty: TypeId) -> Value {
+        self.op(Op::Binary { op, flags: IntFlags::NONE, fmf: FastMath::default(), lhs, rhs }, ty)
+    }
+
+    fn cast(&mut self, op: CastOp, value: Value, ty: TypeId) -> Value {
+        self.op(Op::Cast { op, flags: IntFlags::NONE, fmf: FastMath::default(), value }, ty)
+    }
+}
+
+/// The high half of `x * m` at `w` bits, then shifted right by `extra`:
+/// the product of the operands extended to `2w` bits.
+fn mul_high(cx: &mut Ctx, s: &mut Seq, x: Value, m: i64, w: u32, signed: bool, extra: u32) -> Value {
+    let ty = cx.m.types.int(w);
+    let wide = cx.m.types.int(2 * w);
+    let ext = if signed { CastOp::SExt } else { CastOp::ZExt };
+    let mc = cx.int(ty, m);
+    let a = s.cast(ext, x, wide);
+    let b = s.cast(ext, mc, wide);
+    let p = s.bin(BinOp::Mul, a, b, wide);
+    // At 32 bits, any further shift joins this one; at 64, smulh and
+    // umulh take the high half as it is.
+    let (shift, rest) = if w == 32 { (32 + extra, 0) } else { (64, extra) };
+    let sh = cx.int(wide, shift as i64);
+    let op = if signed && w == 32 { BinOp::AShr } else { BinOp::LShr };
+    let h = s.bin(op, p, sh, wide);
+    let hi = s.cast(CastOp::Trunc, h, ty);
+    if rest > 0 {
+        let k = cx.int(ty, rest as i64);
+        return s.bin(if signed { BinOp::AShr } else { BinOp::LShr }, hi, k, ty);
+    }
+    hi
+}
+
+fn lower_const_divs(cx: &mut Ctx, f: &mut Function) {
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::Binary { op, lhs: x, rhs, .. } = f.insts[i.index()].op else {
+                k += 1;
+                continue;
+            };
+            let signed = matches!(op, BinOp::SDiv | BinOp::SRem);
+            let rem = matches!(op, BinOp::SRem | BinOp::URem);
+            let (Some(d), Type::Int(w)) = (cx.const_int(rhs), cx.m.types.get(cx.value_ty(f, x)).clone()) else {
+                k += 1;
+                continue;
+            };
+            if !matches!(op, BinOp::SDiv | BinOp::SRem | BinOp::UDiv | BinOp::URem) || !(w == 32 || w == 64) || d == 0 {
+                k += 1;
+                continue;
+            }
+            let ty = cx.m.types.int(w);
+            let mask: u64 = if w == 64 { u64::MAX } else { (1u64 << w) - 1 };
+            let mut s = Seq { f, new: Vec::new() };
+            let zero = cx.int(ty, 0);
+            let c = |cx: &mut Ctx, v: i64| cx.int(ty, v);
+            let result = if signed {
+                let ad = d.unsigned_abs() & mask;
+                if d == 1 || d == -1 {
+                    let q = if d == 1 { x } else { s.bin(BinOp::Sub, zero, x, ty) };
+                    if rem { zero } else { q }
+                } else if ad.is_power_of_two() {
+                    // Round towards zero: add 2^k - 1 to negative values.
+                    let kk = ad.trailing_zeros() as i64;
+                    let sign = s.bin(BinOp::AShr, x, c(cx, w as i64 - 1), ty);
+                    let bias = s.bin(BinOp::LShr, sign, c(cx, w as i64 - kk), ty);
+                    let t = s.bin(BinOp::Add, x, bias, ty);
+                    if rem {
+                        let low = s.bin(BinOp::And, t, c(cx, -(ad as i64)), ty);
+                        s.bin(BinOp::Sub, x, low, ty)
+                    } else {
+                        let q = s.bin(BinOp::AShr, t, c(cx, kk), ty);
+                        if d < 0 { s.bin(BinOp::Sub, zero, q, ty) } else { q }
+                    }
+                } else {
+                    let (m, sh) = crate::divconst::magic_signed(d, w);
+                    let needs_fix = (d > 0 && m < 0) || (d < 0 && m > 0);
+                    let mut q = mul_high(cx, &mut s, x, m, w, true, if needs_fix { 0 } else { sh });
+                    if needs_fix {
+                        q = s.bin(if d > 0 { BinOp::Add } else { BinOp::Sub }, q, x, ty);
+                        if sh > 0 {
+                            q = s.bin(BinOp::AShr, q, c(cx, sh as i64), ty);
+                        }
+                    }
+                    let sign = s.bin(BinOp::LShr, q, c(cx, w as i64 - 1), ty);
+                    let q = s.bin(BinOp::Add, q, sign, ty);
+                    if rem {
+                        let p = s.bin(BinOp::Mul, q, c(cx, d), ty);
+                        s.bin(BinOp::Sub, x, p, ty)
+                    } else {
+                        q
+                    }
+                }
+            } else {
+                let du = (d as u64) & mask;
+                if du == 1 {
+                    if rem { zero } else { x }
+                } else if du.is_power_of_two() {
+                    if rem {
+                        s.bin(BinOp::And, x, c(cx, (du - 1) as i64), ty)
+                    } else {
+                        s.bin(BinOp::LShr, x, c(cx, du.trailing_zeros() as i64), ty)
+                    }
+                } else {
+                    let q = if du > mask / 2 {
+                        // Only 0 or 1 fits.
+                        let i1 = cx.m.types.int(1);
+                        let ge = s.op(Op::ICmp { pred: ICmpPred::Uge, samesign: false, lhs: x, rhs: c(cx, d) }, i1);
+                        s.cast(CastOp::ZExt, ge, ty)
+                    } else {
+                        let (m, add, sh) = crate::divconst::magic_unsigned(du, w);
+                        if add {
+                            let t = mul_high(cx, &mut s, x, m as i64, w, false, 0);
+                            let diff = s.bin(BinOp::Sub, x, t, ty);
+                            let half = s.bin(BinOp::LShr, diff, c(cx, 1), ty);
+                            let sum = s.bin(BinOp::Add, half, t, ty);
+                            s.bin(BinOp::LShr, sum, c(cx, sh as i64 - 1), ty)
+                        } else {
+                            mul_high(cx, &mut s, x, m as i64, w, false, sh)
+                        }
+                    };
+                    if rem {
+                        let p = s.bin(BinOp::Mul, q, c(cx, d), ty);
+                        s.bin(BinOp::Sub, x, p, ty)
+                    } else {
+                        q
+                    }
+                }
+            };
+            let new = std::mem::take(&mut s.new);
+            let res = f.insts[i.index()].result.unwrap();
+            f.replace_uses(Value::Local(res), result);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
 }
 
 fn widen_narrow(cx: &mut Ctx, f: &mut Function) {

@@ -220,8 +220,8 @@ fn trip_count(sh: &Shared, f: &Function, iv: &Iv, e: &Exit) -> Option<String> {
     }
     let constant = |v: Value| int_of(sh, v).map(|k| eval::sext(k.value, k.bits));
     let name = |v: Value| match v {
-        Value::Local(x) => f.locals[x.index()].name.clone().map(|n| format!("%{n}")).unwrap_or_else(|| "?".into()),
-        _ => "?".into(),
+        Value::Local(x) => f.locals[x.index()].name.clone().map(|n| format!("%{n}")),
+        _ => None,
     };
     // The bound `i.next` is tested against, as a constant if it is one,
     // and how far it is from the bound written in the test.
@@ -231,12 +231,13 @@ fn trip_count(sh: &Shared, f: &Function, iv: &Iv, e: &Exit) -> Option<String> {
     let ((hi, hi_k), (lo, lo_k)) =
         if counts_up { ((e.bound, bound), (iv.start, start)) } else { ((iv.start, start), (e.bound, bound)) };
     let extra = if bound.is_none() { shift.abs() } else { 0 };
-    let text = |v: Value, k: Option<i64>| k.map(|k| k.to_string()).unwrap_or_else(|| name(v));
+    // Values without names are left out of remarks.
+    let text = |v: Value, k: Option<i64>| k.map(|k| k.to_string()).or_else(|| name(v));
     match (hi_k, lo_k) {
         (Some(h), Some(l)) => (h - l > 0).then(|| (h - l).to_string()),
-        (_, Some(0)) if extra == 0 => Some(text(hi, hi_k)),
-        _ if extra == 0 => Some(format!("{} - {}", text(hi, hi_k), text(lo, lo_k))),
-        _ => Some(format!("{} - {} + 1", text(hi, hi_k), text(lo, lo_k))),
+        (_, Some(0)) if extra == 0 => text(hi, hi_k),
+        _ if extra == 0 => Some(format!("{} - {}", text(hi, hi_k)?, text(lo, lo_k)?)),
+        _ => Some(format!("{} - {} + 1", text(hi, hi_k)?, text(lo, lo_k)?)),
     }
 }
 

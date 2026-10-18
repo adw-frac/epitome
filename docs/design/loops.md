@@ -129,10 +129,40 @@ for.body:
 
 with the remark `loop %for.body runs %n times when entered`.
 
+## Strength reduction
+
+`opt/src/lsr.rs`. In a rotated loop whose counter `i` steps by 1 and has
+an exact exit test, when every other use of `i` is an index into an array
+whose base does not change in the loop, `getelementptr T, ptr %a, i64 %i`,
+used only as an address for loads and stores:
+
+- each array gets a pointer of its own, `p = phi [&a[start], preheader],
+  [p + 1, latch]`, and the indexing is replaced by it;
+- the counter becomes `bound - i`, so the exit test is `c.next != 0`.
+
+```llvm
+; before                                  ; after
+%i = phi i64 [ 0, %pre ], [ %i.next, %l ]   %p = phi ptr [ %a, %pre ], [ %p.next, %l ]
+%q = getelementptr i32, ptr %a, i64 %i      %c = phi i64 [ %n, %pre ], [ %c.next, %l ]
+%v = load i32, ptr %q                       %v = load i32, ptr %p
+%i.next = add nsw i64 %i, 1                 %c.next = add i64 %c, -1
+%t = icmp ne i64 %i.next, %n                %t = icmp ne i64 %c.next, 0
+                                            %p.next = getelementptr i32, ptr %p, i64 1
+```
+
+At most two arrays become pointers, since each is a register live across
+the loop. The rewrite pays off on machines with post-increment addressing,
+where stepping the pointer is part of the load (`ldr w0, [x1], #4`), and
+where a comparison with zero folds into the branch (`cbnz`): on AArch64
+`sum_array`'s loop goes from five instructions to four. LLVM does this in
+its code generator; here it is an IR pass, so it also shapes the IR other
+back ends see.
+
 ## In the pipeline
 
 After simplifycfg, before CSE, on each function: rotate; then, if any loop
-rotated, the combiner and simplifycfg again; then indvars and the combiner.
+rotated, the combiner and simplifycfg again; then indvars and the combiner;
+then strength reduction and the combiner.
 `--no-loops` turns all of this off, and `loops` names it in `--passes=`.
 
 On the inlining test program (clang without its own passes, then ours,

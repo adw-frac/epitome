@@ -2,7 +2,10 @@
 //!
 //! An encoding is a list of tokens, most significant bit first, adding up
 //! to 32 bits. A token is literal bits (`01011`) or a field
-//! `name:width[=expr]`, where a width written `s19` is signed. Without an
+//! `name:width[=expr]`, where a width written `s19` is signed. Expressions
+//! have integers, operand names, `+ - * / % & | ^ << >>`, and the
+//! functions `bitmask32`, `bitmask64` (logical immediates) and `log2`
+//! (defined only for powers of two). Without an
 //! expression the field holds the operand called `name`.
 //!
 //! Encoding evaluates each field's expression on the operands. Decoding
@@ -22,6 +25,8 @@ pub enum Expr {
     Bin(char, Box<Expr>, Box<Expr>),
     /// `bitmask32(x)` or `bitmask64(x)`: a logical immediate's N:immr:imms.
     Bitmask(u32, Box<Expr>),
+    /// `log2(x)`: defined only when `x` is a power of two.
+    Log2(Box<Expr>),
 }
 
 impl fmt::Display for Expr {
@@ -36,6 +41,7 @@ impl fmt::Display for Expr {
                 op => write!(f, "({a}{op}{b})"),
             },
             Expr::Bitmask(w, e) => write!(f, "bitmask{w}({e})"),
+            Expr::Log2(e) => write!(f, "log2({e})"),
         }
     }
 }
@@ -220,6 +226,15 @@ impl ExprParser {
         if t.bytes().next().is_some_and(|c| c.is_ascii_digit()) {
             return t.parse().map(Expr::Int).map_err(|_| format!("bad number `{t}`"));
         }
+        if t == "log2" && self.peek() == Some("(") {
+            self.pos += 1;
+            let e = self.expr(0)?;
+            if self.peek() != Some(")") {
+                return Err("missing `)`".into());
+            }
+            self.pos += 1;
+            return Ok(Expr::Log2(Box::new(e)));
+        }
         if (t == "bitmask32" || t == "bitmask64") && self.peek() == Some("(") {
             self.pos += 1;
             let e = self.expr(0)?;
@@ -258,6 +273,13 @@ pub fn eval(e: &Expr, env: &Env) -> Option<i64> {
             }
         }
         Expr::Bitmask(w, a) => encode_bitmask(eval(a, env)? as u64, *w)? as i64,
+        Expr::Log2(a) => {
+            let v = eval(a, env)?;
+            if v <= 0 || v & (v - 1) != 0 {
+                return None;
+            }
+            v.trailing_zeros() as i64
+        }
     })
 }
 
@@ -268,6 +290,7 @@ fn invert(e: &Expr, target: i64) -> Option<(String, i64)> {
         Expr::Var(v) => Some((v.clone(), target)),
         Expr::Neg(a) => invert(a, target.wrapping_neg()),
         Expr::Bitmask(w, a) => invert(a, decode_bitmask(target as u64, *w)? as i64),
+        Expr::Log2(a) => invert(a, 1i64.checked_shl(u32::try_from(target).ok()?)?),
         Expr::Bin(op, a, b) => {
             let ka = eval(a, &Env::new());
             let kb = eval(b, &Env::new());
@@ -299,7 +322,7 @@ fn names_in(e: &Expr, out: &mut Vec<String>) {
             }
         }
         Expr::Int(_) => {}
-        Expr::Neg(a) | Expr::Bitmask(_, a) => names_in(a, out),
+        Expr::Neg(a) | Expr::Bitmask(_, a) | Expr::Log2(a) => names_in(a, out),
         Expr::Bin(_, a, b) => {
             names_in(a, out);
             names_in(b, out);

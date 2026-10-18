@@ -27,7 +27,8 @@
 //! replacement converts to the type of the instruction being replaced.
 //!
 //! A **condition** is one or more tests joined by `&&`: comparisons of
-//! expressions (`C1 + C2 < bw`, unsigned), `pow2(C)`, and `sametype(x, @)`.
+//! expressions (`C1 + C2 < bw`, unsigned), `pow2(C)`, `sametype(x, @)`, and
+//! `oneuse`: every operation the pattern looks through has no other use.
 //! `@` is the instruction being replaced, `bw` is its integer width (for
 //! a comparison, the width of what it compares), and `bw(x)` is the width
 //! of `x`.
@@ -213,6 +214,9 @@ pub enum Cond {
     Cmp(CmpOp, Expr, Expr),
     Pow2(Expr),
     SameType(Subject, Subject),
+    /// Every operation the pattern looks through has no other use, so
+    /// the rule does not keep an old value alive beside the new one.
+    OneUse,
 }
 
 #[derive(Clone, Debug)]
@@ -602,6 +606,9 @@ impl Parser {
     }
 
     fn cond(&mut self) -> Result<Cond, String> {
+        if self.eat("oneuse") {
+            return Ok(Cond::OneUse);
+        }
         if self.eat("pow2") {
             self.expect("(")?;
             let e = self.expr()?;

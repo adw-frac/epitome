@@ -79,6 +79,8 @@ pub struct Operand {
     /// Bits of the value's IR type: immediates are compared at this width.
     pub bits: u32,
     pub tied: bool,
+    /// Read and written: the base register of a post-increment access.
+    pub writeback: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -293,6 +295,10 @@ pub struct Pattern {
     /// The wildcards in preorder: a parameter, or `None` for the
     /// fall-through block.
     pub wild: Vec<Option<usize>>,
+    /// Further results, for instructions that write back their base: a
+    /// tree another IR instruction in the block must match, with the
+    /// parameters shared, and the operand of `emit[0]` that receives it.
+    pub extra: Vec<(Tree, usize)>,
 }
 
 pub struct Target {
@@ -307,7 +313,7 @@ pub struct Target {
     pub trie: Trie,
     /// Intrinsics the description's bodies call, such as `llvm.smax.i32`.
     pub intrinsics: Vec<String>,
-    fits_cache: std::sync::Mutex<HashMap<(usize, Vec<Option<i64>>), bool>>,
+    fits_cache: std::sync::Mutex<HashMap<FitsKey, bool>>,
 }
 
 fn attr<'a>(attrs: &'a [Attr], key: &str) -> Option<Option<&'a str>> {
@@ -429,9 +435,24 @@ impl Target {
             let enc = enc::parse(enc_text).map_err(|e| format!("@{name}: {e}"))?;
             let fn_ty = m.types.get(f.ty).clone();
             let Type::Function { ret, .. } = fn_ty else { unreachable!() };
-            let ret_bits = type_bits(m, ret);
-            let flags = matches!(m.types.get(ret), Type::Named(_) | Type::Struct { .. });
-            let has_result = ret_bits > 0 && !flags;
+            // A struct result is the flags, for a comparison ("sets"), or
+            // the value and the written-back base of a post-increment load.
+            let aggregate = matches!(m.types.get(ret), Type::Named(_) | Type::Struct { .. });
+            let flags = aggregate && attr(&f.fn_attrs, "sets").is_some();
+            let ret_bits = if aggregate && !flags {
+                let fields = match m.types.get(ret) {
+                    Type::Struct { fields, .. } => fields.clone(),
+                    Type::Named(n) => {
+                        m.types.structs[*n as usize].body.as_ref().map(|b| b.fields.clone()).unwrap_or_default()
+                    }
+                    _ => vec![],
+                };
+                fields.first().map_or(0, |&t| type_bits(m, t))
+            } else {
+                type_bits(m, ret)
+            };
+            let writeback_ret = f.params.iter().any(|p| attr(&p.attrs, "writeback").is_some()) && !aggregate;
+            let has_result = ret_bits > 0 && !flags && !writeback_ret;
             let mut operands = Vec::new();
             if has_result {
                 let class = match attr(&f.fn_attrs, "dclass").flatten() {
@@ -439,7 +460,13 @@ impl Target {
                     None if ret_bits <= 32 => Class::W,
                     None => Class::X,
                 };
-                operands.push(Operand { name: "d".into(), kind: Kind::Reg(class), bits: ret_bits, tied: false });
+                operands.push(Operand {
+                    name: "d".into(),
+                    kind: Kind::Reg(class),
+                    bits: ret_bits,
+                    tied: false,
+                    writeback: false,
+                });
             }
             for p in &f.params {
                 let local = &f.locals[p.local.index()];
@@ -462,6 +489,7 @@ impl Target {
                     kind,
                     bits: type_bits(m, local.ty),
                     tied: attr(&p.attrs, "tied").is_some(),
+                    writeback: attr(&p.attrs, "writeback").is_some(),
                 });
             }
             let default_zext = if has_result && ret_bits <= 32 { 32 } else { 64 };
@@ -727,7 +755,40 @@ impl Target {
                         _ => {}
                     }
                     let emit = vec![self.emit_of(idx, 0, None, Src::Result)];
-                    out.push(Pattern { name: ins.name.clone(), tree, params, emit, nodes: 0, wild: vec![] });
+                    // A post-increment access: the access is the pattern,
+                    // and the stepped base is a second root to find.
+                    let mut extra = Vec::new();
+                    let mut tree = tree;
+                    if let Some(wb) = ins.operands.iter().position(|o| o.writeback) {
+                        let entry = f.entry();
+                        let store = f.blocks[entry.index()]
+                            .insts
+                            .iter()
+                            .find(|&&i| matches!(f.insts[i.index()].op, Op::Store { .. }));
+                        match (store, tree) {
+                            (Some(&st), next) => {
+                                let Op::Store { value, ptr, .. } = f.insts[st.index()].op else { unreachable!() };
+                                let bits = match value {
+                                    Value::Local(x) => type_bits(&self.module, f.locals[x.index()].ty),
+                                    _ => 0,
+                                };
+                                let ev = |v| self.eval_value(f, v, &HashMap::new(), 0);
+                                tree = mk(Head::Store(bits), vec![ev(value)?, ev(ptr)?]);
+                                extra.push((next, wb));
+                            }
+                            (None, Tree::Flags(value, next)) => {
+                                tree = *value;
+                                extra.push((*next, wb));
+                            }
+                            (None, t) => {
+                                return Err(format!(
+                                    "@{}: a write-back instruction must return its base: {t:?}",
+                                    ins.name
+                                ));
+                            }
+                        }
+                    }
+                    out.push(Pattern { name: ins.name.clone(), tree, params, emit, nodes: 0, wild: vec![], extra });
                 }
                 Some(cp) => {
                     // Each condition form, on the flags of each comparison
@@ -765,6 +826,7 @@ impl Target {
                                 emit,
                                 nodes: 0,
                                 wild: vec![],
+                                extra: vec![],
                             });
                         }
                     }
@@ -798,6 +860,7 @@ impl Target {
                 emit,
                 nodes: 0,
                 wild: vec![],
+                extra: vec![],
             });
         }
 
@@ -849,7 +912,7 @@ impl Target {
         }
         out.extend(more);
         for p in &mut out {
-            p.nodes = p.tree.nodes();
+            p.nodes = p.tree.nodes() + p.extra.iter().map(|(t, _)| t.nodes()).sum::<usize>();
             let mut wild = Vec::new();
             preorder_wild(&p.tree, &mut wild);
             p.wild = wild;
@@ -992,6 +1055,9 @@ fn preorder_wild(t: &Tree, out: &mut Vec<Option<usize>>) {
 
 // ---------------------------------------------------------------------------
 // Checking
+
+/// An instruction and the immediates it is asked to hold.
+type FitsKey = (usize, Vec<Option<i64>>);
 
 /// A recipe, for checking: its name, its parameters' widths, the tree of
 /// the IR it replaces, and the tree of what its instructions do.

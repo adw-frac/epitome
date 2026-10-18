@@ -32,9 +32,15 @@ trunc_zext_same: trunc(zext(x)) -> x if sametype(x, @)
 - **Replacements** have the same shape, and may compute constants from the
   pattern's: `C1 + C2`, `-C`, `~C`, `log2(C)`, `bw - 1`. Expressions are
   computed exactly and truncated to the width where they are used.
-- **Conditions** are comparisons of expressions, `pow2(C)` and
-  `sametype(x, @)`, joined by `&&`. `@` is the instruction being replaced,
-  and `bw` is its integer width (for a comparison, the width it compares).
+- **Conditions** are comparisons of expressions, `pow2(C)`,
+  `sametype(x, @)` and `oneuse`, joined by `&&`. `@` is the instruction
+  being replaced, and `bw` is its integer width (for a comparison, the
+  width it compares). `oneuse` holds when every operation the pattern
+  looks through has no other use, so that the rule does not keep an old
+  value alive beside the new one: `icmp.ne(add(x, C1), C2)` becomes
+  `icmp.ne(x, C2 - C1)` only then, since otherwise both `x` and the `add`
+  stay live (and a counter tested after its decrement can no longer be
+  compared with zero).
 
 Rules are tried in file order, so more specific rules go first.
 Commutative operations (`add`, `mul`, `and`, `or`, `xor`, `fadd`, `fmul`,

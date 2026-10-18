@@ -172,6 +172,50 @@ define i32 @srem.w.expand(i32 %a, i32 %b) {
 Casts between integer types that live in the same register class are free
 in an expansion: they name the same register.
 
+### Instructions with two results
+
+A post-increment load writes the loaded value and the stepped base:
+`ldrsw x3, [x0], #4`. Its body returns both, and its base operand is
+marked `"writeback"`, read and written:
+
+```llvm
+define { i64, ptr } @LDRSWpost(ptr "reg"="xsp" "writeback" %n, i64 "imm" %off)
+    "enc"="10 111 0 00 10 0 off:s9 01 n:5 d:5" "asm"="ldrsw {d}, [{n}], #{off}" {
+  %v = load i32, ptr %n
+  %r = sext i32 %v to i64
+  %next = getelementptr i8, ptr %n, i64 %off
+  %a = insertvalue { i64, ptr } poison, i64 %r, 0
+  %b = insertvalue { i64, ptr } %a, ptr %next, 1
+  ret { i64, ptr } %b
+}
+```
+
+The first result is the pattern, as usual. The second is an *extra root*:
+after a match, the selector looks for an instruction later in the same
+block that matches it with the parameters already bound (here, a
+`getelementptr` of the same base by a constant that fits). That
+instruction is then covered by the match, and its value is the
+instruction's written-back base: the base is copied into its register
+first, and the instruction steps it. Stores work the same way, with the
+store as the pattern and the stepped base as the extra root.
+
+### Immediates as constants of a shape
+
+`log2(x)` in a field expression is defined only for powers of two, so an
+entry can accept a family of constants. Multiplying by `2^k + 1` is adding
+a value to itself shifted:
+
+```llvm
+define i32 @ADDWmul(i32 "reg"="w" %n, i32 "imm" %c)
+    "enc"="0 0 0 01011 00 0 m:5=n imm6:6=log2(c-1)%32 n:5 d:5" "asm"="add {d}, {n}, {n}, lsl #{=log2(c-1)}" {
+  %r = mul i32 %n, %c
+  ret i32 %r
+}
+```
+
+`mul i32 %x, 5` fits (`log2(4) = 2`) and becomes `add w0, w0, w0, lsl #2`;
+`mul i32 %x, 6` does not, and stays a `mul`.
+
 ## Selection
 
 ### Selection form
@@ -185,6 +229,14 @@ that the IR and the bodies meet in the same shape:
   elements is `getelementptr i8, ptr %a, i64 (shl %i, 2)`, which is what
   the scaled register-offset `ldr` says.
 - `switch` becomes a chain of comparisons.
+- Division and remainder by constants become multiplications by a magic
+  number, keeping the high half, and shifts (Granlund and Montgomery,
+  1994, as in Warren's *Hacker's Delight*, chapter 10; `codegen/src/
+  divconst.rs`). Powers of two are shifts, corrected so that signed
+  division rounds towards zero. The high half of a 32-bit product is
+  `smull` or `umull` and a shift; for 64 bits it is written with `i128`
+  and covered whole by `smulh` or `umulh`, so the wide values never need a
+  register. `x / 7` is `smull`, `asr`, `add`, `asr`, `add ... lsr #31`.
 - Critical edges are split, so that phis can become copies at the end of
   predecessors.
 
@@ -283,18 +335,30 @@ callee-saved registers it uses; locals and spill slots are addressed from
 ## Status
 
 The first version covers enough AArch64 integer code to compile small C
-functions: arithmetic, logic, shifts, multiply-add, division and remainder,
-extensions, loads and stores of 8, 16, 32 and 64 bits with immediate and
-register offsets, comparisons, conditional branches, selects, minimum and
-maximum, switches, calls (up to eight arguments), locals, globals and odd
-widths such as `i33`. The description has 153 instructions, 10 condition
-forms and 16 recipes; the table built from it has 672 patterns.
+functions: arithmetic, logic, shifts, multiply-add, division and remainder
+(by constants, without dividing), extensions, loads and stores of 8, 16, 32
+and 64 bits with immediate, register and post-increment addressing,
+comparisons, conditional branches, selects, minimum and maximum, switches,
+calls (up to eight arguments), locals, globals and odd widths such as
+`i33`. The description has 184 instructions, 10 condition forms and 16
+recipes; the table built from it has 703 patterns.
 
-On `tests/programs/basic.c` (38 functions) built by clang `-O2` without
-vectorising or unrolling, LLVM's back end gives 426 instructions and ours
-510. The differences are mostly addressing modes we do not have yet
-(post-increment loads), loops LLVM rewrites to count down, and phi copies
-the allocator does not coalesce.
+Instructions in the test programs, built without vectorising or unrolling,
+by LLVM's back end and ours:
+
+| Program | IR from | LLVM | Ours |
+| --- | --- | --- | --- |
+| `basic.c` (38 functions) | clang `-O2` | 426 | 509 |
+| `divs.c` (division by 90 constants) | clang `-O2` | 793 | 814 |
+| `loops.c` (9 array loops) | clang `-O2` | 106 | 119 |
+| `loops.c` | clang `-O0`, then `smaugian-opt` | 106 (from `-O2`) | 103 |
+
+clang's `-O2` IR still indexes arrays by counter, since LLVM reduces
+strength in its code generator; ours does it in `smaugian-opt`
+([loops](loops.md)), so it shows in the last row. In `basic.c` the
+remaining differences are mostly loops built with `-fwrapv` (whose
+counters cannot be widened or reduced) and phi copies the allocator does
+not coalesce.
 
 After allocation and frames, blocks are placed so that most branches fall
 through (`codegen/src/layout.rs`): small return blocks are copied into the

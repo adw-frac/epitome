@@ -5,6 +5,7 @@
 ; @sum_to: simplifycfg: 0 unreachable blocks removed, 0 empty blocks bypassed, 0 selects made, 1 blocks merged
 ; @sum_to: indvars: loop %for.body runs %n times when entered
 ; @sum_to: indvars: 1 exact exit tests, 0 exit values, 1 counters widened
+; @sum_to: lsr: 1 arrays stepped by pointer, 1 counters counting down
 ; @last: mem2reg: 2 allocas promoted (4 loads, 3 stores removed)
 ; @last: simplifycfg: 0 unreachable blocks removed, 1 empty blocks bypassed, 0 selects made, 0 blocks merged
 ; @last: rotate: 1 loops rotated
@@ -16,9 +17,9 @@
 ; @count_down: combine: icmp_ugt_zero x1
 ; @count_down: simplifycfg: 0 unreachable blocks removed, 0 empty blocks bypassed, 0 selects made, 1 blocks merged
 ; @count_down: rotate: 1 loops rotated
-; @count_down: combine: icmp_ne_add x1
 ; @count_down: simplifycfg: 0 unreachable blocks removed, 0 empty blocks bypassed, 0 selects made, 1 blocks merged
 ; @count_down: indvars: loop %for.body runs %n times when entered
+; @count_down: indvars: 1 exact exit tests, 0 exit values, 0 counters widened
 ; @squares: mem2reg: 2 allocas promoted (6 loads, 4 stores removed)
 ; @squares: simplifycfg: 0 unreachable blocks removed, 0 empty blocks bypassed, 0 selects made, 1 blocks merged
 ; @squares: rotate: 1 loops rotated
@@ -26,7 +27,6 @@
 ; @squares: simplifycfg: 0 unreachable blocks removed, 0 empty blocks bypassed, 0 selects made, 1 blocks merged
 ; @squares: indvars: loop %for.body runs 10 times when entered
 ; @squares: indvars: 1 exact exit tests, 0 exit values, 0 counters widened
-; @squares: combine: icmp_ne_add x1
 ; @main: mem2reg: 1 allocas promoted (0 loads, 1 stores removed)
 
 target datalayout = "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32"
@@ -41,14 +41,15 @@ entry:
   br i1 %cmp1, label %for.body, label %for.end
 
 for.body:                                         ; preds = %for.body, %entry
-  %i.wide = phi i64 [ 0, %entry ], [ %i.wide.next, %for.body ]
+  %lsr.ptr = phi ptr [ %a, %entry ], [ %lsr.ptr.next, %for.body ]
+  %lsr.count = phi i64 [ %wide.bound, %entry ], [ %lsr.count.next, %for.body ]
   %s = phi i64 [ 0, %entry ], [ %add, %for.body ]
-  %arrayidx = getelementptr inbounds i32, ptr %a, i64 %i.wide
-  %0 = load i32, ptr %arrayidx, align 4
+  %0 = load i32, ptr %lsr.ptr, align 4
   %conv = sext i32 %0 to i64
   %add = add nsw i64 %s, %conv
-  %i.wide.next = add nsw i64 %i.wide, 1
-  %cmp = icmp ne i64 %i.wide.next, %wide.bound
+  %lsr.count.next = add i64 %lsr.count, -1
+  %cmp = icmp ne i64 %lsr.count.next, 0
+  %lsr.ptr.next = getelementptr i32, ptr %lsr.ptr, i64 1
   br i1 %cmp, label %for.body, label %for.end
 
 for.end:                                          ; preds = %for.body, %entry
@@ -84,7 +85,7 @@ for.body:                                         ; preds = %for.body, %entry
   %t = phi i32 [ 0, %entry ], [ %add, %for.body ]
   %add = add i32 %t, %i
   %dec = add i32 %i, -1
-  %cmp = icmp ne i32 %i, 1
+  %cmp = icmp ne i32 %dec, 0
   br i1 %cmp, label %for.body, label %for.end
 
 for.end:                                          ; preds = %for.body, %entry
@@ -103,7 +104,7 @@ for.body:                                         ; preds = %for.body, %entry
   %mul = mul nsw i32 %i, %i
   %add = add nsw i32 %t, %mul
   %inc = add nsw i32 %i, 1
-  %cmp = icmp ne i32 %i, 12
+  %cmp = icmp ne i32 %inc, 13
   br i1 %cmp, label %for.body, label %for.end
 
 for.end:                                          ; preds = %for.body
