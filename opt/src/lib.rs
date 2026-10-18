@@ -1,0 +1,23 @@
+//! Smaugian's optimisation passes, and the machinery that runs them on many
+//! functions at once.
+//!
+//! - `ctx` and `par`: splitting a module so threads can work on different
+//!   functions, and scheduling the work.
+//! - `callgraph`: the call graph, its cycles (SCCs) and the bottom-up order.
+//! - `inline`: the inliner and its cost model.
+//! - `recursion`: turning recursion into loops with an explicit stack.
+//! - `pipeline`: the passes above, run together.
+//! - `cfg`, `ssa`, `cleanup`: analyses and helpers the passes share.
+//!
+//! See `docs/design/parallel.md` for the design.
+
+pub mod attrs;
+pub mod callgraph;
+pub mod cfg;
+pub mod cleanup;
+pub mod ctx;
+pub mod inline;
+pub mod par;
+pub mod pipeline;
+pub mod recursion;
+pub mod ssa;

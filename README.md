@@ -12,9 +12,32 @@ copied or translated into this project.
 ## Building
 
 ```sh
-cargo build
-cargo test
+cargo build --release --workspace
+cargo test --release --workspace
 ```
+
+The tests in `opt/tests/programs.rs` and `opt/tests/examples.rs` also build
+and run their output with `clang` when it is installed.
+
+## Crates
+
+- `ir` (`smaugian-ir`): the IR, with a parser and printer for `.ll` files.
+- `opt` (`smaugian-opt`): optimisation passes, run on many functions in
+  parallel. So far: the call graph, an inliner with a cost model, and
+  recursion removal. See `docs/design/parallel.md`.
+
+## Running
+
+```sh
+# Read a .ll file and print it back.
+cargo run --release -- file.ll
+
+# Inline and remove recursion, using every core, explaining each decision.
+cargo run --release -p smaugian-opt -- -O2 --remarks --print-cycles --stats file.ll
+```
+
+`smaugian-opt --help` lists the options. `opt/tests/examples` has small
+inputs with their expected output.
 
 ## License
 

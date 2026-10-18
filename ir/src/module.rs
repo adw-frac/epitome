@@ -119,6 +119,11 @@ impl Constants {
         &self.list[id.index()]
     }
 
+    /// The id of an already interned constant.
+    pub fn lookup(&self, c: &Constant) -> Option<ConstId> {
+        self.map.get(c).copied()
+    }
+
     pub fn len(&self) -> usize {
         self.list.len()
     }
@@ -491,7 +496,7 @@ pub const CALLING_CONVENTIONS: &[&str] = &[
 // ---------------------------------------------------------------------------
 // Functions
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Function {
     /// The function type.
     pub ty: TypeId,

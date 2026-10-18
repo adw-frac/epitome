@@ -10,6 +10,7 @@
 //! ```
 
 pub mod apint;
+pub mod edit;
 pub mod float;
 pub mod lexer;
 pub mod metadata;

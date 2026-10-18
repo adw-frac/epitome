@@ -97,6 +97,11 @@ impl Types {
         &self.list[id.0 as usize]
     }
 
+    /// The id of an already interned type.
+    pub fn lookup(&self, ty: &Type) -> Option<TypeId> {
+        self.map.get(ty).copied()
+    }
+
     pub fn void(&mut self) -> TypeId {
         self.intern(Type::Void)
     }

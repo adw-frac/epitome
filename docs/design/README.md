@@ -9,6 +9,9 @@ split into two halves:
   instruction selection to object file emission.
 - [Debug info](debug-info.md): the plan for a typed debug-info model,
   parser, printer and verifier.
+- [Parallel passes](parallel.md): how passes run on many functions at once,
+  the inliner and its cost model, and turning recursion into loops with an
+  explicit stack.
 
 ## Clean-room rules
 
@@ -34,6 +37,9 @@ how they were found in
 | [Global Instruction Selection](https://llvm.org/docs/GlobalISel/index.html) and [Core Pipeline](https://llvm.org/docs/GlobalISel/Pipeline.html) | GlobalISel passes and generic MIR |
 | [Writing an LLVM Backend](https://llvm.org/docs/WritingAnLLVMBackend.html) | Backend components and pass hooks |
 | [LLVM Language Reference](https://llvm.org/docs/LangRef.html) | IR semantics, to be cited per feature as it is built |
+| Braun et al., "Simple and Efficient Construction of Static Single Assignment Form", CC 2013 | Rebuilding SSA form in `parallel.md` |
+| Cooper, Harvey and Kennedy, "A Simple, Fast Dominance Algorithm", 2001 | The dominator tree |
+| Tarjan, "Depth-First Search and Linear Graph Algorithms", 1972 | Call-graph SCCs |
 
 The pass list on the Passes page says it may be incomplete. Where we learn
 about a pass from another public document, we add that source to the entry.

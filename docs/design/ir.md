@@ -107,7 +107,7 @@ places in it.
 | `da` | Dependence analysis between memory accesses. | Later |
 | `iv-users` | Tracks the uses of induction-variable expressions. Used by `loop-reduce`. | Later |
 | `regions` | Finds single-entry, single-exit regions and builds a region tree. | Later |
-| `basiccg` | Builds the call graph. The Passes page says this entry is not yet written. | Planned |
+| `basiccg` | Builds the call graph. The Passes page says this entry is not yet written. See [parallel](parallel.md). | Done |
 | `stack-safety` | Works out whether stack allocations are safe from memory errors. Mainly for sanitizers. | Later |
 | `instcount` | Counts instructions by kind. | Planned |
 | `lint` | Warns about IR that is probably undefined or unintended. | Later |
@@ -124,7 +124,7 @@ exists.
 | `print<module-debuginfo>` | Prints module debug info in readable form. | Later |
 | `print<alias-sets>` | Prints alias sets. The Passes page says this entry is not yet written. | Later |
 | `print-callgraph` | Prints the call graph. | Later |
-| `print-callgraph-sccs` | Prints the call graph's strongly connected components. | Later |
+| `print-callgraph-sccs` | Prints the call graph's strongly connected components. `smaugian-opt --print-cycles` lists the recursive ones. | Later |
 | `print<cfg-sccs>` | Prints each function's CFG strongly connected components. | Later |
 | `function(print)` | Prints each function as the pipeline reaches it. | Planned |
 | `module(print)` | Prints the whole module. | Planned |
@@ -151,7 +151,7 @@ exists.
 | `jump-threading` | Routes edges past blocks whose branch result is already known. | Planned |
 | `sink` | Moves instructions into the successor blocks that need them. | Later |
 | `memcpyopt` | Removes `memcpy` calls and turns runs of stores into `memset`. | Later |
-| `tailcallelim` | Turns self-recursive tail calls into loops. | Planned |
+| `tailcallelim` | Turns self-recursive tail calls into loops. Part of recursion removal; see [parallel](parallel.md). | Done |
 | `normalize` | Renames and reorders instructions into a form that diffs well. | Later |
 
 ### Memory to registers
@@ -182,18 +182,26 @@ exists.
 
 | Pass | What it does | Status |
 | --- | --- | --- |
-| `inline` | Inlines calls, walking the call graph bottom-up. | Planned |
-| `always-inline` | Inlines only functions marked `alwaysinline`. | Planned |
+| `inline` | Inlines calls, walking the call graph bottom-up. See [parallel](parallel.md). | Done |
+| `always-inline` | Inlines only functions marked `alwaysinline`. The inliner always inlines these; there is no separate pass yet. | Planned |
 | `partial-inliner` | Inlines the part of a function that wraps its body, such as an early-return `if`. | Later |
 | `function-attrs` | Infers attributes such as `readnone`, `readonly` and `nocapture`. | Planned |
 | `argpromotion` | Turns read-only pointer arguments into value arguments. | Later |
 | `deadargelim` | Removes unused arguments of internal functions. | Planned |
 | `ipsccp` | Interprocedural sparse conditional constant propagation. | Later |
 | `globalopt` | Optimises globals whose address is never taken. | Planned |
-| `globaldce` | Deletes unreachable internal globals, including cycles of them. | Planned |
+| `globaldce` | Deletes unreachable internal globals, including cycles of them. The inliner deletes internal functions it leaves unused, but not variables or cycles. | Planned |
 | `constmerge` | Merges identical global constants. | Planned |
 | `mergefunc` | Finds identical functions and folds them into one. | Later |
 | `internalize` | Makes every global except `main` internal. | Later |
+
+### Smaugian additions
+
+These have no entry on the Passes page.
+
+| Pass | What it does | Status |
+| --- | --- | --- |
+| recursion removal | Collapses cycles of functions by inlining, then turns self-recursion into a loop with an explicit stack of frames. See [parallel](parallel.md). | Done |
 
 ### Lowering
 

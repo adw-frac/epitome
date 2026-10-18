@@ -12,3 +12,10 @@ dependencies = [
 [[package]]
 name = "smaugian-ir"
 version = "0.1.0"
+
+[[package]]
+name = "smaugian-opt"
+version = "0.1.0"
+dependencies = [
+ "smaugian-ir",
+]
