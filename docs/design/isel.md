@@ -243,6 +243,46 @@ that the IR and the bodies meet in the same shape:
 The input is expected to have been through `smaugian-opt`, so it is in the
 combiner's canonical form already.
 
+### Vectors
+
+Advanced SIMD instructions are described like the rest, with vector types
+in their bodies: `add <4 x i32>` is `add v0.4s, v1.4s, v2.4s`. 128-bit
+vectors live in q registers and 64-bit ones in d registers; templates print
+a register with an arrangement (`{n:4s}`), a lane (`{n:.s}[{idx}]`) or a
+scalar view (`{d:s}`). A vector of `i1` is a *mask*: lanes of all ones or
+all zeros, as `cmeq` and its kin make them, in a q register. Shuffles match
+by their constant masks (`rev64` is `shufflevector` with `<1, 0, 3, 2>`),
+and reductions with no single instruction are recipes (`addv` then `umov`).
+The vector section of the description (482 instructions) is written by
+`codegen/targets/gen_aarch64_vectors.py`, one entry per arrangement, which
+puts it in place in `aarch64.ll`; the output is checked in and is data like
+the rest.
+
+What the instructions cannot take directly, `codegen/src/legalize.rs`
+reshapes first, as LLVM's type legalisation does:
+
+- Vectors wider than 128 bits are split into 128-bit parts, each
+  operation done per part. Extensions double one step at a time, each part
+  giving two (`sxtl`, `sxtl2`); truncations halve, two parts giving one
+  (`xtn`, `xtn2`). Reductions combine the parts, then reduce one.
+- Vectors whose lane count is not a power of two (`<10 x i32>`), and those
+  narrower than a d register (`<4 x i8>`), are scalarised: a value for
+  each lane.
+- Shuffles with no instruction are built lane by lane from `umov` and
+  `ins`; whole parts are reused and splats splatted.
+- Masks get the lane width of the comparison that made them. A mask used
+  at another width (a `select` of `i32` lanes by an `i16` comparison, or
+  two masks of different widths combined) is extended or truncated as
+  integers and compared with zero again. A splat of one boolean becomes a
+  register of all ones or zeros, right at any width. `icmp eq (bitcast
+  mask to iN), 0`, whether any lane is set, is `umaxv`.
+- What has no instruction is rewritten: `icmp ne` against other than zero
+  is `cmtst` of an `eor`; shifts by amounts that are not one constant are
+  `ushl` and `sshl` (with the amount negated for right shifts); divisions,
+  64-bit multiplications and reductions without an across-lanes
+  instruction go lane by lane; ordered floating-point reductions are added
+  in order, as written. Vectors of pointers become vectors of `i64`.
+
 ### Patterns and the trie
 
 Each instruction body (after condition forms, flags and recipes are filled
@@ -374,7 +414,8 @@ aggregates and vectors, defining variadic functions under AAPCS64 (whose
   the table has the combinations it should, and not those it must not
   (`tst` with a condition that reads the carry).
 - `codegen/tests/programs.rs`: C functions in `tests/programs/*.c`, built
-  three ways (clang `-O0`, that through `smaugian-opt`, clang `-O2`) and
+  four ways (clang `-O0`, that through `smaugian-opt`, clang `-O2` without
+  vectorising, and clang `-O2` as it is, vectorised and unrolled) and
   compiled by us, are linked with a main built by clang and must print what
   clang's own build prints. Our assembly is assembled by clang and each word
   checked against our encoder (except where we leave a fixup), and each word
@@ -389,6 +430,10 @@ aggregates and vectors, defining variadic functions under AAPCS64 (whose
   wrongly, the mixed pairings fail and ours with ours does not, which is
   why the test pairs us with clang.
 
+  `vectors.c` is 26 loops for the vectoriser (sums, dot products, widening
+  and narrowing, compares and selects, conversions, a de-interleave), run
+  at lengths around the vector widths (0 to 1000) and checked by hashes of
+  every output array.
 - `codegen/tests/sqlite.rs`: SQLite, as above (needs the amalgamation).
 
 ## Status
@@ -396,8 +441,10 @@ aggregates and vectors, defining variadic functions under AAPCS64 (whose
 It compiles SQLite. Every function of the 3.50 amalgamation (1,578, about
 357,000 instructions, in 1.5 seconds) compiles, and the result, linked with
 SQLite's shell built by clang, answers the SQL in `tests/sqlite/` exactly as
-clang's build does: both from clang's `-O2` IR, and from clang's `-O0` IR
-through `smaugian-opt`. It runs those scripts in about twice the time
+clang's build does: from clang's `-O2` IR, from the same vectorised (2,981
+vector values, among them `<16 x ptr>` from vector `getelementptr`s and
+masks reduced with `bitcast`), and from clang's `-O0` IR through
+`smaugian-opt`. It runs those scripts in about twice the time
 clang's build takes. `tests/sqlite.rs` repeats this when `SMAUGIAN_SQLITE`
 names the amalgamation.
 
@@ -423,6 +470,19 @@ by LLVM's back end and ours:
 | `loops.c` (9 array loops) | clang `-O2` | 106 | 119 |
 | `loops.c` | clang `-O0`, then `smaugian-opt` | 106 (from `-O2`) | 103 |
 
+And vectorised and unrolled (clang `-O2` as it is):
+
+| Program | LLVM | Ours |
+| --- | --- | --- |
+| `vectors.c` (26 loops) | 1,719 | 2,277 |
+| `loops.c` | 619 | 771 |
+| `basic.c` | 901 | 1,160 |
+
+Much of the difference is in lanes done one at a time (scalarised odd
+vectors, shuffles built from `umov` and `ins`) where LLVM has a better
+sequence, and in spills of the many vector accumulators an unrolled loop
+keeps.
+
 clang's `-O2` IR still indexes arrays by counter, since LLVM reduces
 strength in its code generator; ours does it in `smaugian-opt`
 ([loops](loops.md)), so it shows in the last row. In `basic.c` the
@@ -447,6 +507,7 @@ above: values narrower than 32 bits live in W registers with their upper
 bits undefined, and odd widths live in the next register width; operations
 that read every bit get their operands extended in place first.
 
-Not yet: floating point, vectors, `i128`, variadic calls, more than eight
-arguments, dynamic allocas, exception handling, atomics, frames over 4095
-bytes, object files, pre- and post-index addressing, load and store pairs.
+Not yet: dynamic allocas, exception handling, `i128` beyond the high half
+of products, frames over 32KB, object files (the output is assembly), load
+and store pairs, pre-index addressing, scalable vectors, and vector
+floating-point minimum, maximum and unordered comparisons.

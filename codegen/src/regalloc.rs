@@ -214,7 +214,14 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
         // Only registers of the value's own file.
         let fp = f.vfp[v as usize];
         cands.retain(|&p| (p >= 32) == fp);
-        let (caller, callee) = if fp { (&fp_caller_saved, &fp_callee_saved) } else { (&caller_saved, &callee_saved) };
+        // Only the low 64 bits of the saved floating-point registers
+        // survive a call, so a whole vector live across one is spilled.
+        let no_saved: Vec<u8> = Vec::new();
+        let callee_fp = if f.vq[v as usize] { &no_saved } else { &fp_callee_saved };
+        if f.vq[v as usize] && across_call {
+            cands.clear();
+        }
+        let (caller, callee) = if fp { (&fp_caller_saved, callee_fp) } else { (&caller_saved, &callee_saved) };
         if across_call {
             cands.extend(callee.iter().copied());
             cands.extend(caller.iter().copied());
@@ -237,12 +244,15 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
     // Spill slots, and loads and stores around each use and definition.
     let mut slot_of: HashMap<VReg, usize> = HashMap::new();
     for &v in &spilled {
-        f.slots.push(Slot { size: 8, align: 8, offset: 0 });
+        let size = if f.vq[v as usize] { 16 } else { 8 };
+        f.slots.push(Slot { size, align: size, offset: 0 });
         slot_of.insert(v, f.slots.len() - 1);
     }
     let (ldr, str_) = (t.by_role("load.x"), t.by_role("store.x"));
     let (ldr_d, str_d) = (t.by_role("load.d"), t.by_role("store.d"));
+    let (ldr_q, str_q) = (t.by_role("load.q"), t.by_role("store.q"));
     let vfp = f.vfp.clone();
+    let vq = f.vq.clone();
     let fname = f.name.clone();
     for b in &mut f.blocks {
         let old = std::mem::take(&mut b.insts);
@@ -276,7 +286,13 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
                         None => return Err(format!("{fname}: more spilled operands than scratch registers")),
                     };
                     scratch.insert(*v, s);
-                    let (ld, st) = if fp { (ldr_d, str_d) } else { (ldr, str_) };
+                    let (ld, st) = if vq[*v as usize] {
+                        (ldr_q, str_q)
+                    } else if fp {
+                        (ldr_d, str_d)
+                    } else {
+                        (ldr, str_)
+                    };
                     if uses.contains(r) {
                         new.push(MInst::new(ld, vec![MOp::Reg(Reg::P(s)), MOp::Reg(Reg::P(31)), MOp::Frame(slot, 0)]));
                     }
@@ -323,6 +339,7 @@ fn lower_copies(t: &Target, f: &mut MFunc) {
             let wide = inst.wide;
             // Within a register file, or across it with fmov.
             let op = match (*d >= 32, *s >= 32, wide) {
+                (true, true, _) if inst.q => t.by_role("copy.q"),
                 (false, false, true) => t.copies[&Class::X],
                 (false, false, false) => t.copies[&Class::W],
                 (true, true, true) => t.copies[&Class::D],
@@ -341,6 +358,7 @@ fn lower_copies(t: &Target, f: &mut MFunc) {
 /// registers still say how wide they are.
 fn record_copy_widths(f: &mut MFunc) {
     let vwide = f.vwide.clone();
+    let vq = f.vq.clone();
     for b in &mut f.blocks {
         for inst in &mut b.insts {
             if inst.op != Opcode::Copy {
@@ -351,6 +369,11 @@ fn record_copy_widths(f: &mut MFunc) {
                 _ => None,
             };
             inst.wide = w(&inst.ops[0]).or(w(&inst.ops[1])).unwrap_or(true);
+            let q = |o: &MOp| match o {
+                MOp::Reg(Reg::V(v)) => Some(vq[*v as usize]),
+                _ => None,
+            };
+            inst.q = q(&inst.ops[0]).or(q(&inst.ops[1])).unwrap_or(false);
         }
     }
 }

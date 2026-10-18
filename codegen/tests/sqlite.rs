@@ -5,11 +5,12 @@
 //! holding the amalgamation (`sqlite3.c`, `shell.c`, `sqlite3.h`), from
 //! <https://sqlite.org/download.html>. Without it the test does nothing.
 //!
-//! Three builds of `sqlite3.c`, each linked with `shell.c` built by clang:
+//! Four builds of `sqlite3.c`, each linked with `shell.c` built by clang:
 //!
 //! 1. clang alone, `-O2`: the reference;
 //! 2. clang `-O2` IR (without vectorising), compiled by smaugian-llc;
-//! 3. clang `-O0` IR, through smaugian-opt, compiled by smaugian-llc.
+//! 3. clang `-O2` IR as it is, vectorised, compiled by smaugian-llc;
+//! 4. clang `-O0` IR, through smaugian-opt, compiled by smaugian-llc.
 //!
 //! Each runs the scripts in `tests/sqlite/`, and must print what the
 //! reference prints.
@@ -71,6 +72,8 @@ fn sqlite_answers_as_clangs_build() {
         .arg("-o")
         .arg(&o2))
     .unwrap();
+    let vec = tmp.join("sqlite3.vec.ll");
+    run(Command::new("clang").args(["-O2", "-S", "-emit-llvm"]).arg(&c).arg("-o").arg(&vec)).unwrap();
     let o0 = tmp.join("sqlite3.O0.ll");
     run(Command::new("clang")
         .args(["-O0", "-Xclang", "-disable-O0-optnone", "-S", "-emit-llvm"])
@@ -80,7 +83,7 @@ fn sqlite_answers_as_clangs_build() {
     .unwrap();
 
     let mut failures = Vec::new();
-    for (name, ll, optimise) in [("llc", &o2, false), ("opt+llc", &o0, true)] {
+    for (name, ll, optimise) in [("llc", &o2, false), ("llc-vec", &vec, false), ("opt+llc", &o0, true)] {
         let asm = ours(&t, ll, optimise).unwrap();
         let s = tmp.join(format!("sqlite3.{name}.s"));
         std::fs::write(&s, asm).unwrap();

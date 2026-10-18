@@ -9,6 +9,7 @@ pub mod enc;
 pub mod frame;
 pub mod isel;
 pub mod layout;
+pub mod legalize;
 pub mod mir;
 pub mod prepare;
 pub mod regalloc;

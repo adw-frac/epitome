@@ -10,6 +10,20 @@ use crate::mir::*;
 use crate::prepare::{self, Ctx};
 use crate::target::{Class, Head, Key, Kind, Src, Target, bin_bits, sext, wide_bits};
 
+/// The arrangement of a vector of `len` lanes of `bits` bits: `4s`, `16b`.
+pub fn arrangement(len: u32, bits: u32) -> String {
+    format!("{len}{}", lane_suffix(bits))
+}
+
+pub fn lane_suffix(bits: u32) -> &'static str {
+    match bits {
+        8 => "b",
+        16 => "h",
+        32 => "s",
+        _ => "d",
+    }
+}
+
 /// A value or block being matched against a pattern.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Term {
@@ -124,6 +138,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             blocks: Vec::new(),
             vwide: Vec::new(),
             vfp: Vec::new(),
+            vq: Vec::new(),
             slots: Vec::new(),
             frame_size: 0,
             out_size: 0,
@@ -171,12 +186,11 @@ impl<'a, 'b> Sel<'a, 'b> {
     }
 
     fn bits(&self, ty: TypeId) -> u32 {
-        match self.cx.m.types.get(ty) {
-            Type::Int(b) => *b,
-            Type::Ptr(_) | Type::Double => 64,
-            Type::Float => 32,
-            _ => 0,
-        }
+        crate::target::type_bits(self.cx.m, ty)
+    }
+
+    fn is_vector(&self, ty: TypeId) -> bool {
+        crate::target::is_vector_type(self.cx.m, ty)
     }
 
     fn vbits(&self, v: Value) -> u32 {
@@ -197,6 +211,9 @@ impl<'a, 'b> Sel<'a, 'b> {
 
     /// The register class a value of this type lives in.
     fn class_of_ty(&self, ty: TypeId) -> Class {
+        if self.is_vector(ty) {
+            return if self.bits(ty) > 64 { Class::Q } else { Class::V };
+        }
         let wide = self.bits(ty) > 32;
         if self.is_fp(ty) { Class::D.with_width(wide) } else { Class::X.with_width(wide) }
     }
@@ -211,7 +228,13 @@ impl<'a, 'b> Sel<'a, 'b> {
         }
         let ty = self.f.locals[x.index()].ty;
         let wide = self.bits(ty) > 32;
-        let v = if self.is_fp(ty) { self.mf.new_fp_vreg(wide) } else { self.mf.new_vreg(wide) };
+        let v = if self.is_vector(ty) && self.bits(ty) > 64 {
+            self.mf.new_q_vreg()
+        } else if self.is_fp(ty) {
+            self.mf.new_fp_vreg(wide)
+        } else {
+            self.mf.new_vreg(wide)
+        };
         self.vreg.insert(x, v);
         v
     }
@@ -251,8 +274,26 @@ impl<'a, 'b> Sel<'a, 'b> {
         Some(match &inst.op {
             Op::FCmp { pred, lhs, rhs, .. } => (Head::FCmp(*pred, self.vbits(*lhs)), vec![v(*lhs), v(*rhs)]),
             Op::FNeg { value, .. } => (Head::FNeg(res_hbits), vec![v(*value)]),
-            Op::Binary { op, lhs, rhs, .. } => (Head::Bin(*op, bin_bits(*op, res_bits)), vec![v(*lhs), v(*rhs)]),
-            Op::ICmp { pred, lhs, rhs, .. } => (Head::ICmp(*pred, self.vbits(*lhs)), vec![v(*lhs), v(*rhs)]),
+            Op::Binary { op, lhs, rhs, .. } => {
+                let b = if res_hbits & crate::target::VEC != 0 { res_hbits } else { bin_bits(*op, res_bits) };
+                (Head::Bin(*op, b), vec![v(*lhs), v(*rhs)])
+            }
+            Op::ICmp { pred, lhs, rhs, .. } => {
+                let hb = self.vhbits(*lhs);
+                let b = if hb & crate::target::VEC != 0 { hb } else { self.vbits(*lhs) };
+                (Head::ICmp(*pred, b), vec![v(*lhs), v(*rhs)])
+            }
+            Op::InsertElement { vector, element, index } => {
+                (Head::InsertElement(res_hbits), vec![v(*vector), v(*element), v(*index)])
+            }
+            Op::ExtractElement { vector, index } => {
+                (Head::ExtractElement(self.vhbits(*vector)), vec![v(*vector), v(*index)])
+            }
+            Op::ShuffleVector { a, b, mask } => {
+                let lanes = crate::target::mask_lanes(self.cx.m, *mask)?;
+                let id = self.t.find_mask(&lanes)?;
+                (Head::Shuffle(id, res_hbits), vec![v(*a), v(*b)])
+            }
             Op::Select { cond, then_value, else_value, .. } => {
                 (Head::Select(wide_bits(res_hbits)), vec![v(*cond), v(*then_value), v(*else_value)])
             }
@@ -324,15 +365,7 @@ impl<'a, 'b> Sel<'a, 'b> {
 
     fn lit_key(&self, t: Term) -> Option<Key> {
         let Term::V(Value::Const(c)) = t else { return None };
-        let k = self.cx.m.constant(c);
-        let bits = self.bits(k.ty);
-        match &k.kind {
-            ConstKind::Int(a) => Some(Key::Lit(sext(a.low_u64(), bits), bits)),
-            ConstKind::Null | ConstKind::Zero if !self.is_fp(k.ty) => Some(Key::Lit(0, bits)),
-            ConstKind::Float(raw) => Some(Key::Lit(*raw as i64, bits | crate::target::FP)),
-            ConstKind::Zero => Some(Key::Lit(0, bits | crate::target::FP)),
-            _ => None,
-        }
+        crate::target::lit_of(self.cx.m, c).map(|(v, b)| Key::Lit(v, b))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -394,6 +427,11 @@ impl<'a, 'b> Sel<'a, 'b> {
             ConstKind::Int(a) if kb == 1 && bits > 1 => Some((a.low_u64() & 1) as i64),
             ConstKind::Int(a) => Some(sext(a.low_u64(), kb)),
             ConstKind::Null | ConstKind::Zero => Some(0),
+            // A vector whose lanes are all the same: the lane, as for a
+            // shift by a splat.
+            _ if self.is_vector(k.ty) => {
+                crate::target::lit_of(self.cx.m, c).map(|(v, _)| v).filter(|&v| v != crate::target::UNDEF)
+            }
             _ => None,
         }
     }
@@ -493,7 +531,15 @@ impl<'a, 'b> Sel<'a, 'b> {
                     let Term::V(v) = t else { return None };
                     let ty = self.ty_of(v);
                     let bits = self.bits(ty);
-                    if bits == 0 || bits > 64 || (bits > 32) != (pp.bits > 32) || self.is_fp(ty) != class.is_fp() {
+                    let vector_class = matches!(class, Class::Q | Class::V);
+                    if bits == 0
+                        || (bits > 64 && class != Class::Q)
+                        || (bits > 32) != (pp.bits > 32)
+                        || self.is_fp(ty) != class.is_fp()
+                        || self.is_vector(ty) != vector_class
+                        || (class == Class::Q && bits != 128)
+                        || (class == Class::V && bits != 64)
+                    {
                         return None;
                     }
                     if let Value::Const(_) = v {
@@ -575,12 +621,19 @@ impl<'a, 'b> Sel<'a, 'b> {
             Op::Cast { op: CastOp::BitCast, value, .. } => {
                 let r = self.f.insts[i.index()].result.unwrap();
                 self.is_fp(self.ty_of(*value)) == self.is_fp(self.f.locals[r.index()].ty)
+                    && self.bits(self.ty_of(*value)) == self.bits(self.f.locals[r.index()].ty)
             }
-            Op::Cast { op, .. } => {
+            // A mask's lanes are already all ones or all zeros.
+            Op::Cast { op: CastOp::SExt, value, .. } => {
+                matches!(self.cx.m.types.get(self.ty_of(*value)), Type::Vector { elem, .. } if self.bits(*elem) == 1)
+            }
+            // Scalar truncations read the low bits of the same register;
+            // a vector's is xtn.
+            Op::Cast { op, value, .. } => {
                 matches!(
                     op,
                     CastOp::Trunc | CastOp::BitCast | CastOp::PtrToInt | CastOp::IntToPtr | CastOp::AddrSpaceCast
-                )
+                ) && !self.is_vector(self.ty_of(*value))
             }
             Op::Freeze(_) => true,
             _ => false,
@@ -676,7 +729,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             }
             if self.is_free_cast(i) {
                 let mut wide = false;
-                inst.op.for_each_value(|v| wide |= self.vbits(*v) > 64);
+                inst.op.for_each_value(|v| wide |= self.vbits(*v) > 64 && !self.is_vector(self.ty_of(*v)));
                 if wide {
                     return self.err(format!("no instruction for `{}`", self.describe(i)));
                 }
@@ -729,6 +782,9 @@ impl<'a, 'b> Sel<'a, 'b> {
 
     fn const_reg(&mut self, c: ConstId, class: Class) -> Result<Reg, String> {
         let k = self.cx.m.constant(c).clone();
+        if matches!(class, Class::Q | Class::V) {
+            return self.vector_const(c, class);
+        }
         // A floating-point constant: its bits, made in an integer register
         // and moved across (zero from the zero register).
         if class.is_fp() {
@@ -839,6 +895,52 @@ impl<'a, 'b> Sel<'a, 'b> {
         self.cur != 0 && self.in_loop.get(self.cur).copied().unwrap_or(false)
     }
 
+    /// A vector constant: zero with `movi`; a splat by duplicating the lane
+    /// from an integer register; otherwise zero, then each nonzero lane
+    /// inserted.
+    fn vector_const(&mut self, c: ConstId, class: Class) -> Result<Reg, String> {
+        let k = self.cx.m.constant(c).clone();
+        let Type::Vector { len, elem, .. } = self.cx.m.types.get(k.ty).clone() else {
+            return self.err("a vector constant of a scalar type");
+        };
+        let ebits = self.bits(elem).max(8);
+        let lane = |m: &smaugian_ir::Module, e: ConstId| -> i64 {
+            match &m.constant(e).kind {
+                ConstKind::Int(a) => a.low_u64() as i64,
+                ConstKind::Float(raw) => *raw as i64,
+                _ => 0,
+            }
+        };
+        let lanes: Vec<i64> = match &k.kind {
+            ConstKind::Zero | ConstKind::Undef | ConstKind::Poison => vec![0; len as usize],
+            ConstKind::Splat(e) => vec![lane(self.cx.m, *e); len as usize],
+            ConstKind::Vector(es) => es.iter().map(|&e| lane(self.cx.m, e)).collect(),
+            other => return self.err(format!("unsupported vector constant {other:?}")),
+        };
+        let q = class == Class::Q;
+        let d = if q { self.mf.new_q_vreg() } else { self.mf.new_fp_vreg(true) };
+        let arr = arrangement(len, ebits);
+        if lanes.iter().all(|&l| l == lanes[0]) && lanes[0] != 0 {
+            let g = self.int_reg(lanes[0], ebits > 32, true)?;
+            let dup = self.t.by_role(&format!("dup.{arr}"));
+            self.push(MInst::new(dup, vec![MOp::Reg(Reg::V(d)), MOp::Reg(g)]));
+            return Ok(Reg::V(d));
+        }
+        let zero = self.t.by_role("movi.zero");
+        self.push(MInst::new(zero, vec![MOp::Reg(Reg::V(d))]));
+        let ins = self.t.by_role(&format!("ins.{}", lane_suffix(ebits)));
+        for (k, &l) in lanes.iter().enumerate() {
+            if l != 0 {
+                let g = self.int_reg(l, ebits > 32, true)?;
+                self.push(MInst::new(
+                    ins,
+                    vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(d)), MOp::Reg(g), MOp::Imm(k as i64)],
+                ));
+            }
+        }
+        Ok(Reg::V(d))
+    }
+
     /// A register holding integer `v`.
     pub fn int_reg(&mut self, v: i64, wide: bool, zr_ok: bool) -> Result<Reg, String> {
         let v = if wide { v } else { v as i32 as i64 };
@@ -899,6 +1001,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         // Zero extension of a value whose top is already zero is a copy.
         if let Op::Cast { op: CastOp::ZExt, value: Value::Local(x), .. } = self.f.insts[root.index()].op
             && p.nodes == 1
+            && !self.is_vector(self.f.locals[x.index()].ty)
         {
             let from = self.bits(self.f.locals[x.index()].ty);
             let src = self.vreg_of(x);
@@ -934,8 +1037,25 @@ impl<'a, 'b> Sel<'a, 'b> {
                     Src::Param(i) => vals[*i].clone().ok_or("an unbound pattern operand")?,
                     Src::Imm(v) => MOp::Imm(*v),
                     Src::Temp(t) => {
+                        // A temporary of the register class its producer
+                        // writes.
                         let wide = ins.operands[j].bits > 32;
-                        let v = *temps.entry(*t).or_insert_with(|| self.mf.new_vreg(wide));
+                        let class = match ins.operands[j].kind {
+                            Kind::Reg(c) => c,
+                            _ => Class::X,
+                        };
+                        let v = match temps.get(t) {
+                            Some(&v) => v,
+                            None => {
+                                let v = match class {
+                                    Class::Q => self.mf.new_q_vreg(),
+                                    c if c.is_fp() => self.mf.new_fp_vreg(c.is_64()),
+                                    _ => self.mf.new_vreg(wide),
+                                };
+                                temps.insert(*t, v);
+                                v
+                            }
+                        };
                         let _ = k;
                         MOp::Reg(Reg::V(v))
                     }
@@ -952,6 +1072,22 @@ impl<'a, 'b> Sel<'a, 'b> {
                     };
                     self.push(MInst::copy(Reg::V(rx), src));
                     ops[operand] = MOp::Reg(Reg::V(rx));
+                }
+            }
+            // A tied operand shares the result's register: copied there
+            // first, then updated in place.
+            if ins.has_result
+                && let MOp::Reg(res) = ops[0]
+            {
+                for (j, o) in ins.operands.iter().enumerate() {
+                    if o.tied
+                        && !o.writeback
+                        && let MOp::Reg(src) = ops[j]
+                        && src != res
+                    {
+                        self.push(MInst::copy(res, src));
+                        ops[j] = MOp::Reg(res);
+                    }
                 }
             }
             let z = ins.zext;

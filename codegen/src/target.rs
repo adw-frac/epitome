@@ -27,6 +27,11 @@ pub enum Class {
     /// registers 32-63 are v0-v31.
     D,
     S,
+    /// Vectors: 128 bits in a q register, and 64 bits in a d register.
+    /// Templates print them `q3` and `d3`, or with an arrangement, as in
+    /// `{n:4s}`, `v3.4s`.
+    Q,
+    V,
 }
 
 impl Class {
@@ -38,16 +43,19 @@ impl Class {
             "xsp" => Class::Xsp,
             "d" => Class::D,
             "s" => Class::S,
+            "q" => Class::Q,
+            "v" => Class::V,
             _ => return None,
         })
     }
 
     pub fn is_64(self) -> bool {
-        matches!(self, Class::X | Class::Xsp | Class::D)
+        matches!(self, Class::X | Class::Xsp | Class::D | Class::V | Class::Q)
     }
 
+    /// In the floating-point and vector registers, v0-v31.
     pub fn is_fp(self) -> bool {
-        matches!(self, Class::D | Class::S)
+        matches!(self, Class::D | Class::S | Class::Q | Class::V)
     }
 
     /// The register name for number `r`.
@@ -59,6 +67,8 @@ impl Class {
             (Class::Xsp, 31) => "sp".into(),
             (Class::D, r) => format!("d{}", r.wrapping_sub(32)),
             (Class::S, r) => format!("s{}", r.wrapping_sub(32)),
+            (Class::Q, r) => format!("q{}", r.wrapping_sub(32)),
+            (Class::V, r) => format!("d{}", r.wrapping_sub(32)),
             (c, r) if c.is_64() => format!("x{r}"),
             (_, r) => format!("w{r}"),
         }
@@ -73,6 +83,7 @@ impl Class {
             (Class::Wsp | Class::Xsp, true) => Class::Xsp,
             (Class::D | Class::S, false) => Class::S,
             (Class::D | Class::S, true) => Class::D,
+            (c @ (Class::Q | Class::V), _) => c,
         }
     }
 }
@@ -193,6 +204,11 @@ pub enum Head {
     Intrinsic(u16, u32),
     FCmp(FCmpPred, u32),
     FNeg(u32),
+    InsertElement(u32),
+    ExtractElement(u32),
+    /// A shuffle by the mask `Target::masks[k]`, giving the type of the
+    /// width given.
+    Shuffle(u16, u32),
 }
 
 impl Head {
@@ -351,6 +367,8 @@ pub struct Target {
     /// Calling conventions and platforms.
     pub abis: Vec<crate::abi::Abi>,
     fits_cache: std::sync::Mutex<HashMap<FitsKey, bool>>,
+    /// Shuffle masks the description's patterns use.
+    pub masks: std::sync::Mutex<Vec<Vec<i32>>>,
 }
 
 fn attr<'a>(attrs: &'a [Attr], key: &str) -> Option<Option<&'a str>> {
@@ -362,19 +380,37 @@ fn attr<'a>(attrs: &'a [Attr], key: &str) -> Option<Option<&'a str>> {
     })
 }
 
-fn type_bits(m: &Module, ty: TypeId) -> u32 {
+pub fn type_bits(m: &Module, ty: TypeId) -> u32 {
     match m.types.get(ty) {
         Type::Int(b) => *b,
         Type::Ptr(_) => 64,
         Type::Double => 64,
         Type::Float => 32,
+        // A vector of booleans is a mask, a whole q register of lanes that
+        // are all ones or all zeros, as a vector comparison makes it.
+        Type::Vector { scalable: false, elem, .. } if type_bits(m, *elem) == 1 => 128,
+        Type::Vector { scalable: false, len, elem } => len * type_bits(m, *elem),
         _ => 0,
     }
 }
 
+/// Values of this type live in the floating-point and vector registers.
 pub fn is_fp_type(m: &Module, ty: TypeId) -> bool {
-    matches!(m.types.get(ty), Type::Double | Type::Float)
+    matches!(m.types.get(ty), Type::Double | Type::Float | Type::Vector { .. })
 }
+
+pub fn is_vector_type(m: &Module, ty: TypeId) -> bool {
+    matches!(m.types.get(ty), Type::Vector { .. })
+}
+
+/// Set in the widths of pattern heads for vectors, with the lane count in
+/// bits 16-23 and the element's width below: `<4 x i32>` and `<8 x i16>`
+/// are told apart.
+pub const VEC: u32 = 0x2000;
+
+/// A literal standing for `poison` or `undef` in a vector pattern, such as
+/// the unused operand of a splat's `shufflevector`.
+pub const UNDEF: i64 = 0x7eee_eeee_eeee_eeee;
 
 /// Set in the widths of pattern heads for floating-point values, so that a
 /// `double` load and an `i64` load are told apart.
@@ -382,7 +418,70 @@ pub const FP: u32 = 0x1000;
 
 /// The width a pattern head records for a value of type `ty`.
 pub fn head_bits(m: &Module, ty: TypeId) -> u32 {
-    type_bits(m, ty) | if is_fp_type(m, ty) { FP } else { 0 }
+    match m.types.get(ty) {
+        Type::Vector { len, elem, .. } => VEC | (len << 16) | head_bits(m, *elem),
+        Type::Double | Type::Float => type_bits(m, ty) | FP,
+        _ => type_bits(m, ty),
+    }
+}
+
+/// A constant as a pattern literal: its value (sign-extended, or the raw
+/// bits of a floating-point value) and the width of its pattern head.
+/// Vectors whose lanes are all the same are that lane; `poison` and
+/// `undef` vectors are `UNDEF`. Shared by descriptions and the selector so
+/// the two always agree.
+pub fn lit_of(m: &Module, c: ConstId) -> Option<(i64, u32)> {
+    let k = m.constant(c);
+    let hb = head_bits(m, k.ty);
+    let bits = type_bits(m, k.ty);
+    let lane = |e: ConstId| -> Option<i64> {
+        let ek = m.constant(e);
+        let eb = type_bits(m, ek.ty);
+        match &ek.kind {
+            ConstKind::Int(a) => Some(sext(a.low_u64(), eb)),
+            ConstKind::Float(raw) => Some(*raw as i64),
+            ConstKind::Zero | ConstKind::Null => Some(0),
+            _ => None,
+        }
+    };
+    match &k.kind {
+        ConstKind::Int(a) => Some((sext(a.low_u64(), bits), hb)),
+        ConstKind::Float(raw) => Some((*raw as i64, hb)),
+        ConstKind::Zero | ConstKind::Null => Some((0, hb)),
+        ConstKind::Poison | ConstKind::Undef if is_vector_type(m, k.ty) => Some((UNDEF, hb)),
+        ConstKind::Splat(e) => Some((lane(*e)?, hb)),
+        ConstKind::Vector(es) => {
+            let first = lane(*es.first()?)?;
+            es.iter().all(|&e| lane(e) == Some(first)).then_some((first, hb))
+        }
+        _ => None,
+    }
+}
+
+/// The lanes of a `shufflevector` mask: -1 for `poison` lanes.
+pub fn mask_lanes(m: &Module, c: ConstId) -> Option<Vec<i32>> {
+    let k = m.constant(c);
+    let Type::Vector { len, .. } = m.types.get(k.ty) else { return None };
+    match &k.kind {
+        ConstKind::Zero => Some(vec![0; *len as usize]),
+        ConstKind::Poison | ConstKind::Undef => Some(vec![-1; *len as usize]),
+        ConstKind::Splat(e) => {
+            let v = match &m.constant(*e).kind {
+                ConstKind::Int(a) => a.low_u64() as i32,
+                _ => -1,
+            };
+            Some(vec![v; *len as usize])
+        }
+        ConstKind::Vector(es) => Some(
+            es.iter()
+                .map(|e| match &m.constant(*e).kind {
+                    ConstKind::Int(a) => a.low_u64() as i32,
+                    _ => -1,
+                })
+                .collect(),
+        ),
+        _ => None,
+    }
 }
 
 impl Target {
@@ -404,6 +503,7 @@ impl Target {
             intrinsics: Vec::new(),
             abis: Vec::new(),
             fits_cache: Default::default(),
+            masks: Default::default(),
         };
         t.read()?;
         t.abis = crate::abi::read(&t.module, "aarch64.abi.")?;
@@ -460,6 +560,23 @@ impl Target {
     /// substrings it contains.
     pub fn abi_for_triple(&self, triple: &str) -> Option<&crate::abi::Abi> {
         self.abis.iter().find(|a| a.triples.iter().any(|s| triple.contains(s.as_str())))
+    }
+
+    /// The number of a shuffle mask, adding it if new.
+    pub fn mask_id(&self, lanes: &[i32]) -> u16 {
+        let mut ms = self.masks.lock().unwrap();
+        match ms.iter().position(|m| m == lanes) {
+            Some(i) => i as u16,
+            None => {
+                ms.push(lanes.to_vec());
+                (ms.len() - 1) as u16
+            }
+        }
+    }
+
+    /// The number of a shuffle mask the description uses, if it does.
+    pub fn find_mask(&self, lanes: &[i32]) -> Option<u16> {
+        self.masks.lock().unwrap().iter().position(|m| m == lanes).map(|i| i as u16)
     }
 
     pub fn instr(&self, name: &str) -> &Instr {
@@ -533,6 +650,8 @@ impl Target {
             if has_result {
                 let class = match attr(&f.fn_attrs, "dclass").flatten() {
                     Some(c) => Class::parse(c).ok_or_else(|| format!("@{name}: bad dclass"))?,
+                    None if res_ty.is_some_and(|t| is_vector_type(m, t)) && ret_bits > 64 => Class::Q,
+                    None if res_ty.is_some_and(|t| is_vector_type(m, t)) => Class::V,
                     None if res_fp && ret_bits <= 32 => Class::S,
                     None if res_fp => Class::D,
                     None if ret_bits <= 32 => Class::W,
@@ -612,11 +731,12 @@ impl Target {
             Value::Const(c) => {
                 let k = self.module.constant(c);
                 let bits = type_bits(&self.module, k.ty);
+                if let Some((v, hb)) = lit_of(&self.module, c) {
+                    return Ok(Tree::Lit(v, hb));
+                }
+                let _ = bits;
                 Ok(match &k.kind {
-                    ConstKind::Int(a) => Tree::Lit(sext(a.low_u64(), bits), bits),
-                    ConstKind::Float(raw) => Tree::Lit(*raw as i64, bits | FP),
                     ConstKind::Poison | ConstKind::Undef => Tree::Poison,
-                    ConstKind::Zero | ConstKind::Null => Tree::Lit(0, bits),
                     other => return Err(format!("unsupported constant {other:?} in a body")),
                 })
             }
@@ -650,8 +770,25 @@ impl Target {
             _ => 0,
         };
         Ok(match &f.insts[i.index()].op {
-            Op::Binary { op, lhs, rhs, .. } => mk(Head::Bin(*op, bin_bits(*op, res_bits)), vec![ev(*lhs)?, ev(*rhs)?]),
-            Op::ICmp { pred, lhs, rhs, .. } => mk(Head::ICmp(*pred, ty_bits(*lhs)), vec![ev(*lhs)?, ev(*rhs)?]),
+            Op::Binary { op, lhs, rhs, .. } => {
+                let b = if res_hbits & VEC != 0 { res_hbits } else { bin_bits(*op, res_bits) };
+                mk(Head::Bin(*op, b), vec![ev(*lhs)?, ev(*rhs)?])
+            }
+            Op::ICmp { pred, lhs, rhs, .. } => {
+                let b = if hb(*lhs) & VEC != 0 { hb(*lhs) } else { ty_bits(*lhs) };
+                mk(Head::ICmp(*pred, b), vec![ev(*lhs)?, ev(*rhs)?])
+            }
+            Op::InsertElement { vector, element, index } => {
+                mk(Head::InsertElement(res_hbits), vec![ev(*vector)?, ev(*element)?, ev(*index)?])
+            }
+            Op::ExtractElement { vector, index } => {
+                mk(Head::ExtractElement(hb(*vector)), vec![ev(*vector)?, ev(*index)?])
+            }
+            Op::ShuffleVector { a, b, mask } => {
+                let lanes = mask_lanes(m, *mask).ok_or("a shuffle mask that is not constant")?;
+                let id = self.mask_id(&lanes);
+                mk(Head::Shuffle(id, res_hbits), vec![ev(*a)?, ev(*b)?])
+            }
             Op::Select { cond, then_value, else_value, .. } => {
                 mk(Head::Select(wide_bits(res_hbits)), vec![ev(*cond)?, ev(*then_value)?, ev(*else_value)?])
             }
@@ -1200,11 +1337,16 @@ pub type RecipeCheck = (String, Vec<u32>, Tree, Tree);
 impl Target {
     /// For each recipe: the tree of the IR it replaces, and the tree of
     /// what its instructions do, with their bodies put in for the calls.
+    /// Recipes taking vectors are left out: the evaluator holds a value in
+    /// 64 bits. (The vector programs in `tests/programs` run them.)
     pub fn recipe_trees(&self) -> Result<Vec<RecipeCheck>, String> {
         let m = &self.module;
         let mut out = Vec::new();
         for (_, f) in m.functions() {
             let Some(Some(expand)) = attr(&f.fn_attrs, "recipe") else { continue };
+            if f.params.iter().any(|p| matches!(m.types.get(f.locals[p.local.index()].ty), Type::Vector { .. })) {
+                continue;
+            }
             let want = self.body_tree(f, &HashMap::new(), 0)?.ok_or("recipe without a value")?;
             let g = m
                 .global_order

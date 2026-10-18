@@ -1,0 +1,1459 @@
+//! Vector type legalisation: vectors are made into what the description's
+//! instructions take. Values of vector types wider than a 128-bit register
+//! become lists of 128-bit parts; those with lane counts not a power of
+//! two, or narrower than a d register, become a scalar for each lane.
+//!
+//! Each instruction with a split result or operand is replaced by one per
+//! part: element-wise operations, comparisons (whose masks are split as
+//! their operands are), selects, loads and stores, phis, and calls to
+//! element-wise intrinsics (declared again for the part's type). Others
+//! need more:
+//!
+//! - **Widening** (`sext`, `zext`) is done one doubling at a time, each
+//!   part giving two: the extension of its low half and of its high half
+//!   (`sxtl` and `sxtl2`). Wider steps are made into chains first.
+//! - **Narrowing** (`trunc`) also halves at each step: two parts give one,
+//!   the truncations of each joined (`xtn` and `xtn2`).
+//! - **Shuffles** take each result lane from the part holding it: whole
+//!   parts are reused, splats splatted, and other lanes extracted and
+//!   inserted one by one. Shuffles of legal vectors with no instruction are
+//!   done the same way. `insertelement` and `extractelement` with constant
+//!   lanes go to the part holding the lane.
+//! - **Reductions** (`llvm.vector.reduce.*`) combine the parts with the
+//!   same operation, then reduce one part. A partial reduction adds its
+//!   parts to the accumulator, folding halves together to its width.
+//!
+//! Before splitting, vectors of pointers become vectors of i64, masks are
+//! given the lane widths their uses need (`fix_masks`), and operations
+//! with no instruction are rewritten (`rewrite_vector_ops`); after it,
+//! those still without one are done lane by lane (`expand_lanewise`).
+//! Other operations on split vectors are reported as not supported.
+
+use std::collections::HashMap;
+
+use smaugian_ir::module::*;
+use smaugian_ir::types::{Type, TypeId};
+
+use crate::prepare::{Ctx, callee_name};
+
+/// The lanes, element type and element width of a vector type.
+fn vec_info(cx: &Ctx, ty: TypeId) -> Option<(u32, TypeId, u32)> {
+    match cx.m.types.get(ty) {
+        Type::Vector { scalable: false, len, elem } => {
+            let eb = match cx.m.types.get(*elem) {
+                Type::Int(b) => *b,
+                Type::Float => 32,
+                Type::Double => 64,
+                _ => return None,
+            };
+            Some((*len, *elem, eb))
+        }
+        _ => None,
+    }
+}
+
+/// How many parts a value of type `ty` needs, if it is not legal: 128-bit
+/// parts, or, for lane counts not a power of two and vectors narrower than
+/// a d register, a scalar for each lane.
+/// Masks (vectors of i1) are not decided by their own type.
+fn split_count(cx: &Ctx, ty: TypeId) -> Option<usize> {
+    let (len, _, eb) = vec_info(cx, ty)?;
+    if eb == 1 {
+        return None;
+    }
+    let bits = len * eb;
+    if !len.is_power_of_two() || bits < 64 {
+        return Some(len as usize);
+    }
+    (bits > 128).then_some((bits / 128) as usize)
+}
+
+/// The type of each part of a split vector of `len` lanes of `elem` (`eb`
+/// bits wide): a 128-bit vector, or, for those scalarised, the element
+/// itself. For masks, `elem` is i1 and `eb` the width of the
+/// lanes compared.
+fn part(cx: &mut Ctx, len: u32, elem: TypeId, eb: u32) -> TypeId {
+    if len.is_power_of_two() && len * eb >= 64 { vec_ty(cx, 128 / eb, elem) } else { elem }
+}
+
+fn is_vec(cx: &Ctx, ty: TypeId) -> bool {
+    matches!(cx.m.types.get(ty), Type::Vector { .. })
+}
+
+fn vec_ty(cx: &mut Ctx, len: u32, elem: TypeId) -> TypeId {
+    cx.m.types.intern(Type::Vector { scalable: false, len, elem })
+}
+
+/// The LLVM name of a type in an intrinsic's name: `v4i32`, `v2f64`.
+fn mangle(cx: &Ctx, ty: TypeId) -> String {
+    match cx.m.types.get(ty) {
+        Type::Vector { len, elem, .. } => format!("v{len}{}", mangle(cx, *elem)),
+        Type::Int(b) => format!("i{b}"),
+        Type::Float => "f32".into(),
+        Type::Double => "f64".into(),
+        _ => "?".into(),
+    }
+}
+
+/// A function declaration (an intrinsic), found or added.
+pub fn declare(cx: &mut Ctx, name: &str, ret: TypeId, params: &[TypeId]) -> Value {
+    let g = match cx.m.globals.iter().position(|g| g.name.as_deref() == Some(name)) {
+        Some(i) => GlobalId(i as u32),
+        None => {
+            let ty = cx.m.types.intern(Type::Function { ret, params: params.to_vec(), varargs: false });
+            let mut f = Function { ty, ..Default::default() };
+            for (k, &t) in params.iter().enumerate() {
+                let local = f.add_local(None, t, LocalDef::Param(k as u32));
+                f.params.push(Param { local, attrs: vec![] });
+            }
+            let g = GlobalId(cx.m.globals.len() as u32);
+            cx.m.globals.push(Global {
+                name: Some(name.to_string()),
+                props: GlobalProps::default(),
+                attachments: vec![],
+                kind: GlobalKind::Function(Box::new(f)),
+            });
+            cx.m.global_order.push(g);
+            g
+        }
+    };
+    let ptr = cx.m.types.ptr(0);
+    Value::Const(cx.m.consts.intern(Constant { ty: ptr, kind: ConstKind::Global(g) }))
+}
+
+struct Builder<'f> {
+    f: &'f mut Function,
+    new: Vec<InstId>,
+}
+
+impl Builder<'_> {
+    fn op(&mut self, op: Op, ty: Option<TypeId>) -> Value {
+        let i = self.f.add_inst(op, ty.map(|t| (None, t)));
+        self.new.push(i);
+        if ty.is_some() { self.f.result(i) } else { Value::Const(ConstId(0)) }
+    }
+}
+
+fn shuffle(b: &mut Builder, cx: &mut Ctx, a: Value, bv: Value, lanes: &[i32], ty: TypeId) -> Value {
+    let i32t = cx.m.types.int(32);
+    let elems: Vec<ConstId> = lanes
+        .iter()
+        .map(|&l| {
+            cx.m.consts
+                .intern(Constant { ty: i32t, kind: ConstKind::Int(smaugian_ir::apint::ApInt::from_i64(32, l as i64)) })
+        })
+        .collect();
+    let mty = vec_ty(cx, lanes.len() as u32, i32t);
+    let mask = cx.m.consts.intern(Constant { ty: mty, kind: ConstKind::Vector(elems) });
+    b.op(Op::ShuffleVector { a, b: bv, mask }, Some(ty))
+}
+
+fn poison(cx: &mut Ctx, ty: TypeId) -> Value {
+    Value::Const(cx.m.consts.intern(Constant { ty, kind: ConstKind::Poison }))
+}
+
+/// The parts of `v`, whose type is split into `n` parts of `part_ty`.
+fn parts_of(
+    cx: &mut Ctx,
+    parts: &HashMap<LocalId, Vec<Value>>,
+    f: &Function,
+    v: Value,
+    n: usize,
+    part_ty: TypeId,
+) -> Result<Vec<Value>, String> {
+    match v {
+        Value::Local(x) => parts
+            .get(&x)
+            .cloned()
+            .ok_or_else(|| format!("a split vector {:?} used before its parts", f.locals[x.index()].name)),
+        Value::Const(c) => {
+            let k = cx.m.constant(c).clone();
+            if !is_vec(cx, part_ty) {
+                return Ok((0..n)
+                    .map(|p| match &k.kind {
+                        ConstKind::Vector(es) => Value::Const(es[p]),
+                        ConstKind::Splat(x) => Value::Const(*x),
+                        other => Value::Const(cx.m.consts.intern(Constant { ty: part_ty, kind: other.clone() })),
+                    })
+                    .collect());
+            }
+            let (plen, _, _) = vec_info(cx, part_ty).unwrap();
+            Ok((0..n)
+                .map(|p| {
+                    let kind = match &k.kind {
+                        ConstKind::Vector(es) => {
+                            ConstKind::Vector(es[p * plen as usize..(p + 1) * plen as usize].to_vec())
+                        }
+                        other => other.clone(),
+                    };
+                    Value::Const(cx.m.consts.intern(Constant { ty: part_ty, kind }))
+                })
+                .collect())
+        }
+        Value::Metadata(_) => Err("metadata as a vector".into()),
+    }
+}
+
+/// Makes each extension or truncation change element widths by a factor
+/// of two, inserting the steps between.
+fn chain_casts(cx: &mut Ctx, f: &mut Function) {
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            if let Op::Cast { op: op @ (CastOp::SExt | CastOp::ZExt | CastOp::Trunc), value, flags, fmf } =
+                f.insts[i.index()].op.clone()
+                && let Some(r) = f.insts[i.index()].result
+            {
+                let from_ty = cx.value_ty(f, value);
+                let to_ty = f.locals[r.index()].ty;
+                if let (Some((len, _, fe)), Some((_, _, te))) = (vec_info(cx, from_ty), vec_info(cx, to_ty))
+                    && fe > 1
+                    && (te > 2 * fe || fe > 2 * te)
+                {
+                    let mid_bits = if te > fe { fe * 2 } else { fe / 2 };
+                    let mid_elem = cx.m.types.int(mid_bits);
+                    let mid_ty = vec_ty(cx, len, mid_elem);
+                    let m = f.add_inst(Op::Cast { op, flags, fmf, value }, Some((None, mid_ty)));
+                    f.blocks[b.index()].insts.insert(k, m);
+                    let mv = f.result(m);
+                    if let Op::Cast { value, .. } = &mut f.insts[i.index()].op {
+                        *value = mv;
+                    }
+                    continue;
+                }
+            }
+            k += 1;
+        }
+    }
+}
+
+/// Extensions of masks to lanes of another width than the comparison that
+/// made them: first to the comparison's own lanes (free: the lanes are
+/// already all ones or zeros), then `and` with 1 for `zext`, then widened
+/// or narrowed as integers.
+fn widen_masks(cx: &mut Ctx, f: &mut Function) {
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::Cast { op: op @ (CastOp::SExt | CastOp::ZExt), value: Value::Local(m), flags, fmf } =
+                f.insts[i.index()].op.clone()
+            else {
+                k += 1;
+                continue;
+            };
+            let to_ty = f.locals[f.insts[i.index()].result.unwrap().index()].ty;
+            let (Some((len, _, 1)), Some((_, _, te))) = (vec_info(cx, f.locals[m.index()].ty), vec_info(cx, to_ty))
+            else {
+                k += 1;
+                continue;
+            };
+            // The lane width of the comparison that made the mask.
+            let Some(cb) = mask_width(cx, f, Value::Local(m), &mut Vec::new()).filter(|&cb| cb != te) else {
+                k += 1;
+                continue;
+            };
+            let ce = cx.m.types.int(cb);
+            let lane_ty = vec_ty(cx, len, ce);
+            let mut new = Vec::new();
+            let s = f.add_inst(
+                Op::Cast { op: CastOp::SExt, flags: IntFlags::NONE, fmf, value: Value::Local(m) },
+                Some((None, lane_ty)),
+            );
+            new.push(s);
+            let mut v = f.result(s);
+            if op == CastOp::ZExt {
+                let one = cx.int(ce, 1);
+                let Value::Const(one) = one else { unreachable!() };
+                let ones = Value::Const(cx.m.consts.intern(Constant { ty: lane_ty, kind: ConstKind::Splat(one) }));
+                let a = f.add_inst(
+                    Op::Binary { op: BinOp::And, flags: IntFlags::NONE, fmf: FastMath::default(), lhs: v, rhs: ones },
+                    Some((None, lane_ty)),
+                );
+                new.push(a);
+                v = f.result(a);
+            }
+            // Then widened, or narrowed, as integers.
+            let op = if cb < te { op } else { CastOp::Trunc };
+            f.insts[i.index()].op = Op::Cast { op, flags, fmf, value: v };
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..k, new);
+            k += n + 1;
+        }
+    }
+}
+
+/// Vectors of pointers become vectors of i64: their values retyped, the
+/// scalars going in and out of them converted, and vector `getelementptr`s
+/// written as arithmetic.
+fn pointer_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
+    let i64t = cx.m.types.int(64);
+    let ptr = cx.m.types.ptr(0);
+    let as_int = |cx: &mut Ctx, ty: TypeId| match cx.m.types.get(ty).clone() {
+        Type::Vector { scalable: false, len, elem } if elem == ptr => Some(vec_ty(cx, len, i64t)),
+        _ => None,
+    };
+    if !f.locals.iter().any(|l| matches!(cx.m.types.get(l.ty), Type::Vector { elem, .. } if *elem == ptr)) {
+        return Ok(());
+    }
+    for k in 0..f.locals.len() {
+        if let Some(t) = as_int(cx, f.locals[k].ty) {
+            f.locals[k].ty = t;
+        }
+    }
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            // Constants of pointer vectors: null, zero and poison only.
+            let mut op = f.insts[i.index()].op.clone();
+            let mut bad = false;
+            op.for_each_value_mut(|v| {
+                if let Value::Const(c) = *v {
+                    let k = cx.m.constant(c).clone();
+                    if let Some(t) = as_int(cx, k.ty) {
+                        let kind = match k.kind {
+                            ConstKind::Zero | ConstKind::Null => ConstKind::Zero,
+                            ConstKind::Vector(es)
+                                if es
+                                    .iter()
+                                    .all(|&e| matches!(cx.m.constant(e).kind, ConstKind::Null | ConstKind::Zero)) =>
+                            {
+                                ConstKind::Zero
+                            }
+                            ConstKind::Poison => ConstKind::Poison,
+                            ConstKind::Undef => ConstKind::Undef,
+                            _ => {
+                                bad = true;
+                                return;
+                            }
+                        };
+                        *v = Value::Const(cx.m.consts.intern(Constant { ty: t, kind }));
+                    }
+                }
+            });
+            if bad {
+                return Err("a vector of pointers to globals".into());
+            }
+            let res = f.insts[i.index()].result;
+            let res_ty = res.map(|r| f.locals[r.index()].ty);
+            let mut new = Vec::new();
+            match &mut op {
+                // A pointer put into a vector: its address.
+                Op::InsertElement { element, .. } if cx.value_ty(f, *element) == ptr => {
+                    let c = f.add_inst(
+                        Op::Cast {
+                            op: CastOp::PtrToInt,
+                            flags: IntFlags::NONE,
+                            fmf: FastMath::default(),
+                            value: *element,
+                        },
+                        Some((None, i64t)),
+                    );
+                    new.push(c);
+                    *element = f.result(c);
+                }
+                // One taken out: made a pointer again.
+                Op::ExtractElement { .. } if res_ty == Some(ptr) => {
+                    let r = res.unwrap();
+                    let old = Value::Local(r);
+                    f.locals[r.index()].ty = i64t;
+                    let c = f.add_inst(
+                        Op::Cast { op: CastOp::IntToPtr, flags: IntFlags::NONE, fmf: FastMath::default(), value: old },
+                        Some((None, ptr)),
+                    );
+                    let cv = f.result(c);
+                    f.insts[i.index()].op = op.clone();
+                    f.replace_uses(old, cv);
+                    // replace_uses rewrote the cast's own operand too.
+                    f.insts[c.index()].op =
+                        Op::Cast { op: CastOp::IntToPtr, flags: IntFlags::NONE, fmf: FastMath::default(), value: old };
+                    f.blocks[b.index()].insts.insert(k + 1, c);
+                    k += 2;
+                    continue;
+                }
+                Op::Cast { op: CastOp::PtrToInt | CastOp::IntToPtr, value, .. }
+                    if res_ty.is_some_and(|t| matches!(cx.m.types.get(t), Type::Vector { .. }))
+                        && cx.value_ty(f, *value) == res_ty.unwrap() =>
+                {
+                    let v = *value;
+                    f.replace_uses(Value::Local(res.unwrap()), v);
+                    f.blocks[b.index()].insts.remove(k);
+                    continue;
+                }
+                Op::Gep { source_ty, ptr: base, indices, .. }
+                    if res_ty.is_some_and(|t| matches!(cx.m.types.get(t), Type::Vector { .. })) =>
+                {
+                    let rt = res_ty.unwrap();
+                    let (len, _, _) = vec_info(cx, rt).unwrap();
+                    let [idx] = indices[..] else {
+                        return Err("a vector getelementptr with more than one index".into());
+                    };
+                    let size = cx.size_of(*source_ty)?;
+                    let i64z = cx.int(i64t, 0);
+                    let splat = |f: &mut Function, cx: &mut Ctx, v: Value, new: &mut Vec<InstId>| -> Value {
+                        let vt = cx.value_ty(f, v);
+                        if matches!(cx.m.types.get(vt), Type::Vector { .. }) {
+                            return v;
+                        }
+                        let v = if vt == ptr {
+                            let c = f.add_inst(
+                                Op::Cast {
+                                    op: CastOp::PtrToInt,
+                                    flags: IntFlags::NONE,
+                                    fmf: FastMath::default(),
+                                    value: v,
+                                },
+                                Some((None, i64t)),
+                            );
+                            new.push(c);
+                            f.result(c)
+                        } else {
+                            v
+                        };
+                        let pz = poison(cx, rt);
+                        let ins =
+                            f.add_inst(Op::InsertElement { vector: pz, element: v, index: i64z }, Some((None, rt)));
+                        new.push(ins);
+                        let insv = f.result(ins);
+                        let mut bb = Builder { f, new: Vec::new() };
+                        let s = shuffle(&mut bb, cx, insv, pz, &vec![0; len as usize], rt);
+                        new.extend(bb.new);
+                        s
+                    };
+                    let bv = splat(f, cx, *base, &mut new);
+                    let iv = splat(f, cx, idx, &mut new);
+                    let off = if size == 1 {
+                        iv
+                    } else {
+                        let sc = cx.int(i64t, size as i64);
+                        let Value::Const(sc) = sc else { unreachable!() };
+                        let sv = Value::Const(cx.m.consts.intern(Constant { ty: rt, kind: ConstKind::Splat(sc) }));
+                        let m = f.add_inst(
+                            Op::Binary {
+                                op: BinOp::Mul,
+                                flags: IntFlags::NONE,
+                                fmf: FastMath::default(),
+                                lhs: iv,
+                                rhs: sv,
+                            },
+                            Some((None, rt)),
+                        );
+                        new.push(m);
+                        f.result(m)
+                    };
+                    op = Op::Binary {
+                        op: BinOp::Add,
+                        flags: IntFlags::NONE,
+                        fmf: FastMath::default(),
+                        lhs: bv,
+                        rhs: off,
+                    };
+                }
+                _ => {}
+            }
+            f.insts[i.index()].op = op;
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..k, new);
+            k += n + 1;
+        }
+    }
+    Ok(())
+}
+
+/// Is there an instruction for this shuffle of legal vectors (see the
+/// description's vector section): a splat of lane 0, a half, two halves
+/// joined, lanes reversed within each 64 bits, or two 64-bit lanes swapped?
+/// Others are done lane by lane.
+fn native_shuffle(cx: &Ctx, f: &Function, a: Value, b: Value, mask: ConstId) -> bool {
+    let Some(lanes) = crate::target::mask_lanes(cx.m, mask) else { return false };
+    let Some((src, _, eb)) = vec_info(cx, cx.value_ty(f, a)) else { return false };
+    let (len, src) = (lanes.len(), src as usize);
+    let one = matches!(b, Value::Const(c) if matches!(cx.m.constant(c).kind, ConstKind::Poison | ConstKind::Undef));
+    let seq = |from: usize, n: usize| lanes.iter().copied().eq((from..from + n).map(|l| l as i32));
+    if lanes.iter().all(|&l| l == 0) {
+        return true;
+    }
+    if src == 2 * len && (seq(0, len) || seq(len, len)) {
+        return true;
+    }
+    if len == 2 * src && seq(0, len) {
+        return true;
+    }
+    if one && len == src && eb < 64 {
+        let g = (64 / eb) as usize;
+        return lanes.iter().enumerate().all(|(k, &l)| l as usize == (k / g) * g + (g - 1 - k % g));
+    }
+    one && len == 2 && src == 2 && eb == 64 && lanes == [1, 0]
+}
+
+/// Vector operations with no instruction of their own, rewritten: `icmp
+/// ne` against other than zero (as `icmp ne (xor ..), 0`, which `cmtst`
+/// does), and shifts by amounts that are not one constant (as `ushl` and
+/// `sshl`, which shift each lane by its own amount, right for negative
+/// amounts).
+fn rewrite_vector_ops(cx: &mut Ctx, f: &mut Function) {
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Some(r) = f.insts[i.index()].result else {
+                k += 1;
+                continue;
+            };
+            let mut new = Vec::new();
+            match f.insts[i.index()].op.clone() {
+                Op::ICmp { pred: ICmpPred::Ne, samesign, lhs, rhs }
+                    if vec_info(cx, cx.value_ty(f, lhs)).is_some()
+                        && !matches!(rhs, Value::Const(c) if matches!(cx.m.constant(c).kind, ConstKind::Zero)) =>
+                {
+                    let t = cx.value_ty(f, lhs);
+                    let x = f.add_inst(
+                        Op::Binary { op: BinOp::Xor, flags: IntFlags::NONE, fmf: FastMath::default(), lhs, rhs },
+                        Some((None, t)),
+                    );
+                    new.push(x);
+                    let zero = Value::Const(cx.m.consts.intern(Constant { ty: t, kind: ConstKind::Zero }));
+                    f.insts[i.index()].op = Op::ICmp { pred: ICmpPred::Ne, samesign, lhs: f.result(x), rhs: zero };
+                }
+                Op::Binary { op: op @ (BinOp::Shl | BinOp::LShr | BinOp::AShr), lhs, rhs, .. }
+                    if vec_info(cx, f.locals[r.index()].ty).is_some_and(|(_, _, eb)| eb > 1)
+                        && !matches!(rhs, Value::Const(c) if matches!(cx.m.constant(c).kind, ConstKind::Splat(_) | ConstKind::Zero)) =>
+                {
+                    let t = f.locals[r.index()].ty;
+                    let amount = if op == BinOp::Shl {
+                        rhs
+                    } else {
+                        let zero = Value::Const(cx.m.consts.intern(Constant { ty: t, kind: ConstKind::Zero }));
+                        let n = f.add_inst(
+                            Op::Binary {
+                                op: BinOp::Sub,
+                                flags: IntFlags::NONE,
+                                fmf: FastMath::default(),
+                                lhs: zero,
+                                rhs,
+                            },
+                            Some((None, t)),
+                        );
+                        new.push(n);
+                        f.result(n)
+                    };
+                    let name = if op == BinOp::AShr { "sshl" } else { "ushl" };
+                    let callee = declare(cx, &format!("llvm.aarch64.neon.{name}.{}", mangle(cx, t)), t, &[t, t]);
+                    let fn_ty = cx.m.types.intern(Type::Function { ret: t, params: vec![t, t], varargs: false });
+                    f.insts[i.index()].op = Op::Call(Box::new(Call {
+                        tail: TailKind::None,
+                        fmf: FastMath::default(),
+                        cconv: CallConv::default(),
+                        ret_attrs: vec![],
+                        addrspace: None,
+                        fn_ty,
+                        callee,
+                        args: [lhs, amount].into_iter().map(|value| CallArg { value, attrs: vec![] }).collect(),
+                        fn_attrs: vec![],
+                        bundles: vec![],
+                    }));
+                }
+                _ => {}
+            }
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..k, new);
+            k += n + 1;
+        }
+    }
+}
+
+/// After splitting: operations on legal vectors that no instruction does,
+/// done lane by lane: divisions and remainders, multiplications of 64-bit
+/// lanes, and reductions
+/// with no across-lanes instruction (`and`, `or`, `xor`, `mul`; of 64-bit
+/// lanes, all but `add`; of two 32-bit lanes, all but `add`).
+fn expand_lanewise(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
+    let i64t = cx.m.types.int(64);
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for blk in blocks {
+        let mut k = 0;
+        while k < f.blocks[blk.index()].insts.len() {
+            let i = f.blocks[blk.index()].insts[k];
+            let Some(r) = f.insts[i.index()].result else {
+                k += 1;
+                continue;
+            };
+            let rt = f.locals[r.index()].ty;
+            let mut bld = Builder { f, new: Vec::new() };
+            let lanes = |bld: &mut Builder, cx: &mut Ctx, v: Value, len: u32, elem: TypeId| -> Vec<Value> {
+                (0..len)
+                    .map(|l| {
+                        let idx = cx.int(i64t, l as i64);
+                        bld.op(Op::ExtractElement { vector: v, index: idx }, Some(elem))
+                    })
+                    .collect()
+            };
+            let mut replace = None;
+            match bld.f.insts[i.index()].op.clone() {
+                Op::Binary {
+                    op: op @ (BinOp::Mul | BinOp::UDiv | BinOp::SDiv | BinOp::URem | BinOp::SRem),
+                    flags,
+                    fmf,
+                    lhs,
+                    rhs,
+                } if vec_info(cx, rt).is_some_and(|(_, _, eb)| eb == 64 || op != BinOp::Mul) => {
+                    let (len, elem, _) = vec_info(cx, rt).unwrap();
+                    let a = lanes(&mut bld, cx, lhs, len, elem);
+                    let b = lanes(&mut bld, cx, rhs, len, elem);
+                    let mut acc = poison(cx, rt);
+                    for l in 0..len as usize {
+                        let m = bld.op(Op::Binary { op, flags, fmf, lhs: a[l], rhs: b[l] }, Some(elem));
+                        let idx = cx.int(i64t, l as i64);
+                        acc = bld.op(Op::InsertElement { vector: acc, element: m, index: idx }, Some(rt));
+                    }
+                    replace = Some(acc);
+                }
+                Op::Call(call) => {
+                    let name = callee_name(cx.m, &call).unwrap_or_default();
+                    if let Some(rest) = name.strip_prefix("llvm.vector.reduce.")
+                        && let Some(&arg) = call.args.first().map(|a| &a.value)
+                        && let Some((len, elem, eb)) = vec_info(cx, cx.value_ty(bld.f, arg))
+                    {
+                        let opname = rest.split('.').next().unwrap_or("");
+                        let native = match opname {
+                            "add" => true,
+                            "smax" | "smin" | "umax" | "umin" => eb < 64 && len * eb == 128 || eb < 32,
+                            _ => false,
+                        };
+                        if !native
+                            && matches!(
+                                opname,
+                                "add" | "mul" | "and" | "or" | "xor" | "smax" | "smin" | "umax" | "umin"
+                            )
+                        {
+                            let ls = lanes(&mut bld, cx, arg, len, elem);
+                            let mut acc = ls[0];
+                            for &l in &ls[1..] {
+                                acc = combine(&mut bld, cx, opname, acc, l, elem)?;
+                            }
+                            replace = Some(acc);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            let new = std::mem::take(&mut bld.new);
+            match replace {
+                Some(v) => {
+                    f.replace_uses(Value::Local(r), v);
+                    let n = new.len();
+                    f.blocks[blk.index()].insts.splice(k..=k, new);
+                    k += n;
+                }
+                None => k += 1,
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The lane width of mask `v`: that of the comparison that made it, through
+/// logic, freezes, selects and phis. `None` for masks of any width: splats
+/// of one boolean (the whole register is ones or zeros) and constants.
+fn mask_width(cx: &Ctx, f: &Function, v: Value, seen: &mut Vec<LocalId>) -> Option<u32> {
+    let Value::Local(x) = v else { return None };
+    let LocalDef::Inst(d) = f.locals[x.index()].def else { return None };
+    if seen.contains(&x) {
+        return None;
+    }
+    seen.push(x);
+    let w = match &f.insts[d.index()].op {
+        Op::ICmp { lhs, .. } | Op::FCmp { lhs, .. } => vec_info(cx, cx.value_ty(f, *lhs)).map(|(_, _, e)| e),
+        Op::Binary { lhs, rhs, .. } => mask_width(cx, f, *lhs, seen).or_else(|| mask_width(cx, f, *rhs, seen)),
+        Op::Freeze(a) => mask_width(cx, f, *a, seen),
+        Op::Select { then_value, else_value, .. } => {
+            mask_width(cx, f, *then_value, seen).or_else(|| mask_width(cx, f, *else_value, seen))
+        }
+        Op::Phi { incoming, .. } => incoming.iter().find_map(|(v, _)| mask_width(cx, f, *v, seen)),
+        Op::ShuffleVector { a, .. } if !is_bool_splat(cx, f, d) => mask_width(cx, f, *a, seen),
+        _ => None,
+    };
+    seen.pop();
+    w
+}
+
+/// Is `i` a splat of one boolean: `shufflevector (insertelement poison, i1
+/// %c, 0), poison, zeroinitializer`?
+fn is_bool_splat(cx: &Ctx, f: &Function, i: InstId) -> bool {
+    let Op::ShuffleVector { a: Value::Local(x), mask, .. } = &f.insts[i.index()].op else { return false };
+    let Some(lanes) = crate::target::mask_lanes(cx.m, *mask) else { return false };
+    lanes.iter().all(|&l| l <= 0)
+        && matches!(f.locals[x.index()].def, LocalDef::Inst(d) if matches!(&f.insts[d.index()].op,
+            Op::InsertElement { element, .. } if matches!(cx.m.types.get(cx.value_ty(f, *element)), Type::Int(1))))
+}
+
+/// Masks made as wide as their uses need, as LLVM promotes vectors of i1:
+///
+/// - a mask used by a `select` of lanes of another width, or combined with
+///   a mask of another width, is converted: extended to its comparison's
+///   lane width, extended or truncated to the width wanted, and compared
+///   with zero;
+/// - a splat of one boolean is extended and splatted as an integer, then
+///   compared with zero, which makes a register of all ones or all zeros,
+///   right at any width;
+/// - `icmp eq|ne (bitcast mask to iN), 0`, whether any lane is set, is the
+///   unsigned maximum of the mask's lanes compared with zero.
+fn fix_masks(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
+    let i1 = cx.m.types.int(1);
+    let i64t = cx.m.types.int(64);
+    // Converts mask `m` (lanes `len`) from width `from` to `to`, before `new`.
+    let convert =
+        |cx: &mut Ctx, f: &mut Function, new: &mut Vec<InstId>, m: Value, len: u32, from: u32, to: u32| -> Value {
+            let ft = {
+                let e = cx.m.types.int(from);
+                vec_ty(cx, len, e)
+            };
+            let tt = {
+                let e = cx.m.types.int(to);
+                vec_ty(cx, len, e)
+            };
+            let s = f.add_inst(
+                Op::Cast { op: CastOp::SExt, flags: IntFlags::NONE, fmf: FastMath::default(), value: m },
+                Some((None, ft)),
+            );
+            new.push(s);
+            let op = if to > from { CastOp::SExt } else { CastOp::Trunc };
+            let c = f.add_inst(
+                Op::Cast { op, flags: IntFlags::NONE, fmf: FastMath::default(), value: f.result(s) },
+                Some((None, tt)),
+            );
+            new.push(c);
+            let zero = Value::Const(cx.m.consts.intern(Constant { ty: tt, kind: ConstKind::Zero }));
+            let mt = { vec_ty(cx, len, i1) };
+            let r = f.add_inst(
+                Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: f.result(c), rhs: zero },
+                Some((None, mt)),
+            );
+            new.push(r);
+            f.result(r)
+        };
+    let is_mask = |cx: &Ctx, ty: TypeId| vec_info(cx, ty).is_some_and(|(_, _, e)| e == 1);
+    let blocks: Vec<BlockId> = f.layout.clone();
+    // Uses first, while the splats can still be told apart.
+    for &b in &blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let mut new = Vec::new();
+            match f.insts[i.index()].op.clone() {
+                Op::Select { fmf, cond, then_value, else_value } if is_mask(cx, cx.value_ty(f, cond)) => {
+                    let (len, _, te) = vec_info(cx, cx.value_ty(f, then_value)).ok_or("a select of masks")?;
+                    if let Some(w) = mask_width(cx, f, cond, &mut Vec::new())
+                        && w != te
+                        && te != 1
+                    {
+                        let c = convert(cx, f, &mut new, cond, len, w, te);
+                        f.insts[i.index()].op = Op::Select { fmf, cond: c, then_value, else_value };
+                    }
+                }
+                Op::Binary { op, flags, fmf, lhs, rhs } if is_mask(cx, cx.value_ty(f, lhs)) => {
+                    let (len, _, _) = vec_info(cx, cx.value_ty(f, lhs)).unwrap();
+                    if let (Some(a), Some(c)) =
+                        (mask_width(cx, f, lhs, &mut Vec::new()), mask_width(cx, f, rhs, &mut Vec::new()))
+                        && a != c
+                    {
+                        let r = convert(cx, f, &mut new, rhs, len, c, a);
+                        f.insts[i.index()].op = Op::Binary { op, flags, fmf, lhs, rhs: r };
+                    }
+                }
+                Op::ICmp { pred: pred @ (ICmpPred::Eq | ICmpPred::Ne), samesign, lhs: Value::Local(x), rhs }
+                    if matches!(rhs, Value::Const(c) if matches!(cx.m.constant(c).kind, ConstKind::Zero | ConstKind::Int(_)) && cx.const_int(rhs) == Some(0))
+                        && let LocalDef::Inst(d) = f.locals[x.index()].def
+                        && let Op::Cast { op: CastOp::BitCast, value: m, .. } = f.insts[d.index()].op
+                        && is_mask(cx, cx.value_ty(f, m)) =>
+                {
+                    let (len, _, _) = vec_info(cx, cx.value_ty(f, m)).unwrap();
+                    let w = mask_width(cx, f, m, &mut Vec::new()).unwrap_or((128 / len).max(8));
+                    let e = cx.m.types.int(w);
+                    let vt = vec_ty(cx, len, e);
+                    let s = f.add_inst(
+                        Op::Cast { op: CastOp::SExt, flags: IntFlags::NONE, fmf: FastMath::default(), value: m },
+                        Some((None, vt)),
+                    );
+                    new.push(s);
+                    let callee = declare(cx, &format!("llvm.vector.reduce.umax.{}", mangle(cx, vt)), e, &[vt]);
+                    let mut bld = Builder { f, new: Vec::new() };
+                    let sv = bld.f.result(s);
+                    let r = call_value(&mut bld, cx, callee, vec![sv], e, vt);
+                    new.extend(bld.new);
+                    let zero = cx.int(e, 0);
+                    f.insts[i.index()].op = Op::ICmp { pred, samesign, lhs: r, rhs: zero };
+                }
+                _ => {}
+            }
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..k, new);
+            k += n + 1;
+        }
+    }
+    // Then the splats.
+    for &b in &blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            if !is_bool_splat(cx, f, i) {
+                k += 1;
+                continue;
+            }
+            let Op::ShuffleVector { a: Value::Local(x), .. } = f.insts[i.index()].op else { unreachable!() };
+            let LocalDef::Inst(d) = f.locals[x.index()].def else { unreachable!() };
+            let Op::InsertElement { element, .. } = f.insts[d.index()].op else { unreachable!() };
+            let r = f.insts[i.index()].result.unwrap();
+            let (len, _, _) = vec_info(cx, f.locals[r.index()].ty).unwrap();
+            let w = (128 / len).max(8);
+            let e = cx.m.types.int(w);
+            let vt = vec_ty(cx, len, e);
+            let mut new = Vec::new();
+            let z = f.add_inst(
+                Op::Cast { op: CastOp::SExt, flags: IntFlags::NONE, fmf: FastMath::default(), value: element },
+                Some((None, e)),
+            );
+            new.push(z);
+            let pz = poison(cx, vt);
+            let zero_idx = cx.int(i64t, 0);
+            let ins =
+                f.add_inst(Op::InsertElement { vector: pz, element: f.result(z), index: zero_idx }, Some((None, vt)));
+            new.push(ins);
+            let mut bld = Builder { f, new: Vec::new() };
+            let insv = bld.f.result(ins);
+            let sp = shuffle(&mut bld, cx, insv, pz, &vec![0; len as usize], vt);
+            new.extend(bld.new);
+            let zero = Value::Const(cx.m.consts.intern(Constant { ty: vt, kind: ConstKind::Zero }));
+            f.insts[i.index()].op = Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: sp, rhs: zero };
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..k, new);
+            k += n + 1;
+        }
+    }
+    Ok(())
+}
+
+pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
+    pointer_vectors(cx, f)?;
+    rewrite_vector_ops(cx, f);
+    fix_masks(cx, f)?;
+    widen_masks(cx, f);
+    chain_casts(cx, f);
+    let mut parts: HashMap<LocalId, Vec<Value>> = HashMap::new();
+    let mut pending_phis: Vec<(Vec<InstId>, InstId)> = Vec::new();
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for blk in blocks {
+        let mut k = 0;
+        while k < f.blocks[blk.index()].insts.len() {
+            let i = f.blocks[blk.index()].insts[k];
+            let res = f.insts[i.index()].result;
+            let res_ty = res.map(|r| f.locals[r.index()].ty);
+            let mut uses_split = false;
+            f.insts[i.index()].op.for_each_value(|v| match v {
+                Value::Local(x) => uses_split |= parts.contains_key(x),
+                Value::Const(c) => uses_split |= split_count(cx, cx.m.constant(*c).ty).is_some(),
+                Value::Metadata(_) => {}
+            });
+            let res_split = res_ty.and_then(|t| split_count(cx, t));
+            let odd_shuffle = match &f.insts[i.index()].op {
+                Op::ShuffleVector { a, b, mask } => !native_shuffle(cx, f, *a, *b, *mask),
+                _ => false,
+            };
+            if !uses_split && res_split.is_none() && !odd_shuffle {
+                k += 1;
+                continue;
+            }
+            let op = f.insts[i.index()].op.clone();
+            let mut bld = Builder { f, new: Vec::new() };
+            // The parts of the result, or a replacement for it.
+            let mut out_parts: Option<Vec<Value>> = None;
+            let mut replace: Option<Value> = None;
+            match op {
+                Op::Binary { op, flags, fmf, lhs, rhs } if res_split.is_none() => {
+                    // Masks, split as the comparisons that made them were.
+                    let ps = [lhs, rhs]
+                        .iter()
+                        .find_map(|v| if let Value::Local(x) = v { parts.get(x).cloned() } else { None })
+                        .ok_or("a binary operation on a split vector with a legal result")?;
+                    let n = ps.len();
+                    let pt = cx.value_ty(bld.f, ps[0]);
+                    let l = parts_of(cx, &parts, bld.f, lhs, n, pt)?;
+                    let r = parts_of(cx, &parts, bld.f, rhs, n, pt)?;
+                    out_parts = Some(
+                        (0..n).map(|p| bld.op(Op::Binary { op, flags, fmf, lhs: l[p], rhs: r[p] }, Some(pt))).collect(),
+                    );
+                }
+                Op::Binary { op, flags, fmf, lhs, rhs } => {
+                    let n = res_split.unwrap();
+                    let (vlen, elem, eb) = vec_info(cx, res_ty.unwrap()).unwrap();
+                    let pt = part(cx, vlen, elem, eb);
+                    let l = parts_of(cx, &parts, bld.f, lhs, n, pt)?;
+                    let r = parts_of(cx, &parts, bld.f, rhs, n, pt)?;
+                    out_parts = Some(
+                        (0..n).map(|p| bld.op(Op::Binary { op, flags, fmf, lhs: l[p], rhs: r[p] }, Some(pt))).collect(),
+                    );
+                }
+                Op::FNeg { fmf, value } => {
+                    let n = res_split.unwrap();
+                    let (vlen, elem, eb) = vec_info(cx, res_ty.unwrap()).unwrap();
+                    let pt = part(cx, vlen, elem, eb);
+                    let v = parts_of(cx, &parts, bld.f, value, n, pt)?;
+                    out_parts = Some((0..n).map(|p| bld.op(Op::FNeg { fmf, value: v[p] }, Some(pt))).collect());
+                }
+                Op::ICmp { pred, samesign, lhs, rhs } => {
+                    let ot = cx.value_ty(bld.f, lhs);
+                    let n = split_count(cx, ot).ok_or("a comparison of legal vectors with a split result")?;
+                    let (vlen, elem, eb) = vec_info(cx, ot).unwrap();
+                    let pt = part(cx, vlen, elem, eb);
+                    let i1 = cx.m.types.int(1);
+                    let mt = part(cx, vlen, i1, eb);
+                    let l = parts_of(cx, &parts, bld.f, lhs, n, pt)?;
+                    let r = parts_of(cx, &parts, bld.f, rhs, n, pt)?;
+                    out_parts = Some(
+                        (0..n).map(|p| bld.op(Op::ICmp { pred, samesign, lhs: l[p], rhs: r[p] }, Some(mt))).collect(),
+                    );
+                }
+                Op::FCmp { pred, fmf, lhs, rhs } => {
+                    let ot = cx.value_ty(bld.f, lhs);
+                    let n = split_count(cx, ot).ok_or("a comparison of legal vectors with a split result")?;
+                    let (vlen, elem, eb) = vec_info(cx, ot).unwrap();
+                    let pt = part(cx, vlen, elem, eb);
+                    let i1 = cx.m.types.int(1);
+                    let mt = part(cx, vlen, i1, eb);
+                    let l = parts_of(cx, &parts, bld.f, lhs, n, pt)?;
+                    let r = parts_of(cx, &parts, bld.f, rhs, n, pt)?;
+                    out_parts =
+                        Some((0..n).map(|p| bld.op(Op::FCmp { pred, fmf, lhs: l[p], rhs: r[p] }, Some(mt))).collect());
+                }
+                Op::Select { fmf, cond, then_value, else_value } => {
+                    let n = res_split.ok_or("a select of split vectors with a legal result")?;
+                    let (vlen, elem, eb) = vec_info(cx, res_ty.unwrap()).unwrap();
+                    let pt = part(cx, vlen, elem, eb);
+                    let t = parts_of(cx, &parts, bld.f, then_value, n, pt)?;
+                    let e = parts_of(cx, &parts, bld.f, else_value, n, pt)?;
+                    let c: Vec<Value> = match cond {
+                        Value::Local(x) if parts.contains_key(&x) => parts[&x].clone(),
+                        // A scalar condition chooses whole vectors.
+                        v if !matches!(cx.m.types.get(cx.value_ty(bld.f, v)), Type::Vector { .. }) => vec![v; n],
+                        _ => return Err("a select whose mask is not split as its values are".into()),
+                    };
+                    if c.len() != n {
+                        return Err("a select whose mask is not split as its values are".into());
+                    }
+                    out_parts = Some(
+                        (0..n)
+                            .map(|p| {
+                                bld.op(Op::Select { fmf, cond: c[p], then_value: t[p], else_value: e[p] }, Some(pt))
+                            })
+                            .collect(),
+                    );
+                }
+                Op::Freeze(v) => {
+                    let n = res_split.unwrap();
+                    let (vlen, elem, eb) = vec_info(cx, res_ty.unwrap()).unwrap();
+                    let pt = part(cx, vlen, elem, eb);
+                    let vs = parts_of(cx, &parts, bld.f, v, n, pt)?;
+                    out_parts = Some((0..n).map(|p| bld.op(Op::Freeze(vs[p]), Some(pt))).collect());
+                }
+                Op::Phi { fmf, .. } => {
+                    let n = res_split.ok_or("a phi of split masks")?;
+                    let (vlen, elem, eb) = vec_info(cx, res_ty.unwrap()).unwrap();
+                    let pt = part(cx, vlen, elem, eb);
+                    let mut phis = Vec::new();
+                    for _ in 0..n {
+                        let p = bld.f.add_inst(Op::Phi { fmf, incoming: vec![] }, Some((None, pt)));
+                        phis.push(p);
+                    }
+                    out_parts = Some(phis.iter().map(|&p| bld.f.result(p)).collect());
+                    bld.new.extend(phis.iter().copied());
+                    pending_phis.push((phis, i));
+                }
+                Op::Load { volatile, atomic: None, ptr, align } => {
+                    let n = res_split.unwrap();
+                    let (vlen, elem, eb) = vec_info(cx, res_ty.unwrap()).unwrap();
+                    let pt = part(cx, vlen, elem, eb);
+                    let step = if is_vec(cx, pt) { 16 } else { (eb / 8) as i64 };
+                    let i64t = cx.m.types.int(64);
+                    let i8t = cx.m.types.int(8);
+                    let ptr_ty = cx.m.types.ptr(0);
+                    let mut ps = Vec::new();
+                    for p in 0..n {
+                        let at = if p == 0 {
+                            ptr
+                        } else {
+                            let off = Value::Const(cx.m.consts.intern(Constant {
+                                ty: i64t,
+                                kind: ConstKind::Int(smaugian_ir::apint::ApInt::from_i64(64, step * p as i64)),
+                            }));
+                            bld.op(
+                                Op::Gep {
+                                    flags: GepFlags::default(),
+                                    inrange: None,
+                                    source_ty: i8t,
+                                    ptr,
+                                    indices: vec![off],
+                                },
+                                Some(ptr_ty),
+                            )
+                        };
+                        ps.push(bld.op(
+                            Op::Load { volatile, atomic: None, ptr: at, align: align.map(|a| a.min(step as u64)) },
+                            Some(pt),
+                        ));
+                    }
+                    out_parts = Some(ps);
+                }
+                Op::Store { volatile, atomic: None, value, ptr, align } => {
+                    let vt = cx.value_ty(bld.f, value);
+                    let n = split_count(cx, vt).ok_or("a store of a split mask")?;
+                    let (vlen, elem, eb) = vec_info(cx, vt).unwrap();
+                    let pt = part(cx, vlen, elem, eb);
+                    let vs = parts_of(cx, &parts, bld.f, value, n, pt)?;
+                    let step = if is_vec(cx, pt) { 16 } else { (eb / 8) as i64 };
+                    let i64t = cx.m.types.int(64);
+                    let i8t = cx.m.types.int(8);
+                    let ptr_ty = cx.m.types.ptr(0);
+                    for (p, &v) in vs.iter().enumerate() {
+                        let at = if p == 0 {
+                            ptr
+                        } else {
+                            let off = Value::Const(cx.m.consts.intern(Constant {
+                                ty: i64t,
+                                kind: ConstKind::Int(smaugian_ir::apint::ApInt::from_i64(64, step * p as i64)),
+                            }));
+                            bld.op(
+                                Op::Gep {
+                                    flags: GepFlags::default(),
+                                    inrange: None,
+                                    source_ty: i8t,
+                                    ptr,
+                                    indices: vec![off],
+                                },
+                                Some(ptr_ty),
+                            )
+                        };
+                        bld.op(
+                            Op::Store {
+                                volatile,
+                                atomic: None,
+                                value: v,
+                                ptr: at,
+                                align: align.map(|a| a.min(step as u64)),
+                            },
+                            None,
+                        );
+                    }
+                    out_parts = Some(vec![]);
+                }
+                Op::Cast { op, flags, fmf, value } => {
+                    let from_ty = cx.value_ty(bld.f, value);
+                    let to_ty = res_ty.unwrap();
+                    let (len, fe_ty, fe) = vec_info(cx, from_ty).ok_or("a cast of a split vector to a scalar")?;
+                    let (_, te_ty, te) = vec_info(cx, to_ty).unwrap();
+                    // The source as 128-bit parts (one, if it is legal).
+                    let src: Vec<Value> = match value {
+                        Value::Local(x) if parts.contains_key(&x) => parts[&x].clone(),
+                        v if len * fe == 128 => vec![v],
+                        // A legal vector cast to a scalarised one: its lanes.
+                        v if res_split.is_some() && fe > 1 && (!len.is_power_of_two() || len * te < 64) => {
+                            let i64t = cx.m.types.int(64);
+                            (0..len)
+                                .map(|l| {
+                                    let idx = cx.int(i64t, l as i64);
+                                    bld.op(Op::ExtractElement { vector: v, index: idx }, Some(fe_ty))
+                                })
+                                .collect()
+                        }
+                        _ => return Err("a cast from a vector narrower than a register to a split one".into()),
+                    };
+                    if !is_vec(cx, cx.value_ty(bld.f, src[0])) {
+                        // Scalarised: lane for lane.
+                        out_parts = Some(
+                            src.iter().map(|&s| bld.op(Op::Cast { op, flags, fmf, value: s }, Some(te_ty))).collect(),
+                        );
+                    } else if fe == te || fe == 1 {
+                        // Lane for lane: each part on its own.
+                        let pt = vec_ty(cx, 128 / te.max(8), te_ty);
+                        out_parts = Some(
+                            src.iter().map(|&s| bld.op(Op::Cast { op, flags, fmf, value: s }, Some(pt))).collect(),
+                        );
+                    } else if te == 2 * fe {
+                        // Widening: each part's halves.
+                        let half_ty = vec_ty(cx, 64 / fe, fe_ty);
+                        let pt = vec_ty(cx, 64 / fe, te_ty);
+                        let l = (64 / fe) as i32;
+                        let mut ps = Vec::new();
+                        for &s in &src {
+                            let pz = poison(cx, cx.value_ty(bld.f, s));
+                            let lo = shuffle(&mut bld, cx, s, pz, &(0..l).collect::<Vec<_>>(), half_ty);
+                            let hi = shuffle(&mut bld, cx, s, pz, &(l..2 * l).collect::<Vec<_>>(), half_ty);
+                            ps.push(bld.op(Op::Cast { op, flags, fmf, value: lo }, Some(pt)));
+                            ps.push(bld.op(Op::Cast { op, flags, fmf, value: hi }, Some(pt)));
+                        }
+                        out_parts = Some(ps);
+                    } else if fe == 2 * te {
+                        // Narrowing: pairs of parts into one.
+                        if src.len() < 2 {
+                            return Err("a narrowing of a legal vector to a split one".into());
+                        }
+                        let half_ty = vec_ty(cx, 128 / fe, te_ty);
+                        let pt = vec_ty(cx, 128 / te, te_ty);
+                        let l = (128 / fe) as i32;
+                        let mut ps = Vec::new();
+                        for pair in src.chunks(2) {
+                            let a = bld.op(Op::Cast { op, flags, fmf, value: pair[0] }, Some(half_ty));
+                            let b = bld.op(Op::Cast { op, flags, fmf, value: pair[1] }, Some(half_ty));
+                            ps.push(shuffle(&mut bld, cx, a, b, &(0..2 * l).collect::<Vec<_>>(), pt));
+                        }
+                        if ps.len() == 1 && res_split.is_none() {
+                            replace = Some(ps[0]);
+                        } else {
+                            out_parts = Some(ps);
+                        }
+                    } else {
+                        return Err(format!("a cast of split vectors from {fe} to {te} bits"));
+                    }
+                }
+                Op::ShuffleVector { a, b: bv, mask } => {
+                    // Each lane of the result found in the operands' parts:
+                    // whole parts reused, splats splatted, other lanes
+                    // extracted and inserted one by one.
+                    let lanes = crate::target::mask_lanes(cx.m, mask).ok_or("a shuffle mask that is not constant")?;
+                    let at = cx.value_ty(bld.f, a);
+                    let (alen, elem, _) = vec_info(cx, at).unwrap();
+                    let src_of = |v: Value| match v {
+                        Value::Local(x) if parts.contains_key(&x) => parts[&x].clone(),
+                        v => vec![v],
+                    };
+                    let (sa, sb) = (src_of(a), src_of(bv));
+                    let pla = alen as usize / sa.len();
+                    let plb = alen as usize / sb.len();
+                    // A lane of the operands: the part holding it, and where.
+                    let find = |l: i32| -> Option<(Value, usize)> {
+                        if l < 0 {
+                            None
+                        } else if (l as usize) < alen as usize {
+                            Some((sa[l as usize / pla], l as usize % pla))
+                        } else {
+                            let l = l as usize - alen as usize;
+                            Some((sb[l / plb], l % plb))
+                        }
+                    };
+                    let rt = res_ty.unwrap();
+                    let (rlen, _, reb) = vec_info(cx, rt).unwrap();
+                    let (n, pt) = match res_split {
+                        Some(n) => (n, part(cx, rlen, elem, reb)),
+                        None => (1, rt),
+                    };
+                    let opl = rlen as usize / n;
+                    let i64t = cx.m.types.int(64);
+                    let mut ps = Vec::new();
+                    for p in 0..n {
+                        let ls = &lanes[p * opl..(p + 1) * opl];
+                        let found: Vec<Option<(Value, usize)>> = ls.iter().map(|&l| find(l)).collect();
+                        let scalar = |bld: &mut Builder, cx: &mut Ctx, (v, k): (Value, usize)| {
+                            if is_vec(cx, cx.value_ty(bld.f, v)) {
+                                let idx = cx.int(i64t, k as i64);
+                                bld.op(Op::ExtractElement { vector: v, index: idx }, Some(elem))
+                            } else {
+                                v
+                            }
+                        };
+                        if !is_vec(cx, pt) {
+                            ps.push(match found[0] {
+                                Some(x) => scalar(&mut bld, cx, x),
+                                None => poison(cx, pt),
+                            });
+                            continue;
+                        }
+                        let first = found.iter().flatten().next().copied();
+                        let Some((v0, k0)) = first else {
+                            ps.push(poison(cx, pt));
+                            continue;
+                        };
+                        let v0_ty = cx.value_ty(bld.f, v0);
+                        if v0_ty == pt
+                            && found.iter().enumerate().all(|(k, x)| x.is_none_or(|(v, j)| v == v0 && j == k))
+                        {
+                            ps.push(v0);
+                        } else if found.iter().all(|x| x.is_none_or(|y| y == (v0, k0))) {
+                            let e = scalar(&mut bld, cx, (v0, k0));
+                            let pz = poison(cx, pt);
+                            let zero = cx.int(i64t, 0);
+                            let ins = bld.op(Op::InsertElement { vector: pz, element: e, index: zero }, Some(pt));
+                            ps.push(shuffle(&mut bld, cx, ins, pz, &vec![0; opl], pt));
+                        } else {
+                            let mut acc = poison(cx, pt);
+                            for (k, x) in found.iter().enumerate() {
+                                if let Some(x) = *x {
+                                    let e = scalar(&mut bld, cx, x);
+                                    let idx = cx.int(i64t, k as i64);
+                                    acc = bld.op(Op::InsertElement { vector: acc, element: e, index: idx }, Some(pt));
+                                }
+                            }
+                            ps.push(acc);
+                        }
+                    }
+                    if res_split.is_some() {
+                        out_parts = Some(ps);
+                    } else {
+                        replace = Some(ps[0]);
+                    }
+                }
+                Op::InsertElement { vector, element, index } => {
+                    let n = res_split.unwrap();
+                    let (vlen, elem, eb) = vec_info(cx, res_ty.unwrap()).unwrap();
+                    let pt = part(cx, vlen, elem, eb);
+                    let idx =
+                        cx.const_int(index).ok_or("an insertelement into a split vector at a lane not constant")?;
+                    let mut vs = parts_of(cx, &parts, bld.f, vector, n, pt)?;
+                    let l = (vlen as usize / n) as i64;
+                    let i64t = cx.m.types.int(64);
+                    let lane = cx.int(i64t, idx % l);
+                    let p = (idx / l) as usize;
+                    vs[p] = if is_vec(cx, pt) {
+                        bld.op(Op::InsertElement { vector: vs[p], element, index: lane }, Some(pt))
+                    } else {
+                        element
+                    };
+                    out_parts = Some(vs);
+                }
+                Op::ExtractElement { vector, index } => {
+                    let vt = cx.value_ty(bld.f, vector);
+                    let n = split_count(cx, vt).unwrap();
+                    let (vlen, elem, eb) = vec_info(cx, vt).unwrap();
+                    let pt = part(cx, vlen, elem, eb);
+                    let idx =
+                        cx.const_int(index).ok_or("an extractelement from a split vector at a lane not constant")?;
+                    let vs = parts_of(cx, &parts, bld.f, vector, n, pt)?;
+                    let l = (vlen as usize / n) as i64;
+                    let i64t = cx.m.types.int(64);
+                    let lane = cx.int(i64t, idx % l);
+                    let v = vs[(idx / l) as usize];
+                    replace = Some(if is_vec(cx, pt) {
+                        bld.op(Op::ExtractElement { vector: v, index: lane }, Some(elem))
+                    } else {
+                        v
+                    });
+                }
+                Op::Call(call) => {
+                    let name = callee_name(cx.m, &call).unwrap_or_default();
+                    let args: Vec<Value> = call.args.iter().map(|a| a.value).collect();
+                    if let Some(rest) = name.strip_prefix("llvm.vector.reduce.") {
+                        // Combine the parts, then reduce one.
+                        let opname = rest.split('.').next().unwrap_or("");
+                        let vt = cx.value_ty(bld.f, args[0]);
+                        let n = split_count(cx, vt).ok_or("a reduction of a legal vector")?;
+                        let (vlen, elem, eb) = vec_info(cx, vt).unwrap();
+                        let pt = part(cx, vlen, elem, eb);
+                        let vs = parts_of(cx, &parts, bld.f, args[0], n, pt)?;
+                        let mut acc = vs[0];
+                        for &v in &vs[1..] {
+                            acc = combine(&mut bld, cx, opname, acc, v, pt)?;
+                        }
+                        let r = res_ty.unwrap();
+                        replace = Some(if is_vec(cx, pt) {
+                            let callee =
+                                declare(cx, &format!("llvm.vector.reduce.{opname}.{}", mangle(cx, pt)), r, &[pt]);
+                            call_value(&mut bld, cx, callee, vec![acc], r, pt)
+                        } else {
+                            acc
+                        });
+                    } else if name.starts_with("llvm.experimental.vector.partial.reduce.add.") {
+                        let acc_ty = res_ty.unwrap();
+                        if split_count(cx, acc_ty).is_some() {
+                            return Err("a partial reduction into a split accumulator".into());
+                        }
+                        let (alen, elem, eb) = vec_info(cx, acc_ty).unwrap();
+                        let vt = cx.value_ty(bld.f, args[1]);
+                        let vs: Vec<Value> = match split_count(cx, vt) {
+                            Some(n) => {
+                                let pt = vec_ty(cx, 128 / eb, elem);
+                                parts_of(cx, &parts, bld.f, args[1], n, pt)?
+                            }
+                            None => vec![args[1]],
+                        };
+                        let pt = cx.value_ty(bld.f, vs[0]);
+                        let mut s = vs[0];
+                        for &v in &vs[1..] {
+                            s = bld.op(
+                                Op::Binary {
+                                    op: BinOp::Add,
+                                    flags: IntFlags::NONE,
+                                    fmf: FastMath::default(),
+                                    lhs: s,
+                                    rhs: v,
+                                },
+                                Some(pt),
+                            );
+                        }
+                        // Fold halves together down to the accumulator's lanes.
+                        let (mut slen, _, _) = vec_info(cx, pt).unwrap();
+                        while slen > alen {
+                            let half = slen / 2;
+                            let ht = vec_ty(cx, half, elem);
+                            let pz = poison(cx, cx.value_ty(bld.f, s));
+                            let lo = shuffle(&mut bld, cx, s, pz, &(0..half as i32).collect::<Vec<_>>(), ht);
+                            let hi = shuffle(&mut bld, cx, s, pz, &(half as i32..slen as i32).collect::<Vec<_>>(), ht);
+                            s = bld.op(
+                                Op::Binary {
+                                    op: BinOp::Add,
+                                    flags: IntFlags::NONE,
+                                    fmf: FastMath::default(),
+                                    lhs: lo,
+                                    rhs: hi,
+                                },
+                                Some(ht),
+                            );
+                            slen = half;
+                        }
+                        replace = Some(bld.op(
+                            Op::Binary {
+                                op: BinOp::Add,
+                                flags: IntFlags::NONE,
+                                fmf: FastMath::default(),
+                                lhs: args[0],
+                                rhs: s,
+                            },
+                            Some(acc_ty),
+                        ));
+                    } else if name.starts_with("llvm.") && res_split.is_some() {
+                        // An element-wise intrinsic: called for each part,
+                        // declared again for the part's type.
+                        let n = res_split.unwrap();
+                        let (vlen, elem, eb) = vec_info(cx, res_ty.unwrap()).unwrap();
+                        let pt = part(cx, vlen, elem, eb);
+                        let base = name.rsplit_once('.').map(|(b, _)| b).unwrap_or(&name).to_string();
+                        let mut arg_parts = Vec::new();
+                        let mut arg_tys = Vec::new();
+                        for &a in &args {
+                            let at = cx.value_ty(bld.f, a);
+                            if split_count(cx, at).is_some() || at == res_ty.unwrap() {
+                                arg_parts.push(parts_of(cx, &parts, bld.f, a, n, pt)?);
+                                arg_tys.push(pt);
+                            } else {
+                                arg_parts.push(vec![a; n]);
+                                arg_tys.push(at);
+                            }
+                        }
+                        let callee = declare(cx, &format!("{base}.{}", mangle(cx, pt)), pt, &arg_tys);
+                        out_parts = Some(
+                            (0..n)
+                                .map(|p| {
+                                    let a: Vec<Value> = arg_parts.iter().map(|ap| ap[p]).collect();
+                                    call_value(&mut bld, cx, callee, a, pt, pt)
+                                })
+                                .collect(),
+                        );
+                    } else {
+                        return Err(format!("a call to {name} with split vectors"));
+                    }
+                }
+                op => return Err(format!("split vectors in {op:?}")),
+            }
+            // A legal vector made from scalars: inserted lane by lane.
+            if let (Some(ps), None, Some(rt)) = (&out_parts, res_split, res_ty)
+                && let Some((len, elem, eb)) = vec_info(cx, rt)
+                && eb != 1
+                && ps.len() == len as usize
+                && ps.first().is_some_and(|&p| !is_vec(cx, cx.value_ty(bld.f, p)))
+            {
+                let i64t = cx.m.types.int(64);
+                let mut acc = poison(cx, rt);
+                for (k, &p) in ps.iter().enumerate() {
+                    let idx = cx.int(i64t, k as i64);
+                    let p = if cx.value_ty(bld.f, p) == elem {
+                        p
+                    } else {
+                        return Err("a scalarised lane of another type".into());
+                    };
+                    acc = bld.op(Op::InsertElement { vector: acc, element: p, index: idx }, Some(rt));
+                }
+                replace = Some(acc);
+                out_parts = None;
+            }
+            let new = std::mem::take(&mut bld.new);
+            if let (Some(ps), Some(r)) = (out_parts, res) {
+                parts.insert(r, ps);
+            }
+            if let (Some(v), Some(r)) = (replace, res) {
+                f.replace_uses(Value::Local(r), v);
+            }
+            let n = new.len();
+            f.blocks[blk.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
+    // Phis' incoming parts, now that every part is known.
+    for (phis, orig) in pending_phis {
+        let Op::Phi { incoming, .. } = f.insts[orig.index()].op.clone() else { unreachable!() };
+        let pt = f.locals[f.insts[phis[0].index()].result.unwrap().index()].ty;
+        for (v, from) in incoming {
+            let vs = parts_of(cx, &parts, f, v, phis.len(), pt)?;
+            for (p, &phi) in phis.iter().enumerate() {
+                if let Op::Phi { incoming, .. } = &mut f.insts[phi.index()].op {
+                    incoming.push((vs[p], from));
+                }
+            }
+        }
+    }
+    // Phis go first in their blocks.
+    for &b in &f.layout.clone() {
+        let insts = std::mem::take(&mut f.blocks[b.index()].insts);
+        let (phis, rest): (Vec<InstId>, Vec<InstId>) = insts.into_iter().partition(|&i| f.insts[i.index()].op.is_phi());
+        f.blocks[b.index()].insts = phis.into_iter().chain(rest).collect();
+    }
+    expand_lanewise(cx, f)
+}
+
+fn call_value(b: &mut Builder, cx: &mut Ctx, callee: Value, args: Vec<Value>, ret: TypeId, _pt: TypeId) -> Value {
+    let params: Vec<TypeId> = args.iter().map(|&a| cx.value_ty(b.f, a)).collect();
+    let fn_ty = cx.m.types.intern(Type::Function { ret, params, varargs: false });
+    let call = Call {
+        tail: TailKind::None,
+        fmf: FastMath::default(),
+        cconv: CallConv::default(),
+        ret_attrs: vec![],
+        addrspace: None,
+        fn_ty,
+        callee,
+        args: args.into_iter().map(|value| CallArg { value, attrs: vec![] }).collect(),
+        fn_attrs: vec![],
+        bundles: vec![],
+    };
+    b.op(Op::Call(Box::new(call)), Some(ret))
+}
+
+/// The element-wise operation a reduction applies, on two parts.
+fn combine(b: &mut Builder, cx: &mut Ctx, op: &str, x: Value, y: Value, pt: TypeId) -> Result<Value, String> {
+    let bin = |o: BinOp| Op::Binary { op: o, flags: IntFlags::NONE, fmf: FastMath::default(), lhs: x, rhs: y };
+    Ok(match op {
+        "add" => b.op(bin(BinOp::Add), Some(pt)),
+        "mul" => b.op(bin(BinOp::Mul), Some(pt)),
+        "and" => b.op(bin(BinOp::And), Some(pt)),
+        "or" => b.op(bin(BinOp::Or), Some(pt)),
+        "xor" => b.op(bin(BinOp::Xor), Some(pt)),
+        "smax" | "smin" | "umax" | "umin" if !is_vec(cx, pt) => {
+            let pred = match op {
+                "smax" => ICmpPred::Sgt,
+                "smin" => ICmpPred::Slt,
+                "umax" => ICmpPred::Ugt,
+                _ => ICmpPred::Ult,
+            };
+            let i1 = cx.m.types.int(1);
+            let c = b.op(Op::ICmp { pred, samesign: false, lhs: x, rhs: y }, Some(i1));
+            b.op(Op::Select { fmf: FastMath::default(), cond: c, then_value: x, else_value: y }, Some(pt))
+        }
+        "smax" | "smin" | "umax" | "umin" => {
+            let callee = declare(cx, &format!("llvm.{op}.{}", mangle(cx, pt)), pt, &[pt, pt]);
+            call_value(b, cx, callee, vec![x, y], pt, pt)
+        }
+        other => return Err(format!("reductions by {other} of split vectors are not supported yet")),
+    })
+}

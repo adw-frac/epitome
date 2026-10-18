@@ -2,12 +2,13 @@
 //! build does, and that the machine code is right.
 //!
 //! For each `tests/programs/NAME.c` (functions) and `NAME.main.c` (a main
-//! that calls them and prints the results), in three configurations of the
+//! that calls them and prints the results), in four configurations of the
 //! IR given to smaugian-llc:
 //!
 //! - `O0`: clang without optimisation, so every variable is in memory;
 //! - `opt`: that, through smaugian-opt's pipeline;
 //! - `O2`: clang `-O2`, without vectorising or unrolling;
+//! - `vec`: clang `-O2` as it is, vectorised and unrolled;
 //!
 //! the test:
 //!
@@ -49,7 +50,18 @@ fn run(cmd: &mut Command) -> Result<String, String> {
 }
 
 /// Mnemonics objdump may print for an instruction we print another way.
-const ALIASES: &[(&str, &str)] = &[("add", "mov"), ("mov", "orr"), ("mov", "movz"), ("mov", "movn"), ("neg", "sub")];
+const ALIASES: &[(&str, &str)] = &[
+    ("add", "mov"),
+    ("mov", "orr"),
+    ("mov", "movz"),
+    ("mov", "movn"),
+    ("neg", "sub"),
+    ("sshll", "sxtl"),
+    ("ushll", "uxtl"),
+    ("sshll2", "sxtl2"),
+    ("ushll2", "uxtl2"),
+    ("ror", "extr"),
+];
 
 fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<String>, String> {
     let src = dir.join(format!("{name}.c"));
@@ -66,6 +78,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         ("O0", &["-O0", "-Xclang", "-disable-O0-optnone"]),
         ("opt", &["-O0", "-Xclang", "-disable-O0-optnone"]),
         ("O2", &["-O2", "-fno-vectorize", "-fno-slp-vectorize", "-fno-unroll-loops"]),
+        ("vec", &["-O2"]),
     ];
     for (config, flags) in configs {
         let stem = format!("{name}.{config}");

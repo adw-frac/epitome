@@ -48,11 +48,13 @@ pub struct MInst {
     pub imp_defs: Vec<u8>,
     /// For a copy: 64 bits wide, rather than 32.
     pub wide: bool,
+    /// For a copy: a whole 128-bit vector register.
+    pub q: bool,
 }
 
 impl MInst {
     pub fn new(op: usize, ops: Vec<MOp>) -> MInst {
-        MInst { op: Opcode::Instr(op), ops, imp_uses: Vec::new(), imp_defs: Vec::new(), wide: true }
+        MInst { op: Opcode::Instr(op), ops, imp_uses: Vec::new(), imp_defs: Vec::new(), wide: true, q: false }
     }
 
     pub fn copy(dst: Reg, src: Reg) -> MInst {
@@ -62,6 +64,7 @@ impl MInst {
             imp_uses: Vec::new(),
             imp_defs: Vec::new(),
             wide: true,
+            q: false,
         }
     }
 
@@ -121,6 +124,8 @@ pub struct MFunc {
     pub vwide: Vec<bool>,
     /// For each virtual register: is it a floating-point register?
     pub vfp: Vec<bool>,
+    /// For each virtual register: is it a whole 128-bit vector register?
+    pub vq: Vec<bool>,
     pub slots: Vec<Slot>,
     pub frame_size: i64,
     /// Bytes at the bottom of the frame for arguments to calls.
@@ -132,6 +137,15 @@ impl MFunc {
     pub fn new_vreg(&mut self, wide: bool) -> VReg {
         self.vwide.push(wide);
         self.vfp.push(false);
+        self.vq.push(false);
+        (self.vwide.len() - 1) as VReg
+    }
+
+    /// A 128-bit vector register.
+    pub fn new_q_vreg(&mut self) -> VReg {
+        self.vwide.push(true);
+        self.vfp.push(true);
+        self.vq.push(true);
         (self.vwide.len() - 1) as VReg
     }
 
@@ -139,6 +153,7 @@ impl MFunc {
     pub fn new_fp_vreg(&mut self, wide: bool) -> VReg {
         self.vwide.push(wide);
         self.vfp.push(true);
+        self.vq.push(false);
         (self.vwide.len() - 1) as VReg
     }
 }
@@ -152,8 +167,9 @@ pub fn reg_name(r: Reg, class: Class) -> String {
         Reg::V(v) => format!(
             "%{}{v}",
             match class {
-                Class::D => "d",
+                Class::D | Class::V => "d",
                 Class::S => "s",
+                Class::Q => "q",
                 c if c.is_64() => "x",
                 _ => "w",
             }
@@ -234,6 +250,29 @@ pub fn fill_template(t: &Target, abi: Option<&crate::abi::Abi>, i: usize, value:
         let o = &ins.operands[k];
         match (value(k), o.kind) {
             (Operand::Reg(r), Kind::Reg(class)) => {
+                // A vector arrangement, `{n:4s}`: v3.4s; or a lane's size,
+                // `{n:.s}`: v3.s (followed in the template by `[k]`).
+                if let Some(arr) =
+                    modifier.filter(|m| m.len() >= 2 && (m.as_bytes()[0].is_ascii_digit() || m.starts_with('.')))
+                {
+                    let arr = arr.strip_prefix('.').map_or(format!(".{arr}"), |x| format!(".{x}"));
+                    let arr = arr.trim_start_matches('.');
+                    match r {
+                        Reg::P(n) => out.push_str(&format!("v{}.{arr}", n.wrapping_sub(32))),
+                        Reg::V(v) => out.push_str(&format!("%v{v}.{arr}")),
+                    }
+                    continue;
+                }
+                // The scalar view of a vector register: `{n:s}` is s3.
+                if let Some(v @ ("b" | "h" | "s" | "d" | "q")) = modifier
+                    && class.is_fp()
+                {
+                    match r {
+                        Reg::P(n) => out.push_str(&format!("{v}{}", n.wrapping_sub(32))),
+                        Reg::V(x) => out.push_str(&format!("%{v}{x}")),
+                    }
+                    continue;
+                }
                 let class = match modifier {
                     Some("w") => class.with_width(false),
                     Some("x") => class.with_width(true),

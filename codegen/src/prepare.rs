@@ -48,7 +48,7 @@ impl Ctx<'_> {
         self.m.types.int(8)
     }
 
-    fn int(&mut self, ty: TypeId, v: i64) -> Value {
+    pub fn int(&mut self, ty: TypeId, v: i64) -> Value {
         let bits = match self.m.types.get(ty) {
             Type::Int(b) => *b,
             _ => 64,
@@ -65,7 +65,7 @@ impl Ctx<'_> {
         }
     }
 
-    fn value_ty(&self, f: &Function, v: Value) -> TypeId {
+    pub fn value_ty(&self, f: &Function, v: Value) -> TypeId {
         match v {
             Value::Local(x) => f.locals[x.index()].ty,
             Value::Const(c) => self.m.constant(c).ty,
@@ -86,6 +86,7 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     lower_switches(cx, &mut f);
     expand_intrinsics(cx, &mut f);
     split_aggregate_memory(cx, &mut f);
+    crate::legalize::legalize_vectors(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     lower_geps(cx, &mut f)?;
     promote_odd(cx, &mut f)?;
     widen_narrow(cx, &mut f);
@@ -109,6 +110,12 @@ fn check(cx: &Ctx, f: &Function, fname: &str) -> Result<(), String> {
         Type::Int(b) => *b > 64,
         Type::Ptr(a) => *a != 0,
         Type::Void | Type::Label | Type::Double | Type::Float => false,
+        // Vectors that do not fit a register are split (see
+        // `legalize_vectors`); scalable ones are not supported.
+        Type::Vector { scalable: false, elem, .. } => !matches!(
+            cx.m.types.get(*elem),
+            Type::Int(1 | 8 | 16 | 32 | 64) | Type::Float | Type::Double | Type::Ptr(0)
+        ),
         t => !small_struct(t),
     };
     for p in &f.params {
@@ -618,10 +625,12 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 continue;
             };
             let ty = f.locals[r.index()].ty;
+            // Scalars only: vector intrinsics have instructions.
             let bits = match cx.m.types.get(ty) {
                 Type::Int(b) => *b,
-                _ => 0,
+                _ => 64,
             };
+            let scalar = matches!(cx.m.types.get(ty), Type::Int(_));
             let i1 = cx.m.types.int(1);
             let mut s = Seq { f, new: Vec::new() };
             let base = name.split('.').take(2).collect::<Vec<_>>().join(".");
@@ -632,6 +641,64 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 "llvm.umin" => Some(ICmpPred::Ult),
                 _ => None,
             };
+            // An ordered floating-point reduction: the start value, then
+            // each lane added (or multiplied) in order, as written.
+            if (name.starts_with("llvm.vector.reduce.fadd.") || name.starts_with("llvm.vector.reduce.fmul."))
+                && let Type::Vector { len, elem, .. } = cx.m.types.get(cx.value_ty(s.f, args[1])).clone()
+            {
+                let i64t = cx.m.types.int(64);
+                let op = if name.contains(".fadd.") { BinOp::FAdd } else { BinOp::FMul };
+                let mut acc = args[0];
+                for lane in 0..len {
+                    let idx = cx.int(i64t, lane as i64);
+                    let e = s.op(Op::ExtractElement { vector: args[1], index: idx }, elem);
+                    acc =
+                        s.op(Op::Binary { op, flags: IntFlags::NONE, fmf: FastMath::default(), lhs: acc, rhs: e }, ty);
+                }
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), acc);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
+            // A vector funnel shift by a constant: two shifts and an or.
+            if base == "llvm.fshl"
+                && let Type::Vector { elem, .. } = cx.m.types.get(ty).clone()
+                && let Some(c) = crate::target::lit_of(
+                    cx.m,
+                    match args[2] {
+                        Value::Const(c) => c,
+                        _ => ConstId(u32::MAX),
+                    },
+                )
+                .filter(|_| matches!(args[2], Value::Const(_)))
+            {
+                let eb = match cx.m.types.get(elem) {
+                    Type::Int(b) => *b as i64,
+                    _ => 64,
+                };
+                let amt = c.0.rem_euclid(eb);
+                let splat = |cx: &mut Ctx, v: i64| -> Value {
+                    let e = cx.int(elem, v);
+                    let Value::Const(e) = e else { unreachable!() };
+                    Value::Const(cx.m.consts.intern(Constant { ty, kind: ConstKind::Splat(e) }))
+                };
+                let value = if amt == 0 {
+                    args[0]
+                } else {
+                    let (a, b) = (splat(cx, amt), splat(cx, eb - amt));
+                    let hi = s.bin(BinOp::Shl, args[0], a, ty);
+                    let lo = s.bin(BinOp::LShr, args[1], b, ty);
+                    s.bin(BinOp::Or, hi, lo, ty)
+                };
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), value);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
             // ctlz and cttz may say a zero input gives poison; giving the
             // full width instead is always allowed, and is what clz does.
             if (base == "llvm.ctlz" || base == "llvm.cttz") && args.len() == 2 {
@@ -642,7 +709,7 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
             }
             let value = match (minmax, base.as_str()) {
                 // Narrow minimum and maximum: compare and select.
-                (Some(pred), _) if bits < 32 => {
+                (Some(pred), _) if scalar && bits < 32 => {
                     let c = s.op(Op::ICmp { pred, samesign: false, lhs: args[0], rhs: args[1] }, i1);
                     Some(s.op(
                         Op::Select { fmf: FastMath::default(), cond: c, then_value: args[0], else_value: args[1] },
@@ -657,11 +724,22 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                     Some(cx.int(ty, if min { 0 } else { -1 }))
                 }
                 // Saturating subtraction: a > b ? a - b : 0.
-                (_, "llvm.usub") if name.starts_with("llvm.usub.sat") => {
+                (_, "llvm.usub") if scalar && name.starts_with("llvm.usub.sat") => {
                     let zero = cx.int(ty, 0);
                     let diff = s.bin(BinOp::Sub, args[0], args[1], ty);
                     let c = s.op(Op::ICmp { pred: ICmpPred::Ugt, samesign: false, lhs: args[0], rhs: args[1] }, i1);
                     Some(s.op(Op::Select { fmf: FastMath::default(), cond: c, then_value: diff, else_value: zero }, ty))
+                }
+                // Vector abs keeps its call, for the abs instruction; its
+                // flag (poison for the most negative value) may be dropped.
+                (_, "llvm.abs")
+                    if cx.value_ty(s.f, args[0]) != ty || matches!(cx.m.types.get(ty), Type::Vector { .. }) =>
+                {
+                    let no = cx.int(i1, 0);
+                    if let Op::Call(c) = &mut s.f.insts[i.index()].op {
+                        c.args[1].value = no;
+                    }
+                    None
                 }
                 (_, "llvm.abs") => {
                     let zero = cx.int(ty, 0);
@@ -676,7 +754,7 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 }
                 // Population count: sums of bits in pairs, nibbles and
                 // bytes, then a multiply to add the bytes up.
-                (_, "llvm.ctpop") if bits > 0 => {
+                (_, "llvm.ctpop") if scalar => {
                     let w = if bits <= 32 { 32 } else { 64 };
                     let wt = cx.m.types.int(w);
                     let mut x = if bits < w { s.cast(CastOp::ZExt, args[0], wt) } else { args[0] };
@@ -884,9 +962,10 @@ fn legalize_fp(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
             let i = f.blocks[b.index()].insts[k];
             let res = f.insts[i.index()].result;
             let mut s = Seq { f, new: Vec::new() };
+            // Scalars only: vectors have their own conversions.
             let bits_of = |cx: &Ctx, ty: TypeId| match cx.m.types.get(ty) {
                 Type::Int(b) => *b,
-                _ => 0,
+                _ => 64,
             };
             let mut replace: Option<Value> = None;
             match s.f.insts[i.index()].op.clone() {
