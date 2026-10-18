@@ -3,27 +3,27 @@
 version = 4
 
 [[package]]
-name = "smaugian"
+name = "draconian"
 version = "0.1.0"
 dependencies = [
- "smaugian-ir",
+ "draconian-ir",
 ]
 
 [[package]]
-name = "smaugian-codegen"
+name = "draconian-codegen"
 version = "0.1.0"
 dependencies = [
- "smaugian-ir",
- "smaugian-opt",
+ "draconian-ir",
+ "draconian-opt",
 ]
 
 [[package]]
-name = "smaugian-ir"
+name = "draconian-ir"
 version = "0.1.0"
 
 [[package]]
-name = "smaugian-opt"
+name = "draconian-opt"
 version = "0.1.0"
 dependencies = [
- "smaugian-ir",
+ "draconian-ir",
 ]

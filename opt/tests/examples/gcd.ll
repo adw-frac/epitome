@@ -1,4 +1,4 @@
-; smaugian-opt: --no-inline
+; draconian-opt: --no-inline
 ; Tail recursion: the call's result is returned directly, so the call
 ; becomes a jump back to the start with new arguments. No stack needed.
 define i32 @gcd(i32 %a, i32 %b) {

@@ -1,4 +1,4 @@
-; smaugian-opt: --passes=sroa,mem2reg
+; draconian-opt: --passes=sroa,mem2reg
 ; Splitting allocas into pieces mem2reg can promote.
 target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
 

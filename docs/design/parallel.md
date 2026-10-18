@@ -1,10 +1,10 @@
 # Parallel passes, inlining and recursion removal
 
-Smaugian runs passes on many functions at once. This document describes how
+Draconian runs passes on many functions at once. This document describes how
 the module is shared between threads, how work is ordered, and the first
 two interprocedural passes built on that: the inliner and recursion
-removal. The code is in the `smaugian-opt` crate (`opt/`); the
-`smaugian-opt` binary runs the pipeline. For sources and status labels, see
+removal. The code is in the `draconian-opt` crate (`opt/`); the
+`draconian-opt` binary runs the pipeline. For sources and status labels, see
 the [index](README.md).
 
 ## 1. Goals
@@ -86,7 +86,7 @@ may make the SCCs that call it ready.
 
 ### Measurements
 
-`smaugian-opt --stats` reports the time spent in each step, the total task
+`draconian-opt --stats` reports the time spent in each step, the total task
 time, and the critical path: the longest chain of tasks that must run one
 after another. Total task time divided by the critical path is the best
 speed-up threads could give.

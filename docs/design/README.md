@@ -1,6 +1,6 @@
-# Smaugian design documents
+# Draconian design documents
 
-These documents describe what Smaugian has to do to work like LLVM. They are
+These documents describe what Draconian has to do to work like LLVM. They are
 split into two halves:
 
 - [IR and middle end](ir.md): the intermediate representation, the pass
@@ -34,7 +34,7 @@ source code was read to write these documents, and none may be read when
 implementing them.
 
 When the documentation leaves something out, the gap is marked **Open** and
-Smaugian decides for itself. We do not fill a gap by looking at LLVM's source.
+Draconian decides for itself. We do not fill a gap by looking at LLVM's source.
 
 We may also run LLVM's tools, such as `clang -S -emit-llvm -x ir`, on our
 own inputs and record what they print. Rules found this way are listed with

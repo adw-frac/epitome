@@ -1,12 +1,12 @@
-//! Compiles C programs with smaugian-llc and checks they behave as clang's
+//! Compiles C programs with draconian-llc and checks they behave as clang's
 //! build does, and that the machine code is right.
 //!
 //! For each `tests/programs/NAME.c` (functions) and `NAME.main.c` (a main
 //! that calls them and prints the results), in four configurations of the
-//! IR given to smaugian-llc:
+//! IR given to draconian-llc:
 //!
 //! - `O0`: clang without optimisation, so every variable is in memory;
-//! - `opt`: that, through smaugian-opt's pipeline;
+//! - `opt`: that, through draconian-opt's pipeline;
 //! - `O2`: clang `-O2`, without vectorising or unrolling;
 //! - `vec`: clang `-O2` as it is, vectorised and unrolled;
 //!
@@ -29,8 +29,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use smaugian_codegen::target::Target;
-use smaugian_codegen::{Options, compile, mir};
+use draconian_codegen::target::Target;
+use draconian_codegen::{Options, compile, mir};
 
 fn have_tools() -> bool {
     let ok = |c: &str, a: &str| Command::new(c).arg(a).output().is_ok_and(|o| o.status.success());
@@ -85,11 +85,14 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         let ll = tmp.join(format!("{stem}.ll"));
         run(Command::new("clang").args(wrap).args(*flags).args(["-S", "-emit-llvm"]).arg(&src).arg("-o").arg(&ll))?;
         let text = std::fs::read_to_string(&ll).unwrap();
-        let mut m = smaugian_ir::parse_module(&text).map_err(|e| format!("{stem}: {e:?}"))?;
+        let mut m = draconian_ir::parse_module(&text).map_err(|e| format!("{stem}: {e:?}"))?;
         if *config == "opt" {
-            smaugian_opt::pipeline::run(&mut m, &smaugian_opt::pipeline::Options { threads: 1, ..Default::default() });
+            draconian_opt::pipeline::run(
+                &mut m,
+                &draconian_opt::pipeline::Options { threads: 1, ..Default::default() },
+            );
             let text = m.to_string();
-            m = smaugian_ir::parse_module(&text).map_err(|e| format!("{stem}: reparse: {e:?}"))?;
+            m = draconian_ir::parse_module(&text).map_err(|e| format!("{stem}: reparse: {e:?}"))?;
         }
         let compiled = compile(t, &mut m, &Options::default()).map_err(|e| format!("{stem}: {e}"))?;
         let s = tmp.join(format!("{stem}.s"));
@@ -159,11 +162,14 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
             .arg("-o")
             .arg(&ll))?;
         let text = std::fs::read_to_string(&ll).unwrap();
-        let mut m = smaugian_ir::parse_module(&text).map_err(|e| format!("{elf_stem}: {e:?}"))?;
+        let mut m = draconian_ir::parse_module(&text).map_err(|e| format!("{elf_stem}: {e:?}"))?;
         if *config == "opt" {
-            smaugian_opt::pipeline::run(&mut m, &smaugian_opt::pipeline::Options { threads: 1, ..Default::default() });
+            draconian_opt::pipeline::run(
+                &mut m,
+                &draconian_opt::pipeline::Options { threads: 1, ..Default::default() },
+            );
             let text = m.to_string();
-            m = smaugian_ir::parse_module(&text).map_err(|e| format!("{elf_stem}: reparse: {e:?}"))?;
+            m = draconian_ir::parse_module(&text).map_err(|e| format!("{elf_stem}: reparse: {e:?}"))?;
         }
         let compiled = compile(t, &mut m, &Options::default()).map_err(|e| format!("{elf_stem}: {e}"))?;
         if compiled.funcs.first().is_some_and(|f| f.abi.name != "aapcs64") {

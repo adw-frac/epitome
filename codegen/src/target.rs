@@ -9,8 +9,8 @@
 
 use std::collections::HashMap;
 
-use smaugian_ir::module::*;
-use smaugian_ir::types::{Type, TypeId};
+use draconian_ir::module::*;
+use draconian_ir::types::{Type, TypeId};
 
 use crate::enc::{self, Encoding, Env};
 
@@ -490,7 +490,7 @@ impl Target {
     }
 
     pub fn load(src: &str) -> Result<Target, String> {
-        let module = smaugian_ir::parse_module(src).map_err(|e| format!("{e:?}"))?;
+        let module = draconian_ir::parse_module(src).map_err(|e| format!("{e:?}"))?;
         let mut t = Target {
             module,
             instrs: Vec::new(),

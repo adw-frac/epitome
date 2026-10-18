@@ -27,10 +27,10 @@
 //!   register width, with the same rule: masked or sign-extended in place
 //!   before an operation that reads their top bits.
 
-use smaugian_ir::apint::ApInt;
-use smaugian_ir::layout::DataLayout;
-use smaugian_ir::module::*;
-use smaugian_ir::types::{Type, TypeId};
+use draconian_ir::apint::ApInt;
+use draconian_ir::layout::DataLayout;
+use draconian_ir::module::*;
+use draconian_ir::types::{Type, TypeId};
 
 use crate::target::sext;
 

@@ -34,8 +34,8 @@
 //! ending in a conditional branch with one target in the loop and one out,
 //! and an in-loop target reached only from the header.
 
-use smaugian_ir::edit::Names;
-use smaugian_ir::module::*;
+use draconian_ir::edit::Names;
+use draconian_ir::module::*;
 
 use crate::ctx::Shared;
 use crate::fx::FxHashMap as HashMap;

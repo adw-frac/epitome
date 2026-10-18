@@ -29,9 +29,9 @@ use std::sync::{Mutex, OnceLock, RwLock, RwLockReadGuard};
 
 use crate::table::{ConstTable, TypeTable};
 
-use smaugian_ir::apint::ApInt;
-use smaugian_ir::module::*;
-use smaugian_ir::types::{Type, TypeId};
+use draconian_ir::apint::ApInt;
+use draconian_ir::module::*;
+use draconian_ir::types::{Type, TypeId};
 
 /// One function's body during a parallel phase.
 pub struct FnSlot {
@@ -64,7 +64,7 @@ pub struct Shared<'m> {
     pub intrinsics: Intrinsics,
     /// The module's data layout, or the defaults if it has none or it does
     /// not parse.
-    pub layout: smaugian_ir::layout::DataLayout,
+    pub layout: draconian_ir::layout::DataLayout,
 }
 
 /// Runs `phase` with the module split up for parallel work, then puts it
@@ -107,7 +107,7 @@ pub fn parallel_phase<R>(
         layout: m
             .data_layout
             .as_deref()
-            .and_then(|s| smaugian_ir::layout::DataLayout::parse(&String::from_utf8_lossy(s)).ok())
+            .and_then(|s| draconian_ir::layout::DataLayout::parse(&String::from_utf8_lossy(s)).ok())
             .unwrap_or_default(),
     };
     let result = phase(&shared);

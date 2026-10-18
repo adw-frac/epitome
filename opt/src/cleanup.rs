@@ -1,7 +1,7 @@
 //! Small CFG clean-ups run after a function has been restructured. They
 //! keep the output readable; the full `simplifycfg` is planned separately.
 
-use smaugian_ir::module::*;
+use draconian_ir::module::*;
 
 use crate::cfg;
 

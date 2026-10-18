@@ -1,13 +1,13 @@
 [package]
-name = "smaugian-opt"
+name = "draconian-opt"
 version = "0.1.0"
 edition = "2024"
-repository = "https://github.com/andy-thomason/smaugian-reduction"
-description = "Smaugian's optimisation passes and the machinery that runs them on many functions at once"
+repository = "https://github.com/andy-thomason/draconian-measurement"
+description = "Draconian's optimisation passes and the machinery that runs them on many functions at once"
 
 [dependencies]
-smaugian-ir = { path = "../ir" }
+draconian-ir = { path = "../ir" }
 
 [[bin]]
-name = "smaugian-opt"
+name = "draconian-opt"
 path = "src/main.rs"

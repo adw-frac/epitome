@@ -27,7 +27,7 @@ fn strip_comment(line: &str) -> &str {
 
 fn check(path: &Path) -> Result<(), String> {
     let src = std::fs::read_to_string(path).unwrap();
-    let m = smaugian_ir::parse_module(&src).map_err(|e| format!("{}:{e}", path.display()))?;
+    let m = draconian_ir::parse_module(&src).map_err(|e| format!("{}:{e}", path.display()))?;
     let printed = m.to_string();
     let want = significant_lines(&src);
     let got = significant_lines(&printed);
@@ -39,7 +39,7 @@ fn check(path: &Path) -> Result<(), String> {
     if want.len() != got.len() {
         return Err(format!("{}: {} lines, expected {}", path.display(), got.len(), want.len()));
     }
-    let again = smaugian_ir::parse_module(&printed).map_err(|e| format!("{} (reprinted):{e}", path.display()))?;
+    let again = draconian_ir::parse_module(&printed).map_err(|e| format!("{} (reprinted):{e}", path.display()))?;
     if again.to_string() != printed {
         return Err(format!("{}: printing is not stable", path.display()));
     }

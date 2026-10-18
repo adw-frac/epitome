@@ -1,4 +1,4 @@
-; smaugian-opt: --no-inline
+; draconian-opt: --no-inline
 ; Regression: a musttail call must stay right before its ret. The stack
 ; transform reroutes every ret, so @f is left recursive.
 declare i32 @printf(ptr, ...)

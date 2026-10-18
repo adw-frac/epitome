@@ -1,6 +1,6 @@
 //! Hand-written IR covering forms the clang corpus does not, plus parse errors.
 
-use smaugian_ir::parse_module;
+use draconian_ir::parse_module;
 
 /// Lines without comments, trailing spaces or blank lines.
 fn significant_lines(text: &str) -> Vec<String> {

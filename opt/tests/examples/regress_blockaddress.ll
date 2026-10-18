@@ -1,4 +1,4 @@
-; smaugian-opt: -O2
+; draconian-opt: -O2
 ; Regression: a blockaddress names %L in @caller, so inlining into
 ; @caller must not merge %L away, and @caller itself is not inlined.
 declare i32 @printf(ptr, ...)

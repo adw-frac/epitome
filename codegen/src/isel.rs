@@ -3,8 +3,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use smaugian_ir::module::*;
-use smaugian_ir::types::{Type, TypeId};
+use draconian_ir::module::*;
+use draconian_ir::types::{Type, TypeId};
 
 use crate::mir::*;
 use crate::prepare::{self, Ctx};
@@ -904,7 +904,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             return self.err("a vector constant of a scalar type");
         };
         let ebits = self.bits(elem).max(8);
-        let lane = |m: &smaugian_ir::Module, e: ConstId| -> i64 {
+        let lane = |m: &draconian_ir::Module, e: ConstId| -> i64 {
             match &m.constant(e).kind {
                 ConstKind::Int(a) => a.low_u64() as i64,
                 ConstKind::Float(raw) => *raw as i64,

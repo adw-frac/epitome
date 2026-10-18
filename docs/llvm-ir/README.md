@@ -1,6 +1,6 @@
 # LLVM IR reference
 
-This is Smaugian's own description of LLVM IR. It is written only from LLVM's
+This is Draconian's own description of LLVM IR. It is written only from LLVM's
 published documentation, never from LLVM source code. See the clean-room
 rules in the [design index](../design/README.md).
 
@@ -46,16 +46,16 @@ public documentation, so they can fill the gaps marked in the chapters.
 
 The bitcode document has no record layouts for constants, function bodies,
 the value symbol table or metadata. No public document covers these, so
-Smaugian will have to work them out from bitcode files that LLVM writes.
+Draconian will have to work them out from bitcode files that LLVM writes.
 
 ## Conventions
 
-- **Smaugian note:** something the documentation implies for our
+- **Draconian note:** something the documentation implies for our
   implementation.
-- **Not documented:** a question the documentation does not answer. Smaugian
+- **Not documented:** a question the documentation does not answer. Draconian
   decides these for itself, and records the decision in the design docs.
 - **Deprecated** and **Experimental** mark features the documentation labels
   that way.
 
 Exact names, keywords and numbers are copied from the documentation because
-Smaugian must read and write them. Explanations are in our own words.
+Draconian must read and write them. Explanations are in our own words.

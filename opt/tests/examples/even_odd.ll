@@ -1,4 +1,4 @@
-; smaugian-opt: --no-inline --print-cycles
+; draconian-opt: --no-inline --print-cycles
 ; Mutual recursion. @is_odd is internal and only called by @is_even, so
 ; @is_even is the only way into the cycle. Inlining @is_odd into it leaves
 ; a self-recursive tail call, which becomes a loop; @is_odd is then unused.

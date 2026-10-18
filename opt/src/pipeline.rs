@@ -20,9 +20,9 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use smaugian_ir::metadata;
-use smaugian_ir::module::*;
-use smaugian_ir::types::Type;
+use draconian_ir::metadata;
+use draconian_ir::module::*;
+use draconian_ir::types::Type;
 
 use crate::callgraph::CallGraph;
 use crate::ctx::{Intrinsics, parallel_phase};
@@ -432,7 +432,7 @@ fn declare_intrinsics(m: &mut Module) -> Intrinsics {
     let void = m.types.void();
     let save_ty = m.types.intern(Type::Function { ret: ptr, params: vec![], varargs: false });
     let restore_ty = m.types.intern(Type::Function { ret: void, params: vec![ptr], varargs: false });
-    let mut declare = |name: &str, ty, params: &[smaugian_ir::types::TypeId]| -> GlobalId {
+    let mut declare = |name: &str, ty, params: &[draconian_ir::types::TypeId]| -> GlobalId {
         if let Some(i) = m.globals.iter().position(|g| g.name.as_deref() == Some(name)) {
             return GlobalId(i as u32);
         }

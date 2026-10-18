@@ -1,4 +1,4 @@
-; smaugian-opt: --no-inline --recursion=stack
+; draconian-opt: --no-inline --recursion=stack
 ; Two recursive calls per activation. Neither is a tail call, so each pushes
 ; a frame holding what is live after it: `n` after the first call, and the
 ; first result after the second.

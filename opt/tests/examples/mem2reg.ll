@@ -1,4 +1,4 @@
-; smaugian-opt: --passes=mem2reg
+; draconian-opt: --passes=mem2reg
 ; Promoting allocas to SSA values.
 
 declare void @use(ptr)

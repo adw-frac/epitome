@@ -1,4 +1,4 @@
-; smaugian-opt: -O2
+; draconian-opt: -O2
 ; Regression: a weak definition may be replaced at link time, so it is
 ; not inlined.
 declare i32 @printf(ptr, ...)

@@ -47,7 +47,7 @@ call void @llvm.foo(metadata !0)      ; MetadataAsValue(MDNode !0)
 !{i32 1}                              ; tuple whose element is ValueAsMetadata
 ```
 
-**Smaugian note:** after the keyword `metadata`, peek at the next token. If it
+**Draconian note:** after the keyword `metadata`, peek at the next token. If it
 starts with `!`, parse metadata. Otherwise parse `<type> <value>` and wrap it.
 
 ## Metadata strings (MDString)
@@ -96,7 +96,7 @@ Nodes are usually defined at module level with a number:
   content. A `distinct` node can also appear when a transformation changes
   operands and two uniqued nodes would otherwise collide.
 
-**Smaugian note:** the in-memory model needs a uniquing table keyed by
+**Draconian note:** the in-memory model needs a uniquing table keyed by
 (kind, operands) for non-distinct nodes, and a separate identity for each
 distinct node. Self-referential nodes (for example `!0 = !{!0}`) must be
 supported, so parsing needs forward references.
@@ -154,7 +154,7 @@ Rules:
 - Named metadata on the module may not be dropped, except debug metadata
   (named metadata whose name is `!llvm.dbg.*`).
 
-**Smaugian note:** a "strip unknown metadata" utility must keep that list of
+**Draconian note:** a "strip unknown metadata" utility must keep that list of
 global attachments and all non-debug named metadata.
 
 ## Specialized metadata nodes
@@ -175,7 +175,7 @@ list or the default value of every field, except where noted.
 
 **Not documented:** the full field list, field types and defaults for most
 nodes. The tables below list the fields that the manual names or uses in its
-examples. The "type" column is inferred from those examples. Smaugian must
+examples. The "type" column is inferred from those examples. Draconian must
 decide the complete set elsewhere.
 
 Common field value types used below:
@@ -326,7 +326,7 @@ A function type.
 **Not documented:** the manual's example defines its operands with
 `!BasicType(name: "int", size: 32, align: 32, DW_ATE_signed)`. That spelling
 (no `DI` prefix, positional encoding) looks like a typo for `!DIBasicType`
-with `encoding:`. Smaugian should not accept it.
+with `encoding:`. Draconian should not accept it.
 
 ### DIDerivedType
 
@@ -455,7 +455,7 @@ is not `DIFlagFwdDecl`. Linking tools unique such definitions by
 
 **Not documented:** the field name for the variant part's discriminant.
 
-**Smaugian note:** module linking must merge `DICompositeType` nodes by
+**Draconian note:** module linking must merge `DICompositeType` nodes by
 `identifier:` at parse time, ignoring `distinct`.
 
 ### DISubrange
@@ -519,7 +519,7 @@ of bits is stored minus the bias. Example: range `-7 .. 0` fits in 3 bits;
 
 **Not documented:** the manual's examples for this section are written
 `!DISubrange(...)`, not `!DISubrangeType(...)`. This is probably an error in
-the manual. Smaugian should spell the node `!DISubrangeType` and treat the
+the manual. Draconian should spell the node `!DISubrangeType` and treat the
 example fields as its fields.
 
 ### DIEnumerator
@@ -773,7 +773,7 @@ Order is part of identity: the same entries in a different order make a
 different node. LLVM gives the order no meaning. `DILayerLoc` and
 `DILayerLocList` are normally uniqued, but `distinct` forms are legal.
 
-**Smaugian note:** `DILayerLocList` is the only specialized node in this
+**Draconian note:** `DILayerLocList` is the only specialized node in this
 chapter with positional operands. The parser needs a special case.
 
 ### DILocalVariable
@@ -812,7 +812,7 @@ elem ::= DW_OP-name | integer
 A `DIExpression` is always written inline. It can never be given an id like
 `!1` and referenced.
 
-**Smaugian note:** the printer must always print `DIExpression` inline, and
+**Draconian note:** the printer must always print `DIExpression` inline, and
 the parser must reject `!N = !DIExpression(...)`.
 
 Examples from the manual:
@@ -847,7 +847,7 @@ from the examples:
 DIExpression for details" and points elsewhere. The complete list of
 `DW_OP_*` and `DW_OP_LLVM_*` operations, their operand counts and their
 semantics is not in the text this chapter was written from. The rows above
-are only what the examples show. Smaugian needs another documentation source
+are only what the examples show. Draconian needs another documentation source
 (LLVM's "Source Level Debugging" page) before it can parse every operation.
 
 ### DIAssignID
@@ -1292,7 +1292,7 @@ Pairs must be ordered by signed lower bound and must not be contiguous
 !2 = !{ i8 0, i8 2, i8 3, i8 6 }
 ```
 
-**Smaugian note:** the verifier must check type match, `a != b`, ordering and
+**Draconian note:** the verifier must check type match, `a != b`, ordering and
 non-contiguity.
 
 ### `!nofpclass`
@@ -1678,7 +1678,7 @@ attachment is either one pair, or a tuple of pairs.
 !2 = !{!0, !1}
 ```
 
-**Smaugian note:** a node with exactly two `MDString` operands is a single
+**Draconian note:** a node with exactly two `MDString` operands is a single
 tag; a node whose operands are nodes is a list of tags.
 
 ### `!nofree`
@@ -1841,8 +1841,8 @@ Notes:
   means execution is expected to leave before reaching the header; it is
   distinct from "no estimate".
 
-**Smaugian note:** a missing estimated trip count must stay distinguishable
-from zero in Smaugian's API (for example `Option<u32>`).
+**Draconian note:** a missing estimated trip count must stay distinguishable
+from zero in Draconian's API (for example `Option<u32>`).
 
 ### `!llvm.access.group`
 
@@ -1929,7 +1929,7 @@ A key may not have two different behaviors, except `Require` and `Override`.
 not say how other behaviors treat a flag present in only one module. The
 natural reading is that the single value is kept.
 
-**Smaugian note:** the module linker must implement these merge rules
+**Draconian note:** the module linker must implement these merge rules
 exactly, including the `Warning`/`Min`/`Max` interaction.
 
 ### Known module flags
@@ -2019,7 +2019,7 @@ optimize IR (`opt`, `clang -x ir`) ignore them.
 **Not documented:** building an in-memory summary index from text is
 described as future work.
 
-**Smaugian note:** Smaugian's parser must at least accept and skip `^N = ...`
+**Draconian note:** Draconian's parser must at least accept and skip `^N = ...`
 entries, and should be able to round-trip them if it writes bitcode summaries.
 
 There are three entry types.
@@ -2215,7 +2215,7 @@ Same layout as `@llvm.global_ctors`. Destructors run when the module
 unloads, in **descending** priority (highest first). Equal priority order is
 undefined. The third field has the same meaning as for constructors.
 
-**Smaugian note:** linking modules concatenates these arrays (appending
+**Draconian note:** linking modules concatenates these arrays (appending
 linkage). The optimizer must treat everything listed in `@llvm.used` and
 `@llvm.compiler.used` as used.
 

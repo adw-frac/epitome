@@ -10,7 +10,7 @@
 //! every callee outside its own SCC is final. Independent SCCs run in
 //! parallel; see `par::run_dag`.
 
-use smaugian_ir::module::*;
+use draconian_ir::module::*;
 
 use crate::fx::FxHashMap as HashMap;
 use crate::par;

@@ -22,7 +22,7 @@
 //! These repeat until nothing changes. Functions whose blocks have their
 //! address taken are left alone, since a `blockaddress` may name any block.
 
-use smaugian_ir::module::*;
+use draconian_ir::module::*;
 
 use crate::cleanup;
 use crate::ctx::Shared;

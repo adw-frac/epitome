@@ -1,11 +1,11 @@
-//! `smaugian-llc`: compiles a `.ll` file to AArch64 assembly.
+//! `draconian-llc`: compiles a `.ll` file to AArch64 assembly.
 
 use std::process::ExitCode;
 
-use smaugian_codegen::target::Target;
-use smaugian_codegen::{Options, Stop, compile, mir};
+use draconian_codegen::target::Target;
+use draconian_codegen::{Options, Stop, compile, mir};
 
-const USAGE: &str = "usage: smaugian-llc [options] <file.ll>
+const USAGE: &str = "usage: draconian-llc [options] <file.ll>
 
   -o <file>               write the assembly here instead of stdout
   --target=<file.ll>      read the machine description from this file
@@ -41,21 +41,21 @@ fn main() -> ExitCode {
             "--stop-after=ra" => stop = Stop::AfterAllocation,
             s if s.starts_with("--target=") => target_file = Some(s["--target=".len()..].to_string()),
             s if s.starts_with("--abi=") => opts.abi = Some(s["--abi=".len()..].to_string()),
-            "--syntax=macho" => opts.syntax = Some(smaugian_codegen::abi::Syntax::MachO),
-            "--syntax=elf" => opts.syntax = Some(smaugian_codegen::abi::Syntax::Elf),
+            "--syntax=macho" => opts.syntax = Some(draconian_codegen::abi::Syntax::MachO),
+            "--syntax=elf" => opts.syntax = Some(draconian_codegen::abi::Syntax::Elf),
             s if s.starts_with("--reserve=") => {
                 for r in s["--reserve=".len()..].split(',') {
                     match r.strip_prefix('x').and_then(|n| n.parse::<u8>().ok()) {
                         Some(n) if n <= 30 => opts.reserve.push(n),
                         _ => {
-                            eprintln!("smaugian-llc: bad register {r}");
+                            eprintln!("draconian-llc: bad register {r}");
                             return ExitCode::FAILURE;
                         }
                     }
                 }
             }
             s if s.starts_with('-') => {
-                eprintln!("smaugian-llc: unknown option {s}\n\n{USAGE}");
+                eprintln!("draconian-llc: unknown option {s}\n\n{USAGE}");
                 return ExitCode::FAILURE;
             }
             s => input = Some(s.to_string()),
@@ -66,7 +66,7 @@ fn main() -> ExitCode {
         Some(path) => match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|s| Target::load(&s)) {
             Ok(t) => t,
             Err(e) => {
-                eprintln!("smaugian-llc: {path}: {e}");
+                eprintln!("draconian-llc: {path}: {e}");
                 return ExitCode::FAILURE;
             }
         },
@@ -86,14 +86,14 @@ fn main() -> ExitCode {
     let src = match std::fs::read_to_string(&input) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("smaugian-llc: {input}: {e}");
+            eprintln!("draconian-llc: {input}: {e}");
             return ExitCode::FAILURE;
         }
     };
-    let mut module = match smaugian_ir::parse_module(&src) {
+    let mut module = match draconian_ir::parse_module(&src) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("smaugian-llc: {input}: {e:?}");
+            eprintln!("draconian-llc: {input}: {e:?}");
             return ExitCode::FAILURE;
         }
     };
@@ -102,15 +102,15 @@ fn main() -> ExitCode {
     let compiled = match compile(&target, &mut module, &opts) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("smaugian-llc: {e}");
+            eprintln!("draconian-llc: {e}");
             return ExitCode::FAILURE;
         }
     };
     for e in &compiled.errors {
-        eprintln!("smaugian-llc: {e}");
+        eprintln!("draconian-llc: {e}");
     }
     if stats {
-        use smaugian_codegen::isel::stats::*;
+        use draconian_codegen::isel::stats::*;
         let total = started.elapsed();
         let (roots, steps, cands, valid) = (get(&ROOTS), get(&STEPS), get(&CANDIDATES), get(&VALID));
         let insts: usize = compiled.funcs.iter().map(|f| f.blocks.iter().map(|b| b.insts.len()).sum::<usize>()).sum();
@@ -137,7 +137,7 @@ fn main() -> ExitCode {
             let (words, fixups) = match mir::encode_function(&target, f) {
                 Ok(w) => w,
                 Err(e) => {
-                    eprintln!("smaugian-llc: {e}");
+                    eprintln!("draconian-llc: {e}");
                     return ExitCode::FAILURE;
                 }
             };
@@ -160,7 +160,7 @@ fn main() -> ExitCode {
     match output {
         Some(path) => {
             if let Err(e) = std::fs::write(&path, text) {
-                eprintln!("smaugian-llc: {path}: {e}");
+                eprintln!("draconian-llc: {path}: {e}");
                 return ExitCode::FAILURE;
             }
         }

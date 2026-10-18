@@ -14,9 +14,9 @@
 //! this checker cannot evaluate them; they are listed in `UNCHECKED` and
 //! covered by the example and program tests instead.
 
-use smaugian_ir::module::{BinOp, IntFlags};
-use smaugian_opt::combine::dsl::{FloatLit, Head, Lit, Pat, Repl, Rule, Subject, parse_rules};
-use smaugian_opt::combine::eval::{self, Env, Folded, IntConst, mask};
+use draconian_ir::module::{BinOp, IntFlags};
+use draconian_opt::combine::dsl::{FloatLit, Head, Lit, Pat, Repl, Rule, Subject, parse_rules};
+use draconian_opt::combine::eval::{self, Env, Folded, IntConst, mask};
 
 const UNCHECKED: &[&str] = &[
     "zext_zext",

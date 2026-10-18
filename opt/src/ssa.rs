@@ -15,9 +15,9 @@
 
 use crate::fx::{FxHashMap as HashMap, FxHashSet as HashSet};
 
-use smaugian_ir::edit::Names;
-use smaugian_ir::module::*;
-use smaugian_ir::types::TypeId;
+use draconian_ir::edit::Names;
+use draconian_ir::module::*;
+use draconian_ir::types::TypeId;
 
 struct Var {
     ty: TypeId,

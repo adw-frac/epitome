@@ -1,4 +1,4 @@
-; smaugian-opt: -O2
+; draconian-opt: -O2
 ; Regression: the debug record before the inlined call moves to the
 ; instruction that follows it instead of being lost.
 define internal i32 @sq(i32 %v) !dbg !30 {

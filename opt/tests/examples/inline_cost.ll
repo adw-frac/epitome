@@ -1,4 +1,4 @@
-; smaugian-opt: -O2
+; draconian-opt: -O2
 ; How the cost model weighs calls. See the remarks at the top of the
 ; expected output.
 ;

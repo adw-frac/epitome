@@ -124,7 +124,7 @@ each other from looping forever; hitting it shows in the statistics.
 
 In the pipeline, each function is combined after inlining and recursion
 removal, before it is published, so callers see the simpler body when they
-decide what to inline. `smaugian-opt --passes=combine` runs it alone;
+decide what to inline. `draconian-opt --passes=combine` runs it alone;
 `--remarks` lists the rules that fired per function, and `--stats` totals
 them for the module.
 

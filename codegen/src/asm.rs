@@ -4,8 +4,8 @@
 
 use std::fmt::Write;
 
-use smaugian_ir::module::*;
-use smaugian_ir::types::{Type, TypeId};
+use draconian_ir::module::*;
+use draconian_ir::types::{Type, TypeId};
 
 use crate::abi::{Abi, Syntax};
 use crate::mir::*;

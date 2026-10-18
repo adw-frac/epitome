@@ -39,7 +39,7 @@ last two operands:
   compute the normal result on enabled lanes.
 - **Disabled lanes.** The general introduction says disabled lanes are
   `undef`. Every individual entry in this range instead says the result on
-  disabled lanes is `poison`. **Smaugian note:** use poison for disabled
+  disabled lanes is `poison`. **Draconian note:** use poison for disabled
   lanes. It matches every per-intrinsic definition.
 - **Reductions** treat disabled lanes as holding the operation's neutral
   value. They also fold in a scalar `start_value`. If no lanes are enabled
@@ -103,7 +103,7 @@ The element type of `val` equals the scalar type `T`.
 | `llvm.vp.reduce.fmaximum.*` | float | no flags or `nnan` only: `-Inf`; `ninf`: smallest finite value | Max with `maximum` semantics. NaN propagates. `-0.0 < +0.0`. |
 | `llvm.vp.reduce.fminimum.*` | float | no flags or `nnan` only: `+Inf`; `ninf`: largest finite value | Min with `minimum` semantics. NaN propagates. `-0.0 < +0.0`. |
 
-**Smaugian note:** for the four FP min/max reductions the neutral value depends
+**Draconian note:** for the four FP min/max reductions the neutral value depends
 on the call's fast-math flags. A lowering that inserts a select with a
 neutral constant must read the flags first.
 
@@ -139,7 +139,7 @@ taken as authoritative here.
 - Enabled lanes outside the allocation that holds lane 0 are poison. The
   program must find its own terminator (for example a null byte).
 
-**Smaugian note:** a simple and correct generic lowering of `vp.load.ff` is
+**Draconian note:** a simple and correct generic lowering of `vp.load.ff` is
 the one-lane scalar load described above.
 
 ---
@@ -160,7 +160,7 @@ operand.
 **Not documented:** some examples in the source (in the expandload and
 compressstore entries, and the `vp.store` comparison) still show an older
 form with an explicit `i32` alignment operand. The syntax sections use the
-`align` attribute form. **Smaugian note:** the reader should accept only the
+`align` attribute form. **Draconian note:** the reader should accept only the
 form in the syntax sections unless the auto-upgrade chapter says otherwise.
 
 ## Masked vector gather and scatter
@@ -170,7 +170,7 @@ form in the syntax sections unless the auto-upgrade chapter says otherwise.
 | `llvm.masked.gather.<vty>.<pvty>` | `(<W x ptr> ptrs, <W x i1> mask, <W x T> passthru) -> <W x T>` | Loads `*ptrs[i]` for enabled lanes. Disabled lanes take `passthru` and are not accessed. Alignment via `align` on `ptrs`. |
 | `llvm.masked.scatter.<vty>.<pvty>` | `(<W x T> value, <W x ptr> ptrs, <W x i1> mask)` | Stores `value[i]` to `ptrs[i]` for enabled lanes. Overlapping stores happen in lane order, lowest lane first, so the highest lane wins. |
 
-**Smaugian note:** the scatter ordering guarantee means a scalarised lowering
+**Draconian note:** the scatter ordering guarantee means a scalarised lowering
 must emit stores in increasing lane order.
 
 ## Masked expanding load and compressing store
@@ -214,7 +214,7 @@ N for `speculative.load` comes from the variadic tail, in one of two forms:
 `from_end` must be a constant. The N real bytes must lie inside an object
 that `p` is based on.
 
-**Smaugian note:** the verifier should check the oracle function's attributes
+**Draconian note:** the verifier should check the oracle function's attributes
 and the power-of-two size of the return type.
 
 ## Memory use markers
@@ -231,7 +231,7 @@ Lifetime rules:
 
 - The operand must be `poison`, an `alloca` result, or a call to an
   `llvm.structured.alloca` intrinsic. Anything else is ill-formed IR.
-  **Smaugian note:** enforce this in the verifier.
+  **Draconian note:** enforce this in the verifier.
 - If the operand is `poison`, the intrinsic does nothing.
 - A stack object starts dead. It becomes live at `lifetime.start`.
 
@@ -257,7 +257,7 @@ Lifetime rules:
 - The number and order of FP exceptions raised is not guaranteed. For
   example, vectorisation may merge several exceptions into one.
 
-**Smaugian note:** the verifier should reject mixed constrained and plain FP
+**Draconian note:** the verifier should reject mixed constrained and plain FP
 operations in one function, and check the `strictfp` attributes.
 
 **Not documented:** what counts as an "FP operation" for the mixing rule
@@ -396,7 +396,7 @@ types is not given in this range.
 | --- | --- | --- |
 | `llvm.experimental.noalias.scope.decl` | `(metadata !scope_list)` | **Experimental.** Marks where a `noalias` scope is declared. The list must have exactly one element and uses the `noalias` metadata format. When code containing it is duplicated (for example, loop unrolling), the scope may need duplicating too. |
 
-**Smaugian note:** the verifier must reject two declarations of the same scope
+**Draconian note:** the verifier must reject two declarations of the same scope
 where one dominates the other.
 
 ---
@@ -508,13 +508,13 @@ differently at IR level and are not yet handled by `llvm.stackguard`.
 | `llvm.donothing` | `()`, `nounwind memory(none)` | Does nothing. Removed by optimisers. One of three intrinsics that may be called with `invoke` (with `llvm.experimental.patchpoint` and `llvm.experimental.gc.statepoint`). |
 | `llvm.fake.use` | `(...)` | No-op that counts as a use of its single operand, keeping it alive to that point. Variadic only so any type fits; more than one argument is an error. Operand must be a function-local SSA value. |
 
-**Smaugian note:** the verifier must allow `invoke` of `llvm.donothing`,
+**Draconian note:** the verifier must allow `invoke` of `llvm.donothing`,
 `llvm.experimental.patchpoint` and `llvm.experimental.gc.statepoint`, and
 reject `invoke` of other intrinsics (and specifically of
 `llvm.experimental.deoptimize`, `llvm.experimental.guard` and
 `llvm.experimental.widenable.condition`).
 
-**Smaugian note:** `llvm.is.constant` must always be folded to `true` or
+**Draconian note:** `llvm.is.constant` must always be folded to `true` or
 `false` before instruction selection. A fallback of `false` is always
 legal.
 
@@ -537,7 +537,7 @@ legal.
 | `llvm.allow.ubsan.check` | `(i8 immarg kind) -> i1` | True if compiler options enable the UBSan check of this kind in this block. The program must be correct either way. |
 | `llvm.allow.runtime.check` | `(metadata kind) -> i1` | General form of `allow.ubsan.check`. `kind` is a string naming the check. |
 
-`llvm.experimental.deoptimize` rules (**Smaugian note:** all are verifier
+`llvm.experimental.deoptimize` rules (**Draconian note:** all are verifier
 checks):
 
 - It must not be called with `invoke`.
@@ -619,7 +619,7 @@ Shared rules:
 - Concurrent unordered-atomic accesses to the same memory are well defined.
   No ordering beyond `unordered` is given.
 
-**Smaugian note:** these are verifier checks: constant power-of-two
+**Draconian note:** these are verifier checks: constant power-of-two
 `element_size`, and `align` present and `>= element_size` on each pointer.
 
 ## Objective-C ARC runtime
@@ -671,7 +671,7 @@ array form).
 old typed-pointer mangling. The suffix scheme with opaque pointers is not
 stated in this range.
 
-**Smaugian note:** the verifier should require the `elementtype` attribute on
+**Draconian note:** the verifier should require the `elementtype` attribute on
 `base` for the array and struct forms.
 
 ---

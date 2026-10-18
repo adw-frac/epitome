@@ -1,11 +1,11 @@
 # Debug info
 
-Status: plan. Smaugian reads and prints debug info but does not understand
+Status: plan. Draconian reads and prints debug info but does not understand
 it.
 
 ## Where we are
 
-`smaugian-ir` stores a debug-info node such as `!DISubprogram(...)` as a
+`draconian-ir` stores a debug-info node such as `!DISubprogram(...)` as a
 generic `Metadata::Node`: a kind name plus a list of fields. Each field is a
 name and a value, where the value is a reference, a string, a typed value, or
 a word kept as written (`42`, `true`, `DW_TAG_member`,
@@ -133,7 +133,7 @@ and so will we.
 | 7 | Builder API, shaped after `LLVMDIBuilderCreate*` so the C API can wrap it directly. | A Rust test builds a CU, file, subprogram, local variable and location, and prints the same text clang does for the equivalent C. |
 
 Steps 1 and 2 need no code and can run in parallel. Steps 3 to 5 are one
-change to `smaugian-ir`. Step 6 belongs with the IR verifier. Step 7 waits
+change to `draconian-ir`. Step 6 belongs with the IR verifier. Step 7 waits
 for the C API decisions (source of declarations, target LLVM version).
 
 ## Open questions

@@ -25,9 +25,9 @@
 
 use crate::fx::FxHashMap as HashMap;
 
-use smaugian_ir::edit::Names;
-use smaugian_ir::module::*;
-use smaugian_ir::types::TypeId;
+use draconian_ir::edit::Names;
+use draconian_ir::module::*;
+use draconian_ir::types::TypeId;
 
 use crate::ctx::Shared;
 use crate::ssa::{self, SsaUpdater};

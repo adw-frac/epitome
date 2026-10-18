@@ -1,4 +1,4 @@
-; smaugian-opt: --no-inline
+; draconian-opt: --no-inline
 ;
 ; Loop rotation and induction variables, from clang -O0 of:
 ;   long sum_to(int *a, int n) { long s = 0; for (int i = 0; i < n; i++) s += a[i]; return s; }

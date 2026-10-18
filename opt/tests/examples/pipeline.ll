@@ -1,4 +1,4 @@
-; smaugian-opt: -O2
+; draconian-opt: -O2
 ; Recursion removal and inlining working together. @fact is processed
 ; first, because @main calls it. Once its recursion is gone it is a plain
 ; function, small enough to inline into @main, and since that was its only

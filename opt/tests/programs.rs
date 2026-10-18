@@ -16,9 +16,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use smaugian_opt::inline::OptLevel;
-use smaugian_opt::pipeline::{self, Options};
-use smaugian_opt::recursion::RecursionMode;
+use draconian_opt::inline::OptLevel;
+use draconian_opt::pipeline::{self, Options};
+use draconian_opt::recursion::RecursionMode;
 
 /// Clang flags for each configuration. `noinline` is removed from the
 /// output of the optimised ones, so our inliner has something to do.
@@ -85,10 +85,10 @@ fn check(
     let mut outputs = Vec::new();
     let mut summary = String::new();
     for threads in [1, 8] {
-        let mut m = smaugian_ir::parse_module(&text).map_err(|e| format!("{stem}: parse: {e}"))?;
+        let mut m = draconian_ir::parse_module(&text).map_err(|e| format!("{stem}: parse: {e}"))?;
         let report = pipeline::run(&mut m, &Options { threads, level, recursion, ..Options::default() });
         for (g, f) in m.functions() {
-            let errors = smaugian_opt::cfg::verify(f, m.global(g).name.as_deref().unwrap_or(""));
+            let errors = draconian_opt::cfg::verify(f, m.global(g).name.as_deref().unwrap_or(""));
             if !errors.is_empty() {
                 return Err(format!("{stem}: {}", errors.join("\n")));
             }
@@ -114,7 +114,7 @@ fn check(
         return Err(format!("{stem}: output changed\n--- want\n{want}--- got\n{got}"));
     }
     // The output must also read back in and print the same.
-    let again = smaugian_ir::parse_module(&outputs[0]).map_err(|e| format!("{stem}: reparse: {e}"))?;
+    let again = draconian_ir::parse_module(&outputs[0]).map_err(|e| format!("{stem}: reparse: {e}"))?;
     if again.to_string() != outputs[0] {
         return Err(format!("{stem}: output does not round-trip"));
     }

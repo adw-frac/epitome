@@ -32,10 +32,10 @@ use std::collections::BTreeMap;
 use crate::fx::FxHashMap as HashMap;
 use std::sync::OnceLock;
 
-use smaugian_ir::apint::ApInt;
-use smaugian_ir::float::FloatKind;
-use smaugian_ir::module::*;
-use smaugian_ir::types::{Type, TypeId};
+use draconian_ir::apint::ApInt;
+use draconian_ir::float::FloatKind;
+use draconian_ir::module::*;
+use draconian_ir::types::{Type, TypeId};
 
 use crate::table::{ConstTable as Constants, TypeTable as Types};
 
@@ -646,7 +646,7 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
             FloatLit::NegZero => -0.0,
             FloatLit::One => 1.0,
         };
-        let bits = smaugian_ir::float::from_f64(kind, v)?;
+        let bits = draconian_ir::float::from_f64(kind, v)?;
         let k = sh.intern_const(Constant { ty: elem, kind: ConstKind::Float(bits) });
         Some(Value::Const(if vector { sh.intern_const(Constant { ty, kind: ConstKind::Splat(k) }) } else { k }))
     }

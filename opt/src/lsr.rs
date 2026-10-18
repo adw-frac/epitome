@@ -21,9 +21,9 @@
 //! most `MAX_POINTERS` arrays are indexed: each becomes a register live
 //! across the loop.
 
-use smaugian_ir::edit::Names;
-use smaugian_ir::module::*;
-use smaugian_ir::types::{Type, TypeId};
+use draconian_ir::edit::Names;
+use draconian_ir::module::*;
+use draconian_ir::types::{Type, TypeId};
 
 use crate::ctx::Shared;
 use crate::loops::{self, Loop};

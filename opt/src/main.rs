@@ -1,14 +1,14 @@
-//! `smaugian-opt`: reads a `.ll` file, runs the interprocedural pipeline
+//! `draconian-opt`: reads a `.ll` file, runs the interprocedural pipeline
 //! (inlining and recursion removal) and prints the result.
 
 use std::process::ExitCode;
 use std::time::Instant;
 
-use smaugian_opt::inline::OptLevel;
-use smaugian_opt::pipeline::{self, Options};
-use smaugian_opt::recursion::RecursionMode;
+use draconian_opt::inline::OptLevel;
+use draconian_opt::pipeline::{self, Options};
+use draconian_opt::recursion::RecursionMode;
 
-const USAGE: &str = "usage: smaugian-opt [options] <file.ll>
+const USAGE: &str = "usage: draconian-opt [options] <file.ll>
 
   -O1 -O2 -O3 -Os -Oz     optimisation level (default -O2)
   -j <n>                  threads (default: one per core)
@@ -104,7 +104,7 @@ fn main() -> ExitCode {
         }
     };
     let t0 = Instant::now();
-    let mut m = match smaugian_ir::parse_module(&src) {
+    let mut m = match draconian_ir::parse_module(&src) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("{path}:{e}");
@@ -207,7 +207,7 @@ fn main() -> ExitCode {
         let mut bad = false;
         for (g, f) in m.functions() {
             let name = m.global(g).name.clone().unwrap_or_default();
-            for e in smaugian_opt::cfg::verify(f, &name) {
+            for e in draconian_opt::cfg::verify(f, &name) {
                 eprintln!("verify: {e}");
                 bad = true;
             }
@@ -233,6 +233,6 @@ fn ms(d: std::time::Duration) -> f64 {
 }
 
 fn usage(msg: &str) -> ExitCode {
-    eprintln!("smaugian-opt: {msg}\n\n{USAGE}");
+    eprintln!("draconian-opt: {msg}\n\n{USAGE}");
     ExitCode::FAILURE
 }

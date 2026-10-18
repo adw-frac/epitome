@@ -42,9 +42,9 @@
 use crate::fx::FxHashMap as HashMap;
 use std::sync::OnceLock;
 
-use smaugian_ir::edit::Names;
-use smaugian_ir::module::*;
-use smaugian_ir::types::Type;
+use draconian_ir::edit::Names;
+use draconian_ir::module::*;
+use draconian_ir::types::Type;
 
 use crate::attrs;
 use crate::callgraph::CallGraph;
@@ -678,7 +678,7 @@ fn s_has_eh(f: &Function) -> bool {
 }
 
 /// A plain `call` with no attributes.
-pub fn plain_call(fn_ty: smaugian_ir::types::TypeId, callee: Value, args: Vec<Value>) -> Call {
+pub fn plain_call(fn_ty: draconian_ir::types::TypeId, callee: Value, args: Vec<Value>) -> Call {
     Call {
         tail: TailKind::None,
         fmf: FastMath::default(),

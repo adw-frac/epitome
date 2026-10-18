@@ -37,7 +37,7 @@
 
 use std::fmt;
 
-use smaugian_ir::module::{BinOp, CastOp, ICmpPred};
+use draconian_ir::module::{BinOp, CastOp, ICmpPred};
 
 /// An operation that patterns can name.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

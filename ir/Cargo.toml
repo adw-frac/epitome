@@ -1,8 +1,8 @@
 [package]
-name = "smaugian-ir"
+name = "draconian-ir"
 version = "0.1.0"
 edition = "2024"
-repository = "https://github.com/andy-thomason/smaugian-reduction"
+repository = "https://github.com/andy-thomason/draconian-measurement"
 description = "LLVM IR data structures with a text (.ll) parser and printer"
 
 [dependencies]

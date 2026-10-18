@@ -82,7 +82,7 @@ iN
 
 Integer types carry no signedness. Signedness lives in the instructions (for example `sdiv` vs `udiv`).
 
-**Smaugian note:** The lexer must accept `i` followed by any decimal width up to 2^23 (8388608). The type representation must not assume widths fit a machine word.
+**Draconian note:** The lexer must accept `i` followed by any decimal width up to 2^23 (8388608). The type representation must not assume widths fit a machine word.
 
 ### Byte type
 
@@ -112,7 +112,7 @@ These per-bit semantics apply only in the middle end (the optimiser). At the IR-
 | `b32` | 32-bit byte value |
 | `b128` | 128-bit byte value |
 
-**Smaugian note:** The byte type is a recent addition. Smaugian must lex `b` + digits as a type, which may clash with identifier-like tokens; treat it exactly like `iN` in the lexer. Codegen can lower it to `iN`.
+**Draconian note:** The byte type is a recent addition. Draconian must lex `b` + digits as a type, which may clash with identifier-like tokens; treat it exactly like `iN` in the lexer. Codegen can lower it to `iN`.
 
 **Not documented:** The section does not list which instructions accept byte operands, or how byte values convert to and from integers and pointers. Those rules, if any, live in the instruction chapters.
 
@@ -176,7 +176,7 @@ Semantics:
 
 **Deprecated:** Before LLVM 15, pointer types named a pointee type (`i8*`, `[4 x i32]*`, `i32 (i32*)*`). These "typed pointers" survived in LLVM 15 only behind non-default options.
 
-**Smaugian note:** Smaugian only needs opaque `ptr`. Rejecting or rewriting `T*` syntax is acceptable. The data layout must be consulted to resolve `"A"`, `"G"`, `"P"`.
+**Draconian note:** Draconian only needs opaque `ptr`. Rejecting or rewriting `T*` syntax is acceptable. The data layout must be consulted to resolve `"A"`, `"G"`, `"P"`.
 
 ### Target extension types
 
@@ -332,7 +332,7 @@ Literal vs identified:
 | `{ float, ptr }` | a float and a pointer |
 | `<{ i8, i32 }>` | packed struct, 5 bytes |
 
-**Smaugian note:** Type interning must key literal structs by (members, packed) and identified structs by name/identity. Identified structs need a mutable body slot so `opaque` can be filled in later.
+**Draconian note:** Type interning must key literal structs by (members, packed) and identified structs by name/identity. Identified structs need a mutable body slot so `opaque` can be filled in later.
 
 ## Constants
 
@@ -380,7 +380,7 @@ Decimal and hexadecimal literals are converted with round-to-nearest, ties-to-ev
 | `fp128` | `0xL` | 32 | Low 64 bits first (big-endian), then high 64 bits (big-endian) |
 | `ppc_fp128` | `0xM` | 32 | Low 64 bits first (big-endian), then high 64 bits (big-endian) |
 
-**Smaugian note:** The parser must accept the legacy forms because existing `.ll` files use them heavily (`0x...` for float/double especially). The printer should decide which form to emit; the reference does not say which form current tools print.
+**Draconian note:** The parser must accept the legacy forms because existing `.ll` files use them heavily (`0x...` for float/double especially). The printer should decide which form to emit; the reference does not say which form current tools print.
 
 There are no constants of type `x86_amx`.
 
@@ -534,7 +534,7 @@ Safe:
   br %X, BB1, BB2                          ; well-defined, non-deterministic jump
 ```
 
-**Smaugian note:** Constant folders and peephole passes must follow these rules exactly. In particular: never fold `and`/`or` with undef to undef; never assume `x == x` or `x ^ x == 0` for possibly-undef `x`; and check "provably not poison" before using undef to pick a value equal to another operand.
+**Draconian note:** Constant folders and peephole passes must follow these rules exactly. In particular: never fold `and`/`or` with undef to undef; never assume `x == x` or `x ^ x == 0` for possibly-undef `x`; and check "provably not poison" before using undef to pick a value equal to another operand.
 
 ### Poison values (`poison`)
 
@@ -689,9 +689,9 @@ Operands are written with their types, as in the instruction form (for example `
 
 For `getelementptr`, the index list has one or more indices, which must make sense for "pointer to `TY`". Indices may be implicitly sign-extended or truncated to the index width of `CSTPTR`'s address space.
 
-**Not documented:** The list does not mention whether other `getelementptr` flags (such as `nuw`, `nusw`, `inrange`) or wrap flags on `add`/`sub` (`nuw`, `nsw`) are accepted in constant-expression form. Those are described with the instructions. Smaugian should parse the same flag sets as the instructions to be safe.
+**Not documented:** The list does not mention whether other `getelementptr` flags (such as `nuw`, `nusw`, `inrange`) or wrap flags on `add`/`sub` (`nuw`, `nsw`) are accepted in constant-expression form. Those are described with the instructions. Draconian should parse the same flag sets as the instructions to be safe.
 
-**Smaugian note:** This is the complete list of constant-expression opcodes in the reference. Any operation not in the table (for example `mul`, `and`, `icmp`, `zext`) should be rejected in constant-expression position.
+**Draconian note:** This is the complete list of constant-expression opcodes in the reference. Any operation not in the table (for example `mul`, `and`, `icmp`, `zext`) should be rejected in constant-expression position.
 
 ## Other Values
 
@@ -824,7 +824,7 @@ Alternatives (mainly for translating GCC asm):
 
 The documentation advises against both features. LLVM picks the option most likely to compile, not the fastest. Given `rm` it always picks memory. Given several registers or classes it picks the first. It does not even ensure listed physical registers are unique: `{r11}{r12},{r11}{r12}` assigns `r11` to both.
 
-**Smaugian note:** A constraint string parser needs: prefixes `=`, `&`, `*`, `~`, `!`; tied-operand digits; single letters; `^xy`; `{name}`; concatenated sets; and `|` alternatives. Multi-letter codes in the tables below (such as `Uci`, `Upl`, `VA`, `ZC`, `Ws`, `jr`, `vd`) show that target code lists also need multi-character lookahead. The text describes only `^` as the two-letter syntax, but these appear as plain multi-letter codes in the lists.
+**Draconian note:** A constraint string parser needs: prefixes `=`, `&`, `*`, `~`, `!`; tied-operand digits; single letters; `^xy`; `{name}`; concatenated sets; and `|` alternatives. Multi-letter codes in the tables below (such as `Uci`, `Upl`, `VA`, `ZC`, `Ws`, `jr`, `vd`) show that target code lists also need multi-character lookahead. The text describes only `^` as the two-letter syntax, but these appear as plain multi-letter codes in the lists.
 
 **Not documented:** How multi-letter target codes without `^` (for example `Uci`, `ZB`, `DA`, `jR`) are tokenised is not explained. Presumably each target defines its own code lengths.
 
@@ -1244,4 +1244,4 @@ call void asm sideeffect "something bad", ""(), !srcloc !42
 
 If present, the code generator uses the integer as a *location cookie* when reporting inline asm errors through the context's error reporting. The frontend chooses what the numbers mean, so it can map backend errors back to source. If the node has several integers, the code generator uses the one for the asm line where the error occurred.
 
-**Smaugian note:** Smaugian's diagnostics for inline asm should carry the `!srcloc` cookie(s) through to error reports, indexed by line within the template.
+**Draconian note:** Draconian's diagnostics for inline asm should carry the `!srcloc` cookie(s) through to error reports, indexed by line within the template.

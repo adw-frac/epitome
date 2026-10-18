@@ -240,7 +240,7 @@ that the IR and the bodies meet in the same shape:
 - Critical edges are split, so that phis can become copies at the end of
   predecessors.
 
-The input is expected to have been through `smaugian-opt`, so it is in the
+The input is expected to have been through `draconian-opt`, so it is in the
 combiner's canonical form already.
 
 ### Vectors
@@ -414,7 +414,7 @@ aggregates and vectors, defining variadic functions under AAPCS64 (whose
   the table has the combinations it should, and not those it must not
   (`tst` with a condition that reads the carry).
 - `codegen/tests/programs.rs`: C functions in `tests/programs/*.c`, built
-  four ways (clang `-O0`, that through `smaugian-opt`, clang `-O2` without
+  four ways (clang `-O0`, that through `draconian-opt`, clang `-O2` without
   vectorising, and clang `-O2` as it is, vectorised and unrolled) and
   compiled by us, are linked with a main built by clang and must print what
   clang's own build prints. Our assembly is assembled by clang and each word
@@ -444,8 +444,8 @@ SQLite's shell built by clang, answers the SQL in `tests/sqlite/` exactly as
 clang's build does: from clang's `-O2` IR, from the same vectorised (2,981
 vector values, among them `<16 x ptr>` from vector `getelementptr`s and
 masks reduced with `bitcast`), and from clang's `-O0` IR through
-`smaugian-opt`. It runs those scripts in about twice the time
-clang's build takes. `tests/sqlite.rs` repeats this when `SMAUGIAN_SQLITE`
+`draconian-opt`. It runs those scripts in about twice the time
+clang's build takes. `tests/sqlite.rs` repeats this when `DRACONIAN_SQLITE`
 names the amalgamation.
 
 Covered: integer and floating-point arithmetic, logic, shifts,
@@ -468,7 +468,7 @@ by LLVM's back end and ours:
 | `basic.c` (38 functions) | clang `-O2` | 426 | 509 |
 | `divs.c` (division by 90 constants) | clang `-O2` | 793 | 814 |
 | `loops.c` (9 array loops) | clang `-O2` | 106 | 119 |
-| `loops.c` | clang `-O0`, then `smaugian-opt` | 106 (from `-O2`) | 103 |
+| `loops.c` | clang `-O0`, then `draconian-opt` | 106 (from `-O2`) | 103 |
 
 And vectorised and unrolled (clang `-O2` as it is):
 
@@ -484,7 +484,7 @@ sequence, and in spills of the many vector accumulators an unrolled loop
 keeps.
 
 clang's `-O2` IR still indexes arrays by counter, since LLVM reduces
-strength in its code generator; ours does it in `smaugian-opt`
+strength in its code generator; ours does it in `draconian-opt`
 ([loops](loops.md)), so it shows in the last row. In `basic.c` the
 remaining differences are mostly loops built with `-fwrapv` (whose
 counters cannot be widened or reduced) and phi copies the allocator does

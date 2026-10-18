@@ -39,10 +39,10 @@
 
 use crate::fx::{FxHashMap as HashMap, FxHashSet as HashSet};
 
-use smaugian_ir::apint::ApInt;
-use smaugian_ir::edit::Names;
-use smaugian_ir::module::*;
-use smaugian_ir::types::{Type, TypeId};
+use draconian_ir::apint::ApInt;
+use draconian_ir::edit::Names;
+use draconian_ir::module::*;
+use draconian_ir::types::{Type, TypeId};
 
 use crate::ctx::Shared;
 

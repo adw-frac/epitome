@@ -1,4 +1,4 @@
-//! Code generation for Smaugian: instruction selection from machine
+//! Code generation for Draconian: instruction selection from machine
 //! descriptions written in LLVM IR, register allocation, frames, and
 //! assembly, binary and disassembly output. See `docs/design/isel.md`.
 
@@ -15,9 +15,9 @@ pub mod prepare;
 pub mod regalloc;
 pub mod target;
 
-use smaugian_ir::Module;
-use smaugian_ir::layout::DataLayout;
-use smaugian_ir::module::*;
+use draconian_ir::Module;
+use draconian_ir::layout::DataLayout;
+use draconian_ir::module::*;
 
 use crate::mir::MFunc;
 use crate::prepare::Ctx;

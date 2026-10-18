@@ -25,10 +25,10 @@
 //! The guard is the conditional branch rotation puts in front of the loop.
 //! When start and bound are constants, the comparison is checked directly.
 
-use smaugian_ir::apint::ApInt;
-use smaugian_ir::edit::Names;
-use smaugian_ir::module::*;
-use smaugian_ir::types::{Type, TypeId};
+use draconian_ir::apint::ApInt;
+use draconian_ir::edit::Names;
+use draconian_ir::module::*;
+use draconian_ir::types::{Type, TypeId};
 
 use crate::combine::eval::{self, IntConst};
 use crate::ctx::Shared;

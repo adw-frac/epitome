@@ -4,7 +4,7 @@
 //! the registers are laid out on the stack, where variadic arguments go,
 //! and the assembler's dialect.
 
-use smaugian_ir::module::{MdId, Metadata, Module};
+use draconian_ir::module::{MdId, Metadata, Module};
 
 /// How arguments that do not fit in registers are laid out on the stack.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

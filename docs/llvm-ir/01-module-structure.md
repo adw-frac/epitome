@@ -16,7 +16,7 @@ LLVM IR is a Static Single Assignment (SSA) representation. SSA means each value
 
 This reference describes the text form. All three forms carry the same information.
 
-**Smaugian note:** Smaugian must be able to round-trip the text form. Anything parsed from text must be printable back to equivalent text.
+**Draconian note:** Draconian must be able to round-trip the text form. Anything parsed from text must be printable back to equivalent text.
 
 ### 1.1 Well-formedness
 
@@ -24,7 +24,7 @@ The parser accepts more than is "well formed". A well-formed module also satisfi
 
 The reference states that the verifier runs automatically after parsing text and before writing bitcode. Verifier errors indicate a bug in a transformation pass or in the input.
 
-**Smaugian note:** Keep parsing and verification as separate phases. Run the verifier after parsing by default.
+**Draconian note:** Keep parsing and verification as separate phases. Run the verifier after parsing by default.
 
 ---
 
@@ -60,7 +60,7 @@ Reserved words (opcodes such as `add`, `bitcast`, `ret`; type names such as `voi
 - When numbers are written explicitly, gaps are allowed (numbers may be skipped).
 - If the entry block has no label and all parameters are named, the entry block is `%0`.
 
-**Smaugian note:** The counter is shared by unnamed parameters, unnamed blocks and unnamed instruction results, in textual order. When printing, Smaugian must assign numbers in this order. When parsing, an explicit number must not be lower than the next expected number (gaps forward are allowed). For block labels specifically, see section 5.3: an explicit numeric block label must equal the number that would have been assigned implicitly.
+**Draconian note:** The counter is shared by unnamed parameters, unnamed blocks and unnamed instruction results, in textual order. When printing, Draconian must assign numbers in this order. When parsing, an explicit number must not be lower than the next expected number (gaps forward are allowed). For block labels specifically, see section 5.3: an explicit numeric block label must equal the number that would have been assigned implicitly.
 
 ### 2.3 Comments
 
@@ -78,7 +78,7 @@ Reserved words (opcodes such as `add`, `bitcast`, `ret`; type names such as `voi
 - Newlines do not end a string; strings may span lines.
 - The meaning of the bytes (encoding etc.) depends on context.
 
-**Smaugian note:** Store strings as raw bytes, not as Rust `String`. When printing, escape `"`, `\` and non-printable bytes as `\xx`.
+**Draconian note:** Store strings as raw bytes, not as Rust `String`. When printing, escape `"`, `\` and non-printable bytes as `\xx`.
 
 ---
 
@@ -161,7 +161,7 @@ Verifier rules stated in the reference:
 - A symbol with `internal` or `private` linkage must have `default` visibility.
 - A symbol with `internal` or `private` linkage cannot have a DLL storage class.
 
-**Smaugian note:** `external` is the default. The printer should omit it on definitions. (The reference shows `@G = external global i32` for a variable declaration, so `external` is printed there to mark the declaration.)
+**Draconian note:** `external` is the default. The printer should omit it on definitions. (The reference shows `@G = external global i32` for a variable declaration, so `external` is printed there to mark the declaration.)
 
 ### 4.2 Calling conventions
 
@@ -201,7 +201,7 @@ Register preservation for `preserve_mostcc`:
 
 `preserve_allcc`: X86-64 preserves all GPRs except R11, plus all XMM/YMM. AArch64 preserves all GPRs except X0-X8 and X16-X18, plus the low 128 bits of V8-V31; not allowed with `nest`.
 
-**Not documented:** The numeric IDs of the named conventions (other than HiPE = 11, and that target conventions start at 64) are not given. Smaugian needs these for bitcode and to decide when `cc <n>` should be printed by name.
+**Not documented:** The numeric IDs of the named conventions (other than HiPE = 11, and that target conventions start at 64) are not given. Draconian needs these for bitcode and to decide when `cc <n>` should be printed by name.
 
 ### 4.3 Visibility styles
 
@@ -213,7 +213,7 @@ Applies to global variables and functions (and, per the grammars, aliases and if
 | `hidden` | Two hidden declarations refer to the same object if in the same shared object. Usually not in the dynamic symbol table. |
 | `protected` | ELF: in the dynamic symbol table, but references inside the defining module bind locally, so it cannot be overridden. |
 
-**Smaugian note:** `default` is implied when omitted; the printer should omit it.
+**Draconian note:** `default` is implied when omitted; the printer should omit it.
 
 ### 4.4 DLL storage classes
 
@@ -275,7 +275,7 @@ Written `addrspace(N)`. The default address space for globals is 0. For function
 
 (Full type syntax is in the type system chapter.) Before LLVM 3.0 identified types were also structurally uniqued; this is no longer so.
 
-**Smaugian note:** Intern literal structs by structure. Intern identified structs by name only.
+**Draconian note:** Intern literal structs by structure. Intern identified structs by name only.
 
 ### 5.2 Global variables
 
@@ -331,9 +331,9 @@ Examples:
 @G = thread_local(initialexec) global i32 0, align 4
 ```
 
-**Smaugian note:** The prose says "the address space qualifier must precede any other attributes", but the grammar places `addrspace` after `unnamed_addr`. Follow the grammar order for printing.
+**Draconian note:** The prose says "the address space qualifier must precede any other attributes", but the grammar places `addrspace` after `unnamed_addr`. Follow the grammar order for printing.
 
-**Smaugian note:** A global with no initializer is a declaration. The parser must handle the declaration form `@G = external global i32` (linkage `external` written explicitly, no initializer).
+**Draconian note:** A global with no initializer is a declaration. The parser must handle the declaration form `@G = external global i32` (linkage `external` written explicitly, no initializer).
 
 ### 5.3 Functions
 
@@ -375,7 +375,7 @@ declare [linkage] [visibility] [DLLStorageClass]
 - the address space (the prose lists "an optional address space" after `unnamed_addr`),
 - the preemption specifier,
 - metadata attachments.
-Smaugian should accept the definition header grammar for declarations too, minus the body (and minus `prefalign`, `personality`, `section`, `partition`, `comdat` unless confirmed elsewhere).
+Draconian should accept the definition header grammar for declarations too, minus the body (and minus `prefalign`, `personality`, `section`, `partition`, `comdat` unless confirmed elsewhere).
 
 #### Body
 
@@ -393,7 +393,7 @@ Smaugian should accept the definition header grammar for declarations too, minus
 - `unnamed_addr`: two identical functions may be merged.
 - If no `addrspace` is given, the program address space from the data layout is used.
 
-**Smaugian note (verifier):** entry block has no predecessors and no PHIs; `align` and `prefalign` are powers of 2; `prefalign` only on definitions.
+**Draconian note (verifier):** entry block has no predecessors and no PHIs; `align` and `prefalign` are powers of 2; `prefalign` only on definitions.
 
 ### 5.4 Aliases
 
@@ -406,7 +406,7 @@ An alias is a new symbol for an existing location. It creates no new data. The a
           [, partition "name"]
 ```
 
-**Not documented / outdated:** The grammar shows the second type as `<AliaseeTy>*`, a typed-pointer spelling. With opaque pointers this is a `ptr` (or `ptr addrspace(N)`) typed constant. Smaugian should parse `alias <ValueTy>, <pointer type> <constant>`.
+**Not documented / outdated:** The grammar shows the second type as `<AliaseeTy>*`, a typed-pointer spelling. With opaque pointers this is a `ptr` (or `ptr addrspace(N)`) typed constant. Draconian should parse `alias <ValueTy>, <pointer type> <constant>`.
 
 Allowed linkages: `private`, `internal`, `linkonce`, `weak`, `linkonce_odr`, `weak_odr`, `external`, `available_externally`.
 
@@ -418,7 +418,7 @@ Semantics and restrictions:
 - If either side may be replaced at link or run time, optimisers may not replace the alias with the aliasee.
 - Some system linkers mishandle dropping a weak symbol that has an alias.
 
-**Smaugian note (verifier):** check the linkage list and the declaration/weak restrictions above.
+**Draconian note (verifier):** check the linkage list and the declaration/weak restrictions above.
 
 ### 5.5 IFuncs
 
@@ -689,9 +689,9 @@ attributes #1 = { "no-sse" }
 define void @f() #0 #1 { ... }
 ```
 
-**Smaugian note:** Inside an attribute group, `alignstack` is written `alignstack=4`, whereas on a function it is written `alignstack(4)`. The parser must accept both depending on context. **Not documented:** whether other integer attributes also use `=` in groups.
+**Draconian note:** Inside an attribute group, `alignstack` is written `alignstack=4`, whereas on a function it is written `alignstack(4)`. The parser must accept both depending on context. **Not documented:** whether other integer attributes also use `=` in groups.
 
-**Smaugian note:** String attributes take the forms `"key"` and `"key"="value"`.
+**Draconian note:** String attributes take the forms `"key"` and `"key"="value"`.
 
 ---
 
@@ -890,9 +890,9 @@ denormal_fpenv(ieee|dynamic, float: preservesign|ieee)
 
 Other string attributes are mentioned without definition: `"target-features"` and `"target-cpu"` (referenced by module asm), and `"no-sse"` (an example of a target-dependent attribute).
 
-**Not documented:** The reference lists `no-jump-tables` and `indirect-tls-seg-refs` without quotes, but `no-jump-tables` is "set to true" and both contain hyphens, which a bare keyword cannot. Smaugian should treat them as string attributes (`"no-jump-tables"="true"`, `"indirect-tls-seg-refs"`). Similarly, the value forms of `"no-inline-line-tables"`, `"patchable-function-prefix"`, `"patchable-function-entry"`, `"tail-pad-to-size"`, `"tail-pad-value"` and `"no-stack-arg-probe"` are not spelled out; values are presumably decimal strings.
+**Not documented:** The reference lists `no-jump-tables` and `indirect-tls-seg-refs` without quotes, but `no-jump-tables` is "set to true" and both contain hyphens, which a bare keyword cannot. Draconian should treat them as string attributes (`"no-jump-tables"="true"`, `"indirect-tls-seg-refs"`). Similarly, the value forms of `"no-inline-line-tables"`, `"patchable-function-prefix"`, `"patchable-function-entry"`, `"tail-pad-to-size"`, `"tail-pad-value"` and `"no-stack-arg-probe"` are not spelled out; values are presumably decimal strings.
 
-**Smaugian note:** Unknown string attributes must be preserved verbatim; they carry target-specific meaning.
+**Draconian note:** Unknown string attributes must be preserved verbatim; they carry target-specific meaning.
 
 ---
 
@@ -996,7 +996,7 @@ Assume bundle tags (on `llvm.assume`):
 
 Assume bundle operands may be dynamic values. Note the example `"align"(ptr %val, i32 8)` uses `i32` although the signature says `i64`, so integer width is apparently flexible. **Not documented:** the exact permitted integer types.
 
-**Smaugian note (verifier):** at most one each of `"deopt"`, `"funclet"`, `"preallocated"`; `"funclet"` and `"preallocated"` take exactly one operand; `"convergencectrl"` takes exactly one token; `"gc-live"` only on `gc.statepoint`; assume calls with bundles must use `i1 true`.
+**Draconian note (verifier):** at most one each of `"deopt"`, `"funclet"`, `"preallocated"`; `"funclet"` and `"preallocated"` take exactly one operand; `"convergencectrl"` takes exactly one token; `"gc-live"` only on `gc.statepoint`; assume calls with bundles must use `i1 true`.
 
 ---
 
@@ -1093,7 +1093,7 @@ Type alignment lookup:
 
 The data layout must match what the code generator expects. Mid-level optimisers rely on it. Without one, the defaults are used.
 
-**Smaugian note:** Parse the data layout into a structured value, seeded with the defaults above. The exact original string should be kept for printing.
+**Draconian note:** Parse the data layout into a structured value, seeded with the defaults above. The exact original string should be kept for printing.
 
 ### 12.3 Target triple
 
@@ -1327,7 +1327,7 @@ Synchronisation scopes:
 
 **Not documented:** Where the `elementwise` keyword goes in the instruction syntax (see the instruction chapter).
 
-**Smaugian note (verifier):** `elementwise` requires a fixed vector type with power-of-two total width and forbids `seq_cst`.
+**Draconian note (verifier):** `elementwise` requires a fixed vector type with power-of-two total width and forbids `seq_cst`.
 
 ---
 
@@ -1371,7 +1371,7 @@ For `half`, `float`, `double` and `fp128` (IEEE binary16/32/64/128), the IEEE 75
 
 Fast-math flags, `strictfp`, `denormal_fpenv` and `!fpmath` metadata can relax this.
 
-**Smaugian note:** Constant folding of these operations must be correctly rounded IEEE arithmetic. NaN results have freedom per 15.2.
+**Draconian note:** Constant folding of these operations must be correctly rounded IEEE arithmetic. NaN results have freedom per 15.2.
 
 ### 15.4 Fast-math flags
 

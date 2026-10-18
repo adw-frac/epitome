@@ -1,4 +1,4 @@
-; smaugian-opt: --passes=cse
+; draconian-opt: --passes=cse
 ; Common-subexpression elimination. Each function shows one rule, and
 ; the last ones show what must not be merged.
 

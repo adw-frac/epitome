@@ -1,16 +1,16 @@
-//! Builds SQLite with smaugian-llc and checks it answers SQL as clang's
+//! Builds SQLite with draconian-llc and checks it answers SQL as clang's
 //! build does.
 //!
-//! SQLite is not in this repository: set `SMAUGIAN_SQLITE` to a directory
+//! SQLite is not in this repository: set `DRACONIAN_SQLITE` to a directory
 //! holding the amalgamation (`sqlite3.c`, `shell.c`, `sqlite3.h`), from
 //! <https://sqlite.org/download.html>. Without it the test does nothing.
 //!
 //! Four builds of `sqlite3.c`, each linked with `shell.c` built by clang:
 //!
 //! 1. clang alone, `-O2`: the reference;
-//! 2. clang `-O2` IR (without vectorising), compiled by smaugian-llc;
-//! 3. clang `-O2` IR as it is, vectorised, compiled by smaugian-llc;
-//! 4. clang `-O0` IR, through smaugian-opt, compiled by smaugian-llc.
+//! 2. clang `-O2` IR (without vectorising), compiled by draconian-llc;
+//! 3. clang `-O2` IR as it is, vectorised, compiled by draconian-llc;
+//! 4. clang `-O0` IR, through draconian-opt, compiled by draconian-llc.
 //!
 //! Each runs the scripts in `tests/sqlite/`, and must print what the
 //! reference prints.
@@ -18,8 +18,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use smaugian_codegen::target::Target;
-use smaugian_codegen::{Options, compile};
+use draconian_codegen::target::Target;
+use draconian_codegen::{Options, compile};
 
 fn run(cmd: &mut Command) -> Result<String, String> {
     let out = cmd.output().map_err(|e| format!("{cmd:?}: {e}"))?;
@@ -35,21 +35,21 @@ fn run_sql(exe: &Path, script: &Path) -> Result<String, String> {
     Ok(format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)))
 }
 
-/// Our assembly for `ll`, after smaugian-opt if `optimise`.
+/// Our assembly for `ll`, after draconian-opt if `optimise`.
 fn ours(t: &Target, ll: &Path, optimise: bool) -> Result<String, String> {
     let text = std::fs::read_to_string(ll).map_err(|e| e.to_string())?;
-    let mut m = smaugian_ir::parse_module(&text).map_err(|e| format!("{e:?}"))?;
+    let mut m = draconian_ir::parse_module(&text).map_err(|e| format!("{e:?}"))?;
     if optimise {
-        smaugian_opt::pipeline::run(&mut m, &smaugian_opt::pipeline::Options::default());
-        m = smaugian_ir::parse_module(&m.to_string()).map_err(|e| format!("{e:?}"))?;
+        draconian_opt::pipeline::run(&mut m, &draconian_opt::pipeline::Options::default());
+        m = draconian_ir::parse_module(&m.to_string()).map_err(|e| format!("{e:?}"))?;
     }
     Ok(compile(t, &mut m, &Options::default())?.asm)
 }
 
 #[test]
 fn sqlite_answers_as_clangs_build() {
-    let Ok(src) = std::env::var("SMAUGIAN_SQLITE") else {
-        eprintln!("SMAUGIAN_SQLITE is not set; skipping");
+    let Ok(src) = std::env::var("DRACONIAN_SQLITE") else {
+        eprintln!("DRACONIAN_SQLITE is not set; skipping");
         return;
     };
     let src = PathBuf::from(src);

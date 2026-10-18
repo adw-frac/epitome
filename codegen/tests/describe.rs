@@ -1,7 +1,7 @@
 //! Checks of the AArch64 description itself.
 
-use smaugian_codegen::enc::Env;
-use smaugian_codegen::target::{Kind, Target};
+use draconian_codegen::enc::Env;
+use draconian_codegen::target::{Kind, Target};
 
 /// Every instruction encodes and decodes back to itself, for registers and
 /// immediates spread over their ranges.
