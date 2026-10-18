@@ -149,3 +149,26 @@ int count_odd(const int *a, int n) {
   for (int i = 0; i < n; i++) c += is_odd(a[i]) ? 1 : 0;
   return c;
 }
+
+// Loads and stores of 16-bit and signed 8-bit elements by index.
+long sum_shorts(const short *a, int n) {
+  long s = 0;
+  for (int i = 0; i < n; i++) s += a[i];
+  return s;
+}
+
+unsigned sum_ushorts(const unsigned short *a, int n) {
+  unsigned s = 0;
+  for (int i = 0; i < n; i++) s += a[i];
+  return s;
+}
+
+long sum_schars(const signed char *a, long n) {
+  long s = 0;
+  for (long i = 0; i < n; i++) s += a[i];
+  return s;
+}
+
+void scale_shorts(short *a, long n, short k) {
+  for (long i = 0; i < n; i++) a[i] = (short)(a[i] * k);
+}

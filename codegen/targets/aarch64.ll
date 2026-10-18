@@ -954,6 +954,62 @@ define i32 @LDRWroW(ptr "reg"="xsp" %n, i32 "reg"="w" %m) "enc"="10 111 0 00 01 
   ret i32 %v
 }
 
+; Register offsets with sign extension of the loaded value: ldrsw, ldrsh,
+; ldrsb into X, and halfwords.
+define i64 @LDRSWroX(ptr "reg"="xsp" %n, i64 "reg"="x" %m) "enc"="10 111 0 00 10 1 m:5 011 1 10 n:5 d:5" "asm"="ldrsw {d}, [{n}, {m}, lsl #2]" {
+  %o = shl i64 %m, 2
+  %p = getelementptr i8, ptr %n, i64 %o
+  %v = load i32, ptr %p
+  %r = sext i32 %v to i64
+  ret i64 %r
+}
+
+define i64 @LDRSWroW(ptr "reg"="xsp" %n, i32 "reg"="w" %m) "enc"="10 111 0 00 10 1 m:5 110 1 10 n:5 d:5" "asm"="ldrsw {d}, [{n}, {m}, sxtw #2]" {
+  %e = sext i32 %m to i64
+  %o = shl i64 %e, 2
+  %p = getelementptr i8, ptr %n, i64 %o
+  %v = load i32, ptr %p
+  %r = sext i32 %v to i64
+  ret i64 %r
+}
+
+define i16 @LDRHroX(ptr "reg"="xsp" %n, i64 "reg"="x" %m) "enc"="01 111 0 00 01 1 m:5 011 1 10 n:5 d:5" "asm"="ldrh {d}, [{n}, {m}, lsl #1]" "zext"="16" {
+  %o = shl i64 %m, 1
+  %p = getelementptr i8, ptr %n, i64 %o
+  %v = load i16, ptr %p
+  ret i16 %v
+}
+
+define i32 @LDRSHWroX(ptr "reg"="xsp" %n, i64 "reg"="x" %m) "enc"="01 111 0 00 11 1 m:5 011 1 10 n:5 d:5" "asm"="ldrsh {d}, [{n}, {m}, lsl #1]" {
+  %o = shl i64 %m, 1
+  %p = getelementptr i8, ptr %n, i64 %o
+  %v = load i16, ptr %p
+  %r = sext i16 %v to i32
+  ret i32 %r
+}
+
+define i64 @LDRSHXroX(ptr "reg"="xsp" %n, i64 "reg"="x" %m) "enc"="01 111 0 00 10 1 m:5 011 1 10 n:5 d:5" "asm"="ldrsh {d}, [{n}, {m}, lsl #1]" {
+  %o = shl i64 %m, 1
+  %p = getelementptr i8, ptr %n, i64 %o
+  %v = load i16, ptr %p
+  %r = sext i16 %v to i64
+  ret i64 %r
+}
+
+define i64 @LDRSBXroX(ptr "reg"="xsp" %n, i64 "reg"="x" %m) "enc"="00 111 0 00 10 1 m:5 011 0 10 n:5 d:5" "asm"="ldrsb {d}, [{n}, {m}]" {
+  %p = getelementptr i8, ptr %n, i64 %m
+  %v = load i8, ptr %p
+  %r = sext i8 %v to i64
+  ret i64 %r
+}
+
+define void @STRHroX(i16 "reg"="w" %t, ptr "reg"="xsp" %n, i64 "reg"="x" %m) "enc"="01 111 0 00 00 1 m:5 011 1 10 n:5 t:5" "asm"="strh {t}, [{n}, {m}, lsl #1]" {
+  %o = shl i64 %m, 1
+  %p = getelementptr i8, ptr %n, i64 %o
+  store i16 %t, ptr %p
+  ret void
+}
+
 define void @STRWroX(i32 "reg"="w" %t, ptr "reg"="xsp" %n, i64 "reg"="x" %m) "enc"="10 111 0 00 00 1 m:5 011 1 10 n:5 t:5" "asm"="str {t}, [{n}, {m}, lsl #2]" {
   %o = shl i64 %m, 2
   %p = getelementptr i8, ptr %n, i64 %o

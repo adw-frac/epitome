@@ -87,6 +87,26 @@ pub fn place(t: &Target, f: &mut MFunc) {
     let mut parts = split(t, f);
     let n = parts.len();
 
+    // Edges to an empty block that only goes on somewhere else go there
+    // directly, whether they were branches or fall-throughs.
+    let skip = |parts: &Vec<(Vec<MInst>, Exit)>, mut b: usize| {
+        for _ in 0..n {
+            match &parts[b] {
+                (body, Exit::Goto(x)) if body.is_empty() && *x != b => b = *x,
+                _ => break,
+            }
+        }
+        b
+    };
+    for k in 0..n {
+        let exit = match parts[k].1.clone() {
+            Exit::Goto(x) => Exit::Goto(skip(&parts, x)),
+            Exit::Cond { branch, taken, other } => Exit::Cond { branch, taken: skip(&parts, taken), other: skip(&parts, other) },
+            e => e,
+        };
+        parts[k].1 = exit;
+    }
+
     // Copy small return blocks into the blocks that go to them.
     for r in 0..n {
         if !matches!(parts[r].1, Exit::Leaves) || parts[r].0.len() > MAX_TAIL {

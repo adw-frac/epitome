@@ -37,6 +37,10 @@ int across_calls(int);
 unsigned short narrow(unsigned short, short);
 _Bool is_odd(int);
 int count_odd(const int *, int);
+long sum_shorts(const short *, int);
+unsigned sum_ushorts(const unsigned short *, int);
+long sum_schars(const signed char *, long);
+void scale_shorts(short *, long, short);
 
 int main(void) {
   int vals[] = {0, 1, -1, 7, -13, 100, 255, -256, 65536, 2147483647, -2147483647 - 1};
@@ -64,5 +68,12 @@ int main(void) {
   long l1 = 11, l2 = 22;
   printf("sel %ld %ld\n", select_ptr(&l1, &l2, 1), select_ptr(&l1, &l2, 0));
   printf("bump %d %d %d\n", bump(5), bump(-2), global_counter);
+  short sh[] = {-300, 7, 32767, -32768, 12, -1};
+  unsigned short ush[] = {65535, 1, 40000, 3};
+  signed char sc[] = {-128, 127, -1, 5, 0};
+  printf("shorts %ld %u %ld\n", sum_shorts(sh, 6), sum_ushorts(ush, 4), sum_schars(sc, 5));
+  scale_shorts(sh, 6, -3);
+  for (int i = 0; i < 6; i++) printf("%d ", sh[i]);
+  printf("\n");
   return 0;
 }

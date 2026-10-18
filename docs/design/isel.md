@@ -287,13 +287,22 @@ functions: arithmetic, logic, shifts, multiply-add, division and remainder,
 extensions, loads and stores of 8, 16, 32 and 64 bits with immediate and
 register offsets, comparisons, conditional branches, selects, minimum and
 maximum, switches, calls (up to eight arguments), locals, globals and odd
-widths such as `i33`. The description has 146 instructions, 10 condition
-forms and 16 recipes; the table built from it has 665 patterns.
+widths such as `i33`. The description has 153 instructions, 10 condition
+forms and 16 recipes; the table built from it has 672 patterns.
 
-On `tests/programs/basic.c` (34 functions) built by clang `-O2`, LLVM's
-back end gives 383 instructions and ours 470. The differences are mostly
-addressing modes we do not have yet (post-increment loads) and phi copies
+On `tests/programs/basic.c` (38 functions) built by clang `-O2` without
+vectorising or unrolling, LLVM's back end gives 426 instructions and ours
+510. The differences are mostly addressing modes we do not have yet
+(post-increment loads), loops LLVM rewrites to count down, and phi copies
 the allocator does not coalesce.
+
+After allocation and frames, blocks are placed so that most branches fall
+through (`codegen/src/layout.rs`): small return blocks are copied into the
+blocks that jump to them, blocks are chained with each followed by a
+successor that stays in the function, and conditional branches are
+inverted where that lets them fall through. Which branch inverts to which
+is in the description (`"inverse"`); a condition's inverse is the
+condition form with the inverse comparison.
 
 Selection form also does what LLVM's type legalisation does for the cases
 above: values narrower than 32 bits live in W registers with their upper
