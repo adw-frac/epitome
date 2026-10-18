@@ -9,12 +9,15 @@
 //! - `pipeline`: the passes above, run together.
 //! - `combine`: rewriting instructions into simpler ones, from rules in
 //!   `opt/rules/combine.rules`, matched with a discrimination tree.
+//! - `aa`: basic alias analysis: whether two accesses can overlap, and
+//!   whether an instruction can read or write a location.
 //! - `cse`: common-subexpression elimination, by hashing a canonical key
 //!   for each instruction, scoped by the dominator tree.
 //! - `cfg`, `ssa`, `cleanup`: analyses and helpers the passes share.
 //!
 //! See `docs/design/parallel.md` for the design.
 
+pub mod aa;
 pub mod attrs;
 pub mod callgraph;
 pub mod cfg;

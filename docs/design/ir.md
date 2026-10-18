@@ -99,7 +99,7 @@ places in it.
 | `domfrontier` | Computes dominance frontiers. Needed by `mem2reg`. | Planned |
 | `loops` | Finds natural loops and the loop depth of each block. | Planned |
 | `scalar-evolution` | Describes scalar expressions in loops, including induction variables and trip counts. | Planned |
-| `basic-aa` | Stateless alias analysis from simple facts, such as two distinct globals never aliasing. | Planned |
+| `basic-aa` | Stateless alias analysis from simple facts, such as two distinct globals never aliasing. See [alias analysis](aa.md). | Done |
 | `globals-aa` | Alias and mod/ref facts for globals whose address is never taken, plus pure functions. | Later |
 | `scev-aa` | Alias analysis using scalar evolution, within one loop iteration. | Later |
 | `memdep` | Finds the earlier memory operations a memory operation depends on, computed lazily. | Planned |

@@ -103,3 +103,26 @@ define i32 @not_merged(i32 %x, ptr %p) {
   %r = add i32 %s, %t
   ret i32 %r
 }
+
+; With alias analysis: a store to a different object, or a call that cannot
+; reach a local whose address never escapes, does not end what is known.
+@counter = global i32 0
+
+define i32 @aliasing(ptr %p, i32 %v) {
+  %local = alloca i32
+  %pair = alloca [2 x i32]
+  %second = getelementptr inbounds [2 x i32], ptr %pair, i64 0, i64 1
+  store i32 %v, ptr %local
+  store i32 1, ptr %pair
+  store i32 2, ptr %second
+  store i32 3, ptr @counter
+  call void @write(ptr %p)
+  %a = load i32, ptr %local
+  %b = load i32, ptr %pair
+  %c = load i32, ptr %second
+  %d = load i32, ptr @counter
+  %s1 = add i32 %a, %b
+  %s2 = add i32 %c, %d
+  %r = add i32 %s1, %s2
+  ret i32 %r
+}

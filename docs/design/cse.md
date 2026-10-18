@@ -50,23 +50,21 @@ replacements.
 ## Loads
 
 A load can reuse the value of an earlier load of the same address and
-type, or the value an earlier store wrote there, as long as nothing may
-have written memory in between. A *memory generation* number tracks this.
-It moves on at:
+type, or the value an earlier store wrote there, as long as nothing in
+between may have changed those bytes.
 
-- every instruction that may write memory: stores, atomics, fences,
-  `va_arg`, volatile or atomic loads, and calls, except calls marked
-  `memory(none)`, `memory(read)`, `readnone` or `readonly` (on the call or
-  the callee) and intrinsics that only describe the program;
-- entering a block that can be reached other than from its dominator,
-  since another path in may have written memory.
+The pass keeps a log of the instructions on the current dominator path
+that may write memory: stores, atomics, fences, `va_arg`, volatile or
+atomic loads, and calls not known to be read-only. When a load finds a
+remembered value, [alias analysis](aa.md) is asked whether any write
+logged since then may modify the load's location. A store to another
+object, or a call that cannot reach the location, does not stop the reuse.
+Entering a block that can be reached other than from its dominator adds an
+"unknown" entry to the log, which nothing gets past, since another path in
+may have written. After 64 logged writes, the pass stops checking and
+assumes the value is gone.
 
-A remembered load or store counts only in the generation it was made in.
 Volatile and atomic loads are never reused.
-
-There is no alias analysis yet, so any write ends everything remembered,
-even writes to unrelated memory. **Open:** with `basic-aa`, a store to a
-different alloca or global would not need to end loads of this one.
 
 ## What is never merged
 
@@ -78,14 +76,15 @@ different alloca or global would not need to end loads of this one.
 ## Effect
 
 On the test programs built without optimisation, which keep every local
-in memory, CSE reuses 10 to 49 loads and forwards 36 to 56 stored values per
-program. That is part of what `mem2reg` would do. On clang `-O2` output
-there is little left to find.
+in memory, CSE reuses 10 to 65 loads and forwards 65 to 136 stored values
+per program; before alias analysis it was 10 to 49 and 36 to 56. That is
+part of what `mem2reg` would do. On clang `-O2` output there is little
+left to find.
 
-On the 50,000-function synthetic module, CSE alone takes 231 ms on one
-thread for about 1 million instructions. After CSE, the combiner runs
-again, but only from the instructions whose operands CSE changed, since
-only those can combine further.
+On the 50,000-function synthetic module, CSE alone takes 306 ms on one
+thread (83 ms on eight) for about 1 million instructions. After CSE, the
+combiner runs again, but only from the instructions whose operands CSE
+changed, since only those can combine further.
 
 ## Next
 

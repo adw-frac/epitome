@@ -174,6 +174,15 @@ impl TypeTable {
     }
 }
 
+impl smaugian_ir::layout::TypeAccess for TypeTable {
+    fn ty(&self, id: TypeId) -> &Type {
+        self.get(id)
+    }
+    fn named(&self) -> &[NamedStruct] {
+        self.structs()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

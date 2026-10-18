@@ -3,7 +3,10 @@
 ; @flags: cse: 1 merged, 0 loads reused, 0 stores forwarded
 ; @dominance: cse: 2 merged, 0 loads reused, 0 stores forwarded
 ; @memory: cse: 0 merged, 2 loads reused, 1 stores forwarded
+; @aliasing: cse: 0 merged, 0 loads reused, 3 stores forwarded
 
+
+@counter = global i32 0
 
 declare void @write(ptr)
 
@@ -89,5 +92,21 @@ define i32 @not_merged(i32 %x, ptr %p) {
   %s = add i32 %a, %b
   %t = add i32 %c, %d
   %r = add i32 %s, %t
+  ret i32 %r
+}
+
+define i32 @aliasing(ptr %p, i32 %v) {
+  %local = alloca i32
+  %pair = alloca [2 x i32]
+  %second = getelementptr inbounds [2 x i32], ptr %pair, i64 0, i64 1
+  store i32 %v, ptr %local
+  store i32 1, ptr %pair
+  store i32 2, ptr %second
+  store i32 3, ptr @counter
+  call void @write(ptr %p)
+  %d = load i32, ptr @counter
+  %s1 = add i32 %v, 1
+  %s2 = add i32 2, %d
+  %r = add i32 %s1, %s2
   ret i32 %r
 }

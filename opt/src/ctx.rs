@@ -62,6 +62,9 @@ pub struct Shared<'m> {
     /// Indexed by `GlobalId`; `None` for globals that are not functions.
     slots: Vec<Option<FnSlot>>,
     pub intrinsics: Intrinsics,
+    /// The module's data layout, or the defaults if it has none or it does
+    /// not parse.
+    pub layout: smaugian_ir::layout::DataLayout,
 }
 
 /// Runs `phase` with the module split up for parallel work, then puts it
@@ -101,6 +104,11 @@ pub fn parallel_phase<R>(
         metadata: RwLock::new(metadata),
         slots,
         intrinsics,
+        layout: m
+            .data_layout
+            .as_deref()
+            .and_then(|s| smaugian_ir::layout::DataLayout::parse(&String::from_utf8_lossy(s)).ok())
+            .unwrap_or_default(),
     };
     let result = phase(&shared);
     let Shared { types, consts, metadata, slots, .. } = shared;

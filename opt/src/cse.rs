@@ -22,11 +22,13 @@
 //! replacement always dominates what it replaces.
 //!
 //! Loads are handled too. A load can reuse an earlier load of the same
-//! address and type, or the value an earlier store put there, if nothing
-//! may have written memory in between. A *memory generation* counts that:
-//! it moves on at every instruction that may write memory, and on entering
-//! a block that can be reached other than from its dominator. A remembered
-//! load or store is only used in the generation it was made in.
+//! address and type, or the value an earlier store put there, if nothing in
+//! between may have changed those bytes. The pass keeps a log of the
+//! instructions on the current dominator path that may write memory, and
+//! asks alias analysis (`aa`) whether any written since the value was
+//! remembered may modify the load's location. Entering a block that can be
+//! reached other than from its dominator adds an "unknown" entry to the
+//! log, which nothing gets past, since another path in may have written.
 //!
 //! `freeze` is never merged: two freezes of the same poison may give
 //! different values.
@@ -37,6 +39,7 @@ use std::hash::Hash;
 use smaugian_ir::module::*;
 use smaugian_ir::types::TypeId;
 
+use crate::aa::{BasicAa, Location};
 use crate::cfg::DomTree;
 use crate::ctx::Shared;
 
@@ -253,6 +256,18 @@ fn call_is_read_only(sh: &Shared, call: &Call) -> bool {
     sh.published(g).is_some_and(|f| read_only(&f.fn_attrs))
 }
 
+/// Most writes to check before giving up on a remembered value.
+const MAX_WRITES: usize = 64;
+
+/// True if none of `writes` may change the bytes at `loc`.
+fn still_there(aa: &BasicAa, f: &Function, writes: &[Option<InstId>], loc: Location) -> bool {
+    writes.len() <= MAX_WRITES
+        && writes.iter().all(|w| match w {
+            None => false,
+            Some(i) => !aa.mod_ref(f, &f.insts[i.index()], loc).mods,
+        })
+}
+
 /// Runs CSE on one function.
 pub fn run(sh: &Shared, f: &mut Function) -> Outcome {
     let mut stats = Stats::default();
@@ -274,27 +289,35 @@ pub fn run(sh: &Shared, f: &mut Function) -> Outcome {
         v
     };
     let mut table: Scoped<Key, InstId> = Scoped::new();
-    let mut memory: Scoped<(Value, TypeId), (Value, u32)> = Scoped::new();
+    // Remembered memory contents: (address, type) -> (value, position in
+    // the write log when it was remembered).
+    let mut memory: Scoped<(Value, TypeId), (Value, usize)> = Scoped::new();
+    // Every instruction that may write memory on the current dominator
+    // path, and `None` where a block can be reached another way.
+    let mut writes: Vec<Option<InstId>> = Vec::new();
+    let aa = BasicAa::new(sh, f);
     let mut erased = vec![false; f.insts.len()];
     let mut rewritten: Vec<InstId> = Vec::new();
-    let mut generation = 0u32;
 
     enum Step {
-        Enter(BlockId, u32),
-        Exit(usize, usize),
+        Enter(BlockId, bool),
+        Exit(usize, usize, usize),
     }
-    let mut steps = vec![Step::Enter(f.entry(), 0)];
+    let mut steps = vec![Step::Enter(f.entry(), false)];
     while let Some(step) = steps.pop() {
-        let (b, start) = match step {
-            Step::Exit(t, m) => {
+        let (b, joined) = match step {
+            Step::Exit(t, m, w) => {
                 table.undo(t);
                 memory.undo(m);
+                writes.truncate(w);
                 continue;
             }
-            Step::Enter(b, g) => (b, g),
+            Step::Enter(b, joined) => (b, joined),
         };
-        steps.push(Step::Exit(table.mark(), memory.mark()));
-        let mut gen_now = start;
+        steps.push(Step::Exit(table.mark(), memory.mark(), writes.len()));
+        if joined {
+            writes.push(None);
+        }
         for k in 0..f.blocks[b.index()].insts.len() {
             let i = f.blocks[b.index()].insts[k];
             // Operands through the replacements made so far.
@@ -308,25 +331,25 @@ pub fn run(sh: &Shared, f: &mut Function) -> Outcome {
                 rewritten.push(i);
             }
             let inst = &f.insts[i.index()];
+            if may_write(sh, &inst.op) {
+                writes.push(Some(i));
+            }
             let Some(r) = inst.result else {
-                if may_write(sh, &inst.op) {
-                    generation += 1;
-                    gen_now = generation;
-                }
                 if let Op::Store { volatile: false, atomic: None, value, ptr, .. } = inst.op {
                     let ty = match value {
                         Value::Local(l) => f.locals[l.index()].ty,
                         Value::Const(c) => sh.consts().get(c).ty,
                         Value::Metadata(_) => continue,
                     };
-                    memory.insert((ptr, ty), (value, gen_now));
+                    memory.insert((ptr, ty), (value, writes.len()));
                 }
                 continue;
             };
             let ty = f.locals[r.index()].ty;
             if let Op::Load { volatile: false, atomic: None, ptr, .. } = inst.op {
+                let loc = aa.location(ptr, ty);
                 match memory.get(&(ptr, ty)) {
-                    Some(&(v, g)) if g == gen_now => {
+                    Some(&(v, since)) if still_there(&aa, f, &writes[since..], loc) => {
                         let from_store = !matches!(v, Value::Local(l) if matches!(f.locals[l.index()].def, LocalDef::Inst(d) if matches!(f.insts[d.index()].op, Op::Load { .. })));
                         if from_store {
                             stats.forwarded += 1;
@@ -336,13 +359,9 @@ pub fn run(sh: &Shared, f: &mut Function) -> Outcome {
                         map.insert(r, v);
                         erased[i.index()] = true;
                     }
-                    _ => memory.insert((ptr, ty), (Value::Local(r), gen_now)),
+                    _ => memory.insert((ptr, ty), (Value::Local(r), writes.len())),
                 }
                 continue;
-            }
-            if may_write(sh, &inst.op) {
-                generation += 1;
-                gen_now = generation;
             }
             let Some(key) = key(&inst.op, ty, b) else { continue };
             match table.get(&key) {
@@ -356,17 +375,11 @@ pub fn run(sh: &Shared, f: &mut Function) -> Outcome {
                 None => table.insert(key, i),
             }
         }
-        // Children, so that the first child is visited first. A child
-        // reached only from this block continues its memory generation;
-        // one with other ways in starts a new one.
+        // Children, so that the first child is visited first. A child that
+        // can be reached other than from this block may see memory written
+        // on another path.
         for &c in children[b.index()].iter().rev() {
-            let g = if preds[c.index()].as_slice() == [b] {
-                gen_now
-            } else {
-                generation += 1;
-                generation
-            };
-            steps.push(Step::Enter(c, g));
+            steps.push(Step::Enter(c, preds[c.index()].as_slice() != [b]));
         }
     }
     if stats.total() == 0 {
