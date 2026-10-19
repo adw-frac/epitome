@@ -52,14 +52,19 @@ pub enum Head {
     Br,
     /// `br i1 cond, label, label`: a condition and two blocks.
     CondBr,
+    /// A load (not volatile or atomic): its address.
+    Load,
+    /// A store, only as the write that reaches a load (`@ store(v, p)`):
+    /// the value and the address.
+    Store,
 }
 
 impl Head {
     pub fn arity(self) -> usize {
         match self {
-            Head::Bin(_) | Head::ICmp(_) => 2,
+            Head::Bin(_) | Head::ICmp(_) | Head::Store => 2,
             Head::Select | Head::CondBr => 3,
-            Head::Cast(_) | Head::FNeg | Head::Freeze | Head::Br => 1,
+            Head::Cast(_) | Head::FNeg | Head::Freeze | Head::Br | Head::Load => 1,
         }
     }
 
@@ -104,6 +109,8 @@ impl Head {
             "freeze" => Some(Head::Freeze),
             "br" => Some(Head::Br),
             "condbr" => Some(Head::CondBr),
+            "load" => Some(Head::Load),
+            "store" => Some(Head::Store),
             _ => None,
         }
     }
@@ -120,6 +127,8 @@ impl fmt::Display for Head {
             Head::Freeze => f.write_str("freeze"),
             Head::Br => f.write_str("br"),
             Head::CondBr => f.write_str("condbr"),
+            Head::Load => f.write_str("load"),
+            Head::Store => f.write_str("store"),
         }
     }
 }
@@ -217,6 +226,9 @@ pub enum Cond {
     /// Every operation the pattern looks through has no other use, so
     /// the rule does not keep an old value alive beside the new one.
     OneUse,
+    /// The two pointers start at the same address (alias analysis says
+    /// so).
+    MustAlias(Subject, Subject),
 }
 
 #[derive(Clone, Debug)]
@@ -229,6 +241,9 @@ pub struct Rule {
     pub conds: Vec<Cond>,
     /// Variable names, indexed by the numbers in `Pat`, `Repl` and `Expr`.
     pub vars: Vec<String>,
+    /// For a load: the write that must reach it (`@ store(v, q)`), found by
+    /// memory SSA's walker (`memssa.rs`). Its operands are variables.
+    pub clobber: Option<Pat>,
 }
 
 #[derive(Debug)]
@@ -275,10 +290,32 @@ fn parse_rule(text: &str, line: usize) -> Result<Rule, String> {
     };
     let root = *root;
     check_blocks_pat(&pat)?;
+    // Memory: a load only at the root, a store only as what reaches it.
+    let mut heads = Vec::new();
+    collect_heads(&pat, &mut heads);
+    if heads.contains(&Head::Store) || heads.iter().skip(1).any(|&h| h == Head::Load) {
+        return Err("a load may only be the root of a pattern, and a store only follow '@'".into());
+    }
+    let clobber = if p.eat("@") {
+        if root != Head::Load {
+            return Err("only a load has a write that reaches it ('@')".into());
+        }
+        let c = p.pattern(false)?;
+        match &c {
+            Pat::Op(Head::Store, args) if args.iter().all(|a| matches!(a, Pat::Var(_) | Pat::Const(_))) => {}
+            _ => return Err("'@' must be followed by store(value, address), of variables".into()),
+        }
+        Some(c)
+    } else {
+        None
+    };
     p.expect("->")?;
     let pattern_vars = p.vars.len();
     let repl = p.replacement()?;
     check_blocks_repl(&repl)?;
+    if repl_has_memory(&repl) {
+        return Err("a replacement cannot load or store".into());
+    }
     // A terminator becomes a terminator, and a value a value.
     let repl_is_terminator = matches!(&repl, Repl::Op(h, _) if h.is_terminator());
     if root.is_terminator() != repl_is_terminator {
@@ -301,7 +338,23 @@ fn parse_rule(text: &str, line: usize) -> Result<Rule, String> {
     if p.vars.len() != pattern_vars {
         return Err(format!("'{}' is not bound by the pattern", p.vars[pattern_vars]));
     }
-    Ok(Rule { name: name.to_string(), line, pat, repl, conds, vars: p.vars })
+    Ok(Rule { name: name.to_string(), line, pat, repl, conds, vars: p.vars, clobber })
+}
+
+fn repl_has_memory(r: &Repl) -> bool {
+    match r {
+        Repl::Op(h, args) => matches!(h, Head::Load | Head::Store) || args.iter().any(repl_has_memory),
+        _ => false,
+    }
+}
+
+fn collect_heads(p: &Pat, out: &mut Vec<Head>) {
+    if let Pat::Op(h, args) = p {
+        out.push(*h);
+        for a in args {
+            collect_heads(a, out);
+        }
+    }
 }
 
 /// Blocks may only appear as block operands, and block operands must be
@@ -391,7 +444,7 @@ struct Parser {
 fn is_var_name(s: &str) -> bool {
     s.starts_with(|c: char| c.is_ascii_lowercase())
         && !s.contains('.')
-        && !matches!(s, "true" | "false" | "poison" | "bw" | "log2" | "pow2" | "sametype" | "if")
+        && !matches!(s, "true" | "false" | "poison" | "bw" | "log2" | "pow2" | "sametype" | "mustalias" | "if")
 }
 
 fn is_const_name(s: &str) -> bool {
@@ -614,6 +667,14 @@ impl Parser {
             let e = self.expr()?;
             self.expect(")")?;
             return Ok(Cond::Pow2(e));
+        }
+        if self.eat("mustalias") {
+            self.expect("(")?;
+            let a = self.subject()?;
+            self.expect(",")?;
+            let b = self.subject()?;
+            self.expect(")")?;
+            return Ok(Cond::MustAlias(a, b));
         }
         if self.eat("sametype") {
             self.expect("(")?;

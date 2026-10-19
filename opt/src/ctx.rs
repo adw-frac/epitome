@@ -50,6 +50,8 @@ pub struct Intrinsics {
     pub stacksave: Option<GlobalId>,
     /// `void @llvm.stackrestore.p0(ptr)`
     pub stackrestore: Option<GlobalId>,
+    /// `void @llvm.memset.p0.i64(ptr, i8, i64, i1)`
+    pub memset: Option<GlobalId>,
 }
 
 pub struct Shared<'m> {

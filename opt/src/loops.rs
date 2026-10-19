@@ -20,11 +20,21 @@ pub struct Loop {
     /// Every block in the loop, the header first.
     pub blocks: Vec<BlockId>,
     pub latches: Vec<BlockId>,
+    /// The same blocks, to ask about in constant time.
+    members: crate::fx::FxHashSet<BlockId>,
 }
 
 impl Loop {
     pub fn contains(&self, b: BlockId) -> bool {
-        self.blocks.contains(&b)
+        self.members.contains(&b)
+    }
+
+    /// Adds a block made since the loop was found (the preheader of a loop
+    /// inside it).
+    pub fn add_block(&mut self, b: BlockId) {
+        if self.members.insert(b) {
+            self.blocks.push(b);
+        }
     }
 
     /// Blocks outside the loop that a block in it branches to.
@@ -70,14 +80,21 @@ pub fn find(f: &Function) -> Vec<Loop> {
                         l.latches.push(b);
                     }
                 }
-                None => loops.push(Loop { header: h, blocks: vec![h], latches: vec![b] }),
+                None => loops.push(Loop {
+                    header: h,
+                    blocks: vec![h],
+                    latches: vec![b],
+                    members: [h].into_iter().collect(),
+                }),
             }
         }
     }
     for l in &mut loops {
         let mut work: Vec<BlockId> = l.latches.clone();
         while let Some(x) = work.pop() {
-            if l.blocks.contains(&x) {
+            // The header is the loop's first block already, and the walk
+            // stops there.
+            if x == l.header || !l.members.insert(x) {
                 continue;
             }
             l.blocks.push(x);

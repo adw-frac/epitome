@@ -9,9 +9,11 @@ The code is in `opt/src/memssa.rs`. The form follows LLVM's
 [MemorySSA](https://llvm.org/docs/MemorySSA.html) document. For sources and
 status labels, see the [index](README.md).
 
-**Status:** the form, the on-demand walker and a printer: **Done**. Rules
-that use the edges, and keeping the form up to date as passes change the
-function: **Planned**.
+**Status:** the form, the on-demand walker, a printer, and its users (the
+combiner's memory rules and steps, `licm`): **Done**. Keeping the form up to
+date as passes change the function: **Later** (it is built for each run,
+and passes' edits only make its answers more cautious; see the combiner's
+`Memory`).
 
 ## 1. The form
 
@@ -146,13 +148,7 @@ there first, the answers would depend on timing.
 
 ## 5. Next
 
-- **Rules on the edges:** an operand for an access's clobber, with
-  conditions such as `mustalias(p, q)`, for store-to-load forwarding and
-  load reuse in the combiner.
 - **Updates as passes change the function.** For now the form is built
   fresh, which is linear and cheap enough to repeat after a batch of edits.
-- **Downwards questions** for dead-store elimination ("is this store read
-  before it is overwritten?"), and `postdomtree` to answer them across
-  blocks.
 - **Cheaper walks in unoptimised code:** skipping writes to allocas whose
   address never escapes, without asking alias analysis about each one.

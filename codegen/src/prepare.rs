@@ -129,6 +129,7 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     lower_switches(cx, &mut f);
     expand_intrinsics(cx, &mut f);
     split_aggregate_memory(cx, &mut f);
+    expand_small_mem_ops(cx, &mut f);
     crate::legalize::legalize_vectors(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     // Element-wise intrinsics split into scalars expand as scalars do.
     expand_intrinsics(cx, &mut f);
@@ -233,6 +234,112 @@ fn split_struct_phis(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         f.blocks[b.index()].insts = list;
     }
     Ok(())
+}
+
+/// The most loads and stores a `memset` or `memcpy` is written out as.
+const MAX_MEM_PIECES: u64 = 16;
+
+/// Small `llvm.memset` and `llvm.memcpy` calls of a constant length are
+/// written out as stores (and, for a copy, loads), each as wide as the
+/// alignment and what is left allow (8, 4, 2 or 1 bytes), when that is at
+/// most `MAX_MEM_PIECES` of them; longer ones stay calls to the C library.
+/// `memcpyopt` turns runs of stores into memsets that come back here as
+/// wider stores. Volatile ones, and memsets of a value not known, stay
+/// calls.
+fn expand_small_mem_ops(cx: &mut Ctx, f: &mut Function) {
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::Call(call) = &f.insts[i.index()].op else {
+                k += 1;
+                continue;
+            };
+            let name = callee_name(cx.m, call).unwrap_or_default();
+            let copy = name.starts_with("llvm.memcpy.");
+            if !(copy || name.starts_with("llvm.memset.")) || call.args.len() != 4 {
+                k += 1;
+                continue;
+            }
+            let arg = |n: usize| call.args[n].value;
+            let align = |n: usize| {
+                call.args[n]
+                    .attrs
+                    .iter()
+                    .find_map(|a| match a {
+                        Attr::Int { name, value, .. } if name == "align" => Some(*value),
+                        _ => None,
+                    })
+                    .unwrap_or(1)
+            };
+            let (Some(len), Some(0)) = (cx.const_int(arg(2)), cx.const_int(arg(3))) else {
+                k += 1;
+                continue;
+            };
+            let byte = if copy { None } else { cx.const_int(arg(1)).map(|v| v as u8) };
+            if len <= 0 || (!copy && byte.is_none()) {
+                k += 1;
+                continue;
+            }
+            let len = len as u64;
+            let widest = if copy { align(0).min(align(1)) } else { align(0) }.clamp(1, 8);
+            // The pieces: (offset, bytes), each as wide as it can be.
+            let mut pieces = Vec::new();
+            let mut at = 0u64;
+            while at < len {
+                let w = [8u64, 4, 2, 1].into_iter().find(|&w| w <= widest && at + w <= len).unwrap();
+                pieces.push((at, w));
+                at += w;
+            }
+            if pieces.len() as u64 > MAX_MEM_PIECES
+                || !draconian_ir::chop::allow(|| {
+                    format!(
+                        "write the {name} at {} as {} accesses",
+                        draconian_ir::printer::inst_name(f, i),
+                        pieces.len()
+                    )
+                })
+            {
+                k += 1;
+                continue;
+            }
+            let (dst, src) = (arg(0), arg(1));
+            let (i8t, i64t, ptr) = (cx.m.types.int(8), cx.m.types.int(64), cx.m.types.ptr(0));
+            let mut s = Seq { f, new: Vec::new() };
+            for (off, w) in pieces {
+                let ty = cx.m.types.int(8 * w as u32);
+                let at_off = |cx: &mut Ctx, s: &mut Seq, p: Value| {
+                    if off == 0 {
+                        p
+                    } else {
+                        let o = cx.int(i64t, off as i64);
+                        s.op(gep8(i8t, p, o), ptr)
+                    }
+                };
+                let value = match byte {
+                    Some(b) => {
+                        let v = (0..w).fold(0u64, |acc, _| (acc << 8) | b as u64);
+                        cx.int(ty, v as i64)
+                    }
+                    None => {
+                        let from = at_off(cx, &mut s, src);
+                        s.op(Op::Load { volatile: false, atomic: None, ptr: from, align: Some(w.min(widest)) }, ty)
+                    }
+                };
+                let to = at_off(cx, &mut s, dst);
+                let st = s.f.add_inst(
+                    Op::Store { volatile: false, atomic: None, value, ptr: to, align: Some(w.min(widest)) },
+                    None,
+                );
+                s.new.push(st);
+            }
+            let new = std::mem::take(&mut s.new);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
 }
 
 /// Address sinking, the local half of LLVM's `codegenprepare`: a
@@ -1380,6 +1487,28 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
 /// an integer of `bits` bits, of type `ty`, where the description has no
 /// instruction for it: by the same at a wider width it has one for, or
 /// with shifts and masks. Zero gives the full width.
+/// A call of intrinsic `name`, declared if new, returning `ret`.
+fn call_intrinsic(cx: &mut Ctx, s: &mut Seq, name: &str, args: Vec<Value>, ret: TypeId) -> Value {
+    let params: Vec<TypeId> = args.iter().map(|&a| cx.value_ty(s.f, a)).collect();
+    let callee = crate::legalize::declare(cx, name, ret, &params);
+    let fn_ty = cx.m.types.intern(Type::Function { ret, params, varargs: false });
+    s.op(
+        Op::Call(Box::new(Call {
+            tail: TailKind::None,
+            fmf: FastMath::default(),
+            cconv: CallConv::default(),
+            ret_attrs: vec![],
+            addrspace: None,
+            fn_ty,
+            callee,
+            args: args.into_iter().map(|value| CallArg { value, attrs: vec![] }).collect(),
+            fn_attrs: vec![],
+            bundles: vec![],
+        })),
+        ret,
+    )
+}
+
 fn bit_intrinsic(cx: &mut Ctx, s: &mut Seq, base: &str, x: Value, bits: u32, ty: TypeId) -> Value {
     let i1 = cx.m.types.int(1);
     let wide = [16, 32, 64].into_iter().find(|&w| w > bits && cx.selects_intrinsic(&format!("{base}.i{w}")));
@@ -1392,6 +1521,17 @@ fn bit_intrinsic(cx: &mut Ctx, s: &mut Seq, base: &str, x: Value, bits: u32, ty:
     if base == "llvm.cttz" && bits < w {
         let top = c(cx, 1i64 << bits);
         x = s.bin(BinOp::Or, x, top, wt);
+    }
+    // Trailing zeros as leading zeros of the bits reversed (rbit, clz),
+    // when the description has both at this width.
+    if base == "llvm.cttz"
+        && cx.selects_intrinsic(&format!("llvm.bitreverse.i{w}"))
+        && cx.selects_intrinsic(&format!("llvm.ctlz.i{w}"))
+    {
+        let rev = call_intrinsic(cx, s, &format!("llvm.bitreverse.i{w}"), vec![x], wt);
+        let no = cx.int(i1, 0);
+        let v = call_intrinsic(cx, s, &format!("llvm.ctlz.i{w}"), vec![rev, no], wt);
+        return narrow(s, v);
     }
     if wide.is_some() {
         let name = format!("{base}.i{w}");

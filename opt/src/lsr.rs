@@ -49,8 +49,10 @@ pub fn run(sh: &Shared, f: &mut Function) -> Stats {
         return stats;
     }
     let mut names = Names::new(f);
+    // (Nothing here changes the CFG, so the predecessors stay right.)
+    let preds = f.predecessors();
     for l in loops::find(f) {
-        reduce(sh, f, &mut names, &l, &mut stats);
+        reduce(sh, f, &mut names, &l, &preds, &mut stats);
     }
     stats
 }
@@ -96,10 +98,9 @@ fn int_const(sh: &Shared, v: Value) -> Option<i64> {
     }
 }
 
-fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, stats: &mut Stats) {
+fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[Vec<BlockId>], stats: &mut Stats) {
     let h = l.header;
     let [latch] = l.latches[..] else { return };
-    let preds = f.predecessors();
     let outside: Vec<BlockId> = preds[h.index()].iter().copied().filter(|p| !l.contains(*p)).collect();
     let [pre] = outside[..] else { return };
     let i64t = sh.intern_type(Type::Int(64));

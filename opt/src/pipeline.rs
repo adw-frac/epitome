@@ -38,6 +38,9 @@ pub struct Options {
     pub inline: bool,
     pub combine: bool,
     pub cse: bool,
+    /// The combiner's rules and steps about memory: forwarding stored
+    /// values, reusing loads, deleting dead stores (memory SSA).
+    pub memory: bool,
     pub mem2reg: bool,
     pub sroa: bool,
     pub simplifycfg: bool,
@@ -58,6 +61,7 @@ impl Default for Options {
             inline: true,
             combine: true,
             cse: true,
+            memory: true,
             mem2reg: true,
             sroa: true,
             simplifycfg: true,
@@ -81,6 +85,10 @@ pub struct Report {
     pub combines: crate::combine::Stats,
     /// What CSE removed, over the whole module.
     pub cse: crate::cse::Stats,
+    /// Runs of stores made memsets.
+    pub memcpyopt: crate::memcpyopt::Stats,
+    /// What moved out of loops.
+    pub licm: crate::licm::Stats,
     /// What mem2reg promoted, over the whole module.
     pub mem2reg: crate::mem2reg::Stats,
     /// What SROA split, over the whole module.
@@ -141,6 +149,8 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     let inlined = AtomicUsize::new(0);
     let combines = std::sync::Mutex::new(crate::combine::Stats::default());
     let cse_stats = std::sync::Mutex::new(crate::cse::Stats::default());
+    let memcpy_stats = std::sync::Mutex::new(crate::memcpyopt::Stats::default());
+    let licm_stats = std::sync::Mutex::new(crate::licm::Stats::default());
     let m2r_stats = std::sync::Mutex::new(crate::mem2reg::Stats::default());
     let sroa_stats = std::sync::Mutex::new(crate::sroa::Stats::default());
     let cfg_stats = std::sync::Mutex::new(crate::simplifycfg::Stats::default());
@@ -309,7 +319,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
             // since merged values can make new patterns (`x - y` with
             // `y` now known to be `x`).
             let combine = |g: GlobalId, f: &mut Function, seeds: Option<&[InstId]>| {
-                let stats = crate::combine::run_from(sh, f, matcher, seeds);
+                let stats = crate::combine::run_with(sh, f, matcher, seeds, opts.memory);
                 if stats.total() > 0 {
                     let list: Vec<String> = stats.fired.iter().map(|(k, v)| format!("{k} x{v}")).collect();
                     sh.remark(g, format!("combine: {}", list.join(", ")));
@@ -369,6 +379,14 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                         }
                         simplify_cfg(*g, f);
                     }
+                    // What does not change round a loop, out of it.
+                    let h = crate::licm::run(sh, f);
+                    if h.hoisted > 0 {
+                        sh.remark(*g, format!("licm: {} moved out of loops ({} loads)", h.hoisted, h.loads));
+                        let mut all = licm_stats.lock().unwrap();
+                        all.hoisted += h.hoisted;
+                        all.loads += h.loads;
+                    }
                     let s = crate::indvars::run(sh, f);
                     for (h, n) in &s.trip_counts {
                         sh.remark(*g, format!("indvars: loop {h} runs {n} times when entered"));
@@ -424,6 +442,21 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                         }
                     }
                 }
+                // Runs of stores as memsets, once the stores that were dead
+                // or forwarded are gone.
+                if opts.memory {
+                    let s = crate::memcpyopt::run(sh, f);
+                    if s.memsets > 0 {
+                        sh.remark(*g, format!("memcpyopt: {} stores made {} memsets", s.stores, s.memsets));
+                        // The stores' addresses may now be unused.
+                        if opts.combine {
+                            combine(*g, f, None);
+                        }
+                        let mut all = memcpy_stats.lock().unwrap();
+                        all.memsets += s.memsets;
+                        all.stores += s.stores;
+                    }
+                }
             }
             for (g, f) in bodies {
                 sh.publish(g, f);
@@ -444,6 +477,8 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     report.inlined = inlined.into_inner();
     report.combines = combines.into_inner().unwrap();
     report.cse = cse_stats.into_inner().unwrap();
+    report.memcpyopt = memcpy_stats.into_inner().unwrap();
+    report.licm = licm_stats.into_inner().unwrap();
     report.mem2reg = m2r_stats.into_inner().unwrap();
     report.sroa = sroa_stats.into_inner().unwrap();
     report.simplifycfg = cfg_stats.into_inner().unwrap();
@@ -475,6 +510,8 @@ fn declare_intrinsics(m: &mut Module) -> Intrinsics {
     let void = m.types.void();
     let save_ty = m.types.intern(Type::Function { ret: ptr, params: vec![], varargs: false });
     let restore_ty = m.types.intern(Type::Function { ret: void, params: vec![ptr], varargs: false });
+    let (i8t, i64t, i1t) = (m.types.int(8), m.types.int(64), m.types.int(1));
+    let memset_ty = m.types.intern(Type::Function { ret: void, params: vec![ptr, i8t, i64t, i1t], varargs: false });
     let mut declare = |name: &str, ty, params: &[draconian_ir::types::TypeId]| -> GlobalId {
         if let Some(i) = m.globals.iter().position(|g| g.name.as_deref() == Some(name)) {
             return GlobalId(i as u32);
@@ -497,6 +534,7 @@ fn declare_intrinsics(m: &mut Module) -> Intrinsics {
     Intrinsics {
         stacksave: Some(declare("llvm.stacksave.p0", save_ty, &[])),
         stackrestore: Some(declare("llvm.stackrestore.p0", restore_ty, &[ptr])),
+        memset: Some(declare("llvm.memset.p0.i64", memset_ty, &[ptr, i8t, i64t, i1t])),
     }
 }
 

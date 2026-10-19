@@ -132,12 +132,18 @@ impl DomTree {
     }
 
     pub fn is_reachable(&self, b: BlockId) -> bool {
-        self.order[b.index()] != u32::MAX
+        self.order.get(b.index()).is_some_and(|&o| o != u32::MAX)
     }
 
     /// True if every path from the entry to `b` passes through `a`.
     /// Unreachable blocks are dominated by everything.
+    ///
+    /// A block made after the tree (a pass adding one as it works) is
+    /// dominated by nothing and dominates nothing: the cautious answer.
     pub fn dominates(&self, a: BlockId, b: BlockId) -> bool {
+        if a.index() >= self.order.len() || b.index() >= self.order.len() {
+            return false;
+        }
         if !self.is_reachable(b) {
             return true;
         }

@@ -316,11 +316,13 @@ enum Reach {
     Back(AccessId),
 }
 
-/// Answers "which write reaches this access?", on demand.
-pub struct Walker<'a, 's, 'm> {
-    ssa: &'a MemorySsa,
-    aa: &'a BasicAa<'s, 'm>,
-    f: &'a Function,
+/// The walker's state: what it has found, and what it needs to know about
+/// the function, kept apart from the function itself so that a pass can
+/// edit the function between questions (the combiner). The dominator tree
+/// and the blocks of instructions may then be out of date, which only makes
+/// answers more cautious: taking edges away never undoes a dominance, and
+/// an instruction it does not know is never assumed to dominate.
+pub struct WalkState {
     /// Alias queries allowed per question.
     pub budget: u32,
     cache: RefCell<HashMap<(AccessId, Location), Clobber>>,
@@ -328,33 +330,23 @@ pub struct Walker<'a, 's, 'm> {
     dom: cfg::DomTree,
     /// The block of each instruction.
     block_of: Vec<Option<BlockId>>,
+    /// Writes taken out of the function (a dead store deleted): walks go
+    /// past them.
+    removed: HashSet<InstId>,
 }
 
-impl<'a, 's, 'm> Walker<'a, 's, 'm> {
+impl WalkState {
     /// The default budget: as many writes as CSE looks back over.
     pub const BUDGET: u32 = 64;
 
-    pub fn new(ssa: &'a MemorySsa, aa: &'a BasicAa<'s, 'm>, f: &'a Function) -> Self {
-        Walker {
-            ssa,
-            aa,
-            f,
+    pub fn new(f: &Function) -> Self {
+        WalkState {
             budget: Self::BUDGET,
             cache: Default::default(),
             stats: Default::default(),
             dom: cfg::DomTree::new(f),
             block_of: f.inst_blocks(),
-        }
-    }
-
-    /// Whether `v` has the same value on every way into block `b`: it is a
-    /// constant or a parameter, or defined in a block that strictly
-    /// dominates `b`.
-    fn fixed_at(&self, v: Value, b: BlockId) -> bool {
-        let Value::Local(l) = v else { return true };
-        match self.f.locals[l.index()].def {
-            LocalDef::Inst(i) => self.block_of[i.index()].is_some_and(|d| d != b && self.dom.dominates(d, b)),
-            _ => true,
+            removed: HashSet::default(),
         }
     }
 
@@ -362,33 +354,45 @@ impl<'a, 's, 'm> Walker<'a, 's, 'm> {
         self.stats.get()
     }
 
-    /// The location a load or store accesses.
-    pub fn location_of(&self, i: InstId) -> Option<Location> {
-        let inst = &self.f.insts[i.index()];
-        match &inst.op {
-            Op::Load { ptr, .. } => Some(self.aa.location(*ptr, self.f.locals[inst.result?.index()].ty)),
-            Op::Store { ptr, value, .. } => {
-                let ty = match value {
-                    Value::Local(l) => self.f.locals[l.index()].ty,
-                    Value::Const(c) => self.aa.const_type(*c),
-                    Value::Metadata(_) => return None,
-                };
-                Some(self.aa.location(*ptr, ty))
-            }
-            _ => None,
-        }
+    /// Whether block `a` dominates block `b` (as the function was when the
+    /// state was made).
+    pub fn dominates(&self, a: BlockId, b: BlockId) -> bool {
+        self.dom.dominates(a, b)
+    }
+
+    /// The block instruction `i` was in when the state was made.
+    pub fn block_of(&self, i: InstId) -> Option<BlockId> {
+        self.block_of.get(i.index()).copied().flatten()
+    }
+
+    /// Records that the write `inst` is gone: walks no longer stop at it,
+    /// and answers found before are forgotten (they may have been it).
+    pub fn remove(&mut self, inst: InstId) {
+        self.removed.insert(inst);
+        self.cache.borrow_mut().clear();
     }
 
     /// The write that reaches a load (or, for a store, the write before it
     /// to the bytes it writes), if the instruction is a load or store.
-    pub fn clobber_of(&self, i: InstId) -> Option<Clobber> {
-        let a = self.ssa.access_of(i)?;
-        let loc = self.location_of(i)?;
-        Some(self.clobber(self.ssa.defining(a)?, loc))
+    pub fn clobber_of(&self, ssa: &MemorySsa, aa: &BasicAa, f: &Function, i: InstId) -> Option<Clobber> {
+        let a = ssa.access_of(i)?;
+        let loc = location_of(aa, f, i)?;
+        Some(self.clobber(ssa, aa, f, ssa.defining(a)?, loc))
+    }
+
+    /// Whether `v` has the same value on every way into block `b`: it is a
+    /// constant or a parameter, or defined in a block that strictly
+    /// dominates `b`.
+    fn fixed_at(&self, f: &Function, v: Value, b: BlockId) -> bool {
+        let Value::Local(l) = v else { return true };
+        match f.locals[l.index()].def {
+            LocalDef::Inst(i) => self.block_of[i.index()].is_some_and(|d| d != b && self.dom.dominates(d, b)),
+            _ => true,
+        }
     }
 
     /// The nearest write at or above version `start` that may change `loc`.
-    pub fn clobber(&self, start: AccessId, loc: Location) -> Clobber {
+    pub fn clobber(&self, ssa: &MemorySsa, aa: &BasicAa, f: &Function, start: AccessId, loc: Location) -> Clobber {
         let mut st = self.stats.get();
         st.queries += 1;
         if let Some(&c) = self.cache.borrow().get(&(start, loc)) {
@@ -400,7 +404,7 @@ impl<'a, 's, 'm> Walker<'a, 's, 'm> {
         let mut budget = self.budget;
         let mut exploring = HashSet::default();
         let mut outer = false;
-        let c = match self.walk(start, loc, &mut budget, &mut exploring, &mut outer) {
+        let c = match self.walk(ssa, aa, f, start, loc, &mut budget, &mut exploring, &mut outer) {
             Reach::Found(c) => c,
             // Only phis being explored can be returned to, and none is.
             Reach::Back(_) => unreachable!("a walk ended inside a phi"),
@@ -416,8 +420,12 @@ impl<'a, 's, 'm> Walker<'a, 's, 'm> {
 
     /// Walks up from `a`. `outer` is set if the walk came back to a phi
     /// being explored further up, whose answer is not known yet.
+    #[allow(clippy::too_many_arguments)]
     fn walk(
         &self,
+        ssa: &MemorySsa,
+        aa: &BasicAa,
+        f: &Function,
         mut a: AccessId,
         loc: Location,
         budget: &mut u32,
@@ -428,9 +436,10 @@ impl<'a, 's, 'm> Walker<'a, 's, 'm> {
             if let Some(&c) = self.cache.borrow().get(&(a, loc)) {
                 return Reach::Found(c);
             }
-            match &self.ssa.accesses[a.index()] {
+            match &ssa.accesses[a.index()] {
                 Access::LiveOnEntry => return Reach::Found(Clobber { at: a, exact: true }),
                 Access::Use { .. } => unreachable!("a use is never a version"),
+                Access::Def { inst, prev, .. } if self.removed.contains(inst) => a = *prev,
                 Access::Def { inst, prev, .. } => {
                     if *budget == 0 {
                         return Reach::Found(Clobber { at: a, exact: false });
@@ -439,7 +448,7 @@ impl<'a, 's, 'm> Walker<'a, 's, 'm> {
                     let mut st = self.stats.get();
                     st.steps += 1;
                     self.stats.set(st);
-                    if self.aa.mod_ref(self.f, &self.f.insts[inst.index()], loc).mods {
+                    if aa.mod_ref(f, &f.insts[inst.index()], loc).mods {
                         return Reach::Found(Clobber { at: a, exact: true });
                     }
                     a = *prev;
@@ -448,7 +457,7 @@ impl<'a, 's, 'm> Walker<'a, 's, 'm> {
                     if exploring.contains(&a) {
                         return Reach::Back(a);
                     }
-                    if !self.fixed_at(loc.ptr, *block) {
+                    if !self.fixed_at(f, loc.ptr, *block) {
                         return Reach::Found(Clobber { at: a, exact: true });
                     }
                     if *budget == 0 {
@@ -465,7 +474,7 @@ impl<'a, 's, 'm> Walker<'a, 's, 'm> {
                     let mut reached_outer = false;
                     for &(_, v) in incoming {
                         let mut inner = false;
-                        let r = self.walk(v, loc, budget, exploring, &mut inner);
+                        let r = self.walk(ssa, aa, f, v, loc, budget, exploring, &mut inner);
                         reached_outer |= inner;
                         match r {
                             Reach::Back(p) if p == a => {}
@@ -504,6 +513,61 @@ impl<'a, 's, 'm> Walker<'a, 's, 'm> {
                 }
             }
         }
+    }
+}
+
+/// The location a load or store accesses.
+pub fn location_of(aa: &BasicAa, f: &Function, i: InstId) -> Option<Location> {
+    let inst = &f.insts[i.index()];
+    match &inst.op {
+        Op::Load { ptr, .. } => Some(aa.location(*ptr, f.locals[inst.result?.index()].ty)),
+        Op::Store { ptr, value, .. } => {
+            let ty = match value {
+                Value::Local(l) => f.locals[l.index()].ty,
+                Value::Const(c) => aa.const_type(*c),
+                Value::Metadata(_) => return None,
+            };
+            Some(aa.location(*ptr, ty))
+        }
+        _ => None,
+    }
+}
+
+/// Answers "which write reaches this access?", on demand, for a function
+/// that does not change meanwhile.
+pub struct Walker<'a, 's, 'm> {
+    ssa: &'a MemorySsa,
+    aa: &'a BasicAa<'s, 'm>,
+    f: &'a Function,
+    pub state: WalkState,
+}
+
+impl<'a, 's, 'm> Walker<'a, 's, 'm> {
+    /// The default budget: as many writes as CSE looks back over.
+    pub const BUDGET: u32 = WalkState::BUDGET;
+
+    pub fn new(ssa: &'a MemorySsa, aa: &'a BasicAa<'s, 'm>, f: &'a Function) -> Self {
+        Walker { ssa, aa, f, state: WalkState::new(f) }
+    }
+
+    pub fn stats(&self) -> WalkStats {
+        self.state.stats()
+    }
+
+    /// The location a load or store accesses.
+    pub fn location_of(&self, i: InstId) -> Option<Location> {
+        location_of(self.aa, self.f, i)
+    }
+
+    /// The write that reaches a load (or, for a store, the write before it
+    /// to the bytes it writes), if the instruction is a load or store.
+    pub fn clobber_of(&self, i: InstId) -> Option<Clobber> {
+        self.state.clobber_of(self.ssa, self.aa, self.f, i)
+    }
+
+    /// The nearest write at or above version `start` that may change `loc`.
+    pub fn clobber(&self, start: AccessId, loc: Location) -> Clobber {
+        self.state.clobber(self.ssa, self.aa, self.f, start, loc)
     }
 }
 
@@ -585,7 +649,7 @@ pub fn analyse(aa: &BasicAa, f: &Function, notes: bool) -> FunctionReport {
                     let what = if matches!(ssa.get(a), Access::Def { .. }) { "writes over" } else { "clobbered by" };
                     text.push_str(&format!(" -- {what} {}", ssa.name(c.at)));
                     if !c.exact {
-                        text.push_str(&format!(" (gave up after {} checks)", walker.budget));
+                        text.push_str(&format!(" (gave up after {} checks)", walker.state.budget));
                     }
                 }
                 out.insert(Place::Inst(i), text);

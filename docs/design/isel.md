@@ -330,6 +330,16 @@ reshapes first, as LLVM's type legalisation does:
   instruction go lane by lane; ordered floating-point reductions are added
   in order, as written. Vectors of pointers become vectors of `i64`.
 
+### Small memsets and copies
+
+`llvm.memset` and `llvm.memcpy` of a constant length are written out as
+stores, and for a copy loads, each as wide as the alignment and what is
+left allow (8, 4, 2 or 1 bytes). That happens when it takes at most 16 of
+them (`prepare::expand_small_mem_ops`); longer ones stay calls to the C
+library, and so do volatile ones and memsets of a value not known. The
+optimiser's `memcpyopt` turns runs of narrow stores into memsets that come
+back here as wide ones: a struct's six fields zeroed become three `str xzr`.
+
 ### Address sinking
 
 Selection looks at one block at a time, so an address computed in another

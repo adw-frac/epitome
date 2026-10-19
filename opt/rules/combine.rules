@@ -112,6 +112,12 @@ xor_and_or:       xor(and(x, y), or(x, y)) -> xor(x, y)
 or_and_xor:       or(and(x, y), xor(x, y)) -> or(x, y)
 
 # ---------------------------------------------------------------------------
+# Memory. `load(p) @ store(v, q)` matches a load whose clobber, the write
+# that reaches it as memory SSA's walker finds it, is that store.
+
+forward_store:    load(p) @ store(v, q) -> v if mustalias(p, q) && sametype(v, @)
+
+# ---------------------------------------------------------------------------
 # Strength reduction
 
 # Shifting an i1 by 1 is poison, but x + x on i1 is just 0.

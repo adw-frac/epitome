@@ -75,7 +75,7 @@ fn address(sh: &Shared, f: &Function, v: Value, depth: u32) -> Option<(GlobalId,
 
 /// The byte offset a `getelementptr` of `source` with constant `indices`
 /// adds.
-fn gep_offset(sh: &Shared, source: TypeId, indices: &[Value]) -> Option<i64> {
+pub(crate) fn gep_offset(sh: &Shared, source: TypeId, indices: &[Value]) -> Option<i64> {
     let (types, dl) = (sh.types(), &sh.layout);
     let mut ty = source;
     let mut offset = 0i64;

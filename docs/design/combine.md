@@ -158,6 +158,58 @@ The global must be `constant`, have an initialiser, and not be
 replaced at link time: not `weak`, `linkonce`, `common` or `extern_weak`.
 The `_odr` forms are fine, since they promise every definition is the same.
 
+### Memory
+
+With memory on (the pipeline's default; `--no-memory` turns it off), a run
+of the combiner builds memory SSA and its walker (`memssa.rs`) and has rules
+and steps about memory. The walker's dominator tree and blocks are from the
+start of the run. The combiner's edits only make its answers more cautious:
+replacing values with equal ones and removing loads or pure instructions
+change no write, and folding branches only takes paths away. A store the
+combiner deletes is told to the walker, which then walks past it.
+
+**Rules.** A load pattern may name the write that reaches it, its clobber,
+with `@`:
+
+```text
+forward_store:    load(p) @ store(v, q) -> v if mustalias(p, q) && sametype(v, @)
+```
+
+The rule applies when the walker finds the load's clobber exactly and it is
+a store that matches. `mustalias(p, q)` asks alias analysis whether the
+two addresses are the same. `tests/combine_rules.rs` checks memory rules
+against a model of memory: a load sees the stored value exactly when the
+addresses and the types are the same. So a rule must require both, and its
+replacement must be the stored value. Loads may only be the root of a
+pattern and stores only follow `@`, so other rules are unchanged.
+
+**Load reuse.** An earlier load of the same address and type that comes
+before this one on every path, and has the same exact clobber, gives its
+value. Nothing between them can have written the bytes. Unlike CSE's, this
+works across joins: a load after a diamond reuses one from before it when
+neither arm writes. Up to 16 candidates are tried.
+
+**Dead stores.** A store is deleted when either holds:
+
+- **It stores the value already there:** the value of a load of the same
+  bytes, with the same exact clobber.
+- **Nothing can read it:** a search forward over the CFG finds, on every
+  path, a store covering the same bytes (from the same address, at least
+  as wide) before anything that may read them, or the end of a path where
+  nothing can read them:
+  - an `unreachable`;
+  - a return, when the memory is a local of the function that never
+    escapes;
+  - coming back round a loop to the store itself.
+
+  A call that may unwind ends the search, unless the memory is local, since
+  an exception handler could read it. The search looks at 256 instructions
+  at most.
+
+This is the "is this store read before it is overwritten?" question that
+`postdomtree` was planned for. A forward search answers it directly,
+without one.
+
 ### Larger patterns
 
 These are the expression patterns LLVM's `aggressive-instcombine` looks

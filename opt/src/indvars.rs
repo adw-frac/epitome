@@ -97,8 +97,10 @@ pub fn run(sh: &Shared, f: &mut Function) -> Stats {
         return stats;
     }
     let mut names = Names::new(f);
+    // (Nothing here changes the CFG, so the predecessors stay right.)
+    let preds = f.predecessors();
     for l in loops::find(f) {
-        simplify_loop(sh, f, &mut names, &l, &mut stats);
+        simplify_loop(sh, f, &mut names, &l, &preds, &mut stats);
     }
     stats
 }
@@ -130,10 +132,16 @@ fn def_inst(f: &Function, v: Value) -> Option<InstId> {
     }
 }
 
-fn simplify_loop(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, stats: &mut Stats) {
+fn simplify_loop(
+    sh: &Shared,
+    f: &mut Function,
+    names: &mut Names,
+    l: &Loop,
+    preds: &[Vec<BlockId>],
+    stats: &mut Stats,
+) {
     let h = l.header;
     let [latch] = l.latches[..] else { return };
-    let preds = f.predecessors();
     let outside: Vec<BlockId> = preds[h.index()].iter().copied().filter(|p| !l.contains(*p)).collect();
     let [pre] = outside[..] else { return };
 
@@ -198,7 +206,15 @@ fn simplify_loop(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, sta
         if !draconian_ir::chop::allow(|| format!("indvars: the counter of the loop at {header_name}")) {
             return;
         }
-        if exact_exit(sh, f, pre, h, iv, &e) {
+        // The guard: the block before the loop, or before its preheader
+        // when that is empty (only a branch to the header).
+        let (guard, into) = match f.blocks[pre.index()].insts[..] {
+            [only] if matches!(f.insts[only.index()].op, Op::Br(t) if t == h) && preds[pre.index()].len() == 1 => {
+                (preds[pre.index()][0], pre)
+            }
+            _ => (pre, h),
+        };
+        if exact_exit(sh, f, guard, into, iv, &e) {
             stats.exact_exits += 1;
             stats.exit_values += exit_values(f, latch, iv, &e);
         }
@@ -267,7 +283,9 @@ fn starts_inside(sh: &Shared, f: &Function, pre: BlockId, h: BlockId, iv: &Iv, p
 /// Rewrites `i.next < bound` (and its relatives) as `i.next != bound` when
 /// the counter must reach `bound` exactly. Returns true if it did, or if the
 /// test was already exact.
-fn exact_exit(sh: &Shared, f: &mut Function, pre: BlockId, h: BlockId, iv: &Iv, e: &Exit) -> bool {
+/// `guard` is the block whose branch decides whether the loop is entered,
+/// by going to `into`.
+fn exact_exit(sh: &Shared, f: &mut Function, guard: BlockId, into: BlockId, iv: &Iv, e: &Exit) -> bool {
     if !e.on_next {
         return false;
     }
@@ -279,7 +297,7 @@ fn exact_exit(sh: &Shared, f: &mut Function, pre: BlockId, h: BlockId, iv: &Iv, 
         (1, ICmpPred::Ult) => iv.flags.contains(IntFlags::NUW),
         _ => false,
     };
-    if !ok || !starts_inside(sh, f, pre, h, iv, e.pred, e.bound) {
+    if !ok || !starts_inside(sh, f, guard, into, iv, e.pred, e.bound) {
         return false;
     }
     let next = f.result(iv.next);

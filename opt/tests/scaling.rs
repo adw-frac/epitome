@@ -11,7 +11,10 @@
 //!   the function (now one at the end), fresh names tried from 1 each time
 //!   (now from where the last search stopped), and split blocks keeping
 //!   all their old room;
-//! - one big block of loads and stores (SROA's per-access block lookup);
+//! - one big block of loads and stores (SROA's per-access block lookup),
+//!   and one of stores and loads through pointers that may alias (the
+//!   memory rules: forwarding, load reuse, dead stores);
+//! - a loop with a long invariant body (licm);
 //! - a long chain of adds leaning the wrong way, which reassociation in the
 //!   combiner rebuilds (at most 256 leaves deep from the top).
 
@@ -101,6 +104,42 @@ fn add_chain(n: usize) -> String {
     s
 }
 
+/// Stores and loads through pointers that may alias: forwarding, load
+/// reuse and the (budgeted) search for dead stores look at each.
+fn memory_block(n: usize) -> String {
+    let mut s = String::from("define i64 @f(ptr %p, ptr %q) {\nentry:\n");
+    let mut last = "0".to_string();
+    for k in 0..n {
+        let base = if k % 3 == 0 { "%q" } else { "%p" };
+        let _ = writeln!(s, "  %g{k} = getelementptr i64, ptr {base}, i64 {}", k % 16);
+        if k % 2 == 0 {
+            let _ = writeln!(s, "  store i64 {last}, ptr %g{k}");
+        } else {
+            let _ = writeln!(s, "  %l{k} = load i64, ptr %g{k}\n  %s{k} = add i64 %l{k}, 1");
+            last = format!("%s{k}");
+        }
+    }
+    let _ = writeln!(s, "  ret i64 {last}\n}}");
+    s
+}
+
+/// One loop with a long body of invariant arithmetic: licm moves it all.
+fn invariant_loop(n: usize) -> String {
+    let mut s = String::from(
+        "define i64 @f(ptr %p, i64 %n, i64 %k) {\nentry:\n  br label %loop\nloop:\n  %i = phi i64 [ 0, %entry ], [ %i1, %loop ]\n",
+    );
+    let mut prev = "%k".to_string();
+    for j in 0..n {
+        let _ = writeln!(s, "  %v{j} = mul i64 {prev}, {}", j + 3);
+        prev = format!("%v{j}");
+    }
+    let _ = writeln!(
+        s,
+        "  %g = getelementptr i64, ptr %p, i64 %i\n  store i64 {prev}, ptr %g\n  %i1 = add i64 %i, 1\n  %c = icmp ult i64 %i1, %n\n  br i1 %c, label %loop, label %done\ndone:\n  ret i64 {prev}\n}}"
+    );
+    s
+}
+
 /// The pipeline's time on one thread, the best of three.
 fn time(src: &str) -> Duration {
     (0..3)
@@ -116,7 +155,9 @@ fn time(src: &str) -> Duration {
 
 #[test]
 fn big_functions_take_time_in_proportion() {
-    let shapes: [(&str, fn(usize) -> String, usize); 5] = [
+    let shapes: [(&str, fn(usize) -> String, usize); 7] = [
+        ("stores and loads that may alias", memory_block, 4000),
+        ("a loop with a long invariant body", invariant_loop, 4000),
         ("a long chain of adds", add_chain, 4000),
         ("a chain of diamonds", diamonds, 2000),
         ("a chain of blocks", chain, 4000),

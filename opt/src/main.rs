@@ -14,11 +14,14 @@ const USAGE: &str = "usage: draconian-opt [options] <file.ll>
   -j <n>                  threads (default: one per core)
   -o <file>               write the result here instead of stdout
   --passes=<list>         which passes to run, from sroa, mem2reg, inline,
-                          recursion, combine, simplifycfg, loops and cse,
+                          recursion, combine, simplifycfg, loops, cse and
+                          memory (the combiner's memory rules),
                           separated by commas (default: all)
   --no-inline             do not inline
   --no-combine            do not run the combiner
   --no-cse                do not run common-subexpression elimination
+  --no-memory             do not forward stores, reuse loads or delete dead
+                          stores (the combiner's memory rules)
   --no-mem2reg            do not promote allocas to SSA values
   --no-sroa               do not split allocas into pieces
   --no-simplifycfg        do not simplify the control-flow graph
@@ -59,6 +62,7 @@ fn main() -> ExitCode {
             "--no-inline" => opts.inline = false,
             "--no-combine" => opts.combine = false,
             "--no-cse" => opts.cse = false,
+            "--no-memory" => opts.memory = false,
             "--no-mem2reg" => opts.mem2reg = false,
             "--no-sroa" => opts.sroa = false,
             "--no-simplifycfg" => opts.simplifycfg = false,
@@ -66,13 +70,15 @@ fn main() -> ExitCode {
             s if s.starts_with("--passes=") => {
                 let list: Vec<&str> = s["--passes=".len()..].split(',').filter(|p| !p.is_empty()).collect();
                 if let Some(bad) = list.iter().find(|p| {
-                    !["sroa", "mem2reg", "inline", "recursion", "combine", "simplifycfg", "loops", "cse"].contains(p)
+                    !["sroa", "mem2reg", "inline", "recursion", "combine", "simplifycfg", "loops", "cse", "memory"]
+                        .contains(p)
                 }) {
                     return usage(&format!("unknown pass {bad}"));
                 }
                 opts.inline = list.contains(&"inline");
                 opts.combine = list.contains(&"combine");
                 opts.cse = list.contains(&"cse");
+                opts.memory = list.contains(&"memory");
                 opts.mem2reg = list.contains(&"mem2reg");
                 opts.sroa = list.contains(&"sroa");
                 opts.simplifycfg = list.contains(&"simplifycfg");
@@ -257,6 +263,12 @@ fn main() -> ExitCode {
                 "; cse: {} instructions merged, {} loads reused, {} stores forwarded",
                 report.cse.merged, report.cse.loads, report.cse.forwarded
             );
+        }
+        if report.licm.hoisted > 0 {
+            eprintln!("; licm: {} instructions moved out of loops ({} loads)", report.licm.hoisted, report.licm.loads);
+        }
+        if report.memcpyopt.memsets > 0 {
+            eprintln!("; memcpyopt: {} stores made {} memsets", report.memcpyopt.stores, report.memcpyopt.memsets);
         }
         if report.combines.total() > 0 {
             let mut top: Vec<(&String, &usize)> = report.combines.fired.iter().collect();

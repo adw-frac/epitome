@@ -149,8 +149,9 @@ pub fn check(c: &Cond, env: &Env, same_type: &dyn Fn(Subject, Subject) -> bool) 
             v.is_power_of_two()
         }),
         Cond::SameType(a, b) => same_type(*a, *b),
-        // Checked by the combiner, which knows the uses.
-        Cond::OneUse => true,
+        // Checked by the combiner, which knows the uses and has alias
+        // analysis.
+        Cond::OneUse | Cond::MustAlias(..) => true,
         Cond::Cmp(op, a, b) => {
             let (Some(a), Some(b)) = (eval(a, env), eval(b, env)) else { return false };
             match op {

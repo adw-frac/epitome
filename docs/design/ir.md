@@ -102,7 +102,7 @@ places in it.
 | `basic-aa` | Stateless alias analysis from simple facts, such as two distinct globals never aliasing. See [alias analysis](aa.md). | Done |
 | `globals-aa` | Alias and mod/ref facts for globals whose address is never taken, plus pure functions. | Later |
 | `scev-aa` | Alias analysis using scalar evolution, within one loop iteration. | Later |
-| `memdep` | Finds the earlier memory operations a memory operation depends on, computed lazily. Done as memory SSA with a walker that answers on demand; see [memory SSA](memssa.md). Not yet used by any pass. | Partial |
+| `memdep` | Finds the earlier memory operations a memory operation depends on, computed lazily. Done as memory SSA with a walker that answers on demand; see [memory SSA](memssa.md). The combiner's memory rules and `licm` use it. | Done |
 | `lazy-value-info` | Computes value range facts on demand. Used by jump threading. | Planned |
 | `da` | Dependence analysis between memory accesses. | Later |
 | `iv-users` | Tracks the uses of induction-variable expressions. Used by `loop-reduce`. | Later |
@@ -144,14 +144,14 @@ exists.
 | `simplifycfg` | Removes unreachable blocks, merges blocks, removes trivial PHIs and branch-only blocks. Branch folding is in the combiner; see [simplifying the CFG](simplifycfg.md). | Done |
 | `dce` | Removes dead instructions, and anything that becomes dead as a result. | Planned |
 | `adce` | Aggressive dead code elimination: everything is dead until proven live. | Planned |
-| `dse` | Removes stores that are overwritten before being read. | Planned |
+| `dse` | Removes stores that are overwritten before being read. A step of the combiner: overwritten on every path before any read (across blocks and loops, within a budget), or to a local never read again, or of the value already there; see [combines](combine.md). | Done |
 | `sccp` | Sparse conditional constant propagation. Finds constants and dead blocks. | Planned |
 | `reassociate` | Reorders commutative expressions to help constant folding, CSE and LICM. A step of the combiner; see [combines](combine.md). | Done |
 | `early-cse` | Removes instructions and loads that repeat a dominating one, in one walk of the dominator tree. Not on the Passes page; see [CSE](cse.md). | Done |
-| `gvn` | Removes fully and partially redundant instructions and loads. CSE covers the fully redundant ones within a dominator path. | Planned |
+| `gvn` | Removes fully and partially redundant instructions and loads. CSE covers the fully redundant ones within a dominator path; the combiner forwards stored values to loads and reuses loads under the same memory version, across joins ([combines](combine.md)). Partial redundancy is not done. | Partial |
 | `jump-threading` | Routes edges past blocks whose branch result is already known. | Planned |
 | `sink` | Moves instructions into the successor blocks that need them. | Later |
-| `memcpyopt` | Removes `memcpy` calls and turns runs of stores into `memset`. | Later |
+| `memcpyopt` | Removes `memcpy` calls and turns runs of stores into `memset`. Runs of stores become `memset` (`opt/src/memcpyopt.rs`), which code generation writes back as wide stores when small. Removing copies is not done. | Partial |
 | `tailcallelim` | Turns self-recursive tail calls into loops. Part of recursion removal; see [parallel](parallel.md). | Done |
 | `normalize` | Renames and reorders instructions into a form that diffs well. | Later |
 
@@ -170,7 +170,7 @@ exists.
 | `loop-simplify` | Gives every loop a preheader, dedicated exits and a single backedge. | Planned |
 | `lcssa` | Adds PHIs at loop exits for values used outside the loop. | Planned |
 | `loop-rotate` | Rotates loops into a simpler form. See [loops](loops.md). | Done |
-| `licm` | Moves loop-invariant code out of loops and promotes memory to registers. | Planned |
+| `licm` | Moves loop-invariant code out of loops and promotes memory to registers. Invariant arithmetic that cannot trap, and loads whose clobber is outside the loop from blocks that run on every way out (`opt/src/licm.rs`). Promotion to registers is not done. | Partial |
 | `indvars` | Canonicalises induction variables and exit conditions. Exact exit tests, exit values, widening and trip counts for constant steps, without scalar evolution; see [loops](loops.md). | Partial |
 | `loop-deletion` | Removes finite loops with no side effects and no used results. | Planned |
 | `loop-unroll` | Unrolls loops. Works best after `indvars`. | Planned |

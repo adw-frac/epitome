@@ -261,7 +261,7 @@ fn integer_rules_are_sound() {
     let mut failures = Vec::new();
     let mut checked = 0;
     for r in rules() {
-        if UNCHECKED.contains(&r.name.as_str()) || is_float(&r) {
+        if UNCHECKED.contains(&r.name.as_str()) || is_float(&r) || r.clobber.is_some() {
             continue;
         }
         checked += 1;
@@ -367,6 +367,69 @@ fn every_rule_is_checked_or_listed() {
         if (has_cast || has_freeze) && !UNCHECKED.contains(&r.name.as_str()) {
             panic!("rule {} cannot be checked here; add it to UNCHECKED and to an example test", r.name);
         }
+    }
+}
+
+/// A memory rule, `load(p) @ store(v, q) -> r`, against a model of memory:
+/// the load gives the stored value exactly when the addresses are the same
+/// and the types are (a load of a different width, or from elsewhere,
+/// gives something else). So the rule must require `mustalias(p, q)` and
+/// `sametype(v, @)`, and its replacement must be `v` on every input.
+fn check_memory(r: &Rule) -> Result<(), String> {
+    use draconian_opt::combine::dsl::Cond;
+    let Some(Pat::Op(Head::Store, args)) = &r.clobber else { return Err("not a memory rule".into()) };
+    let Pat::Op(Head::Load, load_args) = &r.pat else { return Err(format!("{}: the root must be a load", r.name)) };
+    let (Pat::Var(p), [Pat::Var(v), Pat::Var(q)]) = (&load_args[0], &args[..]) else {
+        return Err(format!("{}: the model reads load(p) @ store(v, q) only", r.name));
+    };
+    let same = |a: usize, b: usize| {
+        r.conds.iter().any(|c| match c {
+            Cond::MustAlias(Subject::Var(x), Subject::Var(y)) => (*x, *y) == (a, b) || (*x, *y) == (b, a),
+            _ => false,
+        })
+    };
+    let typed = r.conds.iter().any(|c| {
+        matches!(c, Cond::SameType(Subject::Var(x), Subject::Root) | Cond::SameType(Subject::Root, Subject::Var(x)) if x == v)
+    });
+    if !same(*p, *q) {
+        return Err(format!("{}: the load sees the stored value only where the addresses are the same", r.name));
+    }
+    if !typed {
+        return Err(format!("{}: the load sees the stored value only at the same type", r.name));
+    }
+    // The replacement, on every input at small widths, must be the value.
+    for w in [1, 2, 4, 8] {
+        for vals in all_inputs(r.vars.len(), w) {
+            let widths = vec![w; r.vars.len()];
+            let consts: Vec<Option<IntConst>> =
+                vals.iter().map(|&x| Some(IntConst { bits: w, value: x & mask(w) })).collect();
+            let wopt: Vec<Option<u32>> = widths.iter().map(|&x| Some(x)).collect();
+            let env = Env { consts: &consts, widths: &wopt, bw: Some(w) };
+            let e = IntEval { vals: &vals, widths: &widths };
+            if e.repl(&r.repl, w, &env) != Some(V::Int(vals[*v] & mask(w))) {
+                return Err(format!("{}: the replacement is not the stored value", r.name));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn memory_rules_are_sound() {
+    let memory: Vec<Rule> = rules().into_iter().filter(|r| r.clobber.is_some()).collect();
+    assert!(!memory.is_empty());
+    for r in &memory {
+        check_memory(r).unwrap();
+    }
+    // And it catches wrong ones.
+    let wrong = parse_rules(
+        "anywhere: load(p) @ store(v, q) -> v if sametype(v, @)
+         any_type: load(p) @ store(v, q) -> v if mustalias(p, q)
+         other: load(p) @ store(v, q) -> add(v, 1) if mustalias(p, q) && sametype(v, @)",
+    )
+    .unwrap();
+    for r in &wrong {
+        assert!(check_memory(r).is_err(), "the checker accepted the wrong memory rule {}", r.name);
     }
 }
 

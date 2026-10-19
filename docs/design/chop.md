@@ -30,15 +30,16 @@ not type-check. So every step counted is a change made.
 
 | Where | One step |
 | --- | --- |
-| Combiner | a rule, a fold (including a load from a constant global), a chain reassociated, a dead instruction removed, a constant moved to the right, a branch or switch folded |
+| Combiner | a rule (including the memory rules), a fold (including a load from a constant global), a chain reassociated, a load reused, a dead store deleted, a dead instruction removed, a constant moved to the right, a branch or switch folded |
 | CSE | an instruction merged into an earlier one, a load reusing a value |
 | `mem2reg`, SROA | an alloca promoted, split, or removed (only ever written); an aggregate access split |
 | `simplifycfg` and the CFG clean-ups | an empty block bypassed, a branch to one block made plain, a diamond turned into selects, a block merged into its predecessor, unreachable blocks removed |
 | Inliner | a call inlined |
 | Recursion removal | a function's recursion removed; a cycle collapsed |
-| Loops | a loop rotated; a counter simplified (`indvars`); a counter reduced (`loop-reduce`) |
+| Loops | a loop rotated; an instruction moved out of a loop (`licm`); a counter simplified (`indvars`); a counter reduced (`loop-reduce`) |
+| `memcpyopt` | a run of stores made a memset |
 | Pipeline | an unused function deleted |
-| Code generation | a pattern covering several instructions chosen where one covering only the root would do (a load folded into an operation, a post-increment); a division by a constant done with a multiply; a tail call (`musttail` is mandatory); a constant or address hoisted out of a loop; an address sunk into a block that loads or stores through it |
+| Code generation | a pattern covering several instructions chosen where one covering only the root would do (a load folded into an operation, a post-increment); a division by a constant done with a multiply; a tail call (`musttail` is mandatory); a constant or address hoisted out of a loop; an address sunk into a block that loads or stores through it; a small memset or memcpy written out |
 
 ## 2. Limits
 

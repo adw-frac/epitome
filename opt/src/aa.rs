@@ -178,6 +178,13 @@ impl<'s, 'm> BasicAa<'s, 'm> {
         }
     }
 
+    /// Whether `ptr` points into an alloca or allocation of this function
+    /// whose address never escapes: nothing outside the function, a caller
+    /// or an exception handler, can read it.
+    pub fn is_local_object(&self, f: &Function, ptr: Value) -> bool {
+        self.is_local_only(self.object(f, self.underlying(f, ptr)))
+    }
+
     /// The type of a constant.
     pub fn const_type(&self, c: ConstId) -> TypeId {
         self.sh.consts().get(c).ty

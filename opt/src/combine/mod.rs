@@ -45,6 +45,9 @@ use dsl::{Cond, FloatLit, Head, Lit, Repl, Subject as Who};
 use eval::{Env, Folded, IntConst};
 use tree::{Match, Matcher, Shape, Subject};
 
+/// The most instructions the search for a dead store looks at.
+const DSE_BUDGET: u32 = 256;
+
 /// The most leaves a chain is reassociated over.
 const MAX_CHAIN: usize = 256;
 
@@ -102,13 +105,69 @@ pub fn run(sh: &Shared, f: &mut Function, matcher: &Matcher) -> Stats {
 /// from every instruction for `None`. Changes still spread from there to
 /// users and operands as usual.
 pub fn run_from(sh: &Shared, f: &mut Function, matcher: &Matcher, seeds: Option<&[InstId]>) -> Stats {
+    run_with(sh, f, matcher, seeds, false)
+}
+
+/// `run_from`, and with `memory`, the rules and steps about memory too:
+/// forwarding a stored value to a load (`@` rules), reusing an earlier
+/// load, and deleting dead stores. They ask memory SSA's walker
+/// (`memssa.rs`), built for the run.
+pub fn run_with(sh: &Shared, f: &mut Function, matcher: &Matcher, seeds: Option<&[InstId]>, memory: bool) -> Stats {
     if !f.has_body {
         return Stats::default();
     }
+    let mem = memory.then(|| Memory::new(sh, f));
     let mut c = Combiner::new(sh, f, matcher, seeds);
+    c.mem = mem;
     c.run();
     c.finish();
     c.stats
+}
+
+/// What the memory rules and steps ask: alias analysis, memory SSA and its
+/// walker, made when the run starts. The combiner's edits leave them right
+/// enough: replacing values with equal ones, and taking out loads and
+/// pure instructions, change no write; folding branches only takes paths
+/// away, which can only make a walk more cautious. A dead store taken out
+/// is told to the walker (`WalkState::remove`).
+struct Memory<'s, 'm> {
+    aa: crate::aa::BasicAa<'s, 'm>,
+    ssa: crate::memssa::MemorySsa,
+    walk: crate::memssa::WalkState,
+    /// Loads by address and type, for reusing one.
+    loads: HashMap<(Value, TypeId), Vec<InstId>>,
+    /// Each instruction's place in its block, when the run started.
+    pos: Vec<u32>,
+}
+
+impl<'s, 'm> Memory<'s, 'm> {
+    fn new(sh: &'s Shared<'m>, f: &Function) -> Self {
+        let aa = crate::aa::BasicAa::new(sh, f);
+        let ssa = crate::memssa::MemorySsa::build(&aa, f);
+        let walk = crate::memssa::WalkState::new(f);
+        let mut loads: HashMap<(Value, TypeId), Vec<InstId>> = HashMap::default();
+        let mut pos = vec![0u32; f.insts.len()];
+        for &b in &f.layout {
+            for (k, &i) in f.blocks[b.index()].insts.iter().enumerate() {
+                pos[i.index()] = k as u32;
+                if let Op::Load { volatile: false, atomic: None, ptr, .. } = f.insts[i.index()].op
+                    && let Some(r) = f.insts[i.index()].result
+                {
+                    loads.entry((ptr, f.locals[r.index()].ty)).or_default().push(i);
+                }
+            }
+        }
+        Memory { aa, ssa, walk, loads, pos }
+    }
+
+    /// Whether instruction `a` comes before `b` on every path to `b`.
+    fn dominates(&self, a: InstId, b: InstId) -> bool {
+        match (self.walk.block_of(a), self.walk.block_of(b)) {
+            (Some(x), Some(y)) if x == y => self.pos[a.index()] < self.pos[b.index()],
+            (Some(x), Some(y)) => self.walk.dominates(x, y),
+            _ => false,
+        }
+    }
 }
 
 struct Combiner<'s, 'm, 'f> {
@@ -128,6 +187,8 @@ struct Combiner<'s, 'm, 'f> {
     /// Debug records of erased instructions, waiting for the next one.
     pending_records: Vec<DebugRecord>,
     stats: Stats,
+    /// For the memory rules and steps, when asked for.
+    mem: Option<Memory<'s, 'm>>,
 }
 
 fn inst_has_result(f: &Function, i: InstId) -> bool {
@@ -176,6 +237,7 @@ fn head_of(f: &Function, op: &Op) -> Option<(Head, [Value; 3])> {
         Op::Cast { op, value, .. } => (Head::Cast(op), [value, pad, pad]),
         Op::FNeg { value, .. } => (Head::FNeg, [value, pad, pad]),
         Op::Freeze(v) => (Head::Freeze, [v, pad, pad]),
+        Op::Load { volatile: false, atomic: None, ptr, .. } => (Head::Load, [ptr, pad, pad]),
         _ => return None,
     })
 }
@@ -230,6 +292,7 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
             stats: Stats::default(),
             f,
             matcher,
+            mem: None,
         };
         let order: Vec<InstId> = c.f.insts_in_order().collect();
         for &i in &order {
@@ -391,6 +454,158 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
         Some(acc)
     }
 
+    /// An earlier load of the same address and type, before this one on
+    /// every path, under the same write (both loads' clobbers are the same
+    /// write, found exactly): nothing between them can have changed the
+    /// bytes, so this load can take that one's value. Up to 16 candidates
+    /// are tried, nearest-made first.
+    fn reuse_load(&self, i: InstId) -> Option<Value> {
+        let mem = self.mem.as_ref()?;
+        let Op::Load { volatile: false, atomic: None, ptr, .. } = self.f.insts[i.index()].op else { return None };
+        let r = self.f.insts[i.index()].result?;
+        let ty = self.f.locals[r.index()].ty;
+        let candidates = mem.loads.get(&(ptr, ty))?;
+        let mine = mem.walk.clobber_of(&mem.ssa, &mem.aa, self.f, i).filter(|c| c.exact)?;
+        let mut tried = 0;
+        for &k in candidates.iter().rev() {
+            if k == i || self.erased[k.index()] || !mem.dominates(k, i) {
+                continue;
+            }
+            tried += 1;
+            if tried > 16 {
+                break;
+            }
+            let theirs = mem.walk.clobber_of(&mem.ssa, &mem.aa, self.f, k);
+            if theirs == Some(mine) && self.allowed("(load reused)", i) {
+                return Some(self.f.result(k));
+            }
+        }
+        None
+    }
+
+    /// A store that changes nothing anyone sees, and why:
+    ///
+    /// - it stores what is already there: the value of a load of the same
+    ///   bytes, with no write to them between (the load's clobber and the
+    ///   store's are the same write);
+    /// - on every path from it, the same bytes are written again before
+    ///   anything may read them, or the path ends where nothing can (an
+    ///   `unreachable`; a return, if the memory is a local of the function
+    ///   that never escapes). The search goes forward over the CFG, through
+    ///   loops, with a budget of instructions; a call that may unwind stops
+    ///   it, unless the memory is local, since a handler could read it.
+    fn dead_store(&self, i: InstId) -> Option<&'static str> {
+        let mem = self.mem.as_ref()?;
+        let Op::Store { volatile: false, atomic: None, value, ptr, .. } = self.f.insts[i.index()].op else {
+            return None;
+        };
+        let loc = crate::memssa::location_of(&mem.aa, self.f, i)?;
+        let size = loc.size?;
+        // The value already there.
+        if let Value::Local(l) = value
+            && let LocalDef::Inst(ld) = self.f.locals[l.index()].def
+            && !self.erased[ld.index()]
+            && let Op::Load { volatile: false, atomic: None, ptr: from, .. } = self.f.insts[ld.index()].op
+            && crate::memssa::location_of(&mem.aa, self.f, ld).and_then(|x| x.size) == Some(size)
+            && mem.aa.alias(self.f, loc, crate::aa::Location { ptr: from, size: Some(size) })
+                == crate::aa::AliasResult::MustAlias
+        {
+            let a = mem.walk.clobber_of(&mem.ssa, &mem.aa, self.f, ld).filter(|c| c.exact);
+            let b = mem.walk.clobber_of(&mem.ssa, &mem.aa, self.f, i).filter(|c| c.exact);
+            if a.is_some() && a == b && self.allowed("(store of the value there)", i) {
+                return Some("(store of the value there)");
+            }
+        }
+        // Overwritten before it can be read, on every path.
+        let local = mem.aa.is_local_object(self.f, ptr);
+        let start = mem.walk.block_of(i)?;
+        let first = mem.pos[i.index()] as usize + 1;
+        let m = self.sh.module;
+        let mut budget = DSE_BUDGET;
+        let mut work: Vec<(BlockId, usize)> = vec![(start, first)];
+        let mut entered: crate::fx::FxHashSet<BlockId> = Default::default();
+        while let Some((b, from)) = work.pop() {
+            let insts = &self.f.blocks[b.index()].insts;
+            let mut ended = false;
+            for &x in insts.iter().skip(from) {
+                if self.erased[x.index()] {
+                    continue;
+                }
+                // Back round a loop to the store itself: it overwrites.
+                if x == i {
+                    ended = true;
+                    break;
+                }
+                if budget == 0 {
+                    return None;
+                }
+                budget -= 1;
+                let inst = &self.f.insts[x.index()];
+                if let Op::Store { volatile: false, atomic: None, ptr: p2, .. } = inst.op
+                    && let Some(l2) = crate::memssa::location_of(&mem.aa, self.f, x)
+                    && l2.size.is_some_and(|s2| s2 >= size)
+                    && mem.aa.alias(
+                        self.f,
+                        crate::aa::Location { ptr: p2, size: None },
+                        crate::aa::Location { ptr, size: None },
+                    ) == crate::aa::AliasResult::MustAlias
+                {
+                    ended = true;
+                    break;
+                }
+                if mem.aa.mod_ref(self.f, inst, loc).refs {
+                    return None;
+                }
+                let unwinds = match &inst.op {
+                    Op::Call(call) | Op::Invoke { call, .. } => {
+                        !crate::attrs::has(m, &call.fn_attrs, "nounwind")
+                            && !self
+                                .sh
+                                .direct_callee(call)
+                                .and_then(|g| match &m.global(g).kind {
+                                    GlobalKind::Function(callee) => {
+                                        Some(crate::attrs::has(m, &callee.fn_attrs, "nounwind"))
+                                    }
+                                    _ => None,
+                                })
+                                .unwrap_or(false)
+                    }
+                    Op::Resume(_) => true,
+                    _ => false,
+                };
+                if unwinds && !local {
+                    return None;
+                }
+                match &inst.op {
+                    Op::Ret(_) => {
+                        if !local {
+                            return None;
+                        }
+                        ended = true;
+                    }
+                    Op::Unreachable => ended = true,
+                    op if op.is_terminator() => {
+                        for s in op.successors() {
+                            if entered.insert(s) {
+                                work.push((s, 0));
+                            }
+                        }
+                        ended = true;
+                    }
+                    _ => {}
+                }
+                if ended {
+                    break;
+                }
+            }
+            if !ended {
+                // A block without a terminator: not expected; be careful.
+                return None;
+            }
+        }
+        if self.allowed("(dead store)", i) { Some("(dead store)") } else { None }
+    }
+
     /// A value's place in the canonical order reassociation sorts by:
     /// parameters first, in order; then instructions, in the order they were
     /// made; constants last, so that they gather at the outside of a chain,
@@ -449,6 +664,21 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
             self.stats.hit("(reassociated)");
             self.replace(i, v);
             return;
+        }
+        if self.mem.is_some() {
+            if let Some(v) = self.reuse_load(i) {
+                self.stats.hit("(load reused)");
+                self.replace(i, v);
+                return;
+            }
+            if let Some(what) = self.dead_store(i) {
+                self.stats.hit(what);
+                self.erase(i);
+                if let Some(mem) = self.mem.as_mut() {
+                    mem.walk.remove(i);
+                }
+                return;
+            }
         }
         if self.f.insts[i.index()].op.is_terminator() {
             if let Some(new) = self.fold_switch(i) {
@@ -834,6 +1064,38 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
                 _ => bound[*slot] = Some(v),
             }
         }
+        // A memory rule: the write that reaches the load, as the walker
+        // finds it, must be the store the rule names.
+        if let Some(dsl::Pat::Op(Head::Store, args)) = &rule.clobber {
+            let mem = self.mem.as_ref()?;
+            let c = mem.walk.clobber_of(&mem.ssa, &mem.aa, self.f, i)?;
+            let crate::memssa::Access::Def { inst: w, .. } = *mem.ssa.get(c.at) else { return None };
+            if !c.exact || self.erased[w.index()] {
+                return None;
+            }
+            let Op::Store { volatile: false, atomic: None, value, ptr, .. } = self.f.insts[w.index()].op else {
+                return None;
+            };
+            for (a, v) in args.iter().zip([value, ptr]) {
+                let (dsl::Pat::Var(k) | dsl::Pat::Const(k)) = *a else { return None };
+                if matches!(a, dsl::Pat::Const(_)) && !matches!(v, Value::Const(_)) {
+                    return None;
+                }
+                match bound[k] {
+                    Some(prev) if prev != v => return None,
+                    _ => bound[k] = Some(v),
+                }
+            }
+        }
+        for c in &rule.conds {
+            if let Cond::MustAlias(Who::Var(a), Who::Var(b)) = *c {
+                let mem = self.mem.as_ref()?;
+                let loc = |v: Value| crate::aa::Location { ptr: v, size: None };
+                if mem.aa.alias(self.f, loc(bound[a]?), loc(bound[b]?)) != crate::aa::AliasResult::MustAlias {
+                    return None;
+                }
+            }
+        }
         // Constants and widths for the expressions.
         let root_ty = self.f.locals[self.f.insts[i.index()].result?.index()].ty;
         let (consts, widths, bw) = {
@@ -960,7 +1222,7 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
                         vec![t, t]
                     }
                     Head::Cast(_) => vec![var_ty(&args[0])?],
-                    Head::Br | Head::CondBr => return None,
+                    Head::Br | Head::CondBr | Head::Load | Head::Store => return None,
                 };
                 let mut ops = Vec::new();
                 for (a, &t) in args.iter().zip(&operand_tys) {
@@ -977,7 +1239,9 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
                     Head::Cast(op) => Op::Cast { op, flags: IntFlags::NONE, fmf: FastMath::default(), value: ops[0] },
                     Head::FNeg => Op::FNeg { fmf: FastMath::default(), value: ops[0] },
                     Head::Freeze => Op::Freeze(ops[0]),
-                    Head::Br | Head::CondBr => unreachable!("branches are built by try_branch_match"),
+                    Head::Br | Head::CondBr | Head::Load | Head::Store => {
+                        unreachable!("branches are built by try_branch_match; loads and stores never")
+                    }
                 };
                 let new = self.f.add_inst(op, Some((None, ty)));
                 self.grow();
