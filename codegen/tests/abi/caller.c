@@ -34,3 +34,12 @@ long run_big(long x) {
   struct big b = make_big(x, (int)x + 3);
   return b.a + b.b * 2 + b.c * 3 + b.d * 4 + b.e * 5;
 }
+
+double vmix(int, double, ...);
+
+long run_vmix(long x) {
+  double a = vmix(2, 0.5, x, 1.25, x * 2, 2.5);
+  double b = vmix(9, 2.0, x, 0.5, x + 1, 1.5, x + 2, 2.5, x + 3, 3.5, x + 4, 4.5, x + 5, 5.5, x + 6, 6.5, x + 7, 7.5, x + 8,
+                  8.5);
+  return (long)(a * 100) + (long)(b * 10);
+}

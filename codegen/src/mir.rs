@@ -47,6 +47,8 @@ pub enum Opcode {
         id: u32,
         outs: u16,
     },
+    /// A rule of the unwind tables, for the instructions after it: no code.
+    Cfi(crate::unwind::Cfi),
 }
 
 /// How an inline assembly operand is written into its template.
@@ -113,6 +115,7 @@ impl MInst {
                 defs.push(0);
                 uses.push(1);
             }
+            Opcode::Cfi(_) => {}
             Opcode::Asm { outs, .. } => {
                 for (k, op) in self.ops.iter().enumerate() {
                     if matches!(op, MOp::Reg(_)) {
@@ -188,6 +191,7 @@ impl MFunc {
     pub fn bytes(&self, inst: &MInst) -> i64 {
         match inst.op {
             Opcode::Asm { id, .. } => 4 * self.asms[id as usize].statements as i64,
+            Opcode::Cfi(_) => 0,
             _ => 4,
         }
     }
@@ -293,6 +297,14 @@ pub fn format_inst(t: &Target, f: &MFunc, inst: &MInst) -> String {
             format!("COPY {}, {}", r(&inst.ops[0]), r(&inst.ops[1]))
         }
         Opcode::Asm { id, .. } => render_asm(t, f, inst, &f.asms[id as usize]),
+        Opcode::Cfi(c) => {
+            let m = &t.machine;
+            match c {
+                crate::unwind::Cfi::DefCfaOffset(o) => format!(".cfi_def_cfa_offset {o}"),
+                crate::unwind::Cfi::DefCfa(r, o) => format!(".cfi_def_cfa {}, {o}", m.lookup_name(r)),
+                crate::unwind::Cfi::Offset(r, o) => format!(".cfi_offset {}, {o}", m.lookup_name(r)),
+            }
+        }
         Opcode::Instr(i) => {
             let value = |k: usize| -> Operand {
                 match &inst.ops[k] {
@@ -429,14 +441,15 @@ pub fn encode_function(t: &Target, f: &MFunc) -> Result<(Vec<u32>, Vec<Fixup>), 
     let mut n = 0usize;
     for b in &f.blocks {
         starts.push(n * 4);
-        n += b.insts.len();
+        n += b.insts.iter().filter(|i| !matches!(i.op, Opcode::Cfi(_))).count();
     }
     let mut words = Vec::new();
     let mut fixups = Vec::new();
     for (bi, b) in f.blocks.iter().enumerate() {
-        for (k, inst) in b.insts.iter().enumerate() {
-            let pc = starts[bi] + k * 4;
+        let mut pc = starts[bi];
+        for inst in &b.insts {
             let i = match inst.op {
+                Opcode::Cfi(_) => continue,
                 Opcode::Instr(i) => i,
                 Opcode::Copy => return Err(format!("{}: a copy left after allocation", f.name)),
                 Opcode::Asm { .. } => {
@@ -466,9 +479,26 @@ pub fn encode_function(t: &Target, f: &MFunc) -> Result<(Vec<u32>, Vec<Fixup>), 
                 .encode(&env)
                 .ok_or_else(|| format!("{}: cannot encode `{}`", f.name, format_inst(t, f, inst)))?;
             words.push(word);
+            pc += 4;
         }
     }
     Ok((words, fixups))
+}
+
+/// The function's unwind rules, each at its offset from the function's
+/// start (after the instruction before it).
+pub fn cfi_rules(f: &MFunc) -> Vec<(u64, crate::unwind::Cfi)> {
+    let mut out = Vec::new();
+    let mut at = 0u64;
+    for b in &f.blocks {
+        for inst in &b.insts {
+            match inst.op {
+                Opcode::Cfi(c) => out.push((at, c)),
+                _ => at += f.bytes(inst) as u64,
+            }
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------

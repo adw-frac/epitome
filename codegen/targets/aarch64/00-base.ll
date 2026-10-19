@@ -307,6 +307,11 @@ define void @BL(ptr "sym" %s) "enc"="100101 imm26:s26=s/4" "asm"="bl {s}" "reloc
   ret void
 }
 
+; A tail call: the callee returns to this function's caller.
+define void @Btail(ptr "sym" %s) "enc"="000101 imm26:s26=s/4" "asm"="b {s}" "reloc"="jump26" "role"="tailcall" "nomatch" "nodecode" {
+  ret void
+}
+
 define void @BLR(ptr "reg"="x" %n) "enc"="1101011 0 0 01 11111 0000 0 0 n:5 00000" "asm"="blr {n}" "role"="callr" "nomatch" {
   ret void
 }

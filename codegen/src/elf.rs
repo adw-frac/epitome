@@ -49,6 +49,7 @@ pub fn section_name(kind: SectionKind) -> &'static str {
         SectionKind::Bss => ".bss",
         SectionKind::ReadOnly => ".rodata",
         SectionKind::RelRo => ".data.rel.ro",
+        SectionKind::EhFrame => ".eh_frame",
     }
 }
 
@@ -56,7 +57,7 @@ fn section_flags(kind: SectionKind) -> u64 {
     match kind {
         SectionKind::Text => SHF_ALLOC | SHF_EXECINSTR,
         SectionKind::Data | SectionKind::Bss | SectionKind::RelRo => SHF_ALLOC | SHF_WRITE,
-        SectionKind::ReadOnly => SHF_ALLOC,
+        SectionKind::ReadOnly | SectionKind::EhFrame => SHF_ALLOC,
     }
 }
 

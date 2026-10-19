@@ -25,6 +25,7 @@ pub fn function(t: &Target, f: &MFunc, out: &mut String) {
         let _ = writeln!(out, "\t.type {sym},%function");
     }
     let _ = writeln!(out, "{sym}:");
+    let _ = writeln!(out, "\t.cfi_startproc");
     let mut referenced = vec![false; f.blocks.len()];
     for b in &f.blocks {
         for i in &b.insts {
@@ -43,6 +44,7 @@ pub fn function(t: &Target, f: &MFunc, out: &mut String) {
             let _ = writeln!(out, "\t{}", format_inst(t, f, i));
         }
     }
+    let _ = writeln!(out, "\t.cfi_endproc");
     if abi.syntax == Syntax::Elf {
         let _ = writeln!(out, "\t.size {sym}, .-{sym}");
     }

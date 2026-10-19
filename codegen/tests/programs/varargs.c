@@ -1,6 +1,5 @@
 // Variadic functions: va_start, va_arg, va_copy, and passing a va_list on
-// to the C library. Only Apple's convention is supported for these so far.
-// darwin-only
+// to the C library.
 #include <stdarg.h>
 
 typedef unsigned long size_t;

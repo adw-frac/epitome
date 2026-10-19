@@ -40,7 +40,7 @@ fn split(t: &Target, f: &MFunc) -> Vec<(Vec<MInst>, Exit)> {
         let mut body = b.insts.clone();
         let fall = i + 1;
         let leaves = |inst: &MInst| match inst.op {
-            Opcode::Instr(k) => t.has_role(k, "ret") || t.has_role(k, "trap"),
+            Opcode::Instr(k) => t.has_role(k, "ret") || t.has_role(k, "trap") || t.has_role(k, "tailcall"),
             _ => false,
         };
         let exit = if body.last().is_some_and(leaves) {

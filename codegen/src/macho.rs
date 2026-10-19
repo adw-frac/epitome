@@ -280,6 +280,7 @@ pub fn section_names(kind: SectionKind) -> (&'static str, &'static str) {
         SectionKind::Bss => ("__DATA", "__bss"),
         SectionKind::ReadOnly => ("__TEXT", "__const"),
         SectionKind::RelRo => ("__DATA", "__const"),
+        SectionKind::EhFrame => ("__TEXT", "__eh_frame"),
     }
 }
 
@@ -287,6 +288,9 @@ fn section_flags(kind: SectionKind) -> u32 {
     match kind {
         SectionKind::Text => S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS,
         SectionKind::Bss => S_ZEROFILL,
+        // S_COALESCED, with no table of contents, its static symbols
+        // stripped, and live where what it describes is.
+        SectionKind::EhFrame => 0x6800_000b,
         _ => 0,
     }
 }
@@ -504,6 +508,38 @@ pub fn write(obj: &Object, min_os: (u32, u32, u32), m: &Machine) -> Result<Vec<u
     out.extend_from_slice(&symtab);
     out.extend_from_slice(&strtab);
     Ok(out)
+}
+
+/// A Mach-O file's canonical text without its unwind tables, and without
+/// sections' addresses, which they move. clang's assembler makes compact
+/// unwind entries (`__LD,__compact_unwind`) of our `.cfi` directives where
+/// it can, and we make DWARF's `__eh_frame` always; both are right, and
+/// `tests/unwind.rs` runs ours. (For comparing with clang's objects.)
+pub fn without_unwind(text: &str) -> String {
+    let mut out = String::new();
+    let mut skip = false;
+    for l in text.lines() {
+        if let Some(rest) = l.strip_prefix("section ") {
+            skip = rest.starts_with("__TEXT,__eh_frame ") || rest.starts_with("__LD,__compact_unwind ");
+            if skip {
+                continue;
+            }
+            let l = match (l.find(" addr "), l.find(" size ")) {
+                (Some(a), Some(z)) => format!("{}{}", &l[..a], &l[z..]),
+                _ => l.to_string(),
+            };
+            out.push_str(&l);
+            out.push('\n');
+            continue;
+        }
+        if skip && l.starts_with("  ") {
+            continue;
+        }
+        skip = false;
+        out.push_str(l);
+        out.push('\n');
+    }
+    out
 }
 
 impl MachFile {

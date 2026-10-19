@@ -48,6 +48,8 @@ pub enum SectionKind {
     ReadOnly,
     /// Constants holding addresses, which the loader writes once.
     RelRo,
+    /// Unwind tables: DWARF's call frame information (`unwind.rs`).
+    EhFrame,
 }
 
 #[derive(Clone, Debug)]
@@ -192,6 +194,7 @@ pub fn build(t: &Target, abi: &Abi, funcs: &[MFunc], globals: &[GlobalData]) -> 
         at
     };
     let mut pending = Vec::new();
+    let mut frames = Vec::new();
 
     for f in funcs {
         let s = section(&mut obj, SectionKind::Text);
@@ -207,6 +210,13 @@ pub fn build(t: &Target, abi: &Abi, funcs: &[MFunc], globals: &[GlobalData]) -> 
             size: 4 * words.len() as u64,
             global: f.global,
             kind: SymbolKind::Func,
+        });
+        frames.push(crate::unwind::Frame {
+            section: s,
+            start: at,
+            len: 4 * words.len() as u64,
+            symbol: obj.symbols.len() - 1,
+            rules: mir::cfi_rules(f),
         });
         for fx in fixups {
             let i = t.by_name[&fx.instr];
@@ -260,6 +270,8 @@ pub fn build(t: &Target, abi: &Abi, funcs: &[MFunc], globals: &[GlobalData]) -> 
     }
 
     resolve(t, &mut obj, pending, abi.syntax == Syntax::MachO)?;
+    let p = crate::unwind::Params { syntax: abi.syntax, data_align: t.machine.data_align(abi.syntax), ra: abi.lr };
+    crate::unwind::add_eh_frame(&mut obj, &t.machine, &p, &frames)?;
     Ok(obj)
 }
 

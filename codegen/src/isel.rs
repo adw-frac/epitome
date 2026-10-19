@@ -95,6 +95,12 @@ pub struct Sel<'a, 'b> {
     /// Where a variadic function's variable arguments start, from the
     /// stack pointer on entry.
     va_offset: i64,
+    /// AAPCS64's register save areas of a variadic function: the slots
+    /// and sizes of the integer and the vector registers' areas.
+    va_areas: Option<(usize, i64, usize, i64)>,
+    /// Blocks that end in a tail call: they have no successors, and no
+    /// copies for phis.
+    tail_blocks: HashSet<BlockId>,
 }
 
 /// The inline assembly a call calls, if it does.
@@ -253,6 +259,8 @@ impl<'a, 'b> Sel<'a, 'b> {
             hoisted_addr: HashMap::new(),
             agg_params: HashMap::new(),
             va_offset: 0,
+            va_areas: None,
+            tail_blocks: HashSet::new(),
         }
     }
 
@@ -1569,6 +1577,50 @@ impl<'a, 'b> Sel<'a, 'b> {
         Ok(())
     }
 
+    /// The `ret` a call can be a tail call before, if it can: it is marked
+    /// `tail`, its arguments are all in registers, and the next instruction
+    /// returns its result (extended as the call's is), or nothing.
+    fn tail_ret(&self, i: InstId, call: &Call, locs: &[crate::abi::ArgLoc]) -> Option<InstId> {
+        if !matches!(call.tail, TailKind::Tail | TailKind::MustTail)
+            || locs.iter().any(|l| matches!(l, crate::abi::ArgLoc::Stack(_)))
+        {
+            return None;
+        }
+        let f = self.f;
+        let b = self.inst_block[i.index()]?;
+        let next = *f.blocks[b.index()].insts.get(self.pos[i.index()] + 1)?;
+        let result = f.insts[i.index()].result;
+        match &f.insts[next.index()].op {
+            Op::Ret(None) => {}
+            Op::Ret(Some(Value::Local(x))) if Some(*x) == result => {}
+            // A branch to a block that only returns: what this block gives
+            // its phi, or nothing.
+            Op::Br(dest) => {
+                let insts = &f.blocks[dest.index()].insts;
+                let body: Vec<InstId> = insts.iter().copied().filter(|&k| !f.insts[k.index()].op.is_phi()).collect();
+                let [only] = body.as_slice() else { return None };
+                match &f.insts[only.index()].op {
+                    Op::Ret(None) => {}
+                    Op::Ret(Some(Value::Local(x))) => {
+                        let LocalDef::Inst(phi) = f.locals[x.index()].def else { return None };
+                        let Op::Phi { incoming, .. } = &f.insts[phi.index()].op else { return None };
+                        let from = incoming.iter().find(|(_, p)| *p == b).map(|(v, _)| *v);
+                        if result.is_none_or(|r| from != Some(Value::Local(r))) {
+                            return None;
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        }
+        let ext = |a: &[Attr]| -> (bool, bool) {
+            let has = |w: &str| a.iter().any(|x| matches!(x, Attr::Word(y) if y == w));
+            (has("zeroext"), has("signext"))
+        };
+        (ext(&f.ret_attrs) == ext(&call.ret_attrs)).then_some(next)
+    }
+
     fn emit_call(&mut self, i: InstId) -> Result<(), String> {
         let f = self.f;
         let inst = &f.insts[i.index()];
@@ -1586,6 +1638,40 @@ impl<'a, 'b> Sel<'a, 'b> {
                 s if s.starts_with("llvm.trap") => {
                     let brk = self.t.by_role("trap");
                     self.push(MInst::new(brk, vec![]));
+                    return Ok(());
+                }
+                // AAPCS64's va_list: { __stack, __gr_top, __vr_top,
+                // __gr_offs, __vr_offs }: the next stack argument, the ends
+                // of the register save areas, and how far below the ends
+                // the next saved registers are.
+                s if s.starts_with("llvm.va_start") && self.va_areas.is_some() => {
+                    let (gs, gr, vs, vr) = self.va_areas.unwrap();
+                    let ap = self.reg_for(args[0].value, self.int_class(true))?;
+                    let sp = Reg::P(self.t.machine.sp);
+                    let (addi, stx, stw) =
+                        (self.t.by_role("addi"), self.t.by_role("store.x"), self.t.by_role("store.w"));
+                    for (off, at) in
+                        [(0, MOp::Incoming(self.va_offset)), (8, MOp::Frame(gs, gr)), (16, MOp::Frame(vs, vr))]
+                    {
+                        let p = self.ivreg(true);
+                        self.push(MInst::new(addi, vec![MOp::Reg(Reg::V(p)), MOp::Reg(sp), at]));
+                        self.push(MInst::new(stx, vec![MOp::Reg(Reg::V(p)), MOp::Reg(ap), MOp::Imm(off)]));
+                    }
+                    for (off, v) in [(24, -gr), (28, -vr)] {
+                        let r = self.int_reg(v, false, true)?;
+                        self.push(MInst::new(stw, vec![MOp::Reg(r), MOp::Reg(ap), MOp::Imm(off)]));
+                    }
+                    return Ok(());
+                }
+                s if s.starts_with("llvm.va_copy") && self.mf.abi.va_list_aapcs64 => {
+                    let dst = self.reg_for(args[0].value, self.int_class(true))?;
+                    let src = self.reg_for(args[1].value, self.int_class(true))?;
+                    let (ldx, stx) = (self.t.by_role("load.x"), self.t.by_role("store.x"));
+                    for off in [0, 8, 16, 24] {
+                        let p = self.ivreg(true);
+                        self.push(MInst::new(ldx, vec![MOp::Reg(Reg::V(p)), MOp::Reg(src), MOp::Imm(off)]));
+                        self.push(MInst::new(stx, vec![MOp::Reg(Reg::V(p)), MOp::Reg(dst), MOp::Imm(off)]));
+                    }
                     return Ok(());
                 }
                 // A va_list is a pointer to the next variable argument.
@@ -1693,6 +1779,22 @@ impl<'a, 'b> Sel<'a, 'b> {
         }
         for &(p, r) in &in_regs {
             self.push(MInst::copy(Reg::P(p), r));
+        }
+        // A tail call: when the call's result is what the function returns,
+        // its frame goes first, and the callee returns to its caller.
+        let tail = self.tail_ret(i, call, &locs);
+        if let (Some(ret), Some(s), Some(tc)) = (tail, &target, self.t.role("tailcall")) {
+            let mut m = MInst::new(tc, vec![MOp::Sym(s.clone())]);
+            m.imp_uses = in_regs.iter().map(|&(p, _)| p).collect();
+            self.push(m);
+            self.covered.insert(ret);
+            if let Some(b) = self.inst_block[i.index()] {
+                self.tail_blocks.insert(b);
+            }
+            return Ok(());
+        }
+        if call.tail == TailKind::MustTail {
+            return self.err("a musttail call that cannot be made a tail call".to_string());
         }
         let mut inst_m = match (&target, callee_reg) {
             (Some(s), _) => MInst::new(self.t.by_role("call"), vec![MOp::Sym(s.clone())]),
@@ -1951,6 +2053,9 @@ impl<'a, 'b> Sel<'a, 'b> {
                 }
             }
             for p in preds {
+                if self.tail_blocks.contains(&p) {
+                    continue;
+                }
                 let pb = self.bmap[&p];
                 let saved = std::mem::take(&mut self.mf.blocks[pb].insts);
                 let at = self.mf.blocks[pb].term_start.min(saved.len());
@@ -2029,7 +2134,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         // A variadic function's variable arguments follow its named ones on
         // the stack, 8-aligned, under conventions that put them there.
         if let Type::Function { varargs: true, .. } = self.cx.m.types.get(f.ty) {
-            if self.mf.abi.variadic != crate::abi::Variadic::Stack {
+            if self.mf.abi.variadic != crate::abi::Variadic::Stack && !self.mf.abi.va_list_aapcs64 {
                 return self
                     .err(format!("defining variadic functions under {} is not supported yet", self.mf.abi.name));
             }
@@ -2044,6 +2149,41 @@ impl<'a, 'b> Sel<'a, 'b> {
                 .max()
                 .unwrap_or(0);
             self.va_offset = (end + 7) / 8 * 8;
+            // AAPCS64: the argument registers the named arguments left are
+            // saved, x ones in one area and q ones in another, for va_arg
+            // to find them (as clang's IR for it does).
+            if self.mf.abi.va_list_aapcs64 {
+                let used = |regs: &[u8]| {
+                    part_locs
+                        .iter()
+                        .flatten()
+                        .filter_map(|l| match l {
+                            crate::abi::ArgLoc::Reg(r) => regs.iter().position(|x| x == r).map(|k| k + 1),
+                            _ => None,
+                        })
+                        .max()
+                        .unwrap_or(0)
+                };
+                let (args, fp_args) = (self.mf.abi.args.clone(), self.mf.abi.fp_args.clone());
+                let (ngr, nvr) = (used(&args), used(&fp_args));
+                let (gr, vr) = (8 * (args.len() - ngr) as i64, 16 * (fp_args.len() - nvr) as i64);
+                self.mf.slots.push(Slot { size: gr.max(8) as u64, align: 8, offset: 0 });
+                let gs = self.mf.slots.len() - 1;
+                self.mf.slots.push(Slot { size: vr.max(16) as u64, align: 16, offset: 0 });
+                let vs = self.mf.slots.len() - 1;
+                let sp = self.t.machine.sp;
+                let (stx, stq) =
+                    (self.t.by_role("store.x"), self.t.role("store.q").ok_or("no instruction has role store.q")?);
+                for (k, &r) in args.iter().enumerate().skip(ngr) {
+                    let at = MOp::Frame(gs, 8 * (k - ngr) as i64);
+                    self.push(MInst::new(stx, vec![MOp::Reg(Reg::P(r)), MOp::Reg(Reg::P(sp)), at]));
+                }
+                for (k, &r) in fp_args.iter().enumerate().skip(nvr) {
+                    let at = MOp::Frame(vs, 16 * (k - nvr) as i64);
+                    self.push(MInst::new(stq, vec![MOp::Reg(Reg::P(r)), MOp::Reg(Reg::P(sp)), at]));
+                }
+                self.va_areas = Some((gs, gr, vs, vr));
+            }
         }
         for (k, p) in f.params.iter().enumerate() {
             if self.uses[p.local.index()] == 0 {
@@ -2101,7 +2241,11 @@ impl<'a, 'b> Sel<'a, 'b> {
         for (k, &b) in layout.iter().enumerate() {
             let next = layout.get(k + 1).copied();
             self.emit_block(b, next)?;
-            let succs = f.successors(b).iter().map(|s| self.bmap[s]).collect();
+            let succs = if self.tail_blocks.contains(&b) {
+                vec![]
+            } else {
+                f.successors(b).iter().map(|s| self.bmap[s]).collect()
+            };
             self.mf.blocks[self.bmap[&b]].succs = succs;
         }
         self.emit_phi_copies()?;

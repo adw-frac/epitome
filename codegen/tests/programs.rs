@@ -89,7 +89,11 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
     // without -fwrapv, so that overflow flags reach the optimiser.
     let wrap: &[&str] =
         if std::fs::read_to_string(&src).unwrap().contains("// no-fwrapv") { &[] } else { &["-fwrapv"] };
-    run(Command::new("clang").args(wrap).arg(&src).arg(&main).arg("-o").arg(&reference_exe))?;
+    // Programs that recurse too deep for a stack without tail calls say
+    // so: they are built only with optimisation, which marks calls `tail`.
+    let tails = std::fs::read_to_string(&src).unwrap().contains("// needs-tail-calls");
+    let opt: &[&str] = if tails { &["-O2"] } else { &[] };
+    run(Command::new("clang").args(wrap).args(opt).arg(&src).arg(&main).arg("-o").arg(&reference_exe))?;
     let want = run(&mut Command::new(&reference_exe))?;
     let mut report = Vec::new();
     let configs: &[(&str, &[&str])] = &[
@@ -99,6 +103,9 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         ("vec", &["-O2"]),
     ];
     for (config, flags) in configs {
+        if tails && matches!(*config, "O0" | "opt") {
+            continue;
+        }
         let stem = format!("{name}.{config}");
         let ll = tmp.join(format!("{stem}.ll"));
         run(Command::new("clang").args(wrap).args(*flags).args(["-S", "-emit-llvm"]).arg(&src).arg("-o").arg(&ll))?;
@@ -118,7 +125,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
 
         // 1. It behaves the same.
         let exe = tmp.join(&stem);
-        run(Command::new("clang").arg(&s).arg(&main).arg("-o").arg(&exe))?;
+        run(Command::new("clang").args(opt).arg(&s).arg(&main).arg("-o").arg(&exe))?;
         let got = run(&mut Command::new(&exe))?;
         if got != want {
             return Err(format!("{stem}: output differs from clang's build; see {}", s.display()));
@@ -176,7 +183,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         // 8. draconian-as makes the same object of our assembly.
         same_assembled(t, &compiled.asm, &bytes, &stem)?;
         let exe = tmp.join(format!("{stem}.ours"));
-        run(Command::new("clang").arg(&mine).arg(&main).arg("-o").arg(&exe))?;
+        run(Command::new("clang").args(opt).arg(&mine).arg(&main).arg("-o").arg(&exe))?;
         if run(&mut Command::new(&exe))? != want {
             return Err(format!("{stem}: built from our object file, the output differs from clang's build"));
         }
@@ -253,7 +260,7 @@ fn same_object(t: &Target, ours: &Path, theirs: &Path, stem: &str) -> Result<(),
     let read = |p: &Path| {
         let bytes = std::fs::read(p).unwrap();
         let text = if macho::is_macho(&bytes) {
-            macho::read(&bytes).map(|m| m.canonical(&t.machine))
+            macho::read(&bytes).map(|m| macho::without_unwind(&m.canonical(&t.machine)))
         } else {
             elf::read(&bytes).map(|e| e.canonical(&t.machine))
         };

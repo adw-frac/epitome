@@ -36,3 +36,24 @@ struct big make_big(long x, int y) {
   struct big r = {x, x * y, x - y, x + y, y};
   return r;
 }
+
+// Variadic: AAPCS64 puts variable arguments where named ones would go, and
+// va_arg finds them in the register save areas va_start makes, then on the
+// stack. Integers and doubles, more of each than fit in registers.
+#include <stdarg.h>
+double vmix(int n, double scale, ...) {
+  va_list ap, again;
+  va_start(ap, scale);
+  va_copy(again, ap);
+  double s = 0;
+  for (int i = 0; i < n; i++) {
+    long k = va_arg(ap, long);
+    double d = va_arg(ap, double);
+    s += k * scale + d;
+  }
+  // The copy reads them again.
+  long first = va_arg(again, long);
+  va_end(again);
+  va_end(ap);
+  return s + first;
+}

@@ -10,6 +10,7 @@
 
 use crate::mir::*;
 use crate::target::Target;
+use crate::unwind::Cfi;
 
 pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     let (fp_reg, lr_reg) = (f.abi.fp, f.abi.lr);
@@ -141,21 +142,29 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     let low = if reaches(&slots) { 0 } else { slots.iter().map(|s| s.1).min().unwrap_or(0) / 16 * 16 };
     let near: Vec<(u8, i64)> = slots.iter().map(|&(reg, at)| (reg, at - low)).collect();
     let (saves, restores) = save_restore(t, &near);
+    // The unwind rules (unwind.rs) go after what they describe: where the
+    // CFA (sp on entry) is after each move of sp, and where each register
+    // was saved, from the CFA.
+    let cfi = |c: Cfi| MInst { op: Opcode::Cfi(c), ..MInst::new(0, vec![]) };
     let mut prologue = Vec::new();
     if size - low > 0 {
         adjust(t, &mut prologue, sp, sp, -(size - low), &f.abi.scratch)?;
+        prologue.push(cfi(Cfi::DefCfaOffset(size - low)));
     }
     prologue.extend(saves);
+    prologue.extend(slots.iter().map(|&(reg, at)| cfi(Cfi::Offset(reg, at - size))));
     if calls {
         adjust(t, &mut prologue, fp_reg, sp, fp_at - low, &f.abi.scratch)?;
     }
     if low > 0 {
         adjust(t, &mut prologue, sp, sp, -low, &f.abi.scratch)?;
+        prologue.push(cfi(Cfi::DefCfaOffset(size)));
     }
     let mut epilogue = Vec::new();
     if let Some(b) = base {
         let addi = t.by_role("addi");
         prologue.push(MInst::new(addi, vec![MOp::Reg(Reg::P(b)), MOp::Reg(Reg::P(sp)), MOp::Imm(0)]));
+        prologue.push(cfi(Cfi::DefCfa(b, size)));
         epilogue.push(MInst::new(addi, vec![MOp::Reg(Reg::P(sp)), MOp::Reg(Reg::P(b)), MOp::Imm(0)]));
     }
     if low > 0 {
@@ -166,11 +175,14 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
         adjust(t, &mut epilogue, sp, sp, size - low, &f.abi.scratch)?;
     }
 
-    let ret = t.by_role("ret");
+    // Before each return, and each tail call (whose callee returns to this
+    // function's caller).
+    let leaves =
+        |inst: &MInst| matches!(inst.op, Opcode::Instr(k) if t.has_role(k, "ret") || t.has_role(k, "tailcall"));
     for b in &mut f.blocks {
         let old = std::mem::take(&mut b.insts);
         for inst in old {
-            if inst.op == Opcode::Instr(ret) {
+            if leaves(&inst) {
                 b.insts.extend(epilogue.iter().cloned());
             }
             b.insts.push(inst);
@@ -289,7 +301,9 @@ fn tidy_branches(t: &Target, f: &mut MFunc) {
     let b_op = Opcode::Instr(t.by_role("jump"));
     let ends_flow = |t: &Target, b: &MBlock| {
         b.insts.last().is_some_and(|i| match i.op {
-            Opcode::Instr(k) => t.has_role(k, "jump") || t.has_role(k, "ret") || t.has_role(k, "trap"),
+            Opcode::Instr(k) => {
+                t.has_role(k, "jump") || t.has_role(k, "ret") || t.has_role(k, "trap") || t.has_role(k, "tailcall")
+            }
             _ => false,
         })
     };

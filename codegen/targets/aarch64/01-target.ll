@@ -40,7 +40,7 @@
 ; ===========================================================================
 ; Parameters
 
-!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110}
+!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110, !1111}
 !1100 = !{!"sp", !"sp"}
 !1101 = !{!"zero", !"xzr"}
 !1102 = !{!"vector-bits", !"128", !"neon"}
@@ -52,6 +52,9 @@
 !1108 = !{!"cpu", !"generic"}
 !1109 = !{!"elf-format", !"elf64-littleaarch64"}
 !1110 = !{!"asm-comment", !"//"}
+; The data alignment factor of unwind tables, in ELF and in Mach-O, as
+; their assemblers write it.
+!1111 = !{!"cfi-data-align", !"-4", !"-8"}
 
 ; ===========================================================================
 ; Inline assembly: what its constraint codes and template modifiers mean,
@@ -98,7 +101,7 @@
 ; From Arm's ELF for the Arm 64-bit Architecture, and Apple's
 ; <mach-o/arm64/reloc.h>.
 
-!target.relocs = !{!1200, !1201, !1202, !1203, !1204, !1205, !1210, !1211, !1212, !1213, !1214, !1215, !1216, !1217, !1218, !1219, !1220, !1221, !1222, !1223, !1224, !1225, !1226, !1227, !1228}
+!target.relocs = !{!1200, !1201, !1202, !1203, !1204, !1205, !1210, !1211, !1212, !1213, !1214, !1215, !1216, !1217, !1218, !1219, !1220, !1221, !1222, !1223, !1224, !1225, !1226, !1227, !1228, !1229}
 !1200 = !{!"name", !"call26", !"elf", !"283", !"elf-name", !"R_AARCH64_CALL26", !"macho", !"2", !"macho-name", !"ARM64_RELOC_BRANCH26", !"macho-pcrel", !"yes", !"macho-length", !"2", !"use", !"call", !"target", !"pc + v"}
 !1201 = !{!"name", !"adrp", !"elf", !"275", !"elf-name", !"R_AARCH64_ADR_PREL_PG_HI21", !"macho", !"3", !"macho-name", !"ARM64_RELOC_PAGE21", !"macho-pcrel", !"yes", !"macho-length", !"2", !"elf-syntax", !"{s}", !"macho-syntax", !"{s}@PAGE", !"target", !"(pc & -4096) + (v << 12)"}
 !1202 = !{!"name", !"add_lo12", !"elf", !"277", !"elf-name", !"R_AARCH64_ADD_ABS_LO12_NC", !"macho", !"4", !"macho-name", !"ARM64_RELOC_PAGEOFF12", !"macho-length", !"2", !"elf-syntax", !":lo12:{s}", !"macho-syntax", !"{s}@PAGEOFF"}
@@ -109,18 +112,29 @@
 !1211 = !{!"name", !"abs32", !"elf", !"258", !"elf-name", !"R_AARCH64_ABS32"}
 !1212 = !{!"name", !"abs16", !"elf", !"259", !"elf-name", !"R_AARCH64_ABS16"}
 !1213 = !{!"name", !"prel64", !"elf", !"260", !"elf-name", !"R_AARCH64_PREL64"}
-!1214 = !{!"name", !"prel32", !"elf", !"261", !"elf-name", !"R_AARCH64_PREL32"}
+!1214 = !{!"name", !"prel32", !"elf", !"261", !"elf-name", !"R_AARCH64_PREL32", !"use", !"eh-pcrel"}
 !1215 = !{!"name", !"prel16", !"elf", !"262", !"elf-name", !"R_AARCH64_PREL16"}
 !1216 = !{!"name", !"adr_prel_lo21", !"elf", !"274", !"elf-name", !"R_AARCH64_ADR_PREL_LO21"}
 !1217 = !{!"name", !"adr_prel_pg_hi21_nc", !"elf", !"276", !"elf-name", !"R_AARCH64_ADR_PREL_PG_HI21_NC"}
 !1218 = !{!"name", !"ldst8_lo12", !"elf", !"278", !"elf-name", !"R_AARCH64_LDST8_ABS_LO12_NC"}
 !1219 = !{!"name", !"tstbr14", !"elf", !"279", !"elf-name", !"R_AARCH64_TSTBR14"}
 !1220 = !{!"name", !"condbr19", !"elf", !"280", !"elf-name", !"R_AARCH64_CONDBR19"}
-!1221 = !{!"name", !"jump26", !"elf", !"282", !"elf-name", !"R_AARCH64_JUMP26"}
+!1221 = !{!"name", !"jump26", !"elf", !"282", !"elf-name", !"R_AARCH64_JUMP26", !"macho", !"2", !"macho-name", !"ARM64_RELOC_BRANCH26", !"macho-pcrel", !"yes", !"macho-length", !"2", !"use", !"call", !"target", !"pc + v"}
 !1222 = !{!"name", !"ldst16_lo12", !"elf", !"284", !"elf-name", !"R_AARCH64_LDST16_ABS_LO12_NC"}
 !1223 = !{!"name", !"ldst32_lo12", !"elf", !"285", !"elf-name", !"R_AARCH64_LDST32_ABS_LO12_NC"}
 !1224 = !{!"name", !"ldst64_lo12", !"elf", !"286", !"elf-name", !"R_AARCH64_LDST64_ABS_LO12_NC"}
 !1225 = !{!"name", !"ldst128_lo12", !"elf", !"299", !"elf-name", !"R_AARCH64_LDST128_ABS_LO12_NC"}
-!1226 = !{!"name", !"macho_subtractor", !"macho", !"1", !"macho-name", !"ARM64_RELOC_SUBTRACTOR"}
+!1226 = !{!"name", !"macho_subtractor", !"macho", !"1", !"macho-name", !"ARM64_RELOC_SUBTRACTOR", !"macho-length", !"3", !"use", !"eh-sub"}
 !1227 = !{!"name", !"macho_pointer_to_got", !"macho", !"7", !"macho-name", !"ARM64_RELOC_POINTER_TO_GOT"}
 !1228 = !{!"name", !"macho_addend", !"macho", !"10", !"macho-name", !"ARM64_RELOC_ADDEND"}
+; With macho_subtractor before it, the distance from one symbol to another:
+; how __eh_frame says where a function is.
+!1229 = !{!"name", !"macho_unsigned64", !"macho", !"0", !"macho-name", !"ARM64_RELOC_UNSIGNED", !"macho-length", !"3", !"use", !"eh-unsigned"}
+
+; ===========================================================================
+; DWARF's numbers for the registers, in unwind tables: each file's from
+; this. (x0-x30 are 0-30, sp 31; v0-v31 are 64-95.)
+
+!target.dwarf = !{!1400, !1401}
+!1400 = !{!"r", !"0"}
+!1401 = !{!"v", !"64"}

@@ -440,9 +440,40 @@ A convention may also name a `far-scratch` register, never allocated, for
 the addresses of stack slots further than an instruction's offset reaches
 (RISC-V's 2,047 bytes); AArch64's reach 32KB and need none.
 
-Not yet: `byval` and `sret` arguments, homogeneous floating-point
-aggregates and vectors, defining variadic functions under AAPCS64 (whose
-`va_list` is a struct with register save areas), and tail calls.
+More of what conventions differ in is data too:
+
+- **`sret`:** the register a caller passes a result's address in, for a
+  struct too big to return in registers (AArch64's `x8`). Without it the
+  address is the first argument, as on RISC-V.
+- **`base`:** a saved register that addresses the frame of a function whose
+  stack pointer moves, one with dynamic allocas (variable-length arrays,
+  `stacksave`/`stackrestore`). A dynamic alloca moves `sp` down by its
+  size, rounded to 16. Its memory is above the area where calls' arguments
+  go, so a later call's stack arguments do not overwrite it.
+- **`wide-pairs`:** `even` if an integer wider than a register (`i128`)
+  starts in an even register and at a 16-aligned stack slot (AAPCS64;
+  Apple's convention and RISC-V's take any pair).
+- **`va-list`:** `aapcs64` if a variadic function's `va_list` is AAPCS64's
+  record of register save areas. The prologue then saves the argument
+  registers the named arguments left, `x` and `q` ones in an area each, and
+  `va_start` fills in `__stack`, `__gr_top`, `__vr_top`, `__gr_offs` and
+  `__vr_offs`. clang's IR does `va_arg` itself.
+
+Integers of 65 to 128 bits are split into halves of `i64` before anything
+else (`wide.rs`). Arithmetic, logic, shifts, comparisons and the common
+intrinsics act on the halves. Division calls the runtime's `__udivti3`
+family. Across a call, a wide value is a `[2 x i64]`, returned in `x0`
+and `x1` as small aggregates now are.
+
+A call marked `tail` (or `musttail`) is a tail call when every argument is
+in a register and the function returns its result. That holds when the
+next instruction returns it, or when it branches to a block that only
+returns it through a phi. The frame is torn down first, and the call is a
+jump (role `tailcall`: `b sym`, `jal zero, sym`). A `musttail` call that
+cannot be one is an error.
+
+Not yet: `byval` arguments, homogeneous floating-point aggregates and
+vectors, and indirect tail calls.
 
 ## Output
 
@@ -568,7 +599,7 @@ above: values narrower than 32 bits live in W registers with their upper
 bits undefined, and odd widths live in the next register width; operations
 that read every bit get their operands extended in place first.
 
-Not yet: dynamic allocas, exception handling, `i128` beyond the high half
-of products, frames over 32KB, object files (the output is assembly), load
+Not yet: exception handling in the IR (`invoke`, landing pads: unwinding
+through our frames works, see [objects.md](objects.md)), frames over 32KB, object files (the output is assembly), load
 and store pairs, pre-index addressing, scalable vectors, and vector
 floating-point minimum, maximum and unordered comparisons.

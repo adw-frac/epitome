@@ -67,7 +67,8 @@ impl Machine {
         let mut base: HashMap<(usize, usize), u64> = HashMap::new();
         for (fi, f) in files.iter().enumerate() {
             for (si, s) in f.sections.iter().enumerate() {
-                if s.flags & elf::SHF_ALLOC == 0 {
+                // Unwind tables: nothing here unwinds.
+                if s.flags & elf::SHF_ALLOC == 0 || s.name == ".eh_frame" {
                     continue;
                 }
                 at = at.next_multiple_of(s.align.max(1));

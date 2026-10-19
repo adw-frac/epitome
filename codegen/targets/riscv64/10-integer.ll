@@ -302,11 +302,11 @@ define i32 @LIw(i32 "imm" %imm) "enc"="imm:s12 00000 000 d:5 0010011" "asm"="li 
   ret i32 %imm
 }
 
-define i64 @LUI(i64 "imm" %imm) "enc"="imm20:s20=imm>>12 d:5 0110111" "asm"="lui {d}, {=imm>>12}" {
+define i64 @LUI(i64 "imm" %imm) "enc"="imm20:s20=imm>>12 d:5 0110111" "asm"="lui {d}, {=(imm>>12)&1048575}" {
   ret i64 %imm
 }
 
-define i32 @LUIw(i32 "imm" %imm) "enc"="imm20:s20=imm>>12 d:5 0110111" "asm"="lui {d}, {=imm>>12}" "nodecode" {
+define i32 @LUIw(i32 "imm" %imm) "enc"="imm20:s20=imm>>12 d:5 0110111" "asm"="lui {d}, {=(imm>>12)&1048575}" "nodecode" {
   ret i32 %imm
 }
 
@@ -714,6 +714,11 @@ define void @J(ptr "label" %dest) "enc"="j20:s1=dest>>20 j10:10=(dest>>1)&1023 j
 define void @CALL(ptr "sym" %s) "enc"="j20:s1=s>>20 j10:10=(s>>1)&1023 j11:1=(s>>11)&1 j19:8=(s>>12)&255 00001 1101111" "asm"="jal ra, {s}" "reloc"="jal" "role"="call" "nomatch" {
   ret void
 }
+
+define void @TAIL(ptr "sym" %s) "enc"="j20:s1=s>>20 j10:10=(s>>1)&1023 j11:1=(s>>11)&1 j19:8=(s>>12)&255 00000 1101111" "asm"="jal zero, {s}" "reloc"="jal" "role"="tailcall" "nomatch" "nodecode" {
+  ret void
+}
+
 
 define void @CALLR(ptr "reg"="x" %n) "enc"="000000000000 n:5 000 00001 1100111" "asm"="jalr ra, 0({n})" "role"="callr" "nomatch" {
   ret void

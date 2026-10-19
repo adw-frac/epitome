@@ -22,6 +22,7 @@ pub mod object;
 pub mod prepare;
 pub mod regalloc;
 pub mod target;
+pub mod unwind;
 pub mod wide;
 
 use draconian_ir::Module;

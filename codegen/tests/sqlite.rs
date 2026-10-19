@@ -121,8 +121,8 @@ fn sqlite_answers_as_clangs_build() {
         // Our object says what the assembler's says.
         let theirs = tmp.join(format!("sqlite3.{name}.assembled.o"));
         run(Command::new("clang").arg("-c").arg(&s).arg("-o").arg(&theirs)).unwrap();
-        let a = macho::read(&object).unwrap().canonical(&t.machine);
-        let b = macho::read(&std::fs::read(&theirs).unwrap()).unwrap().canonical(&t.machine);
+        let a = macho::without_unwind(&macho::read(&object).unwrap().canonical(&t.machine));
+        let b = macho::without_unwind(&macho::read(&std::fs::read(&theirs).unwrap()).unwrap().canonical(&t.machine));
         let ours_assembled =
             Assembler::new(&t).assemble(&std::fs::read_to_string(&s).unwrap(), None).unwrap().file(&t).unwrap();
         if ours_assembled != object {

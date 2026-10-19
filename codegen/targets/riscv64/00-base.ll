@@ -47,7 +47,7 @@
 ; lane by lane. Globals are reached by their absolute addresses (the medlow
 ; code model), not through a GOT. Branches compare whole registers.
 
-!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110}
+!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110, !1111}
 !1100 = !{!"sp", !"sp"}
 !1101 = !{!"zero", !"zero"}
 !1102 = !{!"vector-bits", !"0"}
@@ -60,6 +60,8 @@
 !1108 = !{!"boolean-branches", !"compare"}
 !1109 = !{!"elf-format", !"elf64-littleriscv"}
 !1110 = !{!"asm-comment", !"#"}
+; The data alignment factor of unwind tables.
+!1111 = !{!"cfi-data-align", !"-8"}
 
 ; ===========================================================================
 ; Inline assembly: what its constraint codes and template modifiers mean,
@@ -97,13 +99,21 @@
 ; ===========================================================================
 ; Relocations, from the RISC-V ELF psABI.
 
-!target.relocs = !{!1200, !1201, !1202, !1203, !1210, !1211, !1212, !1213, !1214, !1215, !1216, !1217, !1218}
+!target.relocs = !{!1200, !1201, !1202, !1203, !1210, !1211, !1212, !1213, !1214, !1215, !1216, !1217, !1218, !1219}
 !1200 = !{!"name", !"jal", !"elf", !"17", !"elf-name", !"R_RISCV_JAL", !"use", !"call", !"target", !"pc + v"}
 !1201 = !{!"name", !"hi20", !"elf", !"26", !"elf-name", !"R_RISCV_HI20", !"elf-syntax", !"%hi({s})", !"target", !"v << 12"}
 !1202 = !{!"name", !"lo12_i", !"elf", !"27", !"elf-name", !"R_RISCV_LO12_I", !"elf-syntax", !"%lo({s})"}
 !1203 = !{!"name", !"abs64", !"elf", !"2", !"elf-name", !"R_RISCV_64", !"use", !"data8"}
 !1210 = !{!"name", !"none", !"elf", !"0", !"elf-name", !"R_RISCV_NONE"}
 !1211 = !{!"name", !"abs32", !"elf", !"1", !"elf-name", !"R_RISCV_32"}
+; How .eh_frame says where a function is.
+!1219 = !{!"name", !"pcrel32", !"elf", !"57", !"elf-name", !"R_RISCV_32_PCREL", !"use", !"eh-pcrel"}
+
+; DWARF's numbers for the registers, in unwind tables: x0-x31 are 0-31,
+; f0-f31 32-63.
+!target.dwarf = !{!1400, !1401}
+!1400 = !{!"x", !"0"}
+!1401 = !{!"f", !"32"}
 !1212 = !{!"name", !"branch", !"elf", !"16", !"elf-name", !"R_RISCV_BRANCH"}
 !1213 = !{!"name", !"call", !"elf", !"18", !"elf-name", !"R_RISCV_CALL"}
 !1214 = !{!"name", !"call_plt", !"elf", !"19", !"elf-name", !"R_RISCV_CALL_PLT"}

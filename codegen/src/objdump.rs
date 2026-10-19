@@ -341,8 +341,16 @@ fn reloc_operand(m: &Machine, r: &ImageReloc, macho: bool) -> String {
 
 /// The instruction `word` is, when a relocation of `kind` fills it in.
 fn decode_reloc(t: &Target, word: u32, kind: RelocKind) -> Option<(usize, Env)> {
+    // Relocations an object file numbers alike are one to it (Mach-O's
+    // BRANCH26 is both a call's and a tail call's).
+    let defs = &t.machine.relocs;
+    let k = &defs[kind.0 as usize];
+    let alike = |r: RelocKind| {
+        let d = &defs[r.0 as usize];
+        r == kind || (d.macho.is_some() && d.macho == k.macho) || (d.elf.is_some() && d.elf == k.elf)
+    };
     (0..t.instrs.len())
-        .filter(|&i| t.instrs[i].reloc == Some(kind) && word & t.instrs[i].enc.mask == t.instrs[i].enc.value)
+        .filter(|&i| t.instrs[i].reloc.is_some_and(alike) && word & t.instrs[i].enc.mask == t.instrs[i].enc.value)
         .find_map(|i| t.instrs[i].decode(word).map(|env| (i, env)))
 }
 

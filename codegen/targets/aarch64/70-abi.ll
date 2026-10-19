@@ -29,6 +29,10 @@
 ;                 whose stack pointer moves (dynamic allocas)
 ;   wide-pairs    "even": an integer wider than a register (i128) starts in
 ;                 an even register, and at a 16-aligned stack slot
+;   va-list       "aapcs64": a variadic function's va_list is AAPCS64's
+;                 record of the saved argument registers and the stack
+;                 (__stack, __gr_top, __vr_top, __gr_offs, __vr_offs);
+;                 without it, a pointer to the next argument
 ;   fp-args, fp-result, fp-clobbers, fp-saved, fp-scratch
 ;                 the same, for floating-point values in d0-d31 (only
 ;                 the low 64 bits of d8-d15 are preserved)
@@ -58,7 +62,7 @@
 ; The Procedure Call Standard for the Arm 64-bit Architecture, as used by
 ; Linux: x18 is an ordinary temporary, stack arguments take 8-byte slots,
 ; and variadic arguments go where named ones would.
-!abi.aapcs64 = !{!200, !201, !202, !203, !204, !205, !206, !207, !208, !209, !210, !211, !212, !213, !214, !215, !216, !217, !218}
+!abi.aapcs64 = !{!200, !201, !202, !203, !204, !205, !206, !207, !208, !209, !210, !211, !212, !213, !214, !215, !216, !217, !218, !219}
 !200 = !{!"args", !"x0-x7"}
 !201 = !{!"result", !"x0"}
 !202 = !{!"clobbers", !"x0-x18", !"x30"}
@@ -78,3 +82,4 @@
 !216 = !{!"sret", !"x8"}
 !217 = !{!"base", !"x19"}
 !218 = !{!"wide-pairs", !"even"}
+!219 = !{!"va-list", !"aapcs64"}

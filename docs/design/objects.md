@@ -12,8 +12,8 @@ checked against clang's assembler over SQLite. Assembling Draconian's own
 assembly: **Done**. Assembling other compilers' assembly: **Partial** (see
 below). Programs and SQLite built
 from our own Mach-O objects, linked by the system linker, run and answer as
-clang's builds do. Unwind tables (`.eh_frame`, compact unwind) and debug
-info in objects: **Later**.
+clang's builds do. Unwind tables (`.eh_frame`): **Done**. Exception
+tables, compact unwind and debug info: **Later**.
 
 ## Sources
 
@@ -226,8 +226,8 @@ assembler takes 4.5.
 clang's own assembly for SQLite assembles about 81% of its instruction
 lines once the things below are set aside. What it uses that ours does not:
 
-- **Directives:** `.cfi_*` (unwind information, which would need unwind
-  tables in the object), `.loh` (linker optimisation hints, which can be
+- **Directives:** the `.cfi_*` directives we don't write
+  (`.cfi_remember_state`, other encodings for `.cfi_personality`), `.loh` (linker optimisation hints, which can be
   ignored), `.zerofill`, literal and C-string sections (`__literal8`,
   `__cstring`), jump tables of label differences
   (`.byte (LBB29_26-LBB29_15)>>2`), and `.indirect_symbol` and
@@ -337,11 +337,56 @@ Linux. The Mach-O objects are linked and run, and the ELF writer shares
 the object model with them, but an arm64 Linux machine (or a CI runner)
 linking the ELF objects with glibc would be the end-to-end proof for ELF.
 
+## Unwind tables
+
+Each function's prologue carries its unwind rules as `Opcode::Cfi`
+pseudo-instructions, which take no space (`unwind.rs`):
+
+- after each move of `sp`, where the CFA (`sp` on entry) is;
+- after the saves, where each register is saved, from the CFA;
+- where `sp` moves, the CFA as the base register plus the frame size.
+
+Assembly writes them as `.cfi_startproc`, `.cfi_def_cfa_offset`,
+`.cfi_def_cfa`, `.cfi_offset` and `.cfi_endproc`, and `draconian-as`
+reads those back.
+
+The object writer and the assembler both make the same tables of them:
+one CIE, and one FDE a function, in DWARF's call frame format. The forms
+are the platforms' assemblers', observed with clang and rustc:
+
+- augmentation `zR`, code alignment 1;
+- the data alignment the description gives for the object format
+  (`cfi-data-align`: AArch64's is −4 in ELF and −8 in Mach-O), and the
+  link register as the return address column (DWARF's register numbers are description data,
+  `!target.dwarf`);
+- the CFA starting at `sp`;
+- entries padded with `DW_CFA_nop` to 4 bytes, and the last to 8.
+
+A function's address is PC-relative. Under ELF it is 4 bytes, with the
+relocation whose `use` is `eh-pcrel` (`R_AARCH64_PREL32`,
+`R_RISCV_32_PCREL`). Under Mach-O it is 8 bytes: the function less a
+symbol at the table's start, a pair of relocations (`eh-sub`, then
+`eh-unsigned`) on a field holding minus its own offset.
+
+The checks:
+
+- **AArch64 ELF:** the tables are clang's, relocations and all, for
+  every program `tests/programs.rs` builds for Linux.
+- **RISC-V:** `.text` and `.eh_frame` are byte for byte what LLVM's
+  assembler (rustc's) makes of our assembly (`tests/unwind.rs`). The
+  `.text` comparison found `lui` written with a negative immediate, which
+  LLVM's assembler rejects.
+- **Mach-O:** clang's assembler makes compact unwind entries where it can,
+  where we write `__eh_frame` always, and the linker takes either. So
+  `tests/unwind.rs` runs it: a C++ exception thrown from a callback our
+  functions call (recursing, saving registers, with a variable-length
+  array) must reach `main`'s `catch`. Without the tables the C++ runtime
+  calls `terminate`.
+
 ## Not yet
 
-- Unwind information (`.eh_frame` for ELF, compact unwind for Mach-O),
-  and debug info. Without them, exceptions cannot unwind through our code
-  and debuggers cannot backtrace it.
+- Compact unwind entries for Mach-O (smaller than DWARF's, and what Apple's
+  assembler writes where a frame fits them), and debug info.
 - `.subsections_via_symbols` (Mach-O): without it the linker keeps each
   section whole, so it cannot drop unused functions.
 - Zero-filled sections in Mach-O (`__DATA,__bss`): zeros are stored.

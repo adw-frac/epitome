@@ -122,6 +122,12 @@ pub enum RelocUse {
     Got,
     /// A pointer in data, of this many bytes.
     Data(u8),
+    /// In unwind tables (`.eh_frame`): ELF's 32-bit PC-relative address of
+    /// a function; Mach-O's pair, a subtractor of a symbol at the table's
+    /// start and an unsigned 64-bit address of the function.
+    EhPcRel,
+    EhSub,
+    EhUnsigned,
 }
 
 #[derive(Clone, Debug)]
@@ -250,6 +256,11 @@ pub struct Machine {
     pub asm_modifiers: HashMap<char, AsmModifier>,
     /// How assembly starts a comment.
     pub asm_comment: String,
+    /// DWARF's number for each file's first register (`!target.dwarf`).
+    pub dwarf: HashMap<usize, u32>,
+    /// The data alignment factor of unwind tables, in ELF and in Mach-O
+    /// (`cfi-data-align`: one value, or ELF's then Mach-O's).
+    pub cfi_data_align: (i64, i64),
     /// Other ways of writing operands, and how the templates write them
     /// (`!target.asm-aliases`: `[{r}]` is `[{r}, #0]`), for assembly that
     /// other compilers or people write.
@@ -375,6 +386,8 @@ impl Machine {
             asm_constraints: HashMap::new(),
             asm_modifiers: HashMap::new(),
             asm_comment: String::new(),
+            dwarf: HashMap::new(),
+            cfi_data_align: (-8, -8),
             asm_aliases: Vec::new(),
         };
         let num = |k: &str| -> Result<Option<u64>, String> {
@@ -415,6 +428,11 @@ impl Machine {
         mc.elf_flags = num("elf-flags")?.unwrap_or(0) as u32;
         mc.elf_format = params.get("elf-format").cloned().unwrap_or_else(|| "elf64-little".into());
         mc.asm_comment = params.get("asm-comment").cloned().unwrap_or_else(|| "//".into());
+        if let Some(t) = all_params.iter().find(|t| t[0] == "cfi-data-align") {
+            let v = |k: usize| t.get(k).and_then(|x| x.parse::<i64>().ok());
+            let elf = v(1).ok_or("target parameter cfi-data-align: a number")?;
+            mc.cfi_data_align = (elf, v(2).unwrap_or(elf));
+        }
         let one_char = |k: &str| -> Result<char, String> {
             let mut c = k.chars();
             match (c.next(), c.next()) {
@@ -448,6 +466,16 @@ impl Machine {
                 o => return Err(format!("asm constraint {code}: {o:?}")),
             };
             mc.asm_constraints.insert(one_char(code)?, def);
+        }
+        for t in tuples(m, "target.dwarf") {
+            if let [file, base] = &t[..] {
+                let k = mc
+                    .files
+                    .iter()
+                    .position(|f| f.name == *file)
+                    .ok_or_else(|| format!("!target.dwarf: no file {file}"))?;
+                mc.dwarf.insert(k, base.parse().map_err(|_| format!("!target.dwarf: {base}"))?);
+            }
         }
         for t in tuples(m, "target.asm-aliases") {
             if let [from, to] = &t[..] {
@@ -485,6 +513,9 @@ impl Machine {
                 usage: match p.get("use").copied() {
                     None | Some("") => RelocUse::Plain,
                     Some("call") => RelocUse::Call,
+                    Some("eh-pcrel") => RelocUse::EhPcRel,
+                    Some("eh-sub") => RelocUse::EhSub,
+                    Some("eh-unsigned") => RelocUse::EhUnsigned,
                     Some("got") => RelocUse::Got,
                     Some(d) if d.starts_with("data") => RelocUse::Data(
                         d.trim_start_matches("data").parse().map_err(|_| format!("relocation {name}: use {d}"))?,
@@ -533,6 +564,26 @@ impl Machine {
     /// Register `r`'s number within its file, as encodings hold it.
     pub fn index(&self, r: u8) -> i64 {
         (r - self.files[self.file_of(r)].base) as i64
+    }
+
+    /// The data alignment factor of unwind tables in this dialect's object
+    /// files.
+    pub fn data_align(&self, syntax: Syntax) -> i64 {
+        match syntax {
+            Syntax::Elf => self.cfi_data_align.0,
+            Syntax::MachO => self.cfi_data_align.1,
+        }
+    }
+
+    /// DWARF's number for register `r`, for unwind tables.
+    pub fn dwarf_number(&self, r: u8) -> Option<u32> {
+        let f = self.file_of(r);
+        self.dwarf.get(&f).map(|b| b + self.index(r) as u32)
+    }
+
+    /// The relocation used so.
+    pub fn reloc_used(&self, u: RelocUse) -> Option<usize> {
+        self.relocs.iter().position(|r| r.usage == u)
     }
 
     /// The file register `r` is in.

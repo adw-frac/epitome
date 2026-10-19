@@ -32,7 +32,8 @@
 //! The directives are those the code generator writes: `.text`, `.data`,
 //! `.bss`, `.section`, `.globl`, `.p2align`, `.type`, `.size`, `.byte`,
 //! `.short`, `.long`, `.quad` (of numbers, or of `symbol+offset`),
-//! `.ascii`, `.asciz`, `.space`, `.zero` and `.build_version`; and
+//! `.ascii`, `.asciz`, `.space`, `.zero` and `.build_version`; the
+//! `.cfi_*` directives of unwind tables; and
 //! `.subsections_via_symbols`, which is accepted and ignored.
 
 use std::collections::{HashMap, HashSet};
@@ -42,6 +43,15 @@ use crate::enc::{self, Env};
 use crate::mir::{self, Operand, Reg};
 use crate::object::{self, Object, Pending, RelocKind, Section, SectionKind, Symbol, SymbolKind};
 use crate::target::{Kind, Target};
+
+/// A function between `.cfi_startproc` and `.cfi_endproc`.
+struct OpenFrame {
+    section: usize,
+    start: u64,
+    /// Its label.
+    name: Option<String>,
+    rules: Vec<(u64, crate::unwind::Cfi)>,
+}
 
 /// An assembled file.
 pub struct Assembled {
@@ -194,7 +204,18 @@ impl<'t> Assembler<'t> {
         for (inner, text) in holes {
             if let Some(expr) = inner.strip_prefix('=') {
                 let e = enc::parse_expr(expr).ok()?;
-                let (name, v) = enc::invert(&e, parse_int(text)?)?;
+                let mut x = parse_int(text)?;
+                // A value written masked to n bits (`{=(imm>>12)&1048575}`,
+                // as RISC-V's lui is written) is read as n bits, signed.
+                if let enc::Expr::Bin('&', _, m) = &e
+                    && let enc::Expr::Int(m) = **m
+                    && (m + 1).count_ones() == 1
+                    && x > m / 2
+                    && x <= m
+                {
+                    x -= m + 1;
+                }
+                let (name, v) = enc::invert(&e, x)?;
                 set(&mut r.env, &name, v)?;
                 continue;
             }
@@ -335,6 +356,10 @@ impl<'t> Assembler<'t> {
         let mut globals: HashSet<String> = HashSet::new();
         let mut types: HashMap<String, SymbolKind> = HashMap::new();
         let mut sizes: HashMap<String, u64> = HashMap::new();
+        // Unwind rules: the function open (section, start, its label, its
+        // rules), and those closed.
+        let mut open: Option<OpenFrame> = None;
+        let mut frames: Vec<(OpenFrame, u64)> = Vec::new();
         let mut min_os = (11, 0, 0);
         // What the second pass does, in order: instructions, and data
         // that refers to symbols.
@@ -405,6 +430,35 @@ impl<'t> Assembler<'t> {
                         } else {
                             sec.data.resize(at as usize, 0);
                         }
+                    }
+                    // Unwind rules (unwind.rs).
+                    "cfi_startproc" => {
+                        let s = section_of(&mut obj, &mut by_kind, &mut cur, SectionKind::Text);
+                        let at = obj.sections[s].size();
+                        let name =
+                            labels.iter().filter(|(k, v)| **v == (s, at) && !temp(k)).map(|(k, _)| k.clone()).min();
+                        open = Some(OpenFrame { section: s, start: at, name, rules: Vec::new() });
+                    }
+                    "cfi_endproc" => {
+                        let f = open.take().ok_or_else(|| err(n, ".cfi_endproc without .cfi_startproc".into()))?;
+                        let len = obj.sections[f.section].size() - f.start;
+                        frames.push((f, len));
+                    }
+                    "cfi_def_cfa_offset" | "cfi_def_cfa" | "cfi_offset" => {
+                        let Some(OpenFrame { section: s, start: at, rules, .. }) = open.as_mut() else {
+                            return Err(err(n, "a .cfi directive outside .cfi_startproc".into()));
+                        };
+                        let a = list();
+                        let reg = |x: &str| self.t.machine.lookup(x).ok_or_else(|| err(n, format!("no register {x}")));
+                        let num = |x: &str| parse_int(x).ok_or_else(|| err(n, format!("a bad number {x}")));
+                        let rule = match (name, a.as_slice()) {
+                            ("cfi_def_cfa_offset", [o]) => crate::unwind::Cfi::DefCfaOffset(num(o)?),
+                            ("cfi_def_cfa", [r, o]) => crate::unwind::Cfi::DefCfa(reg(r)?, num(o)?),
+                            ("cfi_offset", [r, o]) => crate::unwind::Cfi::Offset(reg(r)?, num(o)?),
+                            _ => return Err(err(n, "a bad .cfi directive".into())),
+                        };
+                        let here = obj.sections[*s].size() - *at;
+                        rules.push((here, rule));
                     }
                     "type" => {
                         let a = list();
@@ -511,7 +565,12 @@ impl<'t> Assembler<'t> {
         for l in later {
             match l {
                 Later::Instr { section, offset, line, text } => {
-                    let find = |name: &str| labels.get(name).filter(|l| l.0 == section).map(|l| l.1);
+                    // A branch to a global symbol is relocated, as another
+                    // definition may take its place; to a local label, it
+                    // is resolved here.
+                    let find = |name: &str| {
+                        labels.get(name).filter(|l| l.0 == section && !globals.contains(name)).map(|l| l.1)
+                    };
                     // As written, or as the description's aliases write it
                     // the way its templates do.
                     let read = self.encode(&text, offset, syntax, &find).or_else(|e| {
@@ -569,6 +628,30 @@ impl<'t> Assembler<'t> {
             });
         }
         object::resolve(self.t, &mut obj, pending, syntax == Syntax::MachO)?;
+        // The unwind tables, as the convention of this dialect has them.
+        if !frames.is_empty() {
+            let abi = self.t.abis.iter().find(|a| a.syntax == syntax).ok_or("no convention for this dialect")?;
+            let mut list = Vec::new();
+            for (OpenFrame { section, start, name, rules }, len) in frames {
+                let symbol = match name.and_then(|n| obj.symbols.iter().position(|s| s.name == n)) {
+                    Some(k) => k,
+                    None => {
+                        obj.symbols.push(Symbol {
+                            name: format!("ltmp_fn{start}"),
+                            section: Some(section),
+                            value: start,
+                            size: 0,
+                            global: false,
+                            kind: SymbolKind::NoType,
+                        });
+                        obj.symbols.len() - 1
+                    }
+                };
+                list.push(crate::unwind::Frame { section, start, len, symbol, rules });
+            }
+            let p = crate::unwind::Params { syntax, data_align: self.t.machine.data_align(syntax), ra: abi.lr };
+            crate::unwind::add_eh_frame(&mut obj, &self.t.machine, &p, &list)?;
+        }
         Ok(Assembled { object: obj, syntax, min_os })
     }
 }
