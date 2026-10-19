@@ -30,6 +30,12 @@ const USAGE: &str = "usage: draconian-opt [options] <file.ll>
   --print-cycles          print the call graph's cycles to stderr
   --stats                 print counts and timings to stderr
   --verify                check the output is well-formed SSA
+  --chop=F[:T]            autochop: functions before F (in module order,
+                          from 0) get every elective change, F its first T,
+                          the rest none; also DRACONIAN_OPT_CHOP. Reports
+                          where it stopped, and the last change made
+  --chop-counts           print each function's count of elective changes
+  --rules=<file>          combine rules to try before the standard ones
   --print-memssa          print memory SSA for the result (each access, and
                           the write that reaches each load and store) as
                           comments; with --passes= alone, for the input";
@@ -41,6 +47,7 @@ fn main() -> ExitCode {
     let mut output = None;
     let (mut remarks, mut cycles, mut stats, mut verify) = (false, false, false, false);
     let mut memssa = false;
+    let (mut chop, mut chop_counts) = (None, false);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -79,6 +86,20 @@ fn main() -> ExitCode {
             "--stats" => stats = true,
             "--verify" => verify = true,
             "--print-memssa" => memssa = true,
+            "--chop-counts" => chop_counts = true,
+            s if s.starts_with("--chop=") => chop = Some(s["--chop=".len()..].to_string()),
+            s if s.starts_with("--rules=") => {
+                let path = &s["--rules=".len()..];
+                match std::fs::read_to_string(path) {
+                    Ok(text) => {
+                        if let Err(e) = draconian_opt::combine::with_extra(&text) {
+                            return usage(&format!("{path}: {e}"));
+                        }
+                        opts.extra_rules = Some(text);
+                    }
+                    Err(e) => return usage(&format!("{path}: {e}")),
+                }
+            }
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return ExitCode::SUCCESS;
@@ -100,6 +121,10 @@ fn main() -> ExitCode {
         }
     }
     let Some(path) = input else { return usage("no input file") };
+    opts.chop = match draconian_ir::chop::limit_from(chop.as_deref(), "DRACONIAN_OPT_CHOP") {
+        Ok(l) => l,
+        Err(e) => return usage(&e),
+    };
 
     let src = match std::fs::read_to_string(&path) {
         Ok(s) => s,
@@ -144,6 +169,31 @@ fn main() -> ExitCode {
     };
     let t3 = Instant::now();
 
+    // Autochop's reports: where the limit stopped, each function's count,
+    // and (for a search) the counts and the output in files.
+    if let Some((k, steps, last)) = &report.chop_stopped {
+        let name = report.chop_names.get(*k).map_or("?", String::as_str);
+        match last {
+            Some(d) => eprintln!("; chop: stopped in @{name} (function {k}) after step {steps}: {d}"),
+            None => eprintln!("; chop: stopped in @{name} (function {k}) after {steps} steps"),
+        }
+    }
+    if chop_counts {
+        for (k, c) in report.chop_counts.iter().enumerate() {
+            eprintln!("; chop: function {k} @{}: {} elective changes", report.chop_names[k], c.steps);
+        }
+    }
+    {
+        let counts: Vec<u64> = report.chop_counts.iter().map(|c| c.steps).collect();
+        if let Err(e) = draconian_ir::chop::report_counts("opt", &report.chop_names, &counts) {
+            eprintln!("DRACONIAN_CHOP_COUNTS: {e}");
+        }
+        if let Ok(dump) = std::env::var("DRACONIAN_CHOP_DUMP")
+            && let Err(e) = std::fs::write(&dump, &text)
+        {
+            eprintln!("{dump}: {e}");
+        }
+    }
     if cycles {
         if report.cycles.is_empty() {
             eprintln!("; no call-graph cycles");

@@ -21,6 +21,46 @@ pub fn print_module(m: &Module) -> String {
     p.out
 }
 
+/// A value's name as the printer writes it: `%name`, or `%N` for an
+/// unnamed one, numbered as the printer numbers them. It numbers the whole
+/// function, so it is for messages, not for loops.
+pub fn local_name(f: &Function, l: LocalId) -> String {
+    match &f.locals[l.index()].name {
+        Some(n) => format!("%{}", ident(n)),
+        None => match Slots::new(f).locals[l.index()] {
+            Some(n) => format!("%{n}"),
+            None => format!("%<value {}>", l.0),
+        },
+    }
+}
+
+/// An instruction for messages: its result's name, or the instruction's
+/// text for one without a result (a store, a branch).
+pub fn inst_name(f: &Function, i: InstId) -> String {
+    match f.insts[i.index()].result {
+        Some(r) => local_name(f, r),
+        None => format!(
+            "the {} in %{}",
+            match &f.insts[i.index()].op {
+                Op::Store { .. } => "store",
+                Op::Ret(_) => "ret",
+                Op::Br(_) | Op::CondBr { .. } => "br",
+                Op::Switch { .. } => "switch",
+                Op::Call(_) => "call",
+                Op::Invoke { .. } => "invoke",
+                _ => "instruction",
+            },
+            {
+                let b = f.layout.iter().find(|b| f.blocks[b.index()].insts.contains(&i));
+                b.map_or("?".to_string(), |b| {
+                    let l = f.blocks[b.index()].local;
+                    local_name(f, l)[1..].to_string()
+                })
+            }
+        ),
+    }
+}
+
 /// A place in a function that an analysis can comment on.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Place {

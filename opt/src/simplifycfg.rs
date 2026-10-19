@@ -63,7 +63,7 @@ pub fn run(sh: &Shared, f: &mut Function, block_addresses: bool) -> Outcome {
         out.stats.unreachable += n - f.layout.len();
         while bypass_all(f, &mut out) {}
         fold_same_targets(f, &mut out);
-        while select_one(sh, f, &mut out) {}
+        select_all(sh, f, &mut out);
         let n = f.layout.len();
         cleanup::merge_blocks(f);
         out.stats.merged += n - f.layout.len();
@@ -108,7 +108,14 @@ fn fold_same_targets(f: &mut Function, out: &mut Outcome) {
         let b = f.layout[k];
         let Some(t) = f.terminator(b) else { continue };
         let Op::CondBr { cond, then_dest, else_dest } = f.insts[t.index()].op else { continue };
-        if then_dest != else_dest {
+        if then_dest != else_dest
+            || !draconian_ir::chop::allow(|| {
+                format!(
+                    "simplifycfg: a branch to the same block from {}",
+                    draconian_ir::printer::local_name(f, f.blocks[b.index()].local)
+                )
+            })
+        {
             continue;
         }
         f.insts[t.index()].op = Op::Br(then_dest);
@@ -165,6 +172,14 @@ fn bypass_all(f: &mut Function, out: &mut Outcome) -> bool {
         if clash {
             continue;
         }
+        if !draconian_ir::chop::allow(|| {
+            format!(
+                "simplifycfg: bypass the empty block {}",
+                draconian_ir::printer::local_name(f, f.blocks[b.index()].local)
+            )
+        }) {
+            continue;
+        }
         for &p in &ps {
             let t = f.terminator(p).unwrap();
             let mut edges = 0;
@@ -206,10 +221,14 @@ fn bypass_all(f: &mut Function, out: &mut Outcome) -> bool {
     any
 }
 
-/// Turns one diamond or triangle into selects. Returns false when there is
-/// none.
-fn select_one(sh: &Shared, f: &mut Function, out: &mut Outcome) -> bool {
-    let preds = f.predecessors();
+/// Turns every diamond and triangle it can into selects, in one walk: the
+/// lists of predecessors are kept up to date as branches change, and the
+/// phis' replacements are made in one sweep at the end (a value may be a
+/// phi replaced earlier in the walk, so they are resolved through chains).
+fn select_all(sh: &Shared, f: &mut Function, out: &mut Outcome) {
+    let mut preds = f.predecessors();
+    let mut replaced: Vec<Option<Value>> = vec![None; f.locals.len()];
+    let mut any = false;
     for k in 0..f.layout.len() {
         let a = f.layout[k];
         let Some(t) = f.terminator(a) else { continue };
@@ -217,14 +236,14 @@ fn select_one(sh: &Shared, f: &mut Function, out: &mut Outcome) -> bool {
         if then_dest == else_dest {
             continue;
         }
-        let only_from_a = |x: BlockId| preds[x.index()].as_slice() == [a];
+        let only_from_a = |preds: &[Vec<BlockId>], x: BlockId| preds[x.index()].as_slice() == [a];
         // Where the two ways meet, and the block each value arrives from.
         let (join, from_then, from_else) = match (forwards_to(f, then_dest), forwards_to(f, else_dest)) {
-            (Some(j1), Some(j2)) if j1 == j2 && only_from_a(then_dest) && only_from_a(else_dest) => {
+            (Some(j1), Some(j2)) if j1 == j2 && only_from_a(&preds, then_dest) && only_from_a(&preds, else_dest) => {
                 (j1, then_dest, else_dest)
             }
-            (Some(j), _) if j == else_dest && only_from_a(then_dest) => (j, then_dest, a),
-            (_, Some(j)) if j == then_dest && only_from_a(else_dest) => (j, a, else_dest),
+            (Some(j), _) if j == else_dest && only_from_a(&preds, then_dest) => (j, then_dest, a),
+            (_, Some(j)) if j == then_dest && only_from_a(&preds, else_dest) => (j, a, else_dest),
             _ => continue,
         };
         if join == a {
@@ -245,9 +264,26 @@ fn select_one(sh: &Shared, f: &mut Function, out: &mut Outcome) -> bool {
         if join_phis.len() > MAX_SELECTS || !complete {
             continue;
         }
+        if !draconian_ir::chop::allow(|| {
+            format!(
+                "simplifycfg: selects for the branch in {}",
+                draconian_ir::printer::local_name(f, f.blocks[a.index()].local)
+            )
+        }) {
+            continue;
+        }
+        let resolve = |replaced: &[Option<Value>], mut v: Value| {
+            while let Value::Local(l) = v
+                && let Some(n) = replaced[l.index()]
+            {
+                v = n;
+            }
+            v
+        };
         // Compute each phi with a select before the branch.
         for &phi in &join_phis {
-            let (tv, ev) = (incoming(f, phi, from_then).unwrap(), incoming(f, phi, from_else).unwrap());
+            let tv = resolve(&replaced, incoming(f, phi, from_then).unwrap());
+            let ev = resolve(&replaced, incoming(f, phi, from_else).unwrap());
             let r = f.insts[phi.index()].result.unwrap();
             let v = if tv == ev {
                 tv
@@ -267,11 +303,39 @@ fn select_one(sh: &Shared, f: &mut Function, out: &mut Outcome) -> bool {
             };
             f.locals[r.index()].name = None;
             f.blocks[join.index()].insts.retain(|&x| x != phi);
-            f.replace_uses(Value::Local(r), v);
-            crate::inline::replace_in_debug_records(sh, f, r, v);
+            if replaced.len() < f.locals.len() {
+                replaced.resize(f.locals.len(), None);
+            }
+            replaced[r.index()] = Some(v);
         }
         f.insts[t.index()].op = Op::Br(join);
-        return true;
+        // `a` now goes straight to the join; the arms lose it.
+        for x in [then_dest, else_dest] {
+            if x != join {
+                preds[x.index()].retain(|&p| p != a);
+            }
+        }
+        preds[join.index()] = vec![a];
+        any = true;
     }
-    false
+    if !any {
+        return;
+    }
+    if replaced.len() < f.locals.len() {
+        replaced.resize(f.locals.len(), None);
+    }
+    let resolve = |mut v: Value| {
+        while let Value::Local(l) = v
+            && let Some(n) = replaced[l.index()]
+        {
+            v = n;
+        }
+        v
+    };
+    let order: Vec<InstId> = f.insts_in_order().collect();
+    for i in order {
+        f.insts[i.index()].op.for_each_value_mut(|v| *v = resolve(*v));
+    }
+    let lmap: Vec<Option<Value>> = (0..f.locals.len()).map(|k| replaced[k].map(resolve)).collect();
+    crate::inline::replace_all_in_debug_records(sh, f, &lmap);
 }

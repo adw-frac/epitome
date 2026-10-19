@@ -348,8 +348,14 @@ pub fn run(sh: &Shared, f: &mut Function) -> Outcome {
             let ty = f.locals[r.index()].ty;
             if let Op::Load { volatile: false, atomic: None, ptr, .. } = inst.op {
                 let loc = aa.location(ptr, ty);
+
                 match memory.get(&(ptr, ty)) {
-                    Some(&(v, since)) if still_there(&aa, f, &writes[since..], loc) => {
+                    Some(&(v, since))
+                        if still_there(&aa, f, &writes[since..], loc)
+                            && draconian_ir::chop::allow(|| {
+                                format!("cse: the load {} reuses a value", draconian_ir::printer::inst_name(f, i))
+                            }) =>
+                    {
                         let from_store = !matches!(v, Value::Local(l) if matches!(f.locals[l.index()].def, LocalDef::Inst(d) if matches!(f.insts[d.index()].op, Op::Load { .. })));
                         if from_store {
                             stats.forwarded += 1;
@@ -365,13 +371,21 @@ pub fn run(sh: &Shared, f: &mut Function) -> Outcome {
             }
             let Some(key) = key(&inst.op, ty, b) else { continue };
             match table.get(&key) {
-                Some(&leader) => {
+                Some(&leader)
+                    if draconian_ir::chop::allow(|| {
+                        let n = |x: InstId| draconian_ir::printer::inst_name(f, x);
+                        format!("cse: {} merged into {}", n(i), n(leader))
+                    }) =>
+                {
                     let dup = inst.op.clone();
                     intersect_flags(&mut f.insts[leader.index()].op, &dup);
                     map.insert(r, f.result(leader));
                     erased[i.index()] = true;
                     stats.merged += 1;
                 }
+                // Refused by autochop: it stays, and the first stays the
+                // leader.
+                Some(_) => {}
                 None => table.insert(key, i),
             }
         }

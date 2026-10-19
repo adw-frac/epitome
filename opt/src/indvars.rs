@@ -195,6 +195,9 @@ fn simplify_loop(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, sta
         if let Some(count) = trip_count(sh, f, iv, &e) {
             stats.trip_counts.push((header_name.clone(), count));
         }
+        if !draconian_ir::chop::allow(|| format!("indvars: the counter of the loop at {header_name}")) {
+            return;
+        }
         if exact_exit(sh, f, pre, h, iv, &e) {
             stats.exact_exits += 1;
             stats.exit_values += exit_values(f, latch, iv, &e);

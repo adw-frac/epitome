@@ -173,13 +173,35 @@ impl<'a> Inliner<'a> {
             })
             .collect();
 
+        // Each site's block: where it started, and where the rest of that
+        // block has moved to as calls before it were inlined (sites come in
+        // order, and inlining a call moves what follows it to a new block).
+        let start_blocks = f.inst_blocks();
+        let mut tail: Vec<Option<BlockId>> = vec![None; f.blocks.len()];
+        // Results of inlined calls, and what replaces them: applied in one
+        // sweep at the end. A site's own operands are brought up to date
+        // first, so that it is judged on what it will really be passed.
+        let mut pending: Vec<Option<Value>> = vec![None; f.locals.len()];
+        let mut order = LinkedLayout::new(f);
+        let resolve = |pending: &[Option<Value>], mut v: Value| {
+            while let Value::Local(l) = v
+                && let Some(Some(n)) = pending.get(l.index())
+            {
+                v = *n;
+            }
+            v
+        };
         for site in sites {
+            if count > 0 {
+                f.insts[site.index()].op.for_each_value_mut(|v| *v = resolve(&pending, *v));
+            }
             let call = f.insts[site.index()].op.call().unwrap();
             let callee_g = sh.direct_callee(call).unwrap();
             let callee = sh.published(callee_g).unwrap();
             let summary = self.summary(sh, callee_g, callee);
             let callee_name = sh.name(callee_g);
-            let block = f.inst_blocks()[site.index()].expect("call site not in a block");
+            let first = start_blocks[site.index()].expect("call site not in a block");
+            let block = tail[first.index()].unwrap_or(first);
 
             let decision = self.decide(sh, f, site, block, &caller_attrs, callee_g, callee, summary);
             let Decision::Inline { cost, bonus, threshold, last_call } = decision else {
@@ -194,9 +216,34 @@ impl<'a> Inliner<'a> {
                 sh.remark(g, format!("not inlined @{callee_name}: caller would grow past {limit} instructions"));
                 continue;
             }
+            if !draconian_ir::chop::allow(|| {
+                format!("inline @{callee_name} at {}", draconian_ir::printer::inst_name(f, site))
+            }) {
+                continue;
+            }
             let names = names.get_or_insert_with(|| Names::new(f));
-            inline_call(sh, f, names, &mut memo, site, block, callee, &callee_name, summary.dynamic_alloca);
-            size = live_size(f);
+            let done = inline_call_deferred(
+                sh,
+                f,
+                Some(&mut order),
+                names,
+                &mut memo,
+                site,
+                block,
+                callee,
+                &callee_name,
+                summary.dynamic_alloca,
+            );
+            if matches!(f.insts[site.index()].op, Op::Call(_)) {
+                tail[first.index()] = Some(done.cont);
+            }
+            if let Some((r, v)) = done.replace {
+                if pending.len() < f.locals.len() {
+                    pending.resize(f.locals.len(), None);
+                }
+                pending[r.index()] = Some(v);
+            }
+            size = (size as isize + done.added) as usize;
             count += 1;
             let why = if threshold == i64::MAX {
                 "alwaysinline".to_string()
@@ -204,6 +251,20 @@ impl<'a> Inliner<'a> {
                 format!("cost {cost}, bonus {bonus}, threshold {threshold}")
             };
             sh.remark(g, format!("inlined @{callee_name}: {why}"));
+        }
+        if count > 0 {
+            order.finish(f);
+            debug_assert_eq!(size, live_size(f), "the size was kept up to date");
+            if pending.len() < f.locals.len() {
+                pending.resize(f.locals.len(), None);
+            }
+            let order: Vec<InstId> = f.insts_in_order().collect();
+            for i in order {
+                f.insts[i.index()].op.for_each_value_mut(|v| *v = resolve(&pending, *v));
+            }
+            let lmap: Vec<Option<Value>> =
+                (0..f.locals.len()).map(|k| pending[k].map(|v| resolve(&pending, v))).collect();
+            replace_all_in_debug_records(sh, f, &lmap);
         }
         // A merged block would vanish from under a `blockaddress`.
         let block_addresses = self.cg.node(g).is_some_and(|n| self.cg.has_blockaddress[n]);
@@ -495,6 +556,7 @@ pub struct DebugMemo {
 /// stack on each iteration; if the callee also has dynamic allocas, the
 /// stack is saved before the body and restored after it.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 pub fn inline_call(
     sh: &Shared,
     caller: &mut Function,
@@ -506,19 +568,110 @@ pub fn inline_call(
     callee_name: &str,
     dynamic_alloca: bool,
 ) {
+    let done = inline_call_deferred(sh, caller, None, names, memo, site, block, callee, callee_name, dynamic_alloca);
+    if let Some((r, value)) = done.replace {
+        caller.replace_uses(Value::Local(r), value);
+        replace_in_debug_records(sh, caller, r, value);
+    }
+}
+
+/// A function's block order as a linked list, for inlining many calls:
+/// putting a block after another is then constant time, where inserting
+/// into the layout costs its length. The layout is rebuilt once at the end.
+pub struct LinkedLayout {
+    next: Vec<Option<BlockId>>,
+    first: Option<BlockId>,
+}
+
+impl LinkedLayout {
+    pub fn new(f: &Function) -> Self {
+        let mut next = vec![None; f.blocks.len()];
+        for w in f.layout.windows(2) {
+            next[w[0].index()] = Some(w[1]);
+        }
+        LinkedLayout { next, first: f.layout.first().copied() }
+    }
+
+    /// Puts `x` right after `y`.
+    pub fn insert_after(&mut self, y: BlockId, x: BlockId) {
+        let n = x.index().max(y.index()) + 1;
+        if self.next.len() < n {
+            self.next.resize(n, None);
+        }
+        self.next[x.index()] = self.next[y.index()];
+        self.next[y.index()] = Some(x);
+    }
+
+    /// Writes the order back to the function's layout.
+    pub fn finish(self, f: &mut Function) {
+        let mut layout = Vec::with_capacity(f.layout.len());
+        let mut b = self.first;
+        while let Some(x) = b {
+            layout.push(x);
+            b = self.next.get(x.index()).copied().flatten();
+        }
+        f.layout = layout;
+    }
+}
+
+/// What `inline_call_deferred` did, and what it left to the caller.
+pub struct Inlined {
+    /// The block the rest of the call's block moved to (for a call), where
+    /// the body returns.
+    pub cont: BlockId,
+    /// The call's result and the value that replaces it, for the caller to
+    /// replace (with others, in one sweep).
+    pub replace: Option<(LocalId, Value)>,
+    /// Instructions added to the function, less the call.
+    pub added: isize,
+}
+
+/// `inline_call`, leaving the replacement of the call's result to the
+/// caller, so that many inlined calls cost one sweep over the function
+/// rather than one each.
+#[allow(clippy::too_many_arguments)]
+///
+/// With `order`, new blocks are placed in it, and the function's layout is
+/// left for `LinkedLayout::finish` to rebuild.
+pub fn inline_call_deferred(
+    sh: &Shared,
+    caller: &mut Function,
+    mut order: Option<&mut LinkedLayout>,
+    names: &mut Names,
+    memo: &mut DebugMemo,
+    site: InstId,
+    block: BlockId,
+    callee: &Function,
+    callee_name: &str,
+    dynamic_alloca: bool,
+) -> Inlined {
     let inst = caller.insts[site.index()].clone();
+    let mut added: isize = -1;
     let call = inst.op.call().unwrap().clone();
     let pos = caller.blocks[block.index()].insts.iter().position(|&i| i == site).unwrap();
     let exit_name = names.fresh(&format!("{callee_name}.exit"));
 
     // 1. The block the body returns to.
     let cont = match &inst.op {
-        Op::Call(_) => caller.split_block(block, pos + 1, Some(exit_name)),
+        Op::Call(_) => match order.as_deref_mut() {
+            Some(o) => {
+                let cont = caller.split_block_unplaced(block, pos + 1, Some(exit_name));
+                o.insert_after(block, cont);
+                cont
+            }
+            None => caller.split_block(block, pos + 1, Some(exit_name)),
+        },
         Op::Invoke { normal, unwind, .. } => {
             let cont = caller.add_block(Some(exit_name));
-            let at = caller.layout.iter().position(|&b| b == block).unwrap();
-            caller.layout.insert(at + 1, cont);
+            match order.as_deref_mut() {
+                Some(o) => o.insert_after(block, cont),
+                None => {
+                    let at = caller.layout.iter().position(|&b| b == block).unwrap();
+                    caller.layout.insert(at + 1, cont);
+                }
+            }
             caller.push_inst(cont, Op::Br(*normal), None);
+            added += 1;
             caller.retarget_phis(*normal, block, cont);
             caller.remove_phi_entries(*unwind, block);
             cont
@@ -535,12 +688,27 @@ pub fn inline_call(
         lmap[p.local.index()] = Some(a.value);
     }
     let mut bmap: Vec<Option<BlockId>> = vec![None; callee.blocks.len()];
-    let at = caller.layout.iter().position(|&b| b == cont).unwrap();
-    for (k, &cb) in callee.layout.iter().enumerate() {
-        let name = callee.block_name(cb).map(|n| names.fresh(&format!("{n}.i")));
-        let nb = caller.add_block(name);
-        caller.layout.insert(at + k, nb);
-        bmap[cb.index()] = Some(nb);
+    // The body goes between the call's block and the block it returns to.
+    match order.as_deref_mut() {
+        Some(o) => {
+            let mut after = block;
+            for &cb in &callee.layout {
+                let name = callee.block_name(cb).map(|n| names.fresh(&format!("{n}.i")));
+                let nb = caller.add_block(name);
+                o.insert_after(after, nb);
+                after = nb;
+                bmap[cb.index()] = Some(nb);
+            }
+        }
+        None => {
+            let at = caller.layout.iter().position(|&b| b == cont).unwrap();
+            for (k, &cb) in callee.layout.iter().enumerate() {
+                let name = callee.block_name(cb).map(|n| names.fresh(&format!("{n}.i")));
+                let nb = caller.add_block(name);
+                caller.layout.insert(at + k, nb);
+                bmap[cb.index()] = Some(nb);
+            }
+        }
     }
     let mut copies: Vec<(BlockId, InstId)> = Vec::new();
     for &cb in &callee.layout {
@@ -559,6 +727,7 @@ pub fn inline_call(
             copies.push((cb, ni));
         }
     }
+    added += copies.len() as isize;
 
     // 3. Rewrite the copies' operands, and place them.
     let site_loc = inst.attachments.iter().find(|a| a.kind == "dbg").map(|a| a.node);
@@ -636,15 +805,18 @@ pub fn inline_call(
             Op::Call(Box::new(plain_call(fn_ty, save, vec![]))),
             Some((Some(names.fresh("savedstack")), ptr)),
         );
+        added += 1;
         Some(caller.result(i))
     } else {
         None
     };
     let enter = caller.push_inst(block, Op::Br(bmap[callee_entry.index()].unwrap()), None);
+    added += 1;
     caller.insts[enter.index()].debug_records = site_records;
 
     // 5. The returned value.
     let mut phis = 0;
+    let mut replace = None;
     if let Some(r) = inst.result {
         let ty = caller.locals[r.index()].ty;
         let value = match returns.as_slice() {
@@ -656,11 +828,11 @@ pub fn inline_call(
                 let phi = caller.add_inst(Op::Phi { fmf: FastMath::default(), incoming }, Some((name, ty)));
                 caller.blocks[cont.index()].insts.insert(0, phi);
                 phis = 1;
+                added += 1;
                 caller.result(phi)
             }
         };
-        caller.replace_uses(Value::Local(r), value);
-        replace_in_debug_records(sh, caller, r, value);
+        replace = Some((r, value));
     }
     if let Some(sp) = saved_sp {
         let restore = sh.global_ref(sh.intrinsics.stackrestore.expect("llvm.stackrestore not declared"));
@@ -669,7 +841,9 @@ pub fn inline_call(
         let fn_ty = sh.intern_type(Type::Function { ret: void, params: vec![ptr], varargs: false });
         let i = caller.add_inst(Op::Call(Box::new(plain_call(fn_ty, restore, vec![sp]))), None);
         caller.blocks[cont.index()].insts.insert(phis, i);
+        added += 1;
     }
+    Inlined { cont, replace, added }
 }
 
 fn s_has_eh(f: &Function) -> bool {
@@ -721,13 +895,19 @@ fn remap_md_locals(sh: &Shared, md: MdId, lmap: &[Option<Value>]) -> MdId {
 
 /// Points debug records that refer to local `from` at `to` instead.
 pub fn replace_in_debug_records(sh: &Shared, f: &mut Function, from: LocalId, to: Value) {
-    let order: Vec<InstId> = f.insts_in_order().collect();
     let mut lmap: Vec<Option<Value>> = vec![None; f.locals.len()];
     lmap[from.index()] = Some(to);
+    replace_all_in_debug_records(sh, f, &lmap);
+}
+
+/// Every replacement `lmap` gives (by local), in one walk of the debug
+/// records.
+pub fn replace_all_in_debug_records(sh: &Shared, f: &mut Function, lmap: &[Option<Value>]) {
+    let order: Vec<InstId> = f.insts_in_order().collect();
     for i in order {
         for r in &mut f.insts[i.index()].debug_records {
             for arg in &mut r.args {
-                *arg = remap_md_locals(sh, *arg, &lmap);
+                *arg = remap_md_locals(sh, *arg, lmap);
             }
         }
     }

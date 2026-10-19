@@ -44,6 +44,10 @@ pub struct Options {
     /// Loop rotation, then induction variables and trip counts.
     pub loops: bool,
     pub recursion: RecursionMode,
+    /// Autochop: how far elective changes may go (`draconian_ir::chop`).
+    pub chop: Option<draconian_ir::chop::Limit>,
+    /// Combine rules to try before the standard ones.
+    pub extra_rules: Option<String>,
 }
 
 impl Default for Options {
@@ -59,6 +63,8 @@ impl Default for Options {
             simplifycfg: true,
             loops: true,
             recursion: RecursionMode::Tail,
+            chop: None,
+            extra_rules: None,
         }
     }
 }
@@ -88,6 +94,11 @@ pub struct Report {
     pub frame_calls: usize,
     /// Remarks per function, in module order.
     pub remarks: Vec<(String, Vec<String>)>,
+    /// Autochop: the functions counted, in their order, each one's count,
+    /// and where the limit stopped (function, steps made, the last step).
+    pub chop_names: Vec<String>,
+    pub chop_counts: Vec<draconian_ir::chop::Counter>,
+    pub chop_stopped: Option<(usize, u64, Option<String>)>,
     /// Functions deleted because nothing used them any more.
     pub deleted: Vec<String>,
     /// The size of all functions, and of the longest chain of SCCs that
@@ -133,13 +144,28 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     let m2r_stats = std::sync::Mutex::new(crate::mem2reg::Stats::default());
     let sroa_stats = std::sync::Mutex::new(crate::sroa::Stats::default());
     let cfg_stats = std::sync::Mutex::new(crate::simplifycfg::Stats::default());
-    let matcher = crate::combine::standard();
+    let extra = opts.extra_rules.as_deref().map(|r| crate::combine::with_extra(r).unwrap_or_else(|e| panic!("{e}")));
+    let matcher = extra.as_ref().unwrap_or_else(|| crate::combine::standard());
     let rotated = AtomicUsize::new(0);
     let iv_stats = std::sync::Mutex::new(crate::indvars::Stats::default());
     let tail_calls = AtomicUsize::new(0);
     let accumulator_calls = AtomicUsize::new(0);
     let frame_calls = AtomicUsize::new(0);
     let task_nanos: Vec<std::sync::atomic::AtomicU64> = (0..cg.sccs.len()).map(|_| Default::default()).collect();
+    // Autochop: functions with bodies are numbered in module order, and
+    // each one's elective changes are counted while its passes run.
+    let chop_order: Vec<GlobalId> = m
+        .global_order
+        .iter()
+        .copied()
+        .filter(|&g| matches!(&m.global(g).kind, GlobalKind::Function(f) if f.has_body))
+        .collect();
+    let mut chop_index = vec![usize::MAX; m.globals.len()];
+    for (k, g) in chop_order.iter().enumerate() {
+        chop_index[g.index()] = k;
+    }
+    let chop = draconian_ir::chop::Session::new(chop_order.len(), opts.chop);
+    let counted = |g: GlobalId| chop.enter(chop_index[g.index()]);
 
     let ((), remarks) = parallel_phase(m, intrinsics, |sh| {
         par::run_dag(&deps, &priority, threads, |s| {
@@ -183,11 +209,13 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
             };
             if opts.mem2reg || opts.sroa {
                 for (g, f) in &mut bodies {
+                    let _counted = counted(*g);
                     promote(*g, f);
                 }
             }
             if opts.inline {
                 for (g, f) in &mut bodies {
+                    let _counted = counted(*g);
                     let n = inliner.run_on(sh, *g, f);
                     inlined.fetch_add(n, Ordering::Relaxed);
                     if n > 0 && (opts.mem2reg || opts.sroa) {
@@ -202,6 +230,9 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                         return;
                     }
                     let mode = if attrs::has(m, &f.fn_attrs, "minsize") { RecursionMode::Tail } else { opts.recursion };
+                    if !draconian_ir::chop::allow(|| format!("recursion: remove @{}'s recursion", sh.name(g))) {
+                        return;
+                    }
                     let block_addresses = cg.node(g).is_some_and(|n| cg.has_blockaddress[n]);
                     match recursion::eliminate(sh, g, f, mode, block_addresses) {
                         Ok(o) => {
@@ -245,9 +276,15 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                 // Self-calls first, so that inlining members into each other
                 // below terminates.
                 for (g, f) in &mut bodies {
+                    let _counted = counted(*g);
                     remove(*g, f);
                 }
-                if bodies.len() > 1 {
+                // Collapsing the cycle is one step, of its first function.
+                let collapse = bodies.len() > 1 && {
+                    let _counted = counted(bodies[0].0);
+                    draconian_ir::chop::allow(|| format!("recursion: collapse the cycle of @{}", sh.name(bodies[0].0)))
+                };
+                if collapse {
                     for (e, result) in recursion::collapse_scc(sh, &cg, &mut bodies, 64) {
                         let g = bodies[e].0;
                         match result {
@@ -259,6 +296,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                                     .collect();
                                 sh.remark(g, format!("recursion: inlined {} to break the cycle", others.join(", ")));
                                 let (g, f) = &mut bodies[e];
+                                let _counted = counted(*g);
                                 remove(*g, f);
                             }
                             Err(err) => sh.remark(g, format!("recursion: cycle not collapsed: {err}")),
@@ -312,6 +350,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                 }
             };
             for (g, f) in &mut bodies {
+                let _counted = counted(*g);
                 if opts.combine {
                     combine(*g, f, None);
                 }
@@ -419,8 +458,12 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
         .collect();
     metadata::unique_metadata(m);
     lap("merge metadata");
-    report.deleted = delete_dead_functions(m, threads);
+    report.deleted = delete_dead_functions(m, threads, &chop, &chop_index);
     lap("delete dead functions");
+    report.chop_names =
+        chop_order.iter().map(|&g| m.global(g).name.clone().unwrap_or_else(|| g.0.to_string())).collect();
+    report.chop_counts = chop.counts();
+    report.chop_stopped = chop.stopped_at();
     report.timings = timings;
     report
 }
@@ -461,7 +504,15 @@ fn declare_intrinsics(m: &mut Module) -> Intrinsics {
 /// intrinsic declarations. Deleting a function removes its calls, which can
 /// leave its callees unused in turn, so this works through a list.
 /// Returns the names of the deleted functions, intrinsics aside.
-fn delete_dead_functions(m: &mut Module, threads: usize) -> Vec<String> {
+///
+/// Deleting a function with a body is an elective change of that function
+/// (autochop); declarations go without asking.
+fn delete_dead_functions(
+    m: &mut Module,
+    threads: usize,
+    chop: &draconian_ir::chop::Session,
+    chop_index: &[usize],
+) -> Vec<String> {
     let cg = CallGraph::build(m, threads);
     let mut calls = cg.call_sites.clone();
     let deletable = |n: usize| -> bool {
@@ -476,6 +527,17 @@ fn delete_dead_functions(m: &mut Module, threads: usize) -> Vec<String> {
     while let Some(n) = work.pop() {
         if dead[n] {
             continue;
+        }
+        let g = cg.nodes[n];
+        if let GlobalKind::Function(f) = &m.global(g).kind
+            && f.has_body
+            && chop_index[g.index()] != usize::MAX
+        {
+            let _counted = chop.enter(chop_index[g.index()]);
+            let name = m.global(g).name.clone().unwrap_or_default();
+            if !draconian_ir::chop::allow(|| format!("delete @{name}, no longer used")) {
+                continue;
+            }
         }
         dead[n] = true;
         for &c in &cg.sites[n] {

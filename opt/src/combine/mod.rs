@@ -54,6 +54,16 @@ pub fn standard() -> &'static Matcher {
     })
 }
 
+/// The standard rules with `extra` rules before them (tried first), for
+/// experiments and for tests that plant a rule.
+pub fn with_extra(extra: &str) -> Result<Matcher, String> {
+    let mut rules = dsl::parse_rules(extra).map_err(|e| format!("extra rules: {e}"))?;
+    rules.extend(
+        dsl::parse_rules(include_str!("../../rules/combine.rules")).map_err(|e| format!("combine.rules: {e}"))?,
+    );
+    Ok(Matcher::new(rules))
+}
+
 /// How often each rule (or built-in step) fired.
 #[derive(Default, Debug, Clone)]
 pub struct Stats {
@@ -289,11 +299,23 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
         }
     }
 
+    /// An instruction, for autochop's descriptions: its result's name, or
+    /// its number.
+    fn what(&self, i: InstId) -> String {
+        draconian_ir::printer::inst_name(self.f, i)
+    }
+
+    /// Asks autochop whether this step may be made (`draconian_ir::chop`).
+    fn allowed(&self, what: &str, i: InstId) -> bool {
+        draconian_ir::chop::allow(|| format!("combine {what} at {}", self.what(i)))
+    }
+
     fn visit(&mut self, i: InstId) {
         let inst = &self.f.insts[i.index()];
         if let Some(r) = inst.result
             && self.uses[r.index()].is_empty()
             && is_pure(&inst.op)
+            && self.allowed("(dead)", i)
         {
             self.erase(i);
             self.stats.hit("(dead)");
@@ -302,7 +324,9 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
         if self.canonicalize(i) {
             self.stats.hit("(constant to the right)");
         }
-        if let Some(v) = self.fold(i) {
+        if let Some(v) = self.fold(i)
+            && self.allowed("(folded)", i)
+        {
             self.stats.hit("(folded)");
             self.replace(i, v);
             return;
@@ -316,9 +340,13 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
         }
         if self.f.insts[i.index()].op.is_terminator() {
             if let Some(new) = self.fold_switch(i) {
-                self.stats.hit("(switch folded)");
-                self.retarget(i, new);
-            } else if let Some((name, new)) = self.apply_branch_rules(i) {
+                if self.allowed("(switch folded)", i) {
+                    self.stats.hit("(switch folded)");
+                    self.retarget(i, new);
+                }
+            } else if let Some((name, new)) = self.apply_branch_rules(i)
+                && self.allowed(&name, i)
+            {
                 self.stats.hit(&name);
                 self.retarget(i, new);
             }
@@ -495,10 +523,20 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
     /// Moves a constant left operand of a commutative operation or a
     /// comparison to the right.
     fn canonicalize(&mut self, i: InstId) -> bool {
-        let op = &mut self.f.insts[i.index()].op;
         let commutative = |o: BinOp| {
             matches!(o, BinOp::Add | BinOp::Mul | BinOp::And | BinOp::Or | BinOp::Xor | BinOp::FAdd | BinOp::FMul)
         };
+        let swaps = match &self.f.insts[i.index()].op {
+            Op::Binary { op, lhs, rhs, .. } => {
+                commutative(*op) && matches!(lhs, Value::Const(_)) && !matches!(rhs, Value::Const(_))
+            }
+            Op::ICmp { lhs, rhs, .. } => matches!(lhs, Value::Const(_)) && !matches!(rhs, Value::Const(_)),
+            _ => false,
+        };
+        if !swaps || !self.allowed("(constant to the right)", i) {
+            return false;
+        }
+        let op = &mut self.f.insts[i.index()].op;
         match op {
             Op::Binary { op, lhs, rhs, .. }
                 if commutative(*op) && matches!(lhs, Value::Const(_)) && !matches!(rhs, Value::Const(_)) =>
@@ -733,8 +771,13 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
         }
         let mut created = Vec::new();
         let result = self.build(&rule.repl, &bound, &env, root_ty, i, &mut created);
+        // Autochop: asked once the replacement is built and checked, so
+        // that every step counted is a change made; if refused, it is
+        // undone as one that does not type-check is.
+        let allowed = matches!(result, Some(v) if self.value_type(v) == Some(root_ty))
+            && draconian_ir::chop::allow(|| format!("combine {} at {}", rule.name, self.what(i)));
         match result {
-            Some(v) if self.value_type(v) == Some(root_ty) => {
+            Some(v) if allowed => {
                 // The new instruction in the root's place takes its name.
                 if let (Some(&last), Some(r)) = (created.last(), self.f.insts[i.index()].result)
                     && self.f.result(last) == v

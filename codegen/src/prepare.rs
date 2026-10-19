@@ -1444,6 +1444,13 @@ fn lower_const_divs(cx: &mut Ctx, f: &mut Function) {
                 k += 1;
                 continue;
             }
+            // Elective (autochop): the division instruction does it too.
+            if !draconian_ir::chop::allow(|| {
+                format!("divide by {d} with a multiply at {}", draconian_ir::printer::inst_name(f, i))
+            }) {
+                k += 1;
+                continue;
+            }
             let ty = cx.m.types.int(w);
             let mask: u64 = if w == 64 { u64::MAX } else { (1u64 << w) - 1 };
             let mut s = Seq { f, new: Vec::new() };

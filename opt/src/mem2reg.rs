@@ -99,7 +99,7 @@ pub fn run(sh: &Shared, f: &mut Function) -> Stats {
                 _ => false,
             }
         });
-        if ok {
+        if ok && draconian_ir::chop::allow(|| format!("mem2reg: promote {}", draconian_ir::printer::local_name(f, a))) {
             var_of.insert(a, allocas.len());
             allocas.push((i, a, ty));
         }

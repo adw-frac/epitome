@@ -180,6 +180,14 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, stats: &mu
         if bases.len() > MAX_POINTERS {
             continue;
         }
+        if !draconian_ir::chop::allow(|| {
+            format!("lsr: the counter {} of the loop at {}", draconian_ir::printer::local_name(f, r), {
+                let l = f.blocks[h.index()].local;
+                draconian_ir::printer::local_name(f, l)
+            })
+        }) {
+            continue;
+        }
 
         // The counter's debug records no longer describe it.
         let poison = sh.poison(i64t);

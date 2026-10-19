@@ -10,6 +10,7 @@
 //! ```
 
 pub mod apint;
+pub mod chop;
 pub mod edit;
 pub mod float;
 pub mod layout;

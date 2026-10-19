@@ -343,7 +343,12 @@ fn split_round(sh: &Shared, f: &mut Function, entry: BlockId, stats: &mut Stats)
         let Some(uses) = collect(sh, f, &users, a, size) else { continue };
         if uses.accesses.is_empty() {
             // Only ever written: the alloca and everything writing it go.
-            if !uses.copies.is_empty() && uses.copies.iter().all(|c| !matches!(c.role, Role::OutOf(_))) {
+            if !uses.copies.is_empty()
+                && uses.copies.iter().all(|c| !matches!(c.role, Role::OutOf(_)))
+                && draconian_ir::chop::allow(|| {
+                    format!("sroa: remove {}, only ever written", draconian_ir::printer::local_name(f, a))
+                })
+            {
                 erased.push(i);
                 erased.extend(uses.others);
                 erased.extend(uses.copies.iter().map(|c| c.inst));
@@ -394,6 +399,11 @@ fn split_round(sh: &Shared, f: &mut Function, entry: BlockId, stats: &mut Stats)
         }
         // Nothing to gain: one piece, already of the alloca's own type.
         if parts.len() == 1 && matches!(kinds[0], Kind::Uniform(t) if t == ty) && parts[0].start == 0 {
+            continue;
+        }
+        if !draconian_ir::chop::allow(|| {
+            format!("sroa: split {} into {} pieces", draconian_ir::printer::local_name(f, a), parts.len())
+        }) {
             continue;
         }
 
@@ -656,6 +666,8 @@ fn split_aggregate_accesses(sh: &Shared, f: &mut Function) {
     let ptr_ty = sh.intern_type(Type::Ptr(0));
     for _level in 0..4 {
         let mut changed = false;
+        // (An instruction's block does not change as others are added.)
+        let blocks = f.inst_blocks();
         for i in f.insts_in_order().collect::<Vec<_>>() {
             let (ptr, ty, store_value) = match &f.insts[i.index()].op {
                 Op::Load { volatile: false, atomic: None, ptr, .. } => {
@@ -684,7 +696,12 @@ fn split_aggregate_accesses(sh: &Shared, f: &mut Function) {
             if elems.is_empty() || elems.len() as u64 > MAX_ELEMENTS || !based_on_alloca(f, ptr) {
                 continue;
             }
-            let block = f.inst_blocks()[i.index()].unwrap();
+            if !draconian_ir::chop::allow(|| {
+                format!("sroa: split the aggregate access {}", draconian_ir::printer::inst_name(f, i))
+            }) {
+                continue;
+            }
+            let block = blocks[i.index()].unwrap();
             let mut new_insts = Vec::new();
             let mut emit = |f: &mut Function, op: Op, result: Option<TypeId>| -> Value {
                 let new = f.add_inst(op, result.map(|t| (Some(names.fresh("sroa")), t)));

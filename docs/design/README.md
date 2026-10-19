@@ -13,6 +13,8 @@ split into two halves:
   the inliner and its cost model, and turning recursion into loops with an
   explicit stack.
 - [Alias analysis](aa.md): the data layout, and basic alias analysis.
+- [Autochop](chop.md): every elective change counted, so a miscompilation
+  is found by binary search to the change that causes it.
 - [Memory SSA](memssa.md): memory versions, and the walker that finds the
   write reaching a load on demand, within a budget.
 - [SROA](sroa.md): splitting allocas into pieces mem2reg can promote.

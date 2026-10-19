@@ -10,6 +10,10 @@ const USAGE: &str = "usage: draconian-llc [options] <file.ll>
 
   -j <n>                  threads to compile functions on (default: one
                           per core); the output is the same for any number
+  --chop=F[:T]            autochop: functions before F (in module order,
+                          from 0) get every elective choice, F its first T,
+                          the rest none; also DRACONIAN_LLC_CHOP
+  --chop-counts           print each function's count of elective choices
   -o <file>               write the output here instead of stdout; a name
                           ending in .o asks for an object file
   --filetype=asm|obj      assembly (the default) or an object file, Mach-O
@@ -54,6 +58,7 @@ fn main() -> ExitCode {
     let mut filetype = None;
     let mut stop = Stop::Done;
     let mut opts = Options::default();
+    let (mut chop, mut chop_counts) = (None, false);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -72,6 +77,8 @@ fn main() -> ExitCode {
             "--sample-asm" => sample = true,
             "--verbose" => verbose = true,
             "--stats" => stats = true,
+            "--chop-counts" => chop_counts = true,
+            s if s.starts_with("--chop=") => chop = Some(s["--chop=".len()..].to_string()),
             "--keep-going" => opts.keep_going = true,
             "--filetype=asm" => filetype = Some(false),
             "--filetype=obj" => filetype = Some(true),
@@ -149,6 +156,13 @@ fn main() -> ExitCode {
     }
     let started = std::time::Instant::now();
     opts.stop = stop;
+    opts.chop = match draconian_ir::chop::limit_from(chop.as_deref(), "DRACONIAN_LLC_CHOP") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("draconian-llc: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
     let compiled = match compile(&target, &mut module, &opts) {
         Ok(c) => c,
         Err(e) => {
@@ -158,6 +172,30 @@ fn main() -> ExitCode {
     };
     for e in &compiled.errors {
         eprintln!("draconian-llc: {e}");
+    }
+    // Autochop's reports, as draconian-opt's.
+    if let Some((k, steps, last)) = &compiled.chop_stopped {
+        let name = compiled.chop_names.get(*k).map_or("?", String::as_str);
+        match last {
+            Some(d) => eprintln!("; chop: stopped in @{name} (function {k}) after step {steps}: {d}"),
+            None => eprintln!("; chop: stopped in @{name} (function {k}) after {steps} steps"),
+        }
+    }
+    if chop_counts {
+        for (k, c) in compiled.chop_counts.iter().enumerate() {
+            eprintln!("; chop: function {k} @{}: {} elective choices", compiled.chop_names[k], c.steps);
+        }
+    }
+    {
+        let counts: Vec<u64> = compiled.chop_counts.iter().map(|c| c.steps).collect();
+        if let Err(e) = draconian_ir::chop::report_counts("llc", &compiled.chop_names, &counts) {
+            eprintln!("DRACONIAN_CHOP_COUNTS: {e}");
+        }
+        if let Ok(dump) = std::env::var("DRACONIAN_CHOP_DUMP")
+            && let Err(e) = std::fs::write(&dump, &compiled.asm)
+        {
+            eprintln!("{dump}: {e}");
+        }
     }
     if stats {
         use draconian_codegen::isel::stats::*;

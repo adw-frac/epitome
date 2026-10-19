@@ -48,6 +48,11 @@ pub struct Compiled {
     pub asm: String,
     /// With `keep_going`: the functions that could not be compiled, and why.
     pub errors: Vec<String>,
+    /// Autochop: the functions counted (in module order), each one's count
+    /// of elective choices, and where a limit stopped.
+    pub chop_names: Vec<String>,
+    pub chop_counts: Vec<draconian_ir::chop::Counter>,
+    pub chop_stopped: Option<(usize, u64, Option<String>)>,
 }
 
 /// Which stages to stop after, for looking at the machine IR.
@@ -79,6 +84,8 @@ pub struct Options {
     pub mattr: Vec<String>,
     /// Threads to compile functions on; 0 means one per core.
     pub threads: usize,
+    /// Autochop: how far elective choices may go (`draconian_ir::chop`).
+    pub chop: Option<draconian_ir::chop::Limit>,
 }
 
 /// Time spent in each stage of compiling functions, summed over every
@@ -229,6 +236,8 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
     let mut by_size: Vec<usize> = (0..jobs.len()).collect();
     by_size.sort_by_key(|&k| std::cmp::Reverse(jobs[k].1.body.insts.len()));
     let skeleton: &Module = m;
+    // Autochop: function `j` (in module order) counts its own choices.
+    let chop = draconian_ir::chop::Session::new(jobs.len(), opts.chop);
     let results = par_run(
         jobs.len(),
         &by_size,
@@ -236,10 +245,12 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
         || skeleton.clone(),
         |m, j| {
             let mut cx = Ctx { m, dl: &dl, t, features: Default::default() };
+            let _counted = chop.enter(j);
             compile_function(t, &abi, &mut cx, &jobs[j].1, opts)
         },
         isel::stats::flush,
     );
+    let chop_names: Vec<String> = jobs.iter().map(|(_, j)| j.name.clone()).collect();
     // The bodies go back.
     for (g, job) in jobs {
         if let GlobalKind::Function(f) = &mut m.globals[g.index()].kind {
@@ -297,7 +308,17 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
         // The stack need not be executable.
         out.push_str("\t.section .note.GNU-stack,\"\",%progbits\n");
     }
-    Ok(Compiled { funcs, globals, abi, min_os, asm: out, errors })
+    Ok(Compiled {
+        funcs,
+        globals,
+        abi,
+        min_os,
+        asm: out,
+        errors,
+        chop_names,
+        chop_counts: chop.counts(),
+        chop_stopped: chop.stopped_at(),
+    })
 }
 
 /// The macOS version a triple names (`macosx26.0.0`, `macos14.2`), or 11.0,

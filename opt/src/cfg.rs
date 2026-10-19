@@ -35,6 +35,11 @@ pub struct DomTree {
     idom: Vec<Option<BlockId>>,
     /// Position in reverse postorder; `u32::MAX` for unreachable blocks.
     order: Vec<u32>,
+    /// Each block's interval in a depth-first walk of the tree: `a`
+    /// dominates `b` when `b`'s interval is inside `a`'s, so the question
+    /// takes constant time however deep the tree (a chain of diamonds).
+    enter: Vec<u32>,
+    exit: Vec<u32>,
 }
 
 impl DomTree {
@@ -79,7 +84,32 @@ impl DomTree {
                 }
             }
         }
-        DomTree { idom, order }
+        let mut tree = DomTree { idom, order, enter: vec![], exit: vec![] };
+        tree.number();
+        tree
+    }
+
+    fn number(&mut self) {
+        let n = self.idom.len();
+        let children = self.children();
+        self.enter = vec![u32::MAX; n];
+        self.exit = vec![0; n];
+        let Some(root) = (0..n).find(|&i| self.idom[i] == Some(BlockId(i as u32))) else { return };
+        let mut clock = 0u32;
+        let mut stack: Vec<(BlockId, usize)> = vec![(BlockId(root as u32), 0)];
+        self.enter[root] = 0;
+        while let Some(&mut (b, ref mut next)) = stack.last_mut() {
+            if let Some(&c) = children[b.index()].get(*next) {
+                *next += 1;
+                clock += 1;
+                self.enter[c.index()] = clock;
+                stack.push((c, 0));
+            } else {
+                clock += 1;
+                self.exit[b.index()] = clock;
+                stack.pop();
+            }
+        }
     }
 
     /// The children of each block in the dominator tree, in reverse
@@ -111,17 +141,10 @@ impl DomTree {
         if !self.is_reachable(b) {
             return true;
         }
-        let mut x = b;
-        loop {
-            if x == a {
-                return true;
-            }
-            let up = self.idom[x.index()].unwrap();
-            if up == x {
-                return false;
-            }
-            x = up;
+        if !self.is_reachable(a) {
+            return false;
         }
+        self.enter[a.index()] <= self.enter[b.index()] && self.exit[b.index()] <= self.exit[a.index()]
     }
 }
 

@@ -173,6 +173,12 @@ in allocas) and of loads and stores through pointers that may alias.
 `tests/parallel.rs` checks every stage of code generation: a block four
 times bigger must take less than ten times as long (linear is four).
 
+The optimiser is checked the same way (`opt/tests/scaling.rs`): a chain of
+diamonds, a chain of blocks, thousands of calls in one block, and a big
+block of loads and stores. Reading every pass for [autochop](chop.md)
+found several things quadratic in a function's size there, listed in
+that document.
+
 ## 4. The inliner
 
 The inliner (`inline.rs`) runs on each function after its callees are

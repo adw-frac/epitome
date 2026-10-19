@@ -761,6 +761,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         self.walk(0, &mut pending, &mut Vec::new(), &mut Vec::new(), root, &mut raw);
         stats::add(&stats::WALK_NANOS, t0.elapsed().as_nanos() as u64);
         let mut best: Option<Match> = None;
+        let mut best_single: Option<Match> = None;
         stats::add(&stats::CANDIDATES, raw.len() as u64);
         for (pat, binds, covered) in raw {
             // Not with an instruction whose features are off.
@@ -769,15 +770,33 @@ impl<'a, 'b> Sel<'a, 'b> {
             }
             let Some(m) = self.validate(pat, &binds, covered, layout_next) else { continue };
             stats::add(&stats::VALID, 1);
-            let better = match &best {
+            let better = |best: &Option<Match>| match best {
                 None => true,
                 Some(b) => m.cost > b.cost || (m.cost == b.cost && m.pat < b.pat),
             };
-            if better {
+            if m.covered.len() == 1 && better(&best_single) {
+                best_single = Some(m.clone());
+            }
+            if better(&best) {
                 best = Some(m);
             }
         }
-        best
+        // A pattern covering several instructions (a load folded into an
+        // add, a post-increment) is elective (autochop) when one covering
+        // only the root would do; without one, it is needed.
+        match best {
+            Some(b) if b.covered.len() > 1 && best_single.is_some() => {
+                let name = &self.t.patterns[b.pat].name;
+                if draconian_ir::chop::allow(|| {
+                    format!("select {name} at {}", draconian_ir::printer::inst_name(self.f, root))
+                }) {
+                    Some(b)
+                } else {
+                    best_single
+                }
+            }
+            b => b,
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1027,10 +1046,17 @@ impl<'a, 'b> Sel<'a, 'b> {
                 let Some((g, off)) = prepare::const_address(self.cx, c) else {
                     return self.err(format!("unsupported constant {:?}", k.kind));
                 };
-                if self.hoisting() {
-                    if let Some(&r) = self.hoisted_addr.get(&c) {
-                        return Ok(Reg::V(r));
-                    }
+                if let Some(&r) = self.hoisted_addr.get(&c).filter(|_| self.hoisting()) {
+                    return Ok(Reg::V(r));
+                }
+                if self.hoisting()
+                    && draconian_ir::chop::allow(|| {
+                        format!(
+                            "hoist the address of @{} out of the loop",
+                            self.cx.m.global(g).name.as_deref().unwrap_or("?")
+                        )
+                    })
+                {
                     let saved = std::mem::take(&mut self.in_loop);
                     let r = self.in_entry(|s| s.const_reg(c, class));
                     self.in_loop = saved;
@@ -1158,10 +1184,10 @@ impl<'a, 'b> Sel<'a, 'b> {
         {
             return Ok(Reg::P(z));
         }
-        if self.hoisting() {
-            if let Some(&r) = self.hoisted.get(&(v, wide)) {
-                return Ok(Reg::V(r));
-            }
+        if let Some(&r) = self.hoisted.get(&(v, wide)).filter(|_| self.hoisting()) {
+            return Ok(Reg::V(r));
+        }
+        if self.hoisting() && draconian_ir::chop::allow(|| format!("hoist the constant {v} out of the loop")) {
             let r = self.in_entry(|s| s.make_int(v, wide))?;
             if let Reg::V(x) = r {
                 self.hoisted.insert((v, wide), x);
@@ -1957,6 +1983,17 @@ impl<'a, 'b> Sel<'a, 'b> {
         // A tail call: when the call's result is what the function returns,
         // its frame goes first, and the callee returns to its caller.
         let tail = if self.landing_next.is_some() { None } else { self.tail_ret(i, call, &locs) };
+        // Elective (autochop) unless the call must be a tail call.
+        let tail = tail.filter(|_| {
+            call.tail == TailKind::MustTail
+                || draconian_ir::chop::allow(|| {
+                    format!(
+                        "tail call @{} at {}",
+                        name.as_deref().unwrap_or("?"),
+                        draconian_ir::printer::inst_name(f, i)
+                    )
+                })
+        });
         if let (Some(ret), Some(s), Some(tc)) = (tail, &target, self.t.role("tailcall")) {
             let mut m = MInst::new(tc, vec![MOp::Sym(s.clone())]);
             m.imp_uses = in_regs.iter().map(|&(p, _)| p).collect();

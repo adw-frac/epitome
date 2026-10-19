@@ -349,11 +349,23 @@ impl Function {
     /// block placed after `b` in the layout, and returns it. Phis in the
     /// successors of the moved terminator are updated to name the new block.
     pub fn split_block(&mut self, b: BlockId, at: usize, name: Option<String>) -> BlockId {
-        let tail = self.blocks[b.index()].insts.split_off(at);
-        let new = self.add_block(name);
-        self.blocks[new.index()].insts = tail;
+        let new = self.split_block_unplaced(b, at, name);
         let pos = self.layout.iter().position(|&x| x == b).unwrap();
         self.layout.insert(pos + 1, new);
+        new
+    }
+
+    /// `split_block`, but the new block is not put in the layout: for a
+    /// pass that keeps the order some other way while it works (finding a
+    /// block's place in a long layout each time would cost its length).
+    pub fn split_block_unplaced(&mut self, b: BlockId, at: usize, name: Option<String>) -> BlockId {
+        let tail = self.blocks[b.index()].insts.split_off(at);
+        // `split_off` leaves the head with the whole list's capacity; many
+        // splits of one long block (inlining thousands of calls) would keep
+        // every head's room for all that followed it.
+        self.blocks[b.index()].insts.shrink_to_fit();
+        let new = self.add_block(name);
+        self.blocks[new.index()].insts = tail;
         let mut succs = self.successors(new);
         succs.dedup();
         for s in succs {
@@ -366,11 +378,17 @@ impl Function {
 /// Picks fresh local names for a function.
 pub struct Names {
     used: HashSet<String>,
+    /// For each base asked for, a suffix below which every `base{n}` is
+    /// taken: where the next search starts, so that asking for the same
+    /// base many times (a function inlined thousands of times) costs one
+    /// try each, not one per earlier name. Names only become taken, which
+    /// keeps these right, except through `release`, which forgets them.
+    next: std::collections::HashMap<String, u64>,
 }
 
 impl Names {
     pub fn new(f: &Function) -> Self {
-        Names { used: f.names() }
+        Names { used: f.names(), next: Default::default() }
     }
 
     /// `base` if it is free, otherwise `base1`, `base2`, and so on. A name
@@ -381,7 +399,11 @@ impl Names {
         if self.used.insert(base.clone()) {
             return base;
         }
-        (1..).map(|n| format!("{base}{n}")).find(|n| self.used.insert(n.clone())).unwrap()
+        let start = self.next.get(&base).copied().unwrap_or(1);
+        let (n, name) =
+            (start..).map(|n| (n, format!("{base}{n}"))).find(|(_, name)| self.used.insert(name.clone())).unwrap();
+        self.next.insert(base, n + 1);
+        name
     }
 
     /// Reserves a name so that `fresh` never returns it.
@@ -392,5 +414,6 @@ impl Names {
     /// Makes a name free again, once nothing that will be printed has it.
     pub fn release(&mut self, name: &str) {
         self.used.remove(name);
+        self.next.clear();
     }
 }

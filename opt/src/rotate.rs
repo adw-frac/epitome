@@ -61,6 +61,11 @@ pub fn run(sh: &Shared, f: &mut Function) -> Stats {
         let found = loops::find(f);
         let Some(l) = found.iter().find(|l| can_rotate(sh, f, l)) else { break };
         let l = l.clone();
+        if !draconian_ir::chop::allow(|| {
+            format!("rotate the loop at {}", draconian_ir::printer::local_name(f, f.blocks[l.header.index()].local))
+        }) {
+            break;
+        }
         if rotate(sh, f, &mut names, &l) {
             stats.rotated += 1;
         } else {
