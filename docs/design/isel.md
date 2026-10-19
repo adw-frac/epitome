@@ -475,6 +475,52 @@ cannot be one is an error.
 Not yet: `byval` arguments, homogeneous floating-point aggregates and
 vectors, and indirect tail calls.
 
+### Exceptions
+
+The IR's exceptions are the Itanium ABI's, as C++ and Rust (`panic`) use
+them on both platforms:
+
+- **`invoke`** is a call, then a branch to its normal destination. The
+  machine instruction carries two more operands than the description's:
+  its landing pad's block and its action, an index into the function's
+  exception information (`EhInfo`), which the LSDA is built from
+  ([objects.md](objects.md)). An invoke is never a tail call.
+- **`landingpad`** gives the exception's pointer and the type selector,
+  which the personality routine leaves in two registers. They are the
+  convention's `eh-regs`, by default its first two argument registers
+  (`x0` and `x1`; `a0` and `a1`). The clauses become the landing pad's
+  action: the types it catches (`catch ptr @_ZTIi`, or `null` for all),
+  filters (`filter [0 x ptr] zeroinitializer`, which Rust uses where
+  nothing may unwind out), and whether it cleans up.
+- **`resume`** calls `_Unwind_Resume` with the exception's pointer.
+- **`llvm.eh.typeid.for`** is the type's index in the function's type
+  table, from 1, which is what the selector holds when it is caught.
+
+The edge to a landing pad is never split for phis: the landing pad must
+be the block the call's entry names.
+
+Landing pads bring struct values that other parts of the code generator
+had no use for, and they are handled generally:
+
+- a phi of a struct of scalars (a landing pad's `{ ptr, i32 }` carried to
+  a `resume`) is a phi for each field;
+- a call may return a struct of integers and pointers (`{ ptr, ptr }`), a
+  field in each result register;
+- `extractvalue` reads any struct built by `insertvalue`.
+
+Rust's overflow checks call `llvm.{s,u}{add,sub,mul}.with.overflow`,
+which expand before wide integers are split:
+
+- a sum overflows if it is below an operand (unsigned), or if its sign
+  differs from both operands' (signed);
+- a product narrower than 64 bits is made at twice the width and must fit
+  back. A 64-bit one must have a high half of zero (unsigned) or of the
+  low half's sign (signed: the unsigned high half less each operand where
+  the other is negative).
+
+Loads and stores of odd whole-byte widths (`i48`, which Rust passes
+`[u16; 3]` as) go in pieces of 4, 2 and 1 bytes.
+
 ## Output
 
 - **Assembly** in the convention's dialect (Mach-O or ELF), from the
@@ -599,7 +645,7 @@ above: values narrower than 32 bits live in W registers with their upper
 bits undefined, and odd widths live in the next register width; operations
 that read every bit get their operands extended in place first.
 
-Not yet: exception handling in the IR (`invoke`, landing pads: unwinding
-through our frames works, see [objects.md](objects.md)), frames over 32KB, object files (the output is assembly), load
+Exception handling works for Mach-O; ELF's exception tables are not done
+yet (see [objects.md](objects.md)). Not yet: frames over 32KB, object files (the output is assembly), load
 and store pairs, pre-index addressing, scalable vectors, and vector
 floating-point minimum, maximum and unordered comparisons.

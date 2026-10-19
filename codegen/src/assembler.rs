@@ -33,13 +33,16 @@
 //! `.bss`, `.section`, `.globl`, `.p2align`, `.type`, `.size`, `.byte`,
 //! `.short`, `.long`, `.quad` (of numbers, or of `symbol+offset`),
 //! `.ascii`, `.asciz`, `.space`, `.zero` and `.build_version`; the
-//! `.cfi_*` directives of unwind tables; and
+//! `.cfi_*` directives of unwind tables, with `.cfi_personality` and
+//! `.cfi_lsda` (Mach-O's encodings only); `.long symbol@GOT-label`, with
+//! the label at the field (exception tables' references to types); and
 //! `.subsections_via_symbols`, which is accepted and ignored.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::abi::Syntax;
 use crate::enc::{self, Env};
+use crate::machine::RelocUse;
 use crate::mir::{self, Operand, Reg};
 use crate::object::{self, Object, Pending, RelocKind, Section, SectionKind, Symbol, SymbolKind};
 use crate::target::{Kind, Target};
@@ -51,6 +54,9 @@ struct OpenFrame {
     /// Its label.
     name: Option<String>,
     rules: Vec<(u64, crate::unwind::Cfi)>,
+    personality: Option<String>,
+    /// The label of its LSDA.
+    lsda: Option<String>,
 }
 
 /// An assembled file.
@@ -364,8 +370,26 @@ impl<'t> Assembler<'t> {
         // What the second pass does, in order: instructions, and data
         // that refers to symbols.
         enum Later {
-            Instr { section: usize, offset: u64, line: usize, text: String },
-            Data { section: usize, offset: u64, symbol: String, addend: i64 },
+            Instr {
+                section: usize,
+                offset: u64,
+                line: usize,
+                text: String,
+            },
+            Data {
+                section: usize,
+                offset: u64,
+                symbol: String,
+                addend: i64,
+            },
+            /// A 4-byte reference to `symbol`'s GOT entry, less `label`.
+            Got {
+                section: usize,
+                offset: u64,
+                symbol: String,
+                label: String,
+                line: usize,
+            },
         }
         let mut later: Vec<Later> = Vec::new();
         let lines: Vec<&str> = text.lines().collect();
@@ -437,12 +461,36 @@ impl<'t> Assembler<'t> {
                         let at = obj.sections[s].size();
                         let name =
                             labels.iter().filter(|(k, v)| **v == (s, at) && !temp(k)).map(|(k, _)| k.clone()).min();
-                        open = Some(OpenFrame { section: s, start: at, name, rules: Vec::new() });
+                        open = Some(OpenFrame {
+                            section: s,
+                            start: at,
+                            name,
+                            rules: Vec::new(),
+                            personality: None,
+                            lsda: None,
+                        });
                     }
                     "cfi_endproc" => {
                         let f = open.take().ok_or_else(|| err(n, ".cfi_endproc without .cfi_startproc".into()))?;
                         let len = obj.sections[f.section].size() - f.start;
                         frames.push((f, len));
+                    }
+                    "cfi_personality" | "cfi_lsda" => {
+                        let Some(f) = open.as_mut() else {
+                            return Err(err(n, "a .cfi directive outside .cfi_startproc".into()));
+                        };
+                        // Indirect, PC-relative and 4 bytes; PC-relative.
+                        let want = if name == "cfi_personality" { 155 } else { 16 };
+                        match (syntax, list().as_slice()) {
+                            (Syntax::MachO, [e, sym]) if parse_int(e) == Some(want) => {
+                                if name == "cfi_personality" {
+                                    f.personality = Some(sym.clone());
+                                } else {
+                                    f.lsda = Some(sym.clone());
+                                }
+                            }
+                            _ => return Err(err(n, format!("a .{name} not supported"))),
+                        }
                     }
                     "cfi_def_cfa_offset" | "cfi_def_cfa" | "cfi_offset" => {
                         let Some(OpenFrame { section: s, start: at, rules, .. }) = open.as_mut() else {
@@ -496,8 +544,19 @@ impl<'t> Assembler<'t> {
                             if sec.kind == SectionKind::Bss {
                                 return Err(err(n, "data in .bss".into()));
                             }
+                            let got = v.split_once("@GOT-").filter(|_| size == 4 && syntax == Syntax::MachO);
                             match parse_int(&v) {
                                 Some(x) => sec.data.extend_from_slice(&(x as u64).to_le_bytes()[..size]),
+                                None if let Some((symbol, label)) = got => {
+                                    later.push(Later::Got {
+                                        section: s,
+                                        offset: sec.data.len() as u64,
+                                        symbol: symbol.to_string(),
+                                        label: label.to_string(),
+                                        line: n,
+                                    });
+                                    sec.data.extend_from_slice(&[0; 4]);
+                                }
                                 None if size == 8 => {
                                     let (symbol, addend) =
                                         parse_sym_offset(&v).ok_or_else(|| err(n, format!("a bad value {v}")))?;
@@ -606,6 +665,27 @@ impl<'t> Assembler<'t> {
                         instr: None,
                     });
                 }
+                Later::Got { section, offset, symbol, label, line } => {
+                    if labels.get(&label) != Some(&(section, offset)) {
+                        errors.push(err(line, format!("{label} is not where the reference is")));
+                        continue;
+                    }
+                    let kind = self
+                        .t
+                        .machine
+                        .reloc_used(RelocUse::GotPcRel32)
+                        .ok_or("the description has no relocation for references to GOT entries")?;
+                    obj.sections[section].data[offset as usize..offset as usize + 4]
+                        .copy_from_slice(&crate::unwind::macho_got_field(offset));
+                    pending.push(Pending {
+                        section,
+                        offset,
+                        kind: RelocKind(kind as u16),
+                        symbol,
+                        addend: 0,
+                        instr: None,
+                    });
+                }
             }
         }
         if !errors.is_empty() {
@@ -632,7 +712,11 @@ impl<'t> Assembler<'t> {
         if !frames.is_empty() {
             let abi = self.t.abis.iter().find(|a| a.syntax == syntax).ok_or("no convention for this dialect")?;
             let mut list = Vec::new();
-            for (OpenFrame { section, start, name, rules }, len) in frames {
+            for (OpenFrame { section, start, name, rules, personality, lsda }, len) in frames {
+                let lsda = match lsda {
+                    Some(l) => Some(*labels.get(&l).ok_or_else(|| format!("no label {l}, the LSDA of {name:?}"))?),
+                    None => None,
+                };
                 let symbol = match name.and_then(|n| obj.symbols.iter().position(|s| s.name == n)) {
                     Some(k) => k,
                     None => {
@@ -647,7 +731,7 @@ impl<'t> Assembler<'t> {
                         obj.symbols.len() - 1
                     }
                 };
-                list.push(crate::unwind::Frame { section, start, len, symbol, rules });
+                list.push(crate::unwind::Frame { section, start, len, symbol, rules, personality, lsda });
             }
             let p = crate::unwind::Params { syntax, data_align: self.t.machine.data_align(syntax), ra: abi.lr };
             crate::unwind::add_eh_frame(&mut obj, &self.t.machine, &p, &list)?;
@@ -670,6 +754,7 @@ fn section_kind(args: &str, syntax: Syntax) -> Option<Option<SectionKind>> {
         "__DATA,__bss" | ".bss" => SectionKind::Bss,
         "__TEXT,__const" | ".rodata" => SectionKind::ReadOnly,
         "__DATA,__const" | ".data.rel.ro" => SectionKind::RelRo,
+        "__TEXT,__gcc_except_tab" | ".gcc_except_table" => SectionKind::ExceptTable,
         ".note.GNU-stack" => return Some(None),
         _ => return None,
     }))

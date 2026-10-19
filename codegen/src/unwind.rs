@@ -41,6 +41,10 @@ pub struct Frame {
     /// The function's symbol (Mach-O's pair names it).
     pub symbol: usize,
     pub rules: Vec<(u64, Cfi)>,
+    /// Its personality routine's symbol, as the platform writes it, and
+    /// where its LSDA is (`eh.rs`), if it has landing pads.
+    pub personality: Option<String>,
+    pub lsda: Option<(usize, u64)>,
 }
 
 /// What the tables' common part says.
@@ -137,6 +141,22 @@ fn instructions(m: &Machine, p: &Params, rules: &[(u64, Cfi)]) -> Result<Vec<u8>
     Ok(out)
 }
 
+/// The symbol called `name`, made (undefined) if there is none.
+pub fn symbol_named(obj: &mut Object, name: &str) -> usize {
+    if let Some(k) = obj.symbols.iter().position(|s| s.name == name) {
+        return k;
+    }
+    obj.symbols.push(Symbol {
+        name: name.into(),
+        section: None,
+        value: 0,
+        size: 0,
+        global: true,
+        kind: SymbolKind::NoType,
+    });
+    obj.symbols.len() - 1
+}
+
 /// A local symbol at the start of section `s` (Mach-O's relocation pairs
 /// subtract and add them).
 fn section_start(obj: &mut Object, s: usize, name: &str) -> usize {
@@ -154,6 +174,12 @@ fn section_start(obj: &mut Object, s: usize, name: &str) -> usize {
     obj.symbols.len() - 1
 }
 
+/// What Mach-O's assembler writes in a 4-byte GOT-relative field at
+/// `offset` in its section (its relocation says the rest).
+pub fn macho_got_field(offset: u64) -> [u8; 4] {
+    0xc000_0000u32.wrapping_sub(offset as u32).to_le_bytes()
+}
+
 /// Adds the unwind table section for `frames` to `obj`.
 pub fn add_eh_frame(obj: &mut Object, m: &Machine, p: &Params, frames: &[Frame]) -> Result<(), String> {
     if frames.is_empty() {
@@ -168,28 +194,65 @@ pub fn add_eh_frame(obj: &mut Object, m: &Machine, p: &Params, frames: &[Frame])
     };
     // Mach-O's pairs subtract a symbol at the table's start.
     let start_sym = if macho { Some(section_start(obj, s, "ltmp_eh_frame")) } else { None };
-    // The CIE: what all the functions share. Augmentation zR: the FDEs'
-    // addresses are PC-relative, 8 bytes (Mach-O) or 4, signed (ELF).
-    let mut cie = vec![0u8; 4];
-    cie.extend(0u32.to_le_bytes());
-    cie.push(1);
-    cie.extend(b"zR\0");
-    uleb(&mut cie, 1);
-    sleb(&mut cie, p.data_align);
-    cie.push(m.dwarf_number(p.ra).ok_or("the link register has no DWARF number")? as u8);
-    uleb(&mut cie, 1);
-    cie.push(if macho { 0x10 } else { 0x1b });
-    cie.push(0x0c);
-    uleb(&mut cie, m.dwarf_number(m.sp).ok_or("the stack pointer has no DWARF number")? as u64);
-    uleb(&mut cie, 0);
-    finish(&mut cie);
-    data.extend(&cie);
+    // A CIE for each personality routine (and for none): what all the
+    // functions it covers share.
+    let mut cies: Vec<(Option<String>, u64)> = Vec::new();
+    let mut personalities: Vec<Option<String>> = Vec::new();
+    for f in frames {
+        if !personalities.contains(&f.personality) {
+            personalities.push(f.personality.clone());
+        }
+    }
+    for pers in personalities {
+        let at = data.len() as u64;
+        let mut cie = vec![0u8; 4];
+        cie.extend(0u32.to_le_bytes());
+        cie.push(1);
+        cie.extend(if pers.is_some() { &b"zPLR\0"[..] } else { &b"zR\0"[..] });
+        uleb(&mut cie, 1);
+        sleb(&mut cie, p.data_align);
+        cie.push(m.dwarf_number(p.ra).ok_or("the link register has no DWARF number")? as u8);
+        let fde_enc = if macho { 0x10 } else { 0x1b };
+        match &pers {
+            Some(name) => {
+                if !macho {
+                    return Err("personality routines in ELF unwind tables are not supported yet".into());
+                }
+                // The personality: indirect, PC-relative, 4 bytes (its GOT
+                // entry); then the LSDA's and the FDE's encodings.
+                uleb(&mut cie, 7);
+                cie.push(0x9b);
+                let field = at + cie.len() as u64;
+                cie.extend(macho_got_field(field));
+                let sym = symbol_named(obj, name);
+                relocs.push(Reloc {
+                    offset: field,
+                    kind: reloc(RelocUse::GotPcRel32)?,
+                    target: RelocTarget::Symbol(sym),
+                    addend: 0,
+                });
+                cie.push(0x10);
+                cie.push(fde_enc);
+            }
+            None => {
+                uleb(&mut cie, 1);
+                cie.push(fde_enc);
+            }
+        }
+        cie.push(0x0c);
+        uleb(&mut cie, m.dwarf_number(m.sp).ok_or("the stack pointer has no DWARF number")? as u64);
+        uleb(&mut cie, 0);
+        finish(&mut cie);
+        data.extend(&cie);
+        cies.push((pers, at));
+    }
     let mut last = 0;
     for f in frames {
         let at = data.len() as u64;
         last = at as usize;
+        let cie_at = cies.iter().find(|c| c.0 == f.personality).map_or(0, |c| c.1);
         let mut fde = vec![0u8; 4];
-        fde.extend((at as u32 + 4).to_le_bytes());
+        fde.extend(((at - cie_at) as u32 + 4).to_le_bytes());
         let field = at + 8;
         if let Some(st) = start_sym {
             fde.extend((-(field as i64)).to_le_bytes());
@@ -216,7 +279,44 @@ pub fn add_eh_frame(obj: &mut Object, m: &Machine, p: &Params, frames: &[Frame])
                 addend: f.start as i64,
             });
         }
-        uleb(&mut fde, 0);
+        // The LSDA's address, as the function's is: 8 bytes, a pair naming
+        // a symbol at it (the linker takes one at the start of the section
+        // and an offset as the start less the offset).
+        match (f.lsda, start_sym) {
+            (Some((ls, lo)), Some(st)) => {
+                uleb(&mut fde, 8);
+                let field = at + fde.len() as u64;
+                fde.extend((-(field as i64)).to_le_bytes());
+                let target = match obj.symbols.iter().position(|x| x.section == Some(ls) && x.value == lo) {
+                    Some(k) => k,
+                    None => {
+                        obj.symbols.push(Symbol {
+                            name: format!("GCC_except_table_at{lo}"),
+                            section: Some(ls),
+                            value: lo,
+                            size: 0,
+                            global: false,
+                            kind: SymbolKind::NoType,
+                        });
+                        obj.symbols.len() - 1
+                    }
+                };
+                relocs.push(Reloc {
+                    offset: field,
+                    kind: reloc(RelocUse::EhSub)?,
+                    target: RelocTarget::Symbol(st),
+                    addend: 0,
+                });
+                relocs.push(Reloc {
+                    offset: field,
+                    kind: reloc(RelocUse::EhUnsigned)?,
+                    target: RelocTarget::Symbol(target),
+                    addend: 0,
+                });
+            }
+            (Some(_), None) => return Err("LSDAs in ELF unwind tables are not supported yet".into()),
+            (None, _) => uleb(&mut fde, 0),
+        }
         fde.extend(instructions(m, p, &f.rules)?);
         finish(&mut fde);
         data.extend(fde);

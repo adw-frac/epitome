@@ -176,7 +176,7 @@ features:
 | `elf`, `elf-name` | the ELF number and name |
 | `macho`, `macho-name`, `macho-pcrel`, `macho-length` | Mach-O's number, name, PC-relative flag and log2 size |
 | `elf-syntax`, `macho-syntax` | how assembly writes the operand, with `{s}` for the symbol (`%lo({s})`, `{s}@PAGEOFF`) |
-| `use` | `call` (resolved in place within a section), `got` (through the GOT), `data8` (a pointer in data), or `eh-pcrel`, `eh-sub` and `eh-unsigned` (unwind tables' addresses) |
+| `use` | `call` (resolved in place within a section), `got` (through the GOT), `data8` (a pointer in data), `eh-pcrel`, `eh-sub` and `eh-unsigned` (unwind tables' addresses), or `got-pcrel32` (a 4-byte PC-relative reference to a GOT entry: personality routines, types caught) |
 | `target` | for the disassembler: the address reached, from the instruction's address `pc` and the operand's value `v` |
 
 Code uses `"reloc"` attributes. The object writers use the numbers and

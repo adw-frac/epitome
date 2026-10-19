@@ -101,6 +101,9 @@ pub struct Sel<'a, 'b> {
     /// Blocks that end in a tail call: they have no successors, and no
     /// copies for phis.
     tail_blocks: HashSet<BlockId>,
+    /// For the next call emitted, from an invoke: its landing pad's block
+    /// and action.
+    landing_next: Option<(usize, usize)>,
 }
 
 /// The inline assembly a call calls, if it does.
@@ -219,6 +222,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             out_size: 0,
             abi: abi.clone(),
             dynamic_stack: false,
+            eh: None,
         };
         // A function whose stack pointer moves addresses its frame from a
         // saved register of the convention's, kept from allocation.
@@ -261,6 +265,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             va_offset: 0,
             va_areas: None,
             tail_blocks: HashSet::new(),
+            landing_next: None,
         }
     }
 
@@ -796,7 +801,20 @@ impl<'a, 'b> Sel<'a, 'b> {
             }
             match &inst.op {
                 Op::Phi { .. } => continue,
-                Op::Call(call) if self.intrinsic_id(call).is_none() => {
+                Op::Resume(v) => {
+                    self.need_value(*v);
+                    let mut cur = *v;
+                    while let Value::Local(x) = cur
+                        && let LocalDef::Inst(d) = f.locals[x.index()].def
+                        && let Op::InsertValue { aggregate, element, .. } = &f.insts[d.index()].op
+                    {
+                        self.need_value(*element);
+                        cur = *aggregate;
+                    }
+                    continue;
+                }
+                Op::LandingPad { .. } => continue,
+                Op::Invoke { call, .. } | Op::Call(call) if self.intrinsic_id(call).is_none() => {
                     for a in &call.args {
                         self.need_value(a.value);
                         // The parts of a small struct argument.
@@ -1324,6 +1342,19 @@ impl<'a, 'b> Sel<'a, 'b> {
         }
     }
 
+    /// The registers a returned value takes: a small aggregate's parts, or
+    /// a struct of integers and pointers (`{ ptr, ptr }`), a field each, in
+    /// as many result registers as there are.
+    fn result_parts(&self, ty: TypeId) -> Option<usize> {
+        if let Type::Struct { fields, .. } = self.cx.m.types.get(ty)
+            && fields.len() <= self.mf.abi.results(usize::MAX).len()
+            && fields.iter().all(|t| matches!(self.cx.m.types.get(*t), Type::Int(1..=64) | Type::Ptr(0)))
+        {
+            return Some(fields.len());
+        }
+        self.parts_of(ty)
+    }
+
     /// The parts of a small struct value: from the `insertvalue`s that
     /// built it, from a constant, or from a parameter's registers.
     fn parts(&mut self, v: Value, n: usize) -> Result<Vec<Reg>, String> {
@@ -1577,6 +1608,93 @@ impl<'a, 'b> Sel<'a, 'b> {
         Ok(())
     }
 
+    /// The symbol a type information operand names (`@_ZTIi`), or `None`
+    /// for null (catching everything).
+    fn type_name(&self, v: Value) -> Option<String> {
+        let Value::Const(c) = v else { return None };
+        match &self.cx.m.constant(c).kind {
+            ConstKind::Global(g) => self.cx.m.global(*g).name.clone(),
+            _ => None,
+        }
+    }
+
+    /// The action of the landing pad in block `b`: an index into the
+    /// function's exception information, added if new.
+    fn action_for(&mut self, b: BlockId) -> Result<usize, String> {
+        let f = self.f;
+        let lp = f.blocks[b.index()].insts.iter().find(|&&i| !f.insts[i.index()].op.is_phi());
+        let Some(Op::LandingPad { cleanup, clauses }) = lp.map(|&i| &f.insts[i.index()].op) else {
+            return self.err("an invoke whose unwind destination is not a landing pad".to_string());
+        };
+        let personality = match f.personality.map(|c| &self.cx.m.constant(c).kind) {
+            Some(ConstKind::Global(g)) => self.cx.m.global(*g).name.clone().unwrap_or_default(),
+            _ => return self.err("a landing pad without a personality routine".to_string()),
+        };
+        self.mf.eh.get_or_insert_with(|| EhInfo { personality, ..Default::default() });
+        // A type's index, from 1, added if new.
+        let index = |eh: &mut EhInfo, ti: Option<String>| {
+            1 + match eh.types.iter().position(|t| *t == ti) {
+                Some(k) => k,
+                None => {
+                    eh.types.push(ti);
+                    eh.types.len() - 1
+                }
+            } as i64
+        };
+        let mut filters = Vec::new();
+        for c in clauses {
+            match c {
+                Clause::Catch(v) => {
+                    let ti = self.type_name(*v);
+                    let eh = self.mf.eh.as_mut().unwrap();
+                    filters.push(index(eh, ti));
+                }
+                Clause::Filter(v) => {
+                    let elems = match v {
+                        Value::Const(c) => match &self.cx.m.constant(*c).kind {
+                            ConstKind::Zero
+                                if matches!(
+                                    self.cx.m.types.get(self.cx.m.constant(*c).ty),
+                                    Type::Array { len: 0, .. }
+                                ) =>
+                            {
+                                vec![]
+                            }
+                            ConstKind::Array(e) => e.clone(),
+                            _ => return self.err("an exception filter not a list of types".to_string()),
+                        },
+                        _ => return self.err("an exception filter not a constant".to_string()),
+                    };
+                    let names: Vec<Option<String>> = elems.iter().map(|&e| self.type_name(Value::Const(e))).collect();
+                    let eh = self.mf.eh.as_mut().unwrap();
+                    let mut list = Vec::new();
+                    for ti in names {
+                        let k = index(eh, ti);
+                        crate::eh::uleb(&mut list, k as u64);
+                    }
+                    list.push(0);
+                    // The same list, if there is one already.
+                    let at = (0..eh.specs.len())
+                        .find(|&k| eh.specs[k..].starts_with(&list) && (k == 0 || eh.specs[k - 1] == 0))
+                        .unwrap_or_else(|| {
+                            eh.specs.extend(&list);
+                            eh.specs.len() - list.len()
+                        });
+                    filters.push(-1 - at as i64);
+                }
+            }
+        }
+        let eh = self.mf.eh.as_mut().unwrap();
+        let action = (*cleanup, filters);
+        Ok(match eh.actions.iter().position(|a| *a == action) {
+            Some(k) => k,
+            None => {
+                eh.actions.push(action);
+                eh.actions.len() - 1
+            }
+        })
+    }
+
     /// The `ret` a call can be a tail call before, if it can: it is marked
     /// `tail`, its arguments are all in registers, and the next instruction
     /// returns its result (extended as the call's is), or nothing.
@@ -1624,7 +1742,7 @@ impl<'a, 'b> Sel<'a, 'b> {
     fn emit_call(&mut self, i: InstId) -> Result<(), String> {
         let f = self.f;
         let inst = &f.insts[i.index()];
-        let Op::Call(call) = &inst.op else { unreachable!() };
+        let call = inst.op.call().expect("a call");
         let name = prepare::callee_name(self.cx.m, call);
         let mut args: Vec<&CallArg> = call.args.iter().collect();
         let mut target = name.clone();
@@ -1689,6 +1807,19 @@ impl<'a, 'b> Sel<'a, 'b> {
                     return Ok(());
                 }
                 s if s.starts_with("llvm.va_end") => return Ok(()),
+                // The selector a landing pad gets for a type: its index in
+                // the function's table of types caught.
+                s if s.starts_with("llvm.eh.typeid.for") => {
+                    let ti = self.type_name(args[0].value);
+                    let k = self.mf.eh.as_ref().and_then(|e| e.types.iter().position(|t| *t == ti));
+                    let k = k.ok_or("llvm.eh.typeid.for of a type no landing pad catches")? as i64 + 1;
+                    if let Some(r) = inst.result {
+                        let v = self.int_reg(k, false, true)?;
+                        let d = self.vreg_of(r);
+                        self.push(MInst::copy(Reg::V(d), v));
+                    }
+                    return Ok(());
+                }
                 s if s.starts_with("llvm.va_copy") => {
                     let dst = self.reg_for(args[0].value, self.int_class(true))?;
                     let src = self.reg_for(args[1].value, self.int_class(true))?;
@@ -1782,7 +1913,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         }
         // A tail call: when the call's result is what the function returns,
         // its frame goes first, and the callee returns to its caller.
-        let tail = self.tail_ret(i, call, &locs);
+        let tail = if self.landing_next.is_some() { None } else { self.tail_ret(i, call, &locs) };
         if let (Some(ret), Some(s), Some(tc)) = (tail, &target, self.t.role("tailcall")) {
             let mut m = MInst::new(tc, vec![MOp::Sym(s.clone())]);
             m.imp_uses = in_regs.iter().map(|&(p, _)| p).collect();
@@ -1803,12 +1934,17 @@ impl<'a, 'b> Sel<'a, 'b> {
         };
         inst_m.imp_uses = in_regs.iter().map(|&(p, _)| p).collect();
         inst_m.imp_defs = self.mf.abi.all_clobbers();
+        // From an invoke: where it unwinds to, and what happens there.
+        if let Some((lp, action)) = self.landing_next.take() {
+            inst_m.ops.push(MOp::Label(lp));
+            inst_m.ops.push(MOp::Imm(action as i64));
+        }
         self.push(inst_m);
         if let Some(r) = inst.result
             && self.uses[r.index()] > 0
         {
             // A small aggregate ([2 x i64], an i128): one register a part.
-            if let Some(n) = self.parts_of(self.f.locals[r.index()].ty) {
+            if let Some(n) = self.result_parts(self.f.locals[r.index()].ty) {
                 let mut regs = Vec::new();
                 for from in self.mf.abi.results(n) {
                     let d = self.ivreg(true);
@@ -1876,6 +2012,44 @@ impl<'a, 'b> Sel<'a, 'b> {
                     }
                     continue;
                 }
+                // An invoke: a call that can unwind to the landing pad,
+                // then on to the normal destination.
+                Op::Invoke { normal, unwind, .. } => {
+                    let action = self.action_for(*unwind)?;
+                    self.landing_next = Some((self.bmap[unwind], action));
+                    self.emit_call(i)?;
+                    if Some(*normal) != layout_next {
+                        let target = self.bmap[normal];
+                        self.push(MInst::new(self.t.by_role("jump"), vec![MOp::Label(target)]));
+                    }
+                    continue;
+                }
+                // A landing pad: the exception and its selector arrive in
+                // the convention's registers for them.
+                Op::LandingPad { .. } => {
+                    if let Some(r) = inst.result {
+                        let mut regs = Vec::new();
+                        for p in self.mf.abi.eh_regs.clone() {
+                            let d = self.ivreg(true);
+                            self.push(MInst::copy(Reg::V(d), Reg::P(p)));
+                            regs.push(d);
+                        }
+                        self.agg_params.insert(r, regs);
+                    }
+                    continue;
+                }
+                // Unwinding goes on: _Unwind_Resume(exception).
+                Op::Resume(v) => {
+                    let parts = self.parts(*v, 2)?;
+                    let a0 = self.mf.abi.args[0];
+                    self.push(MInst::copy(Reg::P(a0), parts[0]));
+                    let mut c = MInst::new(self.t.by_role("call"), vec![MOp::Sym("_Unwind_Resume".into())]);
+                    c.imp_uses = vec![a0];
+                    c.imp_defs = self.mf.abi.all_clobbers();
+                    self.push(c);
+                    self.push(MInst::new(self.t.by_role("trap"), vec![]));
+                    continue;
+                }
                 Op::Call(call) if inline_asm(self.cx.m, call).is_some() => {
                     self.emit_asm(i)?;
                     continue;
@@ -1884,8 +2058,8 @@ impl<'a, 'b> Sel<'a, 'b> {
                     self.emit_call(i)?;
                     continue;
                 }
-                Op::Ret(Some(v)) if self.parts_of(self.ty_of(*v)).is_some() => {
-                    let n = self.parts_of(self.ty_of(*v)).unwrap();
+                Op::Ret(Some(v)) if self.result_parts(self.ty_of(*v)).is_some() => {
+                    let n = self.result_parts(self.ty_of(*v)).unwrap();
                     let parts = self.parts(*v, n)?;
                     let to = self.mf.abi.results(n);
                     for (&p, &r) in to.iter().zip(&parts) {
@@ -1958,7 +2132,12 @@ impl<'a, 'b> Sel<'a, 'b> {
                         continue;
                     }
                     let ty = self.ty_of(*aggregate);
-                    let n = self.parts_of(ty).ok_or("extractvalue from an unsupported aggregate")?;
+                    // A small struct, or one of scalars built by insertvalue.
+                    let n = match self.cx.m.types.get(ty) {
+                        Type::Struct { fields, .. } => Some(fields.len()),
+                        _ => self.parts_of(ty),
+                    }
+                    .ok_or("extractvalue from an unsupported aggregate")?;
                     let parts = self.parts(*aggregate, n)?;
                     let d = self.vreg_of(r);
                     self.push(MInst::copy(Reg::V(d), parts[indices[0] as usize]));
@@ -2238,6 +2417,15 @@ impl<'a, 'b> Sel<'a, 'b> {
                 false
             })
             .collect();
+        // The function's types caught and actions, before any landing pad's
+        // code asks for a type's index.
+        for &b in &layout {
+            if let Some(t) = f.terminator(b)
+                && let Op::Invoke { unwind, .. } = &f.insts[t.index()].op
+            {
+                self.action_for(*unwind)?;
+            }
+        }
         for (k, &b) in layout.iter().enumerate() {
             let next = layout.get(k + 1).copied();
             self.emit_block(b, next)?;

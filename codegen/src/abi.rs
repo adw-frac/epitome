@@ -62,6 +62,9 @@ pub struct Abi {
     /// argument (false), or AAPCS64's record of register save areas and
     /// the stack (`va-list` = `aapcs64`).
     pub va_list_aapcs64: bool,
+    /// The registers a landing pad finds the exception and its selector in
+    /// (`eh-regs`; by default the first two argument registers).
+    pub eh_regs: Vec<u8>,
     /// Floating-point registers (32-63 for d0-d31): arguments, result,
     /// those a call may change, those preserved, and scratch for spills.
     pub fp_args: Vec<u8>,
@@ -244,6 +247,8 @@ impl Abi {
             // Written from .cfi directives, never switched to.
             (Syntax::MachO, SectionKind::EhFrame) => ".section __TEXT,__eh_frame",
             (Syntax::Elf, SectionKind::EhFrame) => ".section .eh_frame,\"a\"",
+            (Syntax::MachO, SectionKind::ExceptTable) => ".section __TEXT,__gcc_except_tab",
+            (Syntax::Elf, SectionKind::ExceptTable) => ".section .gcc_except_table,\"a\"",
         }
     }
 }
@@ -294,6 +299,10 @@ pub fn read(m: &Module, prefix: &str, machine: &crate::machine::Machine) -> Resu
             base: props.get("base").map(|v| regs(v)).transpose()?.and_then(|v| v.first().copied()),
             wide_pairs_even: props.get("wide-pairs").is_some_and(|v| v.first().is_some_and(|x| x == "even")),
             va_list_aapcs64: props.get("va-list").is_some_and(|v| v.first().is_some_and(|x| x == "aapcs64")),
+            eh_regs: match props.get("eh-regs") {
+                Some(v) => regs(v)?,
+                None => regs(&get("args")?)?.into_iter().take(2).collect(),
+            },
             scratch: regs(&get("scratch")?)?,
             fp_args: regs(&get("fp-args")?)?,
             fp_result: regs(&get("fp-result")?)?[0],

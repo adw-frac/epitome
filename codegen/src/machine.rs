@@ -128,6 +128,9 @@ pub enum RelocUse {
     EhPcRel,
     EhSub,
     EhUnsigned,
+    /// A 32-bit PC-relative reference to a symbol's GOT entry: unwind and
+    /// exception tables' personality routines and types caught.
+    GotPcRel32,
 }
 
 #[derive(Clone, Debug)]
@@ -516,6 +519,7 @@ impl Machine {
                     Some("eh-pcrel") => RelocUse::EhPcRel,
                     Some("eh-sub") => RelocUse::EhSub,
                     Some("eh-unsigned") => RelocUse::EhUnsigned,
+                    Some("got-pcrel32") => RelocUse::GotPcRel32,
                     Some("got") => RelocUse::Got,
                     Some(d) if d.starts_with("data") => RelocUse::Data(
                         d.trim_start_matches("data").parse().map_err(|_| format!("relocation {name}: use {d}"))?,

@@ -7,6 +7,7 @@ pub mod asm;
 pub mod assembler;
 pub mod check;
 pub mod divconst;
+pub mod eh;
 pub mod elf;
 pub mod enc;
 pub mod features;
@@ -147,8 +148,8 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
         out.push_str(&format!("\t.build_version macos, {a}, {b}{update}\n"));
     }
     out.push_str(&format!("\t{}\n", abi.section_directive(object::SectionKind::Text)));
-    for f in &funcs {
-        asm::function(t, f, &mut out);
+    for (k, f) in funcs.iter().enumerate() {
+        asm::function(t, f, k, &mut out)?;
     }
     let globals = asm::collect_globals(&cx, &abi)?;
     asm::print_globals(&abi, &globals, &mut out);

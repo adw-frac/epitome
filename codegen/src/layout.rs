@@ -262,7 +262,8 @@ pub fn relax(t: &Target, f: &mut MFunc) {
             for k in 0..len {
                 let inst = &f.blocks[bi].insts[k];
                 let Opcode::Instr(op) = inst.op else { continue };
-                if op == b_op {
+                // (A call's label is the landing pad it unwinds to.)
+                if op == b_op || t.has_role(op, "call") || t.has_role(op, "callr") {
                     continue;
                 }
                 let Some(target) = inst.ops.iter().find_map(|o| if let MOp::Label(x) = o { Some(*x) } else { None })

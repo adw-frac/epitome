@@ -51,6 +51,24 @@ pub enum Opcode {
     Cfi(crate::unwind::Cfi),
 }
 
+/// A function's exception handling. A call that can unwind to a landing
+/// pad (an `invoke`) has two more operands than its instruction: the
+/// landing pad's block, and the index of its action in `actions`.
+#[derive(Clone, Debug, Default)]
+pub struct EhInfo {
+    /// The personality routine's symbol, as the IR names it.
+    pub personality: String,
+    /// The types caught, by their type information's symbols; `None`
+    /// catches all. A landing pad's selector is a type's index here, from 1.
+    pub types: Vec<Option<String>>,
+    /// Each landing pad's action: whether it cleans up, and its clauses in
+    /// order: a type caught (its index into `types`, from 1), or a filter
+    /// (the types that may pass, -1 less its list's offset in `specs`).
+    pub actions: Vec<(bool, Vec<i64>)>,
+    /// The filters' lists of types: each type's index as a ULEB128, then 0.
+    pub specs: Vec<u8>,
+}
+
 /// How an inline assembly operand is written into its template.
 #[derive(Clone, Debug, PartialEq)]
 pub enum AsmPrint {
@@ -177,6 +195,9 @@ pub struct MFunc {
     /// `sp` moves (dynamic allocas): the frame is addressed from the
     /// convention's `base` register.
     pub dynamic_stack: bool,
+    /// Exception handling: the personality routine, the types caught, and
+    /// the landing pads' actions (see `eh.rs`), if it has landing pads.
+    pub eh: Option<EhInfo>,
     pub abi: crate::abi::Abi,
 }
 

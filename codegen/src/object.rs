@@ -50,6 +50,8 @@ pub enum SectionKind {
     RelRo,
     /// Unwind tables: DWARF's call frame information (`unwind.rs`).
     EhFrame,
+    /// Exception tables: personality routines' data (`eh.rs`).
+    ExceptTable,
 }
 
 #[derive(Clone, Debug)]
@@ -211,12 +213,47 @@ pub fn build(t: &Target, abi: &Abi, funcs: &[MFunc], globals: &[GlobalData]) -> 
             global: f.global,
             kind: SymbolKind::Func,
         });
+        let symbol = obj.symbols.len() - 1;
+        // Its exception table, if it has landing pads, its references to
+        // the types caught through their GOT entries.
+        let mut lsda = None;
+        if let Some(table) = crate::eh::lsda(t, f, abi.syntax, &|n| abi.symbol(n))? {
+            let es = section(&mut obj, SectionKind::ExceptTable);
+            let eat = place(&mut obj, es, 4);
+            obj.sections[es].data.extend(&table.bytes);
+            // A symbol at it, for the unwind tables to name (unwind.rs).
+            obj.symbols.push(Symbol {
+                name: format!("GCC_except_table{}", frames.len()),
+                section: Some(es),
+                value: eat,
+                size: 0,
+                global: false,
+                kind: SymbolKind::NoType,
+            });
+            let kind = t.machine.reloc_used(RelocUse::GotPcRel32).ok_or("no relocation has use GotPcRel32")?;
+            for (off, name) in table.got_refs {
+                let field = eat + off;
+                obj.sections[es].data[field as usize..field as usize + 4]
+                    .copy_from_slice(&crate::unwind::macho_got_field(field));
+                pending.push(Pending {
+                    section: es,
+                    offset: field,
+                    kind: RelocKind(kind as u16),
+                    symbol: name,
+                    addend: 0,
+                    instr: None,
+                });
+            }
+            lsda = Some((es, eat));
+        }
         frames.push(crate::unwind::Frame {
             section: s,
             start: at,
             len: 4 * words.len() as u64,
-            symbol: obj.symbols.len() - 1,
+            symbol,
             rules: mir::cfi_rules(f),
+            personality: f.eh.as_ref().map(|e| abi.symbol(&e.personality)),
+            lsda,
         });
         for fx in fixups {
             let i = t.by_name[&fx.instr];

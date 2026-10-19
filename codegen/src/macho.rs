@@ -281,6 +281,7 @@ pub fn section_names(kind: SectionKind) -> (&'static str, &'static str) {
         SectionKind::ReadOnly => ("__TEXT", "__const"),
         SectionKind::RelRo => ("__DATA", "__const"),
         SectionKind::EhFrame => ("__TEXT", "__eh_frame"),
+        SectionKind::ExceptTable => ("__TEXT", "__gcc_except_tab"),
     }
 }
 

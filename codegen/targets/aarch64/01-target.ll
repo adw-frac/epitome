@@ -125,7 +125,7 @@
 !1224 = !{!"name", !"ldst64_lo12", !"elf", !"286", !"elf-name", !"R_AARCH64_LDST64_ABS_LO12_NC"}
 !1225 = !{!"name", !"ldst128_lo12", !"elf", !"299", !"elf-name", !"R_AARCH64_LDST128_ABS_LO12_NC"}
 !1226 = !{!"name", !"macho_subtractor", !"macho", !"1", !"macho-name", !"ARM64_RELOC_SUBTRACTOR", !"macho-length", !"3", !"use", !"eh-sub"}
-!1227 = !{!"name", !"macho_pointer_to_got", !"macho", !"7", !"macho-name", !"ARM64_RELOC_POINTER_TO_GOT"}
+!1227 = !{!"name", !"macho_pointer_to_got", !"macho", !"7", !"macho-name", !"ARM64_RELOC_POINTER_TO_GOT", !"macho-pcrel", !"yes", !"macho-length", !"2", !"use", !"got-pcrel32"}
 !1228 = !{!"name", !"macho_addend", !"macho", !"10", !"macho-name", !"ARM64_RELOC_ADDEND"}
 ; With macho_subtractor before it, the distance from one symbol to another:
 ; how __eh_frame says where a function is.

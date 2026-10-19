@@ -120,7 +120,9 @@ impl Ctx<'_> {
 /// Puts a copy of `f` into selection form.
 pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, String> {
     let mut f = f.clone();
+    expand_overflow(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     crate::wide::split_wide(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
+    split_struct_phis(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     check(cx, &f, fname)?;
     lower_dynamic_allocas(cx, &mut f)?;
     drop_noop_calls(cx, &mut f);
@@ -140,6 +142,96 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     }
     split_phi_edges(&mut f);
     Ok(f)
+}
+
+/// A phi of a struct of scalars (a landing pad's `{ ptr, i32 }`, carried
+/// to its `resume`) becomes a phi for each field, each value's field
+/// extracted at the end of its block, and the struct made again after the
+/// phis, as instructions selection keeps aggregates: as their parts.
+fn split_struct_phis(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let phis: Vec<InstId> =
+            f.blocks[b.index()].insts.iter().copied().take_while(|&i| f.insts[i.index()].op.is_phi()).collect();
+        let mut rebuilt = Vec::new();
+        for &i in &phis {
+            let r = f.insts[i.index()].result.unwrap();
+            let ty = f.locals[r.index()].ty;
+            let Type::Struct { fields, .. } = cx.m.types.get(ty).clone() else { continue };
+            if fields.iter().any(|t| matches!(cx.m.types.get(*t), Type::Struct { .. } | Type::Array { .. })) {
+                continue;
+            }
+            let Op::Phi { fmf, incoming } = f.insts[i.index()].op.clone() else { unreachable!() };
+            let mut parts = Vec::new();
+            for (k, &fty) in fields.iter().enumerate() {
+                let mut inc = Vec::new();
+                for &(v, pred) in &incoming {
+                    let part = match v {
+                        Value::Const(c) => {
+                            let kind = match &cx.m.constant(c).kind {
+                                ConstKind::Struct(e) => cx.m.constant(e[k]).kind.clone(),
+                                k @ (ConstKind::Poison | ConstKind::Undef | ConstKind::Zero) => k.clone(),
+                                _ => return Err("a phi of a struct constant not supported".into()),
+                            };
+                            Value::Const(cx.m.consts.intern(Constant { ty: fty, kind }))
+                        }
+                        _ => {
+                            // At the end of the block it comes from, before
+                            // its terminator (which must not define it).
+                            let insts = &f.blocks[pred.index()].insts;
+                            let term = *insts.last().unwrap();
+                            if f.insts[term.index()].result.map(Value::Local) == Some(v) {
+                                return Err("a phi of a struct an invoke returns".into());
+                            }
+                            let e = f.add_inst(
+                                Op::ExtractValue { aggregate: v, indices: vec![k as u32] },
+                                Some((None, fty)),
+                            );
+                            let n = f.blocks[pred.index()].insts.len();
+                            f.blocks[pred.index()].insts.insert(n - 1, e);
+                            f.result(e)
+                        }
+                    };
+                    inc.push((part, pred));
+                }
+                let p = f.add_inst(Op::Phi { fmf, incoming: inc }, Some((None, fty)));
+                parts.push(p);
+            }
+            rebuilt.push((i, r, ty, parts));
+        }
+        if rebuilt.is_empty() {
+            continue;
+        }
+        let mut new_phis = Vec::new();
+        let mut after = Vec::new();
+        for (_, r, ty, parts) in rebuilt.iter() {
+            let mut s = Seq { f, new: Vec::new() };
+            let mut agg = Value::Const(cx.m.consts.intern(Constant { ty: *ty, kind: ConstKind::Poison }));
+            for (k, &p) in parts.iter().enumerate() {
+                new_phis.push(p);
+                let pv = s.f.result(p);
+                agg = s.op(Op::InsertValue { aggregate: agg, element: pv, indices: vec![k as u32] }, *ty);
+            }
+            after.extend(std::mem::take(&mut s.new));
+            f.replace_uses(Value::Local(*r), agg);
+        }
+        let old: Vec<InstId> = rebuilt.iter().map(|x| x.0).collect();
+        let insts = &mut f.blocks[b.index()].insts;
+        let rest: Vec<InstId> = insts.drain(..).filter(|i| !old.contains(i)).collect();
+        let n_phis = rest.iter().take_while(|&&i| f.insts[i.index()].op.is_phi()).count();
+        let mut list = rest[..n_phis].to_vec();
+        list.extend(new_phis);
+        // A landing pad stays first after the phis.
+        let mut tail = rest[n_phis..].to_vec();
+        let lp = tail.first().is_some_and(|&i| matches!(f.insts[i.index()].op, Op::LandingPad { .. }));
+        if lp {
+            list.push(tail.remove(0));
+        }
+        list.extend(after);
+        list.extend(tail);
+        f.blocks[b.index()].insts = list;
+    }
+    Ok(())
 }
 
 /// A dynamic alloca (`alloca T, i32 %n`) becomes one of bytes,
@@ -221,7 +313,10 @@ fn check(cx: &Ctx, f: &Function, fname: &str) -> Result<(), String> {
         let inst = &f.insts[i.index()];
         if let Some(r) = inst.result
             && bad_type(f.locals[r.index()].ty)
-            && !matches!(inst.op, Op::Alloca { .. } | Op::Call(_))
+            && !matches!(
+                inst.op,
+                Op::Alloca { .. } | Op::Call(_) | Op::Invoke { .. } | Op::LandingPad { .. } | Op::InsertValue { .. }
+            )
         {
             return Err(format!(
                 "@{fname}: values of type {} are not supported yet",
@@ -229,8 +324,15 @@ fn check(cx: &Ctx, f: &Function, fname: &str) -> Result<(), String> {
             ));
         }
         match &inst.op {
-            Op::Invoke { .. } | Op::CallBr { .. } | Op::IndirectBr { .. } | Op::LandingPad { .. } | Op::Resume(_) => {
-                return Err(format!("@{fname}: exception handling and indirect branches are not supported yet"));
+            Op::CallBr { .. } | Op::IndirectBr { .. } => {
+                return Err(format!("@{fname}: indirect branches are not supported yet"));
+            }
+            Op::CatchSwitch { .. }
+            | Op::CatchPad { .. }
+            | Op::CleanupPad { .. }
+            | Op::CatchRet { .. }
+            | Op::CleanupRet { .. } => {
+                return Err(format!("@{fname}: Windows exception handling is not supported"));
             }
             Op::AtomicRmw { .. } | Op::CmpXchg { .. } => {
                 return Err(format!("@{fname}: atomic read-modify-write is not supported yet"));
@@ -552,8 +654,105 @@ fn promote_odd(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
             if matches!(op, Op::Load { .. } | Op::Store { .. }) {
                 let mut odd = res_odd.is_some();
                 op.for_each_value(|v| odd |= container(bits_of(cx, f, &orig, *v)).is_some());
-                if odd {
+                // A whole number of bytes: in pieces of 4, 2 and 1 bytes,
+                // the lowest first (little-endian).
+                let bits = match &op {
+                    Op::Store { value, .. } => bits_of(cx, f, &orig, *value),
+                    _ => res_odd.unwrap_or(0),
+                };
+                let plain = matches!(
+                    &op,
+                    Op::Store { volatile: false, atomic: None, .. } | Op::Load { volatile: false, atomic: None, .. }
+                );
+                if odd && !(plain && bits % 8 == 0) {
                     return Err("loads and stores of odd-sized integers are not supported yet".into());
+                }
+                if odd {
+                    let w = cx.m.types.int(container(bits).unwrap());
+                    let (i8t, i64t, ptr_ty) = (cx.m.types.int(8), cx.m.types.int(64), cx.m.types.ptr(0));
+                    let mut pieces = Vec::new();
+                    let mut off = 0;
+                    while off < bits / 8 {
+                        let size = [4, 2, 1].into_iter().find(|&n| off + n <= bits / 8).unwrap();
+                        pieces.push((off, size));
+                        off += size;
+                    }
+                    let nf = IntFlags::NONE;
+                    let fm = FastMath::default();
+                    let mut add = |f: &mut Function, op: Op, ty: Option<TypeId>| -> Value {
+                        let x = f.add_inst(op, ty.map(|t| (None, t)));
+                        new.push(x);
+                        if ty.is_some() { f.result(x) } else { Value::Const(ConstId(0)) }
+                    };
+                    let mut last = None;
+                    match op.clone() {
+                        Op::Store { value, ptr, align, .. } => {
+                            for (n, &(off, size)) in pieces.iter().enumerate() {
+                                let pt = cx.m.types.int(8 * size as u32);
+                                let sh = cx.int(w, 8 * off as i64);
+                                let v = add(
+                                    f,
+                                    Op::Binary { op: BinOp::LShr, flags: nf, fmf: fm, lhs: value, rhs: sh },
+                                    Some(w),
+                                );
+                                let v = add(f, Op::Cast { op: CastOp::Trunc, flags: nf, fmf: fm, value: v }, Some(pt));
+                                let o = cx.int(i64t, off as i64);
+                                let p = add(f, gep8(i8t, ptr, o), Some(ptr_ty));
+                                let st = Op::Store {
+                                    volatile: false,
+                                    atomic: None,
+                                    value: v,
+                                    ptr: p,
+                                    align: align.map(|a| a.min(size as u64)),
+                                };
+                                if n + 1 == pieces.len() {
+                                    last = Some(st);
+                                } else {
+                                    add(f, st, None);
+                                }
+                            }
+                        }
+                        Op::Load { ptr, align, .. } => {
+                            let mut acc = None;
+                            for (n, &(off, size)) in pieces.iter().enumerate() {
+                                let pt = cx.m.types.int(8 * size as u32);
+                                let o = cx.int(i64t, off as i64);
+                                let p = add(f, gep8(i8t, ptr, o), Some(ptr_ty));
+                                let v = add(
+                                    f,
+                                    Op::Load {
+                                        volatile: false,
+                                        atomic: None,
+                                        ptr: p,
+                                        align: align.map(|a| a.min(size as u64)),
+                                    },
+                                    Some(pt),
+                                );
+                                let v = add(f, Op::Cast { op: CastOp::ZExt, flags: nf, fmf: fm, value: v }, Some(w));
+                                let sh = cx.int(w, 8 * off as i64);
+                                let v =
+                                    add(f, Op::Binary { op: BinOp::Shl, flags: nf, fmf: fm, lhs: v, rhs: sh }, Some(w));
+                                acc = Some(match acc {
+                                    None => v,
+                                    Some(a) if n + 1 == pieces.len() => {
+                                        last = Some(Op::Binary { op: BinOp::Or, flags: nf, fmf: fm, lhs: a, rhs: v });
+                                        break;
+                                    }
+                                    Some(a) => add(
+                                        f,
+                                        Op::Binary { op: BinOp::Or, flags: nf, fmf: fm, lhs: a, rhs: v },
+                                        Some(w),
+                                    ),
+                                });
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
+                    f.insts[i.index()].op = last.unwrap();
+                    let n = new.len();
+                    f.blocks[b.index()].insts.splice(k..k, new);
+                    k += n + 1;
+                    continue;
                 }
             }
             match &mut op {
@@ -694,6 +893,139 @@ fn split_aggregate_memory(cx: &mut Ctx, f: &mut Function) {
             }
         }
     }
+}
+
+/// Arithmetic with overflow (`llvm.sadd.with.overflow.i32`, as Rust's
+/// overflow checks call it): the result and whether it overflowed, as a
+/// struct the selector keeps as its parts. It runs before wide integers
+/// are split, so `i128` sums are, and a 64-bit product's high half is the
+/// shape `wide.rs` keeps for instructions such as `umulh`.
+///
+/// - unsigned sums overflow if the result is below an operand, differences
+///   if the first operand is below the second;
+/// - signed ones if the result's sign differs from both operands' (sums),
+///   or from the first's while the operands' differ (differences);
+/// - products narrower than 64 bits are made at twice the width and
+///   overflow if they do not fit back; 64-bit ones overflow if the high
+///   half is not zero (unsigned) or not the low half's sign (signed: the
+///   unsigned high half less each operand where the other is negative).
+fn expand_overflow(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::Call(call) = &f.insts[i.index()].op else {
+                k += 1;
+                continue;
+            };
+            let name = callee_name(cx.m, call).unwrap_or_default();
+            let Some(kind) = name.strip_prefix("llvm.").and_then(|n| n.split_once(".with.overflow")).map(|x| x.0)
+            else {
+                k += 1;
+                continue;
+            };
+            let kind = kind.to_string();
+            let (a, b2) = (call.args[0].value, call.args[1].value);
+            let r = f.insts[i.index()].result.ok_or("an overflow intrinsic without a result")?;
+            let sty = f.locals[r.index()].ty;
+            let ty = cx.value_ty(f, a);
+            let Type::Int(bits) = *cx.m.types.get(ty) else {
+                return Err(format!("{name} of vectors is not supported yet"));
+            };
+            let i1 = cx.m.types.int(1);
+            let mut s = Seq { f, new: Vec::new() };
+            let zero = cx.int(ty, 0);
+            let cmp = |s: &mut Seq, pred, l, r| s.op(Op::ICmp { pred, samesign: false, lhs: l, rhs: r }, i1);
+            let (value, ov) = match kind.as_str() {
+                "uadd" | "sadd" | "usub" | "ssub" => {
+                    let op = if kind.ends_with("add") { BinOp::Add } else { BinOp::Sub };
+                    let v = s.bin(op, a, b2, ty);
+                    let ov = match kind.as_str() {
+                        "uadd" => cmp(&mut s, ICmpPred::Ult, v, a),
+                        "usub" => cmp(&mut s, ICmpPred::Ult, a, b2),
+                        _ => {
+                            let (x, y) = if kind == "sadd" { (a, b2) } else { (a, a) };
+                            let p = s.bin(BinOp::Xor, x, v, ty);
+                            let q = if kind == "sadd" {
+                                s.bin(BinOp::Xor, b2, v, ty)
+                            } else {
+                                s.bin(BinOp::Xor, y, b2, ty)
+                            };
+                            let both = s.bin(BinOp::And, p, q, ty);
+                            cmp(&mut s, ICmpPred::Slt, both, zero)
+                        }
+                    };
+                    (v, ov)
+                }
+                "umul" | "smul" if bits <= 32 => {
+                    let wide = cx.m.types.int(2 * bits);
+                    let ext = if kind == "umul" { CastOp::ZExt } else { CastOp::SExt };
+                    let (wa, wb) = (s.cast(ext, a, wide), s.cast(ext, b2, wide));
+                    let p = s.bin(BinOp::Mul, wa, wb, wide);
+                    let v = s.cast(CastOp::Trunc, p, ty);
+                    let back = s.cast(ext, v, wide);
+                    (v, cmp(&mut s, ICmpPred::Ne, back, p))
+                }
+                "umul" | "smul" if bits == 64 => {
+                    let i128t = cx.m.types.int(128);
+                    let v = s.bin(BinOp::Mul, a, b2, ty);
+                    let (wa, wb) = (s.cast(CastOp::ZExt, a, i128t), s.cast(CastOp::ZExt, b2, i128t));
+                    let p = s.bin(BinOp::Mul, wa, wb, i128t);
+                    let sh = cx.int(i128t, 64);
+                    let h = s.bin(BinOp::LShr, p, sh, i128t);
+                    let mut hi = s.cast(CastOp::Trunc, h, ty);
+                    if kind == "umul" {
+                        (v, cmp(&mut s, ICmpPred::Ne, hi, zero))
+                    } else {
+                        let c63 = cx.int(ty, 63);
+                        for (x, y) in [(a, b2), (b2, a)] {
+                            let sign = s.bin(BinOp::AShr, x, c63, ty);
+                            let take = s.bin(BinOp::And, sign, y, ty);
+                            hi = s.bin(BinOp::Sub, hi, take, ty);
+                        }
+                        let sign = s.bin(BinOp::AShr, v, c63, ty);
+                        (v, cmp(&mut s, ICmpPred::Ne, hi, sign))
+                    }
+                }
+                _ => return Err(format!("{name} is not supported yet")),
+            };
+            // The extractvalues of the result take its parts; anything
+            // else, a struct made of them.
+            let mut gone = Vec::new();
+            let mut others = false;
+            let order: Vec<InstId> = s.f.insts_in_order().collect();
+            for j in order {
+                match &s.f.insts[j.index()].op {
+                    Op::ExtractValue { aggregate: Value::Local(x), indices } if *x == r && indices.len() == 1 => {
+                        let part = if indices[0] == 0 { value } else { ov };
+                        if let Some(e) = s.f.insts[j.index()].result {
+                            s.f.replace_uses(Value::Local(e), part);
+                        }
+                        gone.push(j);
+                    }
+                    op => op.for_each_value(|v| others |= *v == Value::Local(r)),
+                }
+            }
+            for blk in s.f.blocks.iter_mut() {
+                blk.insts.retain(|j| !gone.contains(j));
+            }
+            if others {
+                let poison = Value::Const(cx.m.consts.intern(Constant { ty: sty, kind: ConstKind::Poison }));
+                let x = s.op(Op::InsertValue { aggregate: poison, element: value, indices: vec![0] }, sty);
+                let y = s.op(Op::InsertValue { aggregate: x, element: ov, indices: vec![1] }, sty);
+                s.f.replace_uses(Value::Local(r), y);
+            }
+            let new = std::mem::take(&mut s.new);
+            // (Extractvalues before it in its block were removed.)
+            let k0 = f.blocks[b.index()].insts.iter().position(|&j| j == i).unwrap();
+            k = k0;
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
+    Ok(())
 }
 
 fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
@@ -1439,8 +1771,14 @@ fn split_phi_edges(f: &mut Function) {
         };
         let mut edge = 0;
         let mut new_targets: Vec<BlockId> = Vec::new();
+        // An invoke's landing pad is reached only by unwinding: that edge
+        // is never split (its phis' copies go before the call).
+        let unwind = match &f.insts[t.index()].op {
+            Op::Invoke { unwind, .. } => Some(*unwind),
+            _ => None,
+        };
         for s in succs {
-            if !has_phis(f, s) {
+            if !has_phis(f, s) || Some(s) == unwind {
                 new_targets.push(s);
                 continue;
             }

@@ -14,9 +14,13 @@ use crate::object::{GlobalData, Item, SectionKind};
 use crate::prepare::{self, Ctx};
 use crate::target::{Target, sext};
 
-pub fn function(t: &Target, f: &MFunc, out: &mut String) {
+/// Writes function `f`, the `index`th, with its exception table if it has
+/// landing pads.
+pub fn function(t: &Target, f: &MFunc, index: usize, out: &mut String) -> Result<(), String> {
     let abi = &f.abi;
     let sym = abi.symbol(&f.name);
+    let table = crate::eh::lsda(t, f, abi.syntax, &|n| abi.symbol(n))?;
+    let table_label = format!("{}exception{index}", abi.local_prefix());
     let _ = writeln!(out, "\t.p2align 2");
     if f.global {
         let _ = writeln!(out, "\t.globl {sym}");
@@ -26,6 +30,11 @@ pub fn function(t: &Target, f: &MFunc, out: &mut String) {
     }
     let _ = writeln!(out, "{sym}:");
     let _ = writeln!(out, "\t.cfi_startproc");
+    if let (Some(eh), Some(_)) = (&f.eh, &table) {
+        // Indirect, PC-relative, 4 bytes; and PC-relative.
+        let _ = writeln!(out, "\t.cfi_personality 155, {}", abi.symbol(&eh.personality));
+        let _ = writeln!(out, "\t.cfi_lsda 16, {table_label}");
+    }
     let mut referenced = vec![false; f.blocks.len()];
     for b in &f.blocks {
         for i in &b.insts {
@@ -48,7 +57,33 @@ pub fn function(t: &Target, f: &MFunc, out: &mut String) {
     if abi.syntax == Syntax::Elf {
         let _ = writeln!(out, "\t.size {sym}, .-{sym}");
     }
+    if let Some(table) = table {
+        // The table's bytes, its references to types through the GOT each
+        // relative to a label at it.
+        let _ = writeln!(out, "\t{}", abi.section_directive(SectionKind::ExceptTable));
+        let _ = writeln!(out, "\t.p2align 2");
+        // A symbol at it too, for the unwind tables to name.
+        let _ = writeln!(out, "GCC_except_table{index}:\n{table_label}:");
+        let mut at = 0;
+        let mut refs = table.got_refs.iter().peekable();
+        let mut n = 0;
+        while at < table.bytes.len() {
+            if let Some((off, name)) = refs.next_if(|r| r.0 as usize == at) {
+                let l = format!("{}ttype{index}_{n}", abi.local_prefix());
+                n += 1;
+                let _ = writeln!(out, "{l}:\n\t.long {name}@GOT-{l}");
+                at = *off as usize + 4;
+                continue;
+            }
+            let end = refs.peek().map_or(table.bytes.len(), |r| r.0 as usize).min(at + 16);
+            let list: Vec<String> = table.bytes[at..end].iter().map(|b| b.to_string()).collect();
+            let _ = writeln!(out, "\t.byte {}", list.join(", "));
+            at = end;
+        }
+        let _ = writeln!(out, "\t{}", abi.section_directive(SectionKind::Text));
+    }
     out.push('\n');
+    Ok(())
 }
 
 /// The globals with initial values, in module order, as data.

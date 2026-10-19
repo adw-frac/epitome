@@ -4,7 +4,12 @@
 //!    (recursing, saving registers, one with a variable-length array),
 //!    unwinds through them to `main`'s `catch`, on this machine: without
 //!    our `__eh_frame` the C++ runtime calls `terminate`.
-//! 2. On RISC-V, our object's `.eh_frame` and `.text` are what LLVM's
+//! 2. Functions of ours with landing pads (`tests/unwind/catch.cpp`):
+//!    exceptions caught by type and all, destructors run, rethrown, and
+//!    caught by an inner or an outer `try`, by their exception tables;
+//!    the object written directly and the one assembled from our assembly
+//!    are the same. (Rust's panics: `tests/rust.rs`.)
+//! 3. On RISC-V, our object's `.eh_frame` and `.text` are what LLVM's
 //!    assembler (rustc's) makes of our assembly, byte for byte, for C
 //!    programs of `tests/programs`. (AArch64's ELF tables are checked so
 //!    against clang by `tests/programs.rs`.)
@@ -12,6 +17,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use draconian_codegen::assembler::Assembler;
 use draconian_codegen::elf;
 use draconian_codegen::target::Target;
 use draconian_codegen::{Options, compile};
@@ -55,6 +61,44 @@ fn exceptions_unwind_through_our_frames() {
             .unwrap();
         let out = run(&mut Command::new(&exe)).unwrap();
         assert_eq!(out, "-50\ncaught boom 7\ncaught boom 8\n", "{opt}");
+    }
+}
+
+#[test]
+fn landing_pads_catch_and_clean_up() {
+    if !(have("clang++") && cfg!(target_arch = "aarch64") && cfg!(target_os = "macos")) {
+        eprintln!("needs clang++ on an AArch64 Mac; skipping");
+        return;
+    }
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/unwind");
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("landing");
+    std::fs::create_dir_all(&tmp).unwrap();
+    // What clang makes of it all.
+    let reference = tmp.join("reference");
+    run(Command::new("clang++")
+        .args(["-std=c++17"])
+        .arg(dir.join("main_catch.cpp"))
+        .arg(dir.join("catch.cpp"))
+        .arg("-o")
+        .arg(&reference))
+    .unwrap();
+    let want = run(&mut Command::new(&reference)).unwrap();
+    let t = Target::aarch64();
+    for opt in ["-O0", "-O2"] {
+        let ll = tmp.join(format!("catch{opt}.ll"));
+        run(Command::new("clang++").args(["-S", "-emit-llvm", opt]).arg(dir.join("catch.cpp")).arg("-o").arg(&ll))
+            .unwrap();
+        let mut m = draconian_ir::parse_module(&std::fs::read_to_string(&ll).unwrap()).unwrap();
+        let compiled = compile(&t, &mut m, &Options::default()).unwrap();
+        let bytes = compiled.object_file(&t).unwrap();
+        let assembled = Assembler::new(&t).assemble(&compiled.asm, None).and_then(|a| a.file(&t)).unwrap();
+        assert!(bytes == assembled, "{opt}: the object assembled from our assembly differs");
+        let o = tmp.join(format!("catch{opt}.o"));
+        std::fs::write(&o, bytes).unwrap();
+        let exe = tmp.join(format!("catch{opt}"));
+        run(Command::new("clang++").args(["-std=c++17"]).arg(dir.join("main_catch.cpp")).arg(&o).arg("-o").arg(&exe))
+            .unwrap();
+        assert_eq!(run(&mut Command::new(&exe)).unwrap(), want, "{opt}");
     }
 }
 

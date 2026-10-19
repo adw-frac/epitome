@@ -13,7 +13,8 @@ assembly: **Done**. Assembling other compilers' assembly: **Partial** (see
 below). Programs and SQLite built
 from our own Mach-O objects, linked by the system linker, run and answer as
 clang's builds do. Unwind tables (`.eh_frame`): **Done**. Exception
-tables, compact unwind and debug info: **Later**.
+tables: **Done** for Mach-O, **Later** for ELF. Compact unwind and debug
+info: **Later**.
 
 ## Sources
 
@@ -383,8 +384,64 @@ The checks:
   array) must reach `main`'s `catch`. Without the tables the C++ runtime
   calls `terminate`.
 
+## Exception tables
+
+A function with landing pads has a language-specific data area (LSDA) in
+`__TEXT,__gcc_except_tab`, which its personality routine
+(`___gxx_personality_v0`, `_rust_eh_personality`) reads while unwinding
+(`eh.rs`). It is built after layout, from the call instructions' offsets.
+The form is the Itanium ABI's, as clang and rustc write it:
+
+- **The header:** the landing pads' base is omitted (it is the
+  function's start). The type table's encoding is `0x9b` (indirect,
+  PC-relative, signed, 4 bytes: through the GOT), and its end is a
+  ULEB128. The call sites' encoding is ULEB128.
+- **Call sites:** one for every call, so that unwinding through any of them
+  is allowed. Each gives its offset, its length (4), its landing pad's
+  offset (0 for none), and its action (0 to clean up only, else 1 plus the
+  offset of its chain of action records).
+- **Action records:** each is a filter and the offset to the next. A filter
+  is a type's index in the type table, from 1 (catch it); 0 (a cleanup);
+  or negative, for an exception filter (−1 less its list's offset).
+- **The type table:** last type first, aligned to 4. Each entry is a
+  GOT-relative reference to the type's information, or 0 to catch all.
+  After it come the filters' lists of type indices, each ending in 0.
+
+The unwind tables then name the routine and the LSDA. A CIE for each
+personality has augmentation `zPLR`. The personality goes through its GOT
+entry: 4 bytes, the relocation whose `use` is `got-pcrel32`
+(`ARM64_RELOC_POINTER_TO_GOT`). The LSDA's encoding is `0x10` and the
+FDEs' is `0x10`. A function's FDE adds its LSDA's address, 8 bytes, a pair
+of relocations as its own address is.
+
+Assembly writes `.cfi_personality 155, sym` and `.cfi_lsda 16, label`,
+and the table as `.byte` lists, with `.long sym@GOT-label` for the types.
+`draconian-as` reads all of these. Two things were found by running
+programs, not by comparing bytes:
+
+- **Mach-O's 4-byte GOT reference** holds `0xc0000000` less its own offset
+  in the section. That is what clang's assembler writes there, and the
+  relocation gives the rest.
+- **The LSDA's pair of relocations names a symbol at the LSDA** (we write
+  `GCC_except_tableN`, as clang does). With a section symbol and the
+  offset in the field, which is what clang's assembler makes of a
+  temporary label, the linker gives the unwinder the section's start
+  *less* the offset. Every table but the first is then wrong. Clang's own
+  builds don't meet this because they use compact unwind entries.
+
+The checks run programs. `tests/unwind.rs` covers C++ code of ours that
+catches by type and all, runs destructors, rethrows, and nests `try`s,
+driven by a clang-built `main`. `tests/rust.rs` covers whole Rust programs:
+rustc writes their IR, and their crate's object is ours, linked against
+rustc's standard library. Their panics unwind through drops, and
+`catch_unwind`, `resume_unwind` and overflow checks all work. Each program
+must print what rustc's build of it does, at `-C opt-level=0` and `2`.
+
 ## Not yet
 
+- ELF exception tables: the personality and the types caught as
+  `DW.ref.*` symbols in a COMDAT group, with encodings `0x9c` and `0x1b`.
+  A function with landing pads is an error under ELF for now.
 - Compact unwind entries for Mach-O (smaller than DWARF's, and what Apple's
   assembler writes where a frame fits them), and debug info.
 - `.subsections_via_symbols` (Mach-O): without it the linker keeps each
