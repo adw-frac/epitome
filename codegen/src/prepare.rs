@@ -1355,7 +1355,26 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                     Value::Const(c) => crate::target::lit_of(cx.m, c),
                     _ => None,
                 };
+                // A rotation by a variable amount, where the description
+                // has one (the role "rotr.iN"): right as it is, left as
+                // right by the negated amount.
+                let rotate = !vector
+                    && constant.is_none()
+                    && args[0] == args[1]
+                    && cx.t.role(&format!("rotr.i{eb}")).is_some();
+                if rotate && base == "llvm.fshl" {
+                    let zero = cx.int(ty, 0);
+                    let neg = s.bin(BinOp::Sub, zero, args[2], ty);
+                    let v = call_intrinsic(cx, &mut s, &format!("llvm.fshr.i{eb}"), vec![args[0], args[0], neg], ty);
+                    let new = std::mem::take(&mut s.new);
+                    f.replace_uses(Value::Local(r), v);
+                    let n = new.len();
+                    f.blocks[b.index()].insts.splice(k..=k, new);
+                    k += n;
+                    continue;
+                }
                 let value = match constant {
+                    _ if rotate => None,
                     Some(_) if !vector && cx.selects_intrinsic(&name) => None,
                     Some(c) => {
                         // fshl(a, b, c) is (a << c) | (b >> (w - c)); fshr(a, b, c)

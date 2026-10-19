@@ -5962,14 +5962,6 @@ define void @LDR_H_ldst_pos.1(i64 "reg"="h" %ht, i64 "reg"="xsp" %xn_sp, i64 "im
   ret void
 }
 
-define void @RORV_32_dp_2src.0(i64 "reg"="w" %wd, i64 "reg"="w" %wn, i64 "reg"="w" %wm) "enc"="00011010110 wm:5 001011 wn:5 wd:5" "asm"="rorv {wd}, {wn}, {wm}" "asmonly" "aliases"="ror" {
-  ret void
-}
-
-define void @RORV_32_dp_2src.ROR.0(i64 "reg"="w" %wd, i64 "reg"="w" %wn, i64 "reg"="w" %wm) "enc"="00011010110 wm:5 001011 wn:5 wd:5" "asm"="ror {wd}, {wn}, {wm}" "asmonly" "nodecode" {
-  ret void
-}
-
 define void @CRC32B_32C_dp_2src.0(i64 "reg"="w" %wd, i64 "reg"="w" %wn, i64 "reg"="w" %wm) "enc"="00011010110 wm:5 010000 wn:5 wd:5" "asm"="crc32b {wd}, {wn}, {wm}" "asmonly" {
   ret void
 }
@@ -6023,14 +6015,6 @@ define void @IRG_64I_dp_2src.1(i64 "reg"="xsp" %xd_sp, i64 "reg"="xsp" %xn_sp, i
 }
 
 define void @GMI_64G_dp_2src.0(i64 "reg"="x" %xd, i64 "reg"="xsp" %xn_sp, i64 "reg"="x" %xm) "enc"="10011010110 xm:5 000101 xn_sp:5 xd:5" "asm"="gmi {xd}, {xn_sp}, {xm}" "asmonly" {
-  ret void
-}
-
-define void @RORV_64_dp_2src.0(i64 "reg"="x" %xd, i64 "reg"="x" %xn, i64 "reg"="x" %xm) "enc"="10011010110 xm:5 001011 xn:5 xd:5" "asm"="rorv {xd}, {xn}, {xm}" "asmonly" "aliases"="ror" {
-  ret void
-}
-
-define void @RORV_64_dp_2src.ROR.0(i64 "reg"="x" %xd, i64 "reg"="x" %xn, i64 "reg"="x" %xm) "enc"="10011010110 xm:5 001011 xn:5 xd:5" "asm"="ror {xd}, {xn}, {xm}" "asmonly" "nodecode" {
   ret void
 }
 
@@ -10463,10 +10447,6 @@ define void @CLS_asimdmisc_R.4(i64 "reg"="q" %vd, i64 "reg"="q" %vn) "enc"="0000
 }
 
 define void @CLS_asimdmisc_R.5(i64 "reg"="q" %vd, i64 "reg"="q" %vn) "enc"="0100111010100000010010 vn:5 vd:5" "asm"="cls {vd:4s}, {vn:4s}" "asmonly" {
-  ret void
-}
-
-define void @CNT_asimdmisc_R.0(i64 "reg"="q" %vd, i64 "reg"="q" %vn) "enc"="0000111000100000010110 vn:5 vd:5" "asm"="cnt {vd:8b}, {vn:8b}" "asmonly" {
   ret void
 }
 

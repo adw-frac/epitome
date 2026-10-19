@@ -465,7 +465,9 @@ holding addresses go where the loader can write (`__DATA,__const`,
 
 A convention may also name a `far-scratch` register, never allocated, for
 the addresses of stack slots further than an instruction's offset reaches
-(RISC-V's 2,047 bytes); AArch64's reach 32KB and need none.
+(RISC-V's 2,047 bytes). AArch64 names none: a spill scratch register free
+at that point holds the address instead, made by `add x15, sp, x15, uxtx`
+(the role `far-add`, since plain `add` reads register 31 as zero).
 
 More of what conventions differ in is data too:
 
@@ -570,7 +572,9 @@ Loads and stores of odd whole-byte widths (`i48`, which Rust passes
   `draconian-llc --check-target` ([targets.md](targets.md)): every
   instruction encodes, decodes, disassembles and assembles back to itself;
   each recipe's instructions, by their bodies, compute what the IR they
-  replace computes, on edge values; a smoke program compiles under every
+  replace computes, on edge values (scalar recipes made only of scalar
+  instructions; those through vector registers, such as the population
+  count, are checked by the program tests); a smoke program compiles under every
   convention. It also breaks the RISC-V description on purpose, to show
   the checks find each kind of mistake, and checks that the table has the
   combinations it should, and not those it must not (`tst` with a

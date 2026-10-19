@@ -66,6 +66,19 @@ define i64 @EXTRX(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %c) "enc"="1 00 
 }
 
 
+; Rotation right by a register, the amount taken modulo the width: a funnel
+; shift right with both halves the same value. A rotation left is one right
+; by the negated amount (prepare.rs, for an entry with the role).
+define i32 @RORVW(i32 "reg"="w" %n, i32 "reg"="w" %m) "enc"="0 0 0 11010110 m:5 0010 11 n:5 d:5" "asm"="ror {d}, {n}, {m}" "role"="rotr.i32" {
+  %r = call i32 @llvm.fshr.i32(i32 %n, i32 %n, i32 %m)
+  ret i32 %r
+}
+
+define i64 @RORVX(i64 "reg"="x" %n, i64 "reg"="x" %m) "enc"="1 0 0 11010110 m:5 0010 11 n:5 d:5" "asm"="ror {d}, {n}, {m}" "role"="rotr.i64" {
+  %r = call i64 @llvm.fshr.i64(i64 %n, i64 %n, i64 %m)
+  ret i64 %r
+}
+
 declare i32 @llvm.bitreverse.i32(i32)
 declare i64 @llvm.bitreverse.i64(i64)
 

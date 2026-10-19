@@ -2584,6 +2584,28 @@ define <8 x i8> @ADDV8b(<8 x i8> "reg"="v" %n) "feature"="neon" "enc"="0 0 0 011
   ret <8 x i8> %n
 }
 
+; Population counts: the bits set in each byte. A scalar's count is the
+; bytes' counts summed (60-recipes.ll).
+declare <8 x i8> @llvm.ctpop.v8i8(<8 x i8>)
+
+define <8 x i8> @CNT8b(<8 x i8> "reg"="v" %n) "feature"="neon" "enc"="0 0 0 01110 00 10000 00101 10 n:5 d:5" "asm"="cnt {d:8b}, {n:8b}" {
+  %r = call <8 x i8> @llvm.ctpop.v8i8(<8 x i8> %n)
+  ret <8 x i8> %r
+}
+
+; A general register's bits into the low half of a vector register (the
+; rest zero), as fmov d, x and fmov s, w do.
+define <8 x i8> @FMOVvX(i64 "reg"="x" %n) "feature"="neon" "enc"="1 00 11110 01 1 00 111 000000 n:5 d:5" "asm"="fmov {d:d}, {n}" "nodecode" {
+  %r = bitcast i64 %n to <8 x i8>
+  ret <8 x i8> %r
+}
+
+define <8 x i8> @FMOVvW(i32 "reg"="w" %n) "feature"="neon" "enc"="0 00 11110 00 1 00 111 000000 n:5 d:5" "asm"="fmov {d:s}, {n}" "nodecode" {
+  %z = zext i32 %n to i64
+  %r = bitcast i64 %z to <8 x i8>
+  ret <8 x i8> %r
+}
+
 declare i8 @llvm.vector.reduce.add.v8i8(<8 x i8>)
 
 define i8 @reduce.add.v8i8(<8 x i8> "reg"="v" %v) "recipe"="reduce.add.v8i8.expand" {

@@ -1502,6 +1502,15 @@ impl Target {
             if f.params.iter().any(|p| matches!(m.types.get(f.locals[p.local.index()].ty), Type::Vector { .. })) {
                 continue;
             }
+            // Nor scalar ones made of vector instructions (a population
+            // count): the program tests check those.
+            let through_vectors = m.global_order.iter().copied().find(|&g| m.global(g).name.as_deref() == Some(expand)).is_some_and(|g| {
+                let e = self.func(g);
+                e.locals.iter().any(|l| matches!(m.types.get(l.ty), Type::Vector { .. }))
+            });
+            if through_vectors {
+                continue;
+            }
             let want = self.body_tree(f, &HashMap::new(), 0)?.ok_or("recipe without a value")?;
             let g = m
                 .global_order

@@ -39,6 +39,8 @@ split into two halves:
   key for each instruction.
 - [Combines](combine.md): the rule language, the discrimination tree that
   matches rules, and the combiner pass.
+- [Code generation: what is left](backend-plan.md): the gap to clang,
+  measured, and the plan for allocation, scheduling and machine passes.
 
 ## Clean-room rules
 

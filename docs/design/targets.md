@@ -316,7 +316,11 @@ The calling convention adds a few registers:
 
 - `scratch` and `fp-scratch`: for spill code;
 - `far-scratch`: for the address of a stack slot further away than an
-  instruction's offset can reach (beyond 2,047 bytes on RISC-V).
+  instruction's offset can reach (beyond 2,047 bytes on RISC-V). Without
+  one, a spill scratch register that is free at that instruction is used
+  (AArch64, whose offsets reach 4KB for bytes and 32KB for doublewords).
+  The address is made with the target's `far-add` instruction where it
+  has one, an add that may take the stack pointer, else `add`.
 
 ## What is still built in
 

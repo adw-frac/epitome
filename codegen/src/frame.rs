@@ -73,8 +73,9 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     // the offset, added to the base; the instruction then uses offset 0.
     let far = f.abi.far_scratch;
     for b in &mut f.blocks {
-        let old = std::mem::take(&mut b.insts);
-        for mut inst in old {
+        let mut old = std::mem::take(&mut b.insts);
+        for j in 0..old.len() {
+            let mut inst = std::mem::replace(&mut old[j], MInst::new(0, vec![]));
             let mut at = None;
             for (k, op) in inst.ops.iter_mut().enumerate() {
                 match op {
@@ -104,10 +105,19 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
                 let values: Vec<Option<i64>> =
                     inst.ops.iter().map(|o| if let MOp::Imm(v) = o { Some(*v) } else { None }).collect();
                 if !t.instrs[i].fits(&values) {
-                    let tmp = far.ok_or_else(|| {
-                        format!("{}: a frame offset of {off}, and the convention names no far-scratch register", f.name)
+                    // A spill scratch register free here, else the
+                    // convention's far-scratch register.
+                    let tmp = free_scratch(t, &f.abi.scratch, &inst, &old[j + 1..]).or(far).ok_or_else(|| {
+                        format!(
+                            "{}: a frame offset of {off}, no scratch register free, and the convention names no far-scratch register",
+                            f.name
+                        )
                     })?;
-                    let add = t.role("add").ok_or("no \"add\" instruction for a far frame offset")?;
+                    // (An add that may take sp, where plain "add" cannot.)
+                    let add = t
+                        .role("far-add")
+                        .or_else(|| t.role("add"))
+                        .ok_or("no \"add\" instruction for a far frame offset")?;
                     constant(t, &mut b.insts, tmp, off)?;
                     b.insts.push(MInst::new(
                         add,
@@ -383,4 +393,27 @@ fn tidy_branches(t: &Target, f: &mut MFunc) {
             f.blocks[i].insts.pop();
         }
     }
+}
+
+/// A scratch register that `inst` does not name and that nothing after it
+/// in the block reads before writing. Scratch registers hold values only
+/// within a spill sequence, never from one block to the next.
+fn free_scratch(t: &Target, scratch: &[u8], inst: &MInst, rest: &[MInst]) -> Option<u8> {
+    let names = |i: &MInst, r: u8| i.ops.iter().any(|o| *o == MOp::Reg(Reg::P(r)));
+    scratch.iter().copied().find(|&r| {
+        if names(inst, r) || inst.imp_uses.contains(&r) {
+            return false;
+        }
+        for next in rest {
+            let (defs, uses) = next.defs_uses(t);
+            let is = |k: &usize| next.ops[*k] == MOp::Reg(Reg::P(r));
+            if uses.iter().any(is) || next.imp_uses.contains(&r) {
+                return false;
+            }
+            if defs.iter().any(is) || next.imp_defs.contains(&r) {
+                return true;
+            }
+        }
+        true
+    })
 }

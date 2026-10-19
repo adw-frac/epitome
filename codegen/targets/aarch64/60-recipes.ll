@@ -202,3 +202,36 @@ define i64 @umin.x.expand(i64 %a, i64 %b) {
   ret i64 %r
 }
 
+
+; Population count with the vector unit: the bits into a vector register,
+; each byte's count, their sum.
+declare i32 @llvm.ctpop.i32(i32)
+declare i64 @llvm.ctpop.i64(i64)
+
+define i32 @ctpop.w(i32 "reg"="w" %a) "feature"="neon" "recipe"="ctpop.w.expand" {
+  %r = call i32 @llvm.ctpop.i32(i32 %a)
+  ret i32 %r
+}
+
+define i32 @ctpop.w.expand(i32 %a) {
+  %v = call <8 x i8> @FMOVvW(i32 %a)
+  %c = call <8 x i8> @CNT8b(<8 x i8> %v)
+  %s = call <8 x i8> @ADDV8b(<8 x i8> %c)
+  %b = call i8 @UMOVb64(<8 x i8> %s, i64 0)
+  %r = zext i8 %b to i32
+  ret i32 %r
+}
+
+define i64 @ctpop.x(i64 "reg"="x" %a) "feature"="neon" "recipe"="ctpop.x.expand" {
+  %r = call i64 @llvm.ctpop.i64(i64 %a)
+  ret i64 %r
+}
+
+define i64 @ctpop.x.expand(i64 %a) {
+  %v = call <8 x i8> @FMOVvX(i64 %a)
+  %c = call <8 x i8> @CNT8b(<8 x i8> %v)
+  %s = call <8 x i8> @ADDV8b(<8 x i8> %c)
+  %b = call i8 @UMOVb64(<8 x i8> %s, i64 0)
+  %r = zext i8 %b to i64
+  ret i64 %r
+}

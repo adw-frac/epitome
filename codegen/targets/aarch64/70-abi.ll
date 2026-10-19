@@ -33,6 +33,8 @@
 ;                 record of the saved argument registers and the stack
 ;                 (__stack, __gr_top, __vr_top, __gr_offs, __vr_offs);
 ;                 without it, a pointer to the next argument
+;   far-scratch   a register never allocated, for the address of a stack
+;                 slot too far for an instruction's offset
 ;   fp-args, fp-result, fp-clobbers, fp-saved, fp-scratch
 ;                 the same, for floating-point values in d0-d31 (only
 ;                 the low 64 bits of d8-d15 are preserved)

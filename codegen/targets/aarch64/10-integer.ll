@@ -15,6 +15,14 @@ define i64 @ADDXrr(i64 "reg"="x" %n, i64 "reg"="x" %m) "enc"="1 0 0 01011 00 0 m
   ret i64 %r
 }
 
+; The extended-register form with a 64-bit register unchanged (uxtx): the
+; add whose first source may be sp, for the address of a stack slot too far
+; for an offset. Selection uses ADDXrr.
+define i64 @ADDXrx64(i64 "reg"="xsp" %n, i64 "reg"="x" %m) "enc"="1 0 0 01011 00 1 m:5 011 000 n:5 d:5" "asm"="add {d}, {n}, {m}, uxtx" "dclass"="xsp" "role"="far-add" "nomatch" {
+  %r = add i64 %n, %m
+  ret i64 %r
+}
+
 define i32 @ADDWrs(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 0 0 01011 00 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="add {d}, {n}, {m}, lsl #{sh}" {
   %s = shl i32 %m, %sh
   %r = add i32 %n, %s
