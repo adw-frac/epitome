@@ -8,7 +8,7 @@
 ; t6 (and ft9-ft11) are kept for spill code, and t4 for the addresses of
 ; stack slots too far for an offset ("far-scratch").
 
-!abi.lp64d = !{!100, !101, !102, !103, !104, !105, !106, !107, !108, !109, !110, !111, !112, !113, !114, !115, !116}
+!abi.lp64d = !{!100, !101, !102, !103, !104, !105, !106, !107, !108, !109, !110, !111, !112, !113, !114, !115, !116, !117}
 !100 = !{!"args", !"a0-a7"}
 !101 = !{!"result", !"a0"}
 !102 = !{!"clobbers", !"ra", !"t0-t2", !"a0-a7", !"t3-t6"}
@@ -26,3 +26,4 @@
 !114 = !{!"fp-saved", !"fs0-fs1", !"fs2-fs11"}
 !115 = !{!"fp-scratch", !"ft9-ft11"}
 !116 = !{!"far-scratch", !"t4"}
+!117 = !{!"base", !"s1"}

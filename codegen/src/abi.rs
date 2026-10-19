@@ -49,6 +49,15 @@ pub struct Abi {
     /// instruction's offset (`far-scratch`), never allocated; for machines
     /// whose offsets reach only a little way (RISC-V's 2047 bytes).
     pub far_scratch: Option<u8>,
+    /// Where a caller puts the address its callee writes its result at
+    /// (`sret`: AArch64's x8); if none, it is the first argument.
+    pub sret: Option<u8>,
+    /// A saved register that addresses the frame where `sp` moves (a
+    /// function with dynamic allocas).
+    pub base: Option<u8>,
+    /// An integer wider than a register starts in an even-numbered
+    /// register, and at a 16-aligned stack slot (AAPCS64's `i128`).
+    pub wide_pairs_even: bool,
     /// Floating-point registers (32-63 for d0-d31): arguments, result,
     /// those a call may change, those preserved, and scratch for spills.
     pub fp_args: Vec<u8>,
@@ -70,6 +79,12 @@ pub struct Abi {
 pub struct Part {
     pub size: u64,
     pub fp: bool,
+    /// The address a result is returned at (`sret`): in the convention's
+    /// register for it, if it has one, without taking an argument's.
+    pub sret: bool,
+    /// A part of an integer wider than a register (`i128`), which some
+    /// conventions start in an even register.
+    pub wide: bool,
 }
 
 /// Where one argument goes.
@@ -103,6 +118,15 @@ impl Abi {
         self.fp_saved.clone()
     }
 
+    /// The registers a result of `n` integer parts comes back in: the
+    /// result register and the argument registers after it (x0 and x1).
+    pub fn results(&self, n: usize) -> Vec<u8> {
+        let at = self.args.iter().position(|&r| r == self.result).unwrap_or(0);
+        let mut out = vec![self.result];
+        out.extend(self.args.iter().skip(at + 1).take(n.saturating_sub(1)).copied());
+        out
+    }
+
     /// Every register a call may change.
     pub fn all_clobbers(&self) -> Vec<u8> {
         self.clobbers.iter().chain(&self.fp_clobbers).copied().collect()
@@ -112,7 +136,8 @@ impl Abi {
     /// many are named (the rest are variable arguments), and the bytes of
     /// stack the call needs.
     pub fn assign(&self, sizes: &[u64], named: usize) -> (Vec<ArgLoc>, i64) {
-        let parts: Vec<Vec<Part>> = sizes.iter().map(|&s| vec![Part { size: s, fp: false }]).collect();
+        let parts: Vec<Vec<Part>> =
+            sizes.iter().map(|&s| vec![Part { size: s, fp: false, sret: false, wide: false }]).collect();
         let (locs, stack) = self.assign_parts(&parts, named);
         (locs.into_iter().map(|l| l[0]).collect(), stack)
     }
@@ -127,6 +152,12 @@ impl Abi {
         let mut next_fp = 0;
         let mut stack: i64 = 0;
         for (k, parts) in args.iter().enumerate() {
+            if let ([p], Some(r)) = (parts.as_slice(), self.sret)
+                && p.sret
+            {
+                locs.push(vec![ArgLoc::Reg(r)]);
+                continue;
+            }
             let variadic = k >= named;
             let fp = parts.iter().all(|p| p.fp) && !(variadic && self.variadic == Variadic::Integer);
             let n = parts.len();
@@ -143,6 +174,10 @@ impl Abi {
             // Floating-point values take floating-point registers, counted
             // separately; integers and pointers take x0-x7.
             let (regs, next) = if fp { (&self.fp_args, &mut next_fp) } else { (&self.args, &mut next_reg) };
+            let even = self.wide_pairs_even && parts.first().is_some_and(|p| p.wide);
+            if even && *next % 2 == 1 && *next + 1 + n <= regs.len() {
+                *next += 1;
+            }
             if *next + n <= regs.len() {
                 locs.push(regs[*next..*next + n].iter().map(|&r| ArgLoc::Reg(r)).collect());
                 *next += n;
@@ -152,6 +187,9 @@ impl Abi {
                 *next = regs.len();
             }
             let mut here = Vec::new();
+            if even {
+                stack = (stack + 15) / 16 * 16;
+            }
             for &Part { size, .. } in parts {
                 let (align, room) = match (self.stack_args, n) {
                     (StackArgs::Natural, 1) => (size.max(1) as i64, size.max(1) as i64),
@@ -245,6 +283,9 @@ pub fn read(m: &Module, prefix: &str, machine: &crate::machine::Machine) -> Resu
                 r
             },
             far_scratch: props.get("far-scratch").map(|v| regs(v)).transpose()?.and_then(|v| v.first().copied()),
+            sret: props.get("sret").map(|v| regs(v)).transpose()?.and_then(|v| v.first().copied()),
+            base: props.get("base").map(|v| regs(v)).transpose()?.and_then(|v| v.first().copied()),
+            wide_pairs_even: props.get("wide-pairs").is_some_and(|v| v.first().is_some_and(|x| x == "even")),
             scratch: regs(&get("scratch")?)?,
             fp_args: regs(&get("fp-args")?)?,
             fp_result: regs(&get("fp-result")?)?[0],

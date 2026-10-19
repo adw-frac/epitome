@@ -110,12 +110,12 @@ define i32 @FCVTWUD(double "reg"="d" %n) "enc"="1100001 00001 n:5 001 d:5 101001
   ret i32 %r
 }
 
-define double @FCVTDW(i32 "reg"="w" %n) "enc"="1101001 00000 n:5 111 d:5 1010011" "asm"="fcvt.d.w {d}, {n}" "feature"="d" {
+define double @FCVTDW(i32 "reg"="w" %n) "enc"="1101001 00000 n:5 000 d:5 1010011" "asm"="fcvt.d.w {d}, {n}" "feature"="d" {
   %r = sitofp i32 %n to double
   ret double %r
 }
 
-define double @FCVTDWU(i32 "reg"="w" %n) "enc"="1101001 00001 n:5 111 d:5 1010011" "asm"="fcvt.d.wu {d}, {n}" "feature"="d" {
+define double @FCVTDWU(i32 "reg"="w" %n) "enc"="1101001 00001 n:5 000 d:5 1010011" "asm"="fcvt.d.wu {d}, {n}" "feature"="d" {
   %r = uitofp i32 %n to double
   ret double %r
 }
@@ -283,7 +283,7 @@ define void @FSS(float "reg"="s" %t, ptr "reg"="x" %n, i64 "imm" %off) "enc"="hi
   ret void
 }
 
-define double @FCVTDS(float "reg"="s" %n) "enc"="0100001 00000 n:5 111 d:5 1010011" "asm"="fcvt.d.s {d}, {n}" "feature"="d" {
+define double @FCVTDS(float "reg"="s" %n) "enc"="0100001 00000 n:5 000 d:5 1010011" "asm"="fcvt.d.s {d}, {n}" "feature"="d" {
   %r = fpext float %n to double
   ret double %r
 }

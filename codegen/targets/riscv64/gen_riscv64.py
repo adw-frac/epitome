@@ -194,7 +194,7 @@ for name, ir, f7, f3, x_ok, w_name in [
     ("SRL", "lshr", "0000000", "101", True, "SRLW"),
     ("SRA", "ashr", "0100000", "101", True, "SRAW"),
 ]:
-    role = ' "role"="add"' if name == "ADD" else ""
+    role = {"ADD": ' "role"="add"', "SUB": ' "role"="sub"'}.get(name, "")
     w(define("i64", name, 'i64 "reg"="x" %n, i64 "reg"="x" %m', R(f7, "m:5", "n:5", f3, "d:5", OP),
              f"{name.lower()} {{d}}, {{n}}, {{m}}", f"  %r = {ir} i64 %n, %m\n  ret i64 %r", role))
     w(define("i32", w_name, 'i32 "reg"="w" %n, i32 "reg"="w" %m', R(f7, "m:5", "n:5", f3, "d:5", OP32),
@@ -446,9 +446,12 @@ for t, ty, fmt, feat, cls in [("D", "double", "1", "d", "d"), ("S", "float", "0"
                         f"fcvt.{nm.lower()}.{t.lower()} {{d}}, {{n}}, rtz", f"  %r = fptosi {ty} %n to {it}\n  ret {it} %r", fa))
         F.append(define(it, f"FCVT{nm}U{t}", f'{ty} "reg"="{cls}" %n', R(f"11000" + f"0{fmt}", rs2u, "n:5", "001", "d:5", OPFP),
                         f"fcvt.{nm.lower()}u.{t.lower()} {{d}}, {{n}}, rtz", f"  %r = fptoui {ty} %n to {it}\n  ret {it} %r", fa))
-        F.append(define(ty, f"FCVT{t}{nm}", f'{it} "reg"="{ic}" %n', R(f"11010" + f"0{fmt}", rs2s, "n:5", "111", "d:5", OPFP),
+        # A 32-bit integer to a double is exact: its rounding mode is
+        # written rne (000), as LLVM's assembler writes it; the others dyn.
+        rm = "000" if t == "D" and nm == "W" else "111"
+        F.append(define(ty, f"FCVT{t}{nm}", f'{it} "reg"="{ic}" %n', R(f"11010" + f"0{fmt}", rs2s, "n:5", rm, "d:5", OPFP),
                         f"fcvt.{t.lower()}.{nm.lower()} {{d}}, {{n}}", f"  %r = sitofp {it} %n to {ty}\n  ret {ty} %r", fa))
-        F.append(define(ty, f"FCVT{t}{nm}U", f'{it} "reg"="{ic}" %n', R(f"11010" + f"0{fmt}", rs2u, "n:5", "111", "d:5", OPFP),
+        F.append(define(ty, f"FCVT{t}{nm}U", f'{it} "reg"="{ic}" %n', R(f"11010" + f"0{fmt}", rs2u, "n:5", rm, "d:5", OPFP),
                         f"fcvt.{t.lower()}.{nm.lower()}u {{d}}, {{n}}", f"  %r = uitofp {it} %n to {ty}\n  ret {ty} %r", fa))
     # Moving bits between the register files.
     # fmv.x.d and fmv.d.x; for floats, fmv.x.w and fmv.w.x.
@@ -467,7 +470,7 @@ for t, ty, fmt, feat, cls in [("D", "double", "1", "d", "d"), ("S", "float", "0"
     F.append(define("void", f"FS{t}", f'{ty} "reg"="{cls}" %t, ptr "reg"="x" %n, i64 "imm" %off',
                     S_IMM.format(rs2="t:5", rs1="n:5", f3=f3m, op=STOREFP), f"fs{'d' if t == 'D' else 'w'} {{t}}, {{off}}({{n}})",
                     f"  %p = getelementptr i8, ptr %n, i64 %off\n  store {ty} %t, ptr %p\n  ret void", fa + f' "role"="store.{cls}"'))
-F.append(define("double", "FCVTDS", 'float "reg"="s" %n', R("0100001", "00000", "n:5", "111", "d:5", OPFP),
+F.append(define("double", "FCVTDS", 'float "reg"="s" %n', R("0100001", "00000", "n:5", "000", "d:5", OPFP),
                 "fcvt.d.s {d}, {n}", "  %r = fpext float %n to double\n  ret double %r", ' "feature"="d"'))
 F.append(define("float", "FCVTSD", 'double "reg"="d" %n', R("0100000", "00001", "n:5", "111", "d:5", OPFP),
                 "fcvt.s.d {d}, {n}", "  %r = fptrunc double %n to float\n  ret float %r", ' "feature"="d"'))
@@ -586,7 +589,7 @@ out("70-abi.ll", HEADER.format(what="the LP64D calling convention") + """
 ; t6 (and ft9-ft11) are kept for spill code, and t4 for the addresses of
 ; stack slots too far for an offset ("far-scratch").
 
-!abi.lp64d = !{!100, !101, !102, !103, !104, !105, !106, !107, !108, !109, !110, !111, !112, !113, !114, !115, !116}
+!abi.lp64d = !{!100, !101, !102, !103, !104, !105, !106, !107, !108, !109, !110, !111, !112, !113, !114, !115, !116, !117}
 !100 = !{!"args", !"a0-a7"}
 !101 = !{!"result", !"a0"}
 !102 = !{!"clobbers", !"ra", !"t0-t2", !"a0-a7", !"t3-t6"}
@@ -604,6 +607,7 @@ out("70-abi.ll", HEADER.format(what="the LP64D calling convention") + """
 !114 = !{!"fp-saved", !"fs0-fs1", !"fs2-fs11"}
 !115 = !{!"fp-scratch", !"ft9-ft11"}
 !116 = !{!"far-scratch", !"t4"}
+!117 = !{!"base", !"s1"}
 """)
 
 for name, parts in files.items():

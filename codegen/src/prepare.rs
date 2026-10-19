@@ -120,7 +120,9 @@ impl Ctx<'_> {
 /// Puts a copy of `f` into selection form.
 pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, String> {
     let mut f = f.clone();
+    crate::wide::split_wide(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     check(cx, &f, fname)?;
+    lower_dynamic_allocas(cx, &mut f)?;
     drop_noop_calls(cx, &mut f);
     lower_switches(cx, &mut f);
     expand_intrinsics(cx, &mut f);
@@ -140,6 +142,53 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     Ok(f)
 }
 
+/// A dynamic alloca (`alloca T, i32 %n`) becomes one of bytes,
+/// `alloca i8, i64 %size`, its size rounded up to keep `sp` 16-aligned.
+fn lower_dynamic_allocas(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
+    let i8t = cx.m.types.int(8);
+    let i64t = cx.m.types.int(64);
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::Alloca { ty, count: Some(c), align, inalloca, addrspace } = f.insts[i.index()].op.clone() else {
+                k += 1;
+                continue;
+            };
+            if cx.const_int(c).is_some() {
+                k += 1;
+                continue;
+            }
+            let elem = cx.size_of(ty)? as i64;
+            let mut s = Seq { f, new: Vec::new() };
+            let n = match cx.m.types.get(cx.value_ty(s.f, c)) {
+                Type::Int(64) => c,
+                Type::Int(b) if *b > 64 => s.cast(CastOp::Trunc, c, i64t),
+                _ => s.cast(CastOp::ZExt, c, i64t),
+            };
+            let size = cx.int(i64t, elem);
+            let bytes = s.bin(BinOp::Mul, n, size, i64t);
+            let fifteen = cx.int(i64t, 15);
+            let up = s.bin(BinOp::Add, bytes, fifteen, i64t);
+            let mask = cx.int(i64t, -16);
+            let rounded = s.bin(BinOp::And, up, mask, i64t);
+            let new = std::mem::take(&mut s.new);
+            f.insts[i.index()].op = Op::Alloca {
+                inalloca,
+                ty: i8t,
+                count: Some(rounded),
+                align: Some(align.unwrap_or(16).max(16)),
+                addrspace,
+            };
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..k, new);
+            k += n + 1;
+        }
+    }
+    Ok(())
+}
+
 /// Rejects what the code generator cannot do yet.
 fn check(cx: &Ctx, f: &Function, fname: &str) -> Result<(), String> {
     // Small structs, as clang passes them ([2 x i64]), live as their parts.
@@ -151,7 +200,8 @@ fn check(cx: &Ctx, f: &Function, fname: &str) -> Result<(), String> {
         _ => false,
     };
     let bad_type = |ty: TypeId| match cx.m.types.get(ty) {
-        Type::Int(b) => *b > 64,
+        // i128 remains only in the high half of a product (see wide.rs).
+        Type::Int(b) => *b > 64 && *b != 128,
         Type::Ptr(a) => *a != 0,
         Type::Void | Type::Label | Type::Double | Type::Float => false,
         // Vectors that do not fit a register are split (see
@@ -181,9 +231,6 @@ fn check(cx: &Ctx, f: &Function, fname: &str) -> Result<(), String> {
         match &inst.op {
             Op::Invoke { .. } | Op::CallBr { .. } | Op::IndirectBr { .. } | Op::LandingPad { .. } | Op::Resume(_) => {
                 return Err(format!("@{fname}: exception handling and indirect branches are not supported yet"));
-            }
-            Op::Alloca { count: Some(c), .. } if cx.const_int(*c).is_none() => {
-                return Err(format!("@{fname}: dynamic allocas are not supported yet"));
             }
             Op::AtomicRmw { .. } | Op::CmpXchg { .. } => {
                 return Err(format!("@{fname}: atomic read-modify-write is not supported yet"));

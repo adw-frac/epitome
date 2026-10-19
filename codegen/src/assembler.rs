@@ -263,13 +263,16 @@ impl<'t> Assembler<'t> {
             return Err("no instruction has this mnemonic".into());
         }
         let mut best: Option<(usize, usize, u32, Option<String>)> = None;
+        let mut no_label = None;
         for tpl in cands {
             let Some(holes) = self.holes(tpl, line) else { continue };
             let Some(mut r) = self.read(tpl.instr, &holes, syntax) else { continue };
             let ins = &self.t.instrs[tpl.instr];
             if let Some((k, name)) = &r.label {
+                // Not a label here: perhaps a symbol, as another entry reads it.
                 let Some(at) = label(name) else {
-                    return Err(format!("no label {name} in this section"));
+                    no_label = Some(format!("no label {name} in this section"));
+                    continue;
                 };
                 r.env.insert(ins.operands[*k].name.clone(), at as i64 - pc as i64);
             }
@@ -303,8 +306,9 @@ impl<'t> Assembler<'t> {
                 best = Some((sp_classes, tpl.instr, word, r.sym.map(|s| s.1)));
             }
         }
-        best.map(|(_, i, w, s)| (i, w, s))
-            .ok_or_else(|| "no instruction is written this way, or its values do not fit".into())
+        best.map(|(_, i, w, s)| (i, w, s)).ok_or_else(|| {
+            no_label.unwrap_or_else(|| "no instruction is written this way, or its values do not fit".into())
+        })
     }
 
     /// Assembles `text`: Mach-O assembly if it says so (`.build_version`,

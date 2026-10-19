@@ -31,6 +31,17 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
             }
         }
     }
+    // Where sp moves, the frame is addressed from the base register, which
+    // is saved like the others.
+    let base = if f.dynamic_stack {
+        let b = f.abi.base.ok_or_else(|| format!("{}: sp moves, and the convention names no base register", f.name))?;
+        if !saved.contains(&b) {
+            saved.push(b);
+        }
+        Some(b)
+    } else {
+        None
+    };
     saved.sort();
     // Arguments for calls go at the bottom, where the callee finds them.
     let mut off: i64 = f.out_size;
@@ -74,8 +85,15 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
                         *op = MOp::Imm(size + *o);
                         at = Some(k);
                     }
+                    MOp::OutArea => *op = MOp::Imm(f.out_size),
                     _ => {}
                 }
+            }
+            if let (Some(k), Some(b)) = (at, base)
+                && k > 0
+                && inst.ops[k - 1] == MOp::Reg(Reg::P(t.machine.sp))
+            {
+                inst.ops[k - 1] = MOp::Reg(Reg::P(b));
             }
             if let (Some(k), Opcode::Instr(i)) = (at, inst.op)
                 && k > 0
@@ -135,6 +153,11 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
         adjust(t, &mut prologue, sp, sp, -low, &f.abi.scratch)?;
     }
     let mut epilogue = Vec::new();
+    if let Some(b) = base {
+        let addi = t.by_role("addi");
+        prologue.push(MInst::new(addi, vec![MOp::Reg(Reg::P(b)), MOp::Reg(Reg::P(sp)), MOp::Imm(0)]));
+        epilogue.push(MInst::new(addi, vec![MOp::Reg(Reg::P(sp)), MOp::Reg(Reg::P(b)), MOp::Imm(0)]));
+    }
     if low > 0 {
         adjust(t, &mut epilogue, sp, sp, low, &f.abi.scratch)?;
     }

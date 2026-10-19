@@ -476,8 +476,11 @@ fn native_shuffle(cx: &Ctx, mask: ConstId) -> bool {
 
 /// Vector operations rewritten into a form instructions more often have:
 /// `icmp ne` against other than zero, as `icmp ne (xor ..), 0` (which
-/// AArch64's `cmtst` does). (Shifts by a vector of amounts are the
-/// description's: AArch64's recipes shift with `ushl` and `sshl`.)
+/// AArch64's `cmtst` does); conversions between integers and floats of
+/// another width, as a conversion at the float's width and an extension or
+/// truncation (`uitofp <2 x i32> to <2 x double>` widens first). (Shifts by
+/// a vector of amounts are the description's: AArch64's recipes shift with
+/// `ushl` and `sshl`.)
 fn rewrite_vector_ops(cx: &mut Ctx, f: &mut Function) {
     let blocks: Vec<BlockId> = f.layout.clone();
     for b in blocks {
@@ -502,6 +505,57 @@ fn rewrite_vector_ops(cx: &mut Ctx, f: &mut Function) {
                     new.push(x);
                     let zero = Value::Const(cx.m.consts.intern(Constant { ty: t, kind: ConstKind::Zero }));
                     f.insts[i.index()].op = Op::ICmp { pred: ICmpPred::Ne, samesign, lhs: f.result(x), rhs: zero };
+                }
+                Op::Cast { op: op @ (CastOp::UIToFP | CastOp::SIToFP), value, .. }
+                    if vec_info(cx, cx.value_ty(f, value))
+                        .zip(vec_info(cx, f.locals[f.insts[i.index()].result.unwrap().index()].ty))
+                        .is_some_and(|((_, _, a), (_, _, b))| a != b) =>
+                {
+                    let from = cx.value_ty(f, value);
+                    let to = f.locals[f.insts[i.index()].result.unwrap().index()].ty;
+                    let ((len, _, a), (_, _, bits)) = (vec_info(cx, from).unwrap(), vec_info(cx, to).unwrap());
+                    let et = cx.m.types.int(bits);
+                    let wide = cx.m.types.intern(Type::Vector { scalable: false, len, elem: et });
+                    let ext = match (op, a < bits) {
+                        (_, false) => CastOp::Trunc,
+                        (CastOp::UIToFP, true) => CastOp::ZExt,
+                        _ => CastOp::SExt,
+                    };
+                    let x = f.add_inst(
+                        Op::Cast { op: ext, flags: IntFlags::NONE, fmf: FastMath::default(), value },
+                        Some((None, wide)),
+                    );
+                    new.push(x);
+                    f.insts[i.index()].op =
+                        Op::Cast { op, flags: IntFlags::NONE, fmf: FastMath::default(), value: f.result(x) };
+                }
+                Op::Cast { op: op @ (CastOp::FPToUI | CastOp::FPToSI), value, .. }
+                    if vec_info(cx, cx.value_ty(f, value))
+                        .zip(vec_info(cx, f.locals[f.insts[i.index()].result.unwrap().index()].ty))
+                        .is_some_and(|((_, _, a), (_, _, b))| a != b) =>
+                {
+                    let from = cx.value_ty(f, value);
+                    let r = f.insts[i.index()].result.unwrap();
+                    let to = f.locals[r.index()].ty;
+                    let ((len, _, bits), (_, _, b)) = (vec_info(cx, from).unwrap(), vec_info(cx, to).unwrap());
+                    let et = cx.m.types.int(bits);
+                    let wide = cx.m.types.intern(Type::Vector { scalable: false, len, elem: et });
+                    // Converted at the float's width, then narrowed or
+                    // extended: the original's result, from a new one.
+                    let conv = f.add_inst(
+                        Op::Cast { op, flags: IntFlags::NONE, fmf: FastMath::default(), value },
+                        Some((None, wide)),
+                    );
+                    new.push(conv);
+                    let ext = if b < bits {
+                        CastOp::Trunc
+                    } else if op == CastOp::FPToUI {
+                        CastOp::ZExt
+                    } else {
+                        CastOp::SExt
+                    };
+                    f.insts[i.index()].op =
+                        Op::Cast { op: ext, flags: IntFlags::NONE, fmf: FastMath::default(), value: f.result(conv) };
                 }
                 _ => {}
             }

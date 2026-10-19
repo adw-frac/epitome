@@ -212,7 +212,21 @@ impl<'a, 'b> Sel<'a, 'b> {
             frame_size: 0,
             out_size: 0,
             abi: abi.clone(),
+            dynamic_stack: false,
         };
+        // A function whose stack pointer moves addresses its frame from a
+        // saved register of the convention's, kept from allocation.
+        let dynamic = f.insts.iter().any(|i| match &i.op {
+            Op::Alloca { count: Some(c), .. } => cx.const_int(*c).is_none(),
+            Op::Call(call) => prepare::callee_name(cx.m, call).is_some_and(|n| n.starts_with("llvm.stackrestore")),
+            _ => false,
+        });
+        if dynamic {
+            mf.dynamic_stack = true;
+            if let Some(b) = abi.base {
+                mf.abi.reserved.push(b);
+            }
+        }
         let mut bmap = HashMap::new();
         for (k, &b) in f.layout.iter().enumerate() {
             bmap.insert(b, k);
@@ -792,9 +806,22 @@ impl<'a, 'b> Sel<'a, 'b> {
                 }
                 Op::Ret(Some(v)) => {
                     self.need_value(*v);
+                    // The parts of a small aggregate result.
+                    let mut cur = *v;
+                    while let Value::Local(x) = cur
+                        && let LocalDef::Inst(d) = f.locals[x.index()].def
+                        && let Op::InsertValue { aggregate, element, .. } = &f.insts[d.index()].op
+                    {
+                        self.need_value(*element);
+                        cur = *aggregate;
+                    }
                     continue;
                 }
                 Op::Br(_) => continue,
+                Op::Alloca { count: Some(c), .. } => {
+                    self.need_value(*c);
+                    continue;
+                }
                 Op::Alloca { .. } => continue,
                 Op::VaArg { list } => {
                     self.need_value(*list);
@@ -1603,9 +1630,11 @@ impl<'a, 'b> Sel<'a, 'b> {
         let mut shapes: Vec<Vec<crate::abi::Part>> = Vec::new();
         for a in &args {
             let ty = self.ty_of(a.value);
+            let sret = a.attrs.iter().any(|x| matches!(x, Attr::Type { name, .. } if name == "sret"));
+            let wide = a.attrs.iter().any(|x| matches!(x, Attr::Word(w) if w == crate::wide::WIDE));
             shapes.push(match self.parts_of(ty) {
-                Some(n) => vec![crate::abi::Part { size: 8, fp: false }; n],
-                None => vec![crate::abi::Part { size: self.arg_size(a.value), fp: self.is_fp(ty) }],
+                Some(n) => vec![crate::abi::Part { size: 8, fp: false, sret: false, wide }; n],
+                None => vec![crate::abi::Part { size: self.arg_size(a.value), fp: self.is_fp(ty), sret, wide: false }],
             });
         }
         let (part_locs, stack) = self.mf.abi.assign_parts(&shapes, named);
@@ -1676,6 +1705,17 @@ impl<'a, 'b> Sel<'a, 'b> {
         if let Some(r) = inst.result
             && self.uses[r.index()] > 0
         {
+            // A small aggregate ([2 x i64], an i128): one register a part.
+            if let Some(n) = self.parts_of(self.f.locals[r.index()].ty) {
+                let mut regs = Vec::new();
+                for from in self.mf.abi.results(n) {
+                    let d = self.ivreg(true);
+                    self.push(MInst::copy(Reg::V(d), Reg::P(from)));
+                    regs.push(d);
+                }
+                self.agg_params.insert(r, regs);
+                return Ok(());
+            }
             let d = self.vreg_of(r);
             let from = if self.is_fp(self.f.locals[r.index()].ty) { self.mf.abi.fp_result } else { self.mf.abi.result };
             self.push(MInst::copy(Reg::V(d), Reg::P(from)));
@@ -1719,12 +1759,39 @@ impl<'a, 'b> Sel<'a, 'b> {
             }
             match &inst.op {
                 Op::Phi { .. } => continue,
+                Op::Call(call)
+                    if prepare::callee_name(self.cx.m, call)
+                        .is_some_and(|n| n.starts_with("llvm.stacksave") || n.starts_with("llvm.stackrestore")) =>
+                {
+                    let sp = self.t.machine.sp;
+                    let addi = self.t.by_role("addi");
+                    if let Some(r) = inst.result {
+                        let d = self.vreg_of(r);
+                        self.push(MInst::new(addi, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::P(sp)), MOp::Imm(0)]));
+                    } else if let Some(a) = call.args.first() {
+                        let v = self.reg_for(a.value, self.int_class(true))?;
+                        self.push(MInst::new(addi, vec![MOp::Reg(Reg::P(sp)), MOp::Reg(v), MOp::Imm(0)]));
+                    }
+                    continue;
+                }
                 Op::Call(call) if inline_asm(self.cx.m, call).is_some() => {
                     self.emit_asm(i)?;
                     continue;
                 }
                 Op::Call(_) if !self.chosen.contains_key(&i) => {
                     self.emit_call(i)?;
+                    continue;
+                }
+                Op::Ret(Some(v)) if self.parts_of(self.ty_of(*v)).is_some() => {
+                    let n = self.parts_of(self.ty_of(*v)).unwrap();
+                    let parts = self.parts(*v, n)?;
+                    let to = self.mf.abi.results(n);
+                    for (&p, &r) in to.iter().zip(&parts) {
+                        self.push(MInst::copy(Reg::P(p), r));
+                    }
+                    let mut ret = MInst::new(self.t.by_role("ret"), vec![]);
+                    ret.imp_uses = to;
+                    self.push(ret);
                     continue;
                 }
                 Op::Ret(v) => {
@@ -1799,6 +1866,24 @@ impl<'a, 'b> Sel<'a, 'b> {
                     if Some(*d) != layout_next {
                         let target = self.bmap[d];
                         self.push(MInst::new(self.t.by_role("jump"), vec![MOp::Label(target)]));
+                    }
+                    continue;
+                }
+                Op::Alloca { count: Some(c), .. } if self.cx.const_int(*c).is_none() => {
+                    // A dynamic alloca (prepare made it `alloca i8, i64 n`,
+                    // n a multiple of 16): sp moves down n bytes, and the
+                    // memory is above the area for calls' arguments.
+                    let (sp, c) = (self.t.machine.sp, *c);
+                    let n = self.reg_for(c, self.int_class(true))?;
+                    let v = self.ivreg(true);
+                    let (addi, sub) =
+                        (self.t.by_role("addi"), self.t.role("sub").ok_or("no instruction has role sub")?);
+                    self.push(MInst::new(addi, vec![MOp::Reg(Reg::V(v)), MOp::Reg(Reg::P(sp)), MOp::Imm(0)]));
+                    self.push(MInst::new(sub, vec![MOp::Reg(Reg::V(v)), MOp::Reg(Reg::V(v)), MOp::Reg(n)]));
+                    self.push(MInst::new(addi, vec![MOp::Reg(Reg::P(sp)), MOp::Reg(Reg::V(v)), MOp::Imm(0)]));
+                    if let Some(r) = inst.result {
+                        let d = self.vreg_of(r);
+                        self.push(MInst::new(addi, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::P(sp)), MOp::OutArea]));
                     }
                     continue;
                 }
@@ -1927,9 +2012,16 @@ impl<'a, 'b> Sel<'a, 'b> {
         let mut shapes: Vec<Vec<crate::abi::Part>> = Vec::new();
         for p in &f.params {
             let ty = f.locals[p.local.index()].ty;
+            let sret = p.attrs.iter().any(|x| matches!(x, Attr::Type { name, .. } if name == "sret"));
+            let wide = p.attrs.iter().any(|x| matches!(x, Attr::Word(w) if w == crate::wide::WIDE));
             shapes.push(match self.parts_of(ty) {
-                Some(n) => vec![crate::abi::Part { size: 8, fp: false }; n],
-                None => vec![crate::abi::Part { size: self.arg_size(Value::Local(p.local)), fp: self.is_fp(ty) }],
+                Some(n) => vec![crate::abi::Part { size: 8, fp: false, sret: false, wide }; n],
+                None => vec![crate::abi::Part {
+                    size: self.arg_size(Value::Local(p.local)),
+                    fp: self.is_fp(ty),
+                    sret,
+                    wide: false,
+                }],
             });
         }
         let (part_locs, _) = self.mf.abi.assign_parts(&shapes, shapes.len());

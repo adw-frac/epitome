@@ -11,7 +11,7 @@ define i32 @ADDW(i32 "reg"="w" %n, i32 "reg"="w" %m) "enc"="0000000 m:5 n:5 000 
   ret i32 %r
 }
 
-define i64 @SUB(i64 "reg"="x" %n, i64 "reg"="x" %m) "enc"="0100000 m:5 n:5 000 d:5 0110011" "asm"="sub {d}, {n}, {m}" {
+define i64 @SUB(i64 "reg"="x" %n, i64 "reg"="x" %m) "enc"="0100000 m:5 n:5 000 d:5 0110011" "asm"="sub {d}, {n}, {m}" "role"="sub" {
   %r = sub i64 %n, %m
   ret i64 %r
 }

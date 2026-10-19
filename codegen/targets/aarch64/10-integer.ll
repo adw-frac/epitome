@@ -138,7 +138,7 @@ define i32 @SUBWrr(i32 "reg"="w" %n, i32 "reg"="w" %m) "enc"="0 1 0 01011 00 0 m
   ret i32 %r
 }
 
-define i64 @SUBXrr(i64 "reg"="x" %n, i64 "reg"="x" %m) "enc"="1 1 0 01011 00 0 m:5 000000 n:5 d:5" "asm"="sub {d}, {n}, {m}" {
+define i64 @SUBXrr(i64 "reg"="x" %n, i64 "reg"="x" %m) "enc"="1 1 0 01011 00 0 m:5 000000 n:5 d:5" "asm"="sub {d}, {n}, {m}" "role"="sub" {
   %r = sub i64 %n, %m
   ret i64 %r
 }

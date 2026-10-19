@@ -22,3 +22,17 @@ long relay(int a, int b, int c, int d, int e, int f, int g, int h, signed char i
   return many(h, g, (signed char)f, (short)e, d, c, (unsigned char)b, a, i, (short)j, a + i, j, (unsigned short)b, c) +
          small(a, b, c, d, e, f, g, h, i, (signed char)(i + 1), (short)j, (int)j, (unsigned char)a, j) + i + j;
 }
+
+// An __int128 starts in an even register in AAPCS64 (x2, here, not x1), and
+// goes on the stack, 16-aligned, when a pair is not left.
+__int128 wide_odd(long a, __int128 b, long c) { return b * 3 + a - c; }
+__int128 wide_late(long a, long b, long c, long d, long e, long f, long g, __int128 x, long y) {
+  return x + a + b + c + d + e + f + g - y;
+}
+
+// A struct too big for registers comes back through the address in x8.
+struct big { long a, b, c, d, e; };
+struct big make_big(long x, int y) {
+  struct big r = {x, x * y, x - y, x + y, y};
+  return r;
+}

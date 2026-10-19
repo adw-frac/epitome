@@ -381,7 +381,31 @@ an empty body. The assembler reads it and the disassembler writes it, but
 selection never uses it. That makes it cheap to cover a whole instruction
 set from a machine-readable source, and to check the entries against
 another assembler rather than write their semantics. AArch64's `80-asm.ll`
-is made this way ([objects.md](objects.md)).
+is made this way ([objects.md](objects.md)). So is RISC-V's: `gen_opcodes.py`
+writes 760 entries from riscv-opcodes (RISC-V International, BSD 3-clause).
+That source gives each instruction's fixed bits and the fields of its
+operands, but neither its assembly syntax nor which of its registers are
+integer and which floating-point. So:
+
+- operands are written in RISC-V's order (`rd, rs1, rs2, rs3`; loads
+  `rd, imm(rs1)`; stores `rs2, imm(rs1)`; branches `rs1, rs2, label`;
+  atomics `rd, rs2, (rs1)`);
+- immediates are laid out as the ISA manual lays them out (the I, S, B, J
+  and U forms);
+- the register files, and the bits of rounding modes (`rtz`) and orderings
+  (`.aqrl`), are found with LLVM's RISC-V assembler. rustc has it, in its
+  `riscv64gc-unknown-none-elf` target, which assembles a crate's
+  `global_asm!`.
+
+With it, the description has 300 of the 329 RV64 instructions of I, M, A,
+F, D, Zicsr, Zifencei, the Zb* and Zk* extensions, Zfh, Zfa, Zacas, Zabha,
+Zicbo and others. The rest: Zfa's `fli` (a table of constants), Zalasr
+(which this LLVM rejects), Zimop's numbered operations, and a few
+privileged ones. `tests/assemblers.rs` assembles RISC-V's 2,900 sample
+lines with `draconian-as` and with rustc, and they must agree word for
+word. That check found that our own `fcvt.d.w`, `fcvt.d.wu` and `fcvt.d.s`
+wrote a rounding mode other than LLVM's (they are exact, so it never
+mattered).
 
 The checks apply to these entries as to any other: encodings, assembly
 round trips, and ambiguity. A register the encoding cannot hold (an odd

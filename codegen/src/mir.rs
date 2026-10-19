@@ -31,6 +31,9 @@ pub enum MOp {
     /// An offset from the stack pointer on entry: an argument the caller
     /// put on the stack. Known once the frame's size is.
     Incoming(i64),
+    /// The size of the area at the bottom of the frame for calls'
+    /// arguments: a dynamic alloca's memory is above it.
+    OutArea,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -168,6 +171,9 @@ pub struct MFunc {
     pub frame_size: i64,
     /// Bytes at the bottom of the frame for arguments to calls.
     pub out_size: i64,
+    /// `sp` moves (dynamic allocas): the frame is addressed from the
+    /// convention's `base` register.
+    pub dynamic_stack: bool,
     pub abi: crate::abi::Abi,
 }
 
@@ -296,6 +302,7 @@ pub fn format_inst(t: &Target, f: &MFunc, inst: &MInst) -> String {
                     MOp::Sym(s) => Operand::Sym(s.clone()),
                     MOp::Frame(s, o) => Operand::Text(format!("frame{s}+{o}")),
                     MOp::Incoming(o) => Operand::Text(format!("incoming+{o}")),
+                    MOp::OutArea => Operand::Text("outarea".into()),
                 }
             };
             fill_template(t, Some(&f.abi), i, value)
@@ -448,7 +455,7 @@ pub fn encode_function(t: &Target, f: &MFunc) -> Result<(Vec<u32>, Vec<Fixup>), 
                         fixups.push(Fixup { offset: pc, symbol: s.clone(), instr: ins.name.clone() });
                         0
                     }
-                    MOp::Frame(..) | MOp::Incoming(_) => {
+                    MOp::Frame(..) | MOp::Incoming(_) | MOp::OutArea => {
                         return Err(format!("{}: a frame offset left after layout", f.name));
                     }
                 };

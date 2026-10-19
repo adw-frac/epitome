@@ -23,13 +23,19 @@
 ;                 arguments are)
 ;   syntax        the assembler's dialect: "macho" or "elf"
 ;   triples       substrings of a module's target triple that select it
+;   sret          the register for the address a result is returned at
+;                 (an sret argument); without it, the first argument's
+;   base          a saved register that addresses the frame in a function
+;                 whose stack pointer moves (dynamic allocas)
+;   wide-pairs    "even": an integer wider than a register (i128) starts in
+;                 an even register, and at a 16-aligned stack slot
 ;   fp-args, fp-result, fp-clobbers, fp-saved, fp-scratch
 ;                 the same, for floating-point values in d0-d31 (only
 ;                 the low 64 bits of d8-d15 are preserved)
 
 ; Apple's arm64 ABI: AAPCS64 with x18 reserved, stack arguments packed,
 ; variadic arguments on the stack.
-!abi.darwin = !{!100, !101, !102, !103, !104, !105, !106, !107, !108, !109, !110, !111, !112, !113, !114, !115}
+!abi.darwin = !{!100, !101, !102, !103, !104, !105, !106, !107, !108, !109, !110, !111, !112, !113, !114, !115, !116, !117}
 !100 = !{!"args", !"x0-x7"}
 !101 = !{!"result", !"x0"}
 !102 = !{!"clobbers", !"x0-x18", !"x30"}
@@ -46,11 +52,13 @@
 !113 = !{!"fp-clobbers", !"d0-d7", !"d16-d31"}
 !114 = !{!"fp-saved", !"d8-d15"}
 !115 = !{!"fp-scratch", !"d29-d31"}
+!116 = !{!"sret", !"x8"}
+!117 = !{!"base", !"x19"}
 
 ; The Procedure Call Standard for the Arm 64-bit Architecture, as used by
 ; Linux: x18 is an ordinary temporary, stack arguments take 8-byte slots,
 ; and variadic arguments go where named ones would.
-!abi.aapcs64 = !{!200, !201, !202, !203, !204, !205, !206, !207, !208, !209, !210, !211, !212, !213, !214, !215}
+!abi.aapcs64 = !{!200, !201, !202, !203, !204, !205, !206, !207, !208, !209, !210, !211, !212, !213, !214, !215, !216, !217, !218}
 !200 = !{!"args", !"x0-x7"}
 !201 = !{!"result", !"x0"}
 !202 = !{!"clobbers", !"x0-x18", !"x30"}
@@ -67,3 +75,6 @@
 !213 = !{!"fp-clobbers", !"d0-d7", !"d16-d31"}
 !214 = !{!"fp-saved", !"d8-d15"}
 !215 = !{!"fp-scratch", !"d29-d31"}
+!216 = !{!"sret", !"x8"}
+!217 = !{!"base", !"x19"}
+!218 = !{!"wide-pairs", !"even"}

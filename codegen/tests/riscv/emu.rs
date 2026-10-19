@@ -15,7 +15,21 @@ const BASE: u64 = 0x10000;
 const MEM: usize = 64 << 20;
 const STUBS: u64 = 0x1000;
 const RETURN: u64 = 0x800;
-const LIBC: &[&str] = &["printf", "putchar", "puts", "memcpy", "memmove", "memset", "strlen", "abort", "exit"];
+const LIBC: &[&str] = &[
+    "printf",
+    "putchar",
+    "puts",
+    "memcpy",
+    "memmove",
+    "memset",
+    "strlen",
+    "abort",
+    "exit",
+    "__udivti3",
+    "__divti3",
+    "__umodti3",
+    "__modti3",
+];
 
 pub struct Machine {
     x: [u64; 32],
@@ -239,6 +253,23 @@ impl Machine {
             }
             "strlen" => {
                 self.x[10] = self.cstr(a(self, 0)).len() as u64;
+            }
+            // The runtime's 128-bit division: each operand in a pair of
+            // registers, low half first, as is the result.
+            "__udivti3" | "__divti3" | "__umodti3" | "__modti3" => {
+                let wide = |k: usize| ((a(self, k + 1) as u128) << 64) | a(self, k) as u128;
+                let (x, y) = (wide(0), wide(2));
+                if y == 0 {
+                    return Err(format!("{name} by zero"));
+                }
+                let r: u128 = match name {
+                    "__udivti3" => x / y,
+                    "__umodti3" => x % y,
+                    "__divti3" => (x as i128).wrapping_div(y as i128) as u128,
+                    _ => (x as i128).wrapping_rem(y as i128) as u128,
+                };
+                self.x[10] = r as u64;
+                self.x[11] = (r >> 64) as u64;
             }
             "abort" => return Err("abort".into()),
             "exit" => return Ok(Some(a(self, 0) as i32)),
