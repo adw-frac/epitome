@@ -1,14 +1,11 @@
-"""Writes the vector (Advanced SIMD) section of aarch64.ll.
+"""Writes 50-vectors.ll, the vector (Advanced SIMD) part of the AArch64
+description: one entry per instruction and arrangement. Run it from
+anywhere:
 
-The section, from its "; Vectors (Advanced SIMD)" banner to the
-"; Recipes: IR with no single instruction." banner, has one entry per
-instruction and arrangement; this script writes them and puts them in
-place of what is there. Run it from anywhere:
-
-    python3 codegen/targets/gen_aarch64_vectors.py
+    python3 codegen/targets/aarch64/gen_vectors.py
 
 The description stays data: the output is checked in, and the code
-generator reads only aarch64.ll.
+generator reads only the .ll files.
 """
 import os
 import sys
@@ -27,14 +24,16 @@ def cls(Q): return 'q' if Q else 'v'
 def bitw(Q): return '16b' if Q else '8b'
 def suffix(e): return {8:'b',16:'h',32:'s',64:'d'}[e]
 o = []
-o.append('''; ===========================================================================
+o.append('''; The AArch64 description: vectors. The conventions are in 00-base.ll.
+
+; ===========================================================================
 ; Vectors (Advanced SIMD). 128-bit vectors live in q registers, 64-bit ones
 ; in d registers; templates print them with their arrangement, v3.4s. A
 ; vector of i1 is a mask: lanes of all ones or all zeros, as comparisons
 ; make them, in a q register.
 ;
-; This section is written by gen_aarch64_vectors.py (one entry per
-; arrangement), but is data like the rest.
+; This file is written by gen_vectors.py (one entry per arrangement), but
+; is data like the rest.
 ''')
 for arr, n, e, Q, size in INT:
     T = vt(n, it(e)); M = vt(n, 'i1'); c = cls(Q); A = arr; B = bitw(Q)
@@ -563,15 +562,10 @@ for n in [16, 8, 4, 2]:
 out.append("\n".join(o))
 
 
-def splice():
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aarch64.ll")
-    lines = open(path).read().split("\n")
-    start = next(i for i, l in enumerate(lines) if l.startswith("; Vectors (Advanced SIMD)")) - 1
-    end = next(i for i, l in enumerate(lines) if l.startswith("; Recipes: IR with no single")) - 1
-    assert lines[start].startswith("; ===") and lines[end].startswith("; ===")
-    section = "".join(out).rstrip("\n").split("\n")
+def write():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "50-vectors.ll")
     with open(path, "w") as f:
-        f.write("\n".join(lines[:start] + section + [""] + lines[end:]))
+        f.write("".join(out).rstrip("\n") + "\n\n")
 
 
-splice()
+write()

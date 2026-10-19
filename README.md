@@ -28,7 +28,7 @@ and run their output with `clang` when it is installed.
   `opt/rules/combine.rules`. See `docs/design/parallel.md` and
   `docs/design/combine.md`.
 - `codegen` (`draconian-codegen`): AArch64 code generation from a machine
-  description written in LLVM IR (`codegen/targets/aarch64.ll`):
+  description written in LLVM IR (`codegen/targets/aarch64/*.ll`):
   instruction selection, register allocation, frames, and assembly, object
   files (Mach-O and ELF) and disassembly; `draconian-as` assembles, and
   `draconian-objdump` disassembles, both formats.

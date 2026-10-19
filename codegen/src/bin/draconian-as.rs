@@ -17,7 +17,8 @@ const USAGE: &str = "usage: draconian-as [options] <file.s>
                           .build_version, else ELF)
   --max-errors=<n>        report this many lines that cannot be assembled
                           (default 20)
-  --target=<file.ll>      read the machine description from this file
+  --target=<path>         read the machine description from this .ll file,
+                          or the .ll files in this directory in name order
                           (default: the built-in AArch64 description)";
 
 fn main() -> ExitCode {
@@ -56,7 +57,7 @@ fn main() -> ExitCode {
     let output = output.unwrap_or_else(|| format!("{}.o", input.strip_suffix(".s").unwrap_or(&input)));
     let target = match target_file {
         None => Target::aarch64(),
-        Some(path) => match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|s| Target::load(&s)) {
+        Some(path) => match Target::load_path(&path) {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("draconian-as: {path}: {e}");

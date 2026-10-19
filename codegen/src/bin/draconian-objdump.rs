@@ -19,7 +19,8 @@ const USAGE: &str = "usage: draconian-objdump [options] <file>...
   --canonical             print an ELF or Mach-O file as sorted text without
                           file offsets or order, to diff two that should
                           say the same
-  --target=<file.ll>      read the machine description from this file
+  --target=<path>         read the machine description from this .ll file,
+                          or the .ll files in this directory in name order
                           (default: the built-in AArch64 description)
 
 Options may be combined (-dr).";
@@ -75,7 +76,7 @@ fn main() -> ExitCode {
     }
     let target = match target_file {
         None => Target::aarch64(),
-        Some(path) => match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|s| Target::load(&s)) {
+        Some(path) => match Target::load_path(&path) {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("draconian-objdump: {path}: {e}");

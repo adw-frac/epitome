@@ -382,6 +382,19 @@ fn attr<'a>(attrs: &'a [Attr], key: &str) -> Option<Option<&'a str>> {
     })
 }
 
+/// The built-in AArch64 description (`codegen/targets/aarch64/`), its files
+/// in order. Together they are one module.
+pub const AARCH64_FILES: &[(&str, &str)] = &[
+    ("00-base.ll", include_str!("../targets/aarch64/00-base.ll")),
+    ("10-integer.ll", include_str!("../targets/aarch64/10-integer.ll")),
+    ("20-memory.ll", include_str!("../targets/aarch64/20-memory.ll")),
+    ("30-bits.ll", include_str!("../targets/aarch64/30-bits.ll")),
+    ("40-float.ll", include_str!("../targets/aarch64/40-float.ll")),
+    ("50-vectors.ll", include_str!("../targets/aarch64/50-vectors.ll")),
+    ("60-recipes.ll", include_str!("../targets/aarch64/60-recipes.ll")),
+    ("70-abi.ll", include_str!("../targets/aarch64/70-abi.ll")),
+];
+
 pub fn type_bits(m: &Module, ty: TypeId) -> u32 {
     match m.types.get(ty) {
         Type::Int(b) => *b,
@@ -488,11 +501,58 @@ pub fn mask_lanes(m: &Module, c: ConstId) -> Option<Vec<i32>> {
 
 impl Target {
     pub fn aarch64() -> Target {
-        Target::load(include_str!("../targets/aarch64.ll")).expect("the built-in AArch64 description is valid")
+        Target::load_files(AARCH64_FILES).expect("the built-in AArch64 description is valid")
+    }
+
+    /// A description in several files, read in order as one module; a
+    /// parse error is reported by the file and line it is in.
+    pub fn load_files(files: &[(&str, &str)]) -> Result<Target, String> {
+        let text: String = files.iter().map(|(_, t)| *t).collect();
+        match draconian_ir::parse_module(&text) {
+            Ok(m) => Target::from_module(m),
+            Err(e) => {
+                let mut line = e.line;
+                for (name, t) in files {
+                    let n = t.lines().count();
+                    if line <= n {
+                        return Err(format!("{name}:{line}:{}: {}", e.column, e.message));
+                    }
+                    line -= n;
+                }
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// A description from a file, or from the `.ll` files in a directory,
+    /// read in the order of their names.
+    pub fn load_path(path: &str) -> Result<Target, String> {
+        let p = std::path::Path::new(path);
+        if !p.is_dir() {
+            return Target::load(&std::fs::read_to_string(p).map_err(|e| e.to_string())?);
+        }
+        let mut names: Vec<std::path::PathBuf> = std::fs::read_dir(p)
+            .map_err(|e| e.to_string())?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|f| f.extension().is_some_and(|x| x == "ll"))
+            .collect();
+        names.sort();
+        let mut files = Vec::new();
+        for f in &names {
+            files.push((
+                f.file_name().unwrap().to_string_lossy().into_owned(),
+                std::fs::read_to_string(f).map_err(|e| e.to_string())?,
+            ));
+        }
+        let refs: Vec<(&str, &str)> = files.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect();
+        Target::load_files(&refs)
     }
 
     pub fn load(src: &str) -> Result<Target, String> {
-        let module = draconian_ir::parse_module(src).map_err(|e| format!("{e:?}"))?;
+        Target::load_files(&[("<description>", src)])
+    }
+
+    fn from_module(module: draconian_ir::Module) -> Result<Target, String> {
         let mut t = Target {
             module,
             instrs: Vec::new(),

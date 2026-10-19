@@ -12,7 +12,8 @@ const USAGE: &str = "usage: draconian-llc [options] <file.ll>
                           ending in .o asks for an object file
   --filetype=asm|obj      assembly (the default) or an object file, Mach-O
                           or ELF as the convention uses
-  --target=<file.ll>      read the machine description from this file
+  --target=<path>         read the machine description from this .ll file,
+                          or the .ll files in this directory in name order
                           (default: the built-in AArch64 description)
   --abi=darwin|aapcs64    the calling convention and platform (default:
                           from the module's target triple, else darwin)
@@ -70,7 +71,7 @@ fn main() -> ExitCode {
     }
     let target = match target_file {
         None => Target::aarch64(),
-        Some(path) => match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|s| Target::load(&s)) {
+        Some(path) => match Target::load_path(&path) {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("draconian-llc: {path}: {e}");

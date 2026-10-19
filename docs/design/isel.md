@@ -8,8 +8,11 @@ drives selection, assembly printing, binary encoding and disassembly. The
 description is read at start-up and kept as data; nothing is generated from
 it at build time.
 
-The code is in the `codegen` crate. The AArch64 description is
-`codegen/targets/aarch64.ll`. For sources and status labels, see the
+The code is in the `codegen` crate. The AArch64 description is in
+`codegen/targets/aarch64/`: one module in eight files, read in name order
+(base and conditions, integer, memory, bits, floating point, vectors,
+recipes, calling conventions; `00-base.ll` lists them). For sources and
+status labels, see the
 [index](README.md).
 
 ## Why LLVM IR
@@ -253,10 +256,9 @@ scalar view (`{d:s}`). A vector of `i1` is a *mask*: lanes of all ones or
 all zeros, as `cmeq` and its kin make them, in a q register. Shuffles match
 by their constant masks (`rev64` is `shufflevector` with `<1, 0, 3, 2>`),
 and reductions with no single instruction are recipes (`addv` then `umov`).
-The vector section of the description (482 instructions) is written by
-`codegen/targets/gen_aarch64_vectors.py`, one entry per arrangement, which
-puts it in place in `aarch64.ll`; the output is checked in and is data like
-the rest.
+The vector part of the description (`50-vectors.ll`, 482 instructions) is
+written by `codegen/targets/aarch64/gen_vectors.py`, one entry per
+arrangement; the output is checked in and is data like the rest.
 
 What the instructions cannot take directly, `codegen/src/legalize.rs`
 reshapes first, as LLVM's type legalisation does:

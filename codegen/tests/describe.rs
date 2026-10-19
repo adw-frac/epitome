@@ -138,3 +138,30 @@ fn table_is_built() {
     assert!(!t.patterns.iter().any(|p| p.name == "TSTWrr+Bcc.hs"));
     assert!(t.patterns.iter().any(|p| p.name == "TSTWrr+Bcc.eq"));
 }
+
+#[test]
+fn built_in_files_are_the_directory() {
+    // Every .ll file in targets/aarch64, in name order, is in the built-in
+    // list, so a new file is not left out; and the directory loads as the
+    // built-in description does.
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("targets/aarch64");
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".ll"))
+        .collect();
+    names.sort();
+    let built_in: Vec<&str> = draconian_codegen::target::AARCH64_FILES.iter().map(|f| f.0).collect();
+    assert_eq!(names, built_in);
+    let from_dir = Target::load_path(dir.to_str().unwrap()).unwrap();
+    let t = Target::aarch64();
+    assert_eq!(from_dir.instrs.len(), t.instrs.len());
+    assert_eq!(from_dir.patterns.len(), t.patterns.len());
+}
+
+#[test]
+fn errors_name_their_file() {
+    let e =
+        Target::load_files(&[("a.ll", "%nzcv = type { i64, i64 }\n"), ("b.ll", "\ndefine nonsense\n")]).err().unwrap();
+    assert!(e.starts_with("b.ll:2:"), "{e}");
+}
