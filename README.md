@@ -27,12 +27,14 @@ and run their output with `clang` when it is installed.
   recursion removal, and a rule-driven combiner whose rules are in
   `opt/rules/combine.rules`. See `docs/design/parallel.md` and
   `docs/design/combine.md`.
-- `codegen` (`draconian-codegen`): AArch64 code generation from a machine
-  description written in LLVM IR (`codegen/targets/aarch64/*.ll`):
-  instruction selection, register allocation, frames, and assembly, object
-  files (Mach-O and ELF) and disassembly; `draconian-as` assembles, and
-  `draconian-objdump` disassembles, both formats.
-  See `docs/design/isel.md` and `docs/design/objects.md`.
+- `codegen` (`draconian-codegen`): code generation from machine
+  descriptions written in LLVM IR: instruction selection, register
+  allocation, frames, and assembly, object files (Mach-O and ELF) and
+  disassembly; `draconian-as` assembles, and `draconian-objdump`
+  disassembles. AArch64 (`codegen/targets/aarch64/*.ll`) is built in;
+  other machines and CPUs are description files read at run time, such as
+  RISC-V RV64 (`codegen/targets/riscv64/`). See `docs/design/isel.md`,
+  `docs/design/targets.md` and `docs/design/objects.md`.
 
 ## Running
 
@@ -57,6 +59,16 @@ cargo run --release -p draconian-codegen --bin draconian-objdump -- -dr file.o
 
 # Assemble assembly (draconian-llc's) into an object file.
 cargo run --release -p draconian-codegen --bin draconian-as -- file.s -o file.o
+
+# Another machine, from its description's files; with a CPU and features.
+cargo run --release -p draconian-codegen --bin draconian-llc -- \
+    --target=codegen/targets/riscv64 --mattr=+zbb file.ll -o file.o
+cargo run --release -p draconian-codegen --bin draconian-llc -- --mcpu=apple-m1 --mattr=-neon file.ll
+
+# Or by name, from the directories in DRACONIAN_TARGET_PATH (and objdump
+# finds a description there by the object's ELF machine).
+export DRACONIAN_TARGET_PATH=$PWD/codegen/targets
+cargo run --release -p draconian-codegen --bin draconian-objdump -- -d file.o
 ```
 
 `draconian-opt --help` lists the options. `opt/tests/examples` has small

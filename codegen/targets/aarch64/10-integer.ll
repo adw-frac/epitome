@@ -10,7 +10,7 @@ define i32 @ADDWrr(i32 "reg"="w" %n, i32 "reg"="w" %m) "enc"="0 0 0 01011 00 0 m
   ret i32 %r
 }
 
-define i64 @ADDXrr(i64 "reg"="x" %n, i64 "reg"="x" %m) "enc"="1 0 0 01011 00 0 m:5 000000 n:5 d:5" "asm"="add {d}, {n}, {m}" {
+define i64 @ADDXrr(i64 "reg"="x" %n, i64 "reg"="x" %m) "enc"="1 0 0 01011 00 0 m:5 000000 n:5 d:5" "asm"="add {d}, {n}, {m}" "role"="add" {
   %r = add i64 %n, %m
   ret i64 %r
 }
@@ -128,7 +128,7 @@ define i32 @SUBWri_neg(i32 "reg"="wsp" %n, i32 "imm" %imm) "enc"="0 1 0 100010 0
   ret i32 %r
 }
 
-define i64 @SUBXri_neg(i64 "reg"="xsp" %n, i64 "imm" %imm) "enc"="1 1 0 100010 0 imm12:12=0-imm n:5 d:5" "asm"="sub {d}, {n}, #{=0-imm}" "dclass"="xsp" "nodecode" {
+define i64 @SUBXri_neg(i64 "reg"="xsp" %n, i64 "imm" %imm) "enc"="1 1 0 100010 0 imm12:12=0-imm n:5 d:5" "asm"="sub {d}, {n}, #{=0-imm}" "dclass"="xsp" "nodecode" "role"="addi.neg" {
   %r = add i64 %n, %imm
   ret i64 %r
 }
@@ -419,7 +419,7 @@ define i64 @ASRXri(i64 "reg"="x" %n, i64 "imm" %sh) "enc"="1 00 100110 1 immr:6=
 ; Extensions. Values narrower than 32 bits live in W registers, with
 ; whatever is above them undefined.
 
-define i32 @SXTBW(i8 "reg"="w" %n) "enc"="0 00 100110 0 000000 000111 n:5 d:5" "asm"="sxtb {d}, {n}" {
+define i32 @SXTBW(i8 "reg"="w" %n) "enc"="0 00 100110 0 000000 000111 n:5 d:5" "asm"="sxtb {d}, {n}" "role"="sext.8" {
   %r = sext i8 %n to i32
   ret i32 %r
 }
@@ -429,7 +429,7 @@ define i64 @SXTBX(i8 "reg"="w" %n) "enc"="1 00 100110 1 000000 000111 n:5 d:5" "
   ret i64 %r
 }
 
-define i32 @SXTHW(i16 "reg"="w" %n) "enc"="0 00 100110 0 000000 001111 n:5 d:5" "asm"="sxth {d}, {n}" {
+define i32 @SXTHW(i16 "reg"="w" %n) "enc"="0 00 100110 0 000000 001111 n:5 d:5" "asm"="sxth {d}, {n}" "role"="sext.16" {
   %r = sext i16 %n to i32
   ret i32 %r
 }
@@ -444,7 +444,7 @@ define i64 @SXTWX(i32 "reg"="w" %n) "enc"="1 00 100110 1 000000 011111 n:5 d:5" 
   ret i64 %r
 }
 
-define i32 @SBFX1W(i1 "reg"="w" %n) "enc"="0 00 100110 0 000000 000000 n:5 d:5" "asm"="sbfx {d}, {n}, #0, #1" {
+define i32 @SBFX1W(i1 "reg"="w" %n) "enc"="0 00 100110 0 000000 000000 n:5 d:5" "asm"="sbfx {d}, {n}, #0, #1" "role"="sext.1" {
   %r = sext i1 %n to i32
   ret i32 %r
 }
@@ -454,17 +454,17 @@ define i64 @SBFX1X(i1 "reg"="w" %n) "enc"="1 00 100110 1 000000 000000 n:5 d:5" 
   ret i64 %r
 }
 
-define i32 @UXTBW(i8 "reg"="w" %n) "enc"="0 10 100110 0 000000 000111 n:5 d:5" "asm"="uxtb {d}, {n}" "zext"="8" {
+define i32 @UXTBW(i8 "reg"="w" %n) "enc"="0 10 100110 0 000000 000111 n:5 d:5" "asm"="uxtb {d}, {n}" "zext"="8" "role"="zext.8" {
   %r = zext i8 %n to i32
   ret i32 %r
 }
 
-define i32 @UXTHW(i16 "reg"="w" %n) "enc"="0 10 100110 0 000000 001111 n:5 d:5" "asm"="uxth {d}, {n}" "zext"="16" {
+define i32 @UXTHW(i16 "reg"="w" %n) "enc"="0 10 100110 0 000000 001111 n:5 d:5" "asm"="uxth {d}, {n}" "zext"="16" "role"="zext.16" {
   %r = zext i16 %n to i32
   ret i32 %r
 }
 
-define i32 @UXT1W(i1 "reg"="w" %n) "enc"="0 00 100100 0 000000 000000 n:5 d:5" "asm"="and {d}, {n}, #0x1" "zext"="1" {
+define i32 @UXT1W(i1 "reg"="w" %n) "enc"="0 00 100100 0 000000 000000 n:5 d:5" "asm"="and {d}, {n}, #0x1" "zext"="1" "role"="zext.1" {
   %r = zext i1 %n to i32
   ret i32 %r
 }
@@ -561,21 +561,21 @@ define i64 @MOVKXi(i64 "reg"="x" "tied" %old, i64 "imm" %imm, i64 "imm" %sh) "en
 }
 
 ; Addresses of symbols: the 4KB page, then the offset in it.
-define ptr @ADRP(ptr "sym" %s) "enc"="1 immlo:2=s&3 10000 immhi:s19=s>>2 d:5" "asm"="adrp {d}, {s:page}" "reloc"="adrp" "role"="adrp" "nomatch" {
+define ptr @ADRP(ptr "sym" %s) "enc"="1 immlo:2=s&3 10000 immhi:s19=s>>2 d:5" "asm"="adrp {d}, {s}" "reloc"="adrp" "role"="addr.hi" "nomatch" {
   ret ptr %s
 }
 
-define ptr @ADDpageoff(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="1 0 0 100010 0 imm12:12=s n:5 d:5" "asm"="add {d}, {n}, {s:pageoff}" "reloc"="add_lo12" "dclass"="xsp" "role"="pageoff" "nomatch" "nodecode" {
+define ptr @ADDpageoff(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="1 0 0 100010 0 imm12:12=s n:5 d:5" "asm"="add {d}, {n}, {s}" "reloc"="add_lo12" "dclass"="xsp" "role"="addr.lo" "nomatch" "nodecode" {
   ret ptr %n
 }
 
 ; Addresses of symbols defined in other libraries, from the global offset
 ; table: the table entry's page, then a load of the entry.
-define ptr @ADRPgot(ptr "sym" %s) "enc"="1 immlo:2=s&3 10000 immhi:s19=s>>2 d:5" "asm"="adrp {d}, {s:gotpage}" "reloc"="adrp_got" "role"="adrp.got" "nomatch" "nodecode" {
+define ptr @ADRPgot(ptr "sym" %s) "enc"="1 immlo:2=s&3 10000 immhi:s19=s>>2 d:5" "asm"="adrp {d}, {s}" "reloc"="adrp_got" "role"="got.hi" "nomatch" "nodecode" {
   ret ptr %s
 }
 
-define ptr @LDRgot(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="11 111 0 01 01 imm12:12=s/8 n:5 d:5" "asm"="ldr {d}, [{n}, {s:gotpageoff}]" "reloc"="ld64_got_lo12" "role"="ldr.got" "nomatch" "nodecode" {
+define ptr @LDRgot(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="11 111 0 01 01 imm12:12=s/8 n:5 d:5" "asm"="ldr {d}, [{n}, {s}]" "reloc"="ld64_got_lo12" "role"="got.lo" "nomatch" "nodecode" {
   %v = load ptr, ptr %n
   ret ptr %v
 }

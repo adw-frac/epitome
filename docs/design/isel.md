@@ -389,7 +389,7 @@ Conventions are data too: named metadata in the description, one block per
 convention and platform (`codegen/src/abi.rs` reads them).
 
 ```llvm
-!aarch64.abi.aapcs64 = !{!200, !201, ...}
+!abi.aapcs64 = !{!200, !201, ...}
 !200 = !{!"args", !"x0-x7"}
 !201 = !{!"result", !"x0"}
 !202 = !{!"clobbers", !"x0-x18", !"x30"}
@@ -435,6 +435,10 @@ the global offset table (`adrp` of `@GOTPAGE`, then a load), and constants
 holding addresses go where the loader can write (`__DATA,__const`,
 `.data.rel.ro`).
 
+A convention may also name a `far-scratch` register, never allocated, for
+the addresses of stack slots further than an instruction's offset reaches
+(RISC-V's 2,047 bytes); AArch64's reach 32KB and need none.
+
 Not yet: `byval` and `sret` arguments, homogeneous floating-point
 aggregates and vectors, defining variadic functions under AAPCS64 (whose
 `va_list` is a struct with register save areas), and tail calls.
@@ -442,8 +446,8 @@ aggregates and vectors, defining variadic functions under AAPCS64 (whose
 ## Output
 
 - **Assembly** in the convention's dialect (Mach-O or ELF), from the
-  templates, with `{s:page}` and `{s:pageoff}` written as the platform
-  writes them. It can be assembled with clang and linked with C.
+  templates, with each `{s}` written as its relocation's `elf-syntax` or
+  `macho-syntax` says (`:lo12:g`, `g@PAGEOFF`). It can be assembled with clang and linked with C.
 - **Binary**: the encoding of each instruction, with branches within a
   function resolved, and fixups for symbols.
 - **Object files**: Mach-O and ELF, whose relocations come from each

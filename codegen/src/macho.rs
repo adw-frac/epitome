@@ -4,7 +4,8 @@
 //! tests.
 //!
 //! From Apple's published `<mach-o/loader.h>`, `<mach-o/nlist.h>`,
-//! `<mach-o/reloc.h>`, `<mach-o/arm64/reloc.h>` and `<mach-o/fat.h>`: a
+//! `<mach-o/reloc.h>` and `<mach-o/fat.h>` (the CPU type and relocation
+//! types are the description's, `machine.rs`): a
 //! header, then load commands, of which `LC_SEGMENT_64` lists sections
 //! (with their relocations) and `LC_SYMTAB` places the symbols and their
 //! names. A relocation names a symbol (`extern`) or a section (by number,
@@ -13,7 +14,8 @@
 
 use std::collections::HashMap;
 
-use crate::object::{Object, RelocKind, RelocTarget, SectionKind};
+use crate::machine::{Machine, RelocUse};
+use crate::object::{Object, RelocTarget, SectionKind};
 
 pub const MH_MAGIC_64: u32 = 0xfeed_facf;
 pub const FAT_MAGIC: u32 = 0xcafe_babe;
@@ -36,39 +38,6 @@ pub const N_TYPE: u8 = 0x0e;
 pub const N_UNDF: u8 = 0x0;
 pub const N_SECT: u8 = 0xe;
 pub const N_WEAK_DEF: u16 = 0x80;
-
-/// The arm64 relocation types, with their names.
-pub const RELOCS: &[(u8, &str)] = &[
-    (0, "ARM64_RELOC_UNSIGNED"),
-    (1, "ARM64_RELOC_SUBTRACTOR"),
-    (2, "ARM64_RELOC_BRANCH26"),
-    (3, "ARM64_RELOC_PAGE21"),
-    (4, "ARM64_RELOC_PAGEOFF12"),
-    (5, "ARM64_RELOC_GOT_LOAD_PAGE21"),
-    (6, "ARM64_RELOC_GOT_LOAD_PAGEOFF12"),
-    (7, "ARM64_RELOC_POINTER_TO_GOT"),
-    (8, "ARM64_RELOC_TLVP_LOAD_PAGE21"),
-    (9, "ARM64_RELOC_TLVP_LOAD_PAGEOFF12"),
-    (10, "ARM64_RELOC_ADDEND"),
-];
-
-pub fn reloc_name(ty: u8) -> String {
-    RELOCS.iter().find(|r| r.0 == ty).map_or_else(|| format!("ARM64_RELOC_{ty}"), |r| r.1.to_string())
-}
-
-/// The kind a relocation is, if the description names it. (`PAGEOFF12`
-/// also fills in loads and stores; those are decoded as themselves.)
-pub fn reloc_kind(ty: u8, length: u8) -> Option<RelocKind> {
-    match (ty, length) {
-        (0, 3) => Some(RelocKind::Abs64),
-        (2, _) => Some(RelocKind::Call26),
-        (3, _) => Some(RelocKind::Adrp),
-        (4, _) => Some(RelocKind::AddLo12),
-        (5, _) => Some(RelocKind::AdrpGot),
-        (6, _) => Some(RelocKind::Ld64GotLo12),
-        _ => None,
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct MachFile {
@@ -303,19 +272,6 @@ pub fn read(bytes: &[u8]) -> Result<MachFile, String> {
 // ---------------------------------------------------------------------------
 // Writing
 
-/// The arm64 relocation type for each kind, whether it is PC-relative, and
-/// log2 of the size of what it fills in.
-pub fn reloc_type(k: RelocKind) -> (u8, bool, u8) {
-    match k {
-        RelocKind::Abs64 => (0, false, 3),
-        RelocKind::Call26 => (2, true, 2),
-        RelocKind::Adrp => (3, true, 2),
-        RelocKind::AddLo12 => (4, false, 2),
-        RelocKind::AdrpGot => (5, true, 2),
-        RelocKind::Ld64GotLo12 => (6, false, 2),
-    }
-}
-
 /// The segment and section a kind of section is in Mach-O.
 pub fn section_names(kind: SectionKind) -> (&'static str, &'static str) {
     match kind {
@@ -359,7 +315,8 @@ fn put64(out: &mut Vec<u8>, v: u64) {
 /// undefined ones by name, as `LC_DYSYMTAB` says. Relocations name their
 /// symbols (`r_extern`), and are listed from the highest address down, as
 /// assembler does; a pointer's addend is in the pointer's bytes.
-pub fn write(obj: &Object, min_os: (u32, u32, u32)) -> Vec<u8> {
+pub fn write(obj: &Object, min_os: (u32, u32, u32), m: &Machine) -> Result<Vec<u8>, String> {
+    let cpu = m.macho_cpu.ok_or("the description has no Mach-O CPU type (target parameter macho-cpu)")?;
     // Addresses: each section after the last, aligned.
     let mut addrs = Vec::new();
     let mut at = 0u64;
@@ -419,10 +376,12 @@ pub fn write(obj: &Object, min_os: (u32, u32, u32)) -> Vec<u8> {
         let mut sorted: Vec<&crate::object::Reloc> = s.relocs.iter().collect();
         sorted.sort_by_key(|r| std::cmp::Reverse(r.offset));
         for r in sorted {
-            let (ty, pcrel, length) = reloc_type(r.kind);
+            let def = &m.relocs[r.kind.0 as usize];
+            let ty = def.macho.ok_or_else(|| format!("relocation {} has no Mach-O type", def.name))?;
+            let (pcrel, length) = (def.macho_pcrel, def.macho_length);
             let RelocTarget::Symbol(sym) = r.target else { unreachable!("Mach-O relocations name their symbols") };
             let mut addend = r.addend;
-            if r.kind == RelocKind::Abs64 {
+            if matches!(def.usage, RelocUse::Data(_)) {
                 let at = r.offset as usize;
                 data[at..at + 8].copy_from_slice(&(addend as u64).to_le_bytes());
                 addend = 0;
@@ -469,7 +428,7 @@ pub fn write(obj: &Object, min_os: (u32, u32, u32)) -> Vec<u8> {
 
     let mut out = Vec::new();
     put32(&mut out, MH_MAGIC_64);
-    put32(&mut out, CPU_TYPE_ARM64);
+    put32(&mut out, cpu);
     put32(&mut out, 0); // CPU_SUBTYPE_ARM64_ALL
     put32(&mut out, MH_OBJECT);
     put32(&mut out, 4);
@@ -544,7 +503,7 @@ pub fn write(obj: &Object, min_os: (u32, u32, u32)) -> Vec<u8> {
     out.resize(symoff as usize, 0);
     out.extend_from_slice(&symtab);
     out.extend_from_slice(&strtab);
-    out
+    Ok(out)
 }
 
 impl MachFile {
@@ -554,7 +513,7 @@ impl MachFile {
     /// relocations (against names), and the symbols, without the
     /// assembler's temporaries (`ltmp0`). Where things are in the file,
     /// and in what order, is left out.
-    pub fn canonical(&self) -> String {
+    pub fn canonical(&self, m: &Machine) -> String {
         use std::fmt::Write;
         let mut out = format!("file type {} flags {:#x}\n", self.file_type, self.flags);
         if let Some((platform, (a, b, c))) = self.build {
@@ -583,7 +542,7 @@ impl MachFile {
                     format!(
                         "  reloc {:06x} {} pcrel {} length {} {}{:+#x}",
                         r.offset,
-                        reloc_name(r.rel_type),
+                        m.macho_name(r.rel_type),
                         r.pcrel,
                         r.length,
                         target,

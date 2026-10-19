@@ -68,7 +68,7 @@ fn compare(t: &Target, obj: &Path) -> Result<(usize, usize), String> {
         let Some(addr) = head.trim().split(':').next().and_then(|a| u64::from_str_radix(a, 16).ok()) else { continue };
         theirs.insert(addr, mn.trim().to_string());
     }
-    let img = Image::read(&std::fs::read(obj).unwrap())?;
+    let img = Image::read(&std::fs::read(obj).unwrap(), &t.machine)?;
     let ours = objdump::disassemble(t, &img, false);
     let (mut decoded, mut words) = (0, 0);
     let mut wrong = Vec::new();

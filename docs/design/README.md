@@ -20,6 +20,10 @@ split into two halves:
 - [Machine descriptions and instruction selection](isel.md): targets
   described in LLVM IR, longest-match selection with a trie, register
   allocation, and assembly, binary and disassembly from one description.
+- [Targets, CPUs and features](targets.md): adding a machine or a CPU
+  without rebuilding, as description files found at run time; feature
+  gates; relocations, registers and object-file identities as data; and
+  RISC-V RV64, the second machine.
 - [Object files, assembly and disassembly](objects.md): writing Mach-O
   and ELF object files that match clang's assembler; `draconian-as`, which
   assembles with the machine description run backwards; and
@@ -50,6 +54,7 @@ how they were found in
 | Document | Used for |
 | --- | --- |
 | [LLVM's Analysis and Transform Passes](https://llvm.org/docs/Passes.html) | Every IR pass listed in `ir.md` |
+| [The RISC-V Instruction Set Manual, Volume I](https://github.com/riscv/riscv-isa-manual) and the [RISC-V ELF psABI](https://github.com/riscv-non-isa/riscv-elf-psabi-doc) | The RISC-V RV64 description: encodings, the LP64D convention and relocations (`targets.md`) |
 | Arm's A-profile Architecture Machine Readable Specification (AARCHMRS, open-source package, BSD 3-clause) | Checking the AArch64 description's encodings and mnemonics, and the bit layouts of entries generated from it (`isel.md`) |
 | [Using the New Pass Manager](https://llvm.org/docs/NewPassManager.html) | Pass manager design and pipeline syntax |
 | [The LLVM Target-Independent Code Generator](https://llvm.org/docs/CodeGenerator.html) | Codegen phases, data structures, SelectionDAG, register allocation, MC layer |

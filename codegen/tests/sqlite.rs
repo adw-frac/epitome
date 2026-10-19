@@ -121,9 +121,10 @@ fn sqlite_answers_as_clangs_build() {
         // Our object says what the assembler's says.
         let theirs = tmp.join(format!("sqlite3.{name}.assembled.o"));
         run(Command::new("clang").arg("-c").arg(&s).arg("-o").arg(&theirs)).unwrap();
-        let a = macho::read(&object).unwrap().canonical();
-        let b = macho::read(&std::fs::read(&theirs).unwrap()).unwrap().canonical();
-        let ours_assembled = Assembler::new(&t).assemble(&std::fs::read_to_string(&s).unwrap(), None).unwrap().file();
+        let a = macho::read(&object).unwrap().canonical(&t.machine);
+        let b = macho::read(&std::fs::read(&theirs).unwrap()).unwrap().canonical(&t.machine);
+        let ours_assembled =
+            Assembler::new(&t).assemble(&std::fs::read_to_string(&s).unwrap(), None).unwrap().file(&t).unwrap();
         if ours_assembled != object {
             failures.push(format!("{name}: draconian-as makes another object of our assembly"));
         }
@@ -162,13 +163,13 @@ fn sqlite_answers_as_clangs_build() {
         let theirs = tmp.join(format!("sqlite3.{name}.elf.o"));
         run(Command::new("clang").args(["--target=aarch64-linux-gnu", "-c"]).arg(&s).arg("-o").arg(&theirs)).unwrap();
         let bytes = compiled.object_file(&t).unwrap();
-        if Assembler::new(&t).assemble(&compiled.asm, None).unwrap().file() != bytes {
+        if Assembler::new(&t).assemble(&compiled.asm, None).unwrap().file(&t).unwrap() != bytes {
             failures.push(format!("{name}: draconian-as makes another ELF object of our assembly"));
         }
         let mine = tmp.join(format!("sqlite3.{name}.elf.ours.o"));
         std::fs::write(&mine, &bytes).unwrap();
-        let a = elf::read(&bytes).unwrap().canonical();
-        let b = elf::read(&std::fs::read(&theirs).unwrap()).unwrap().canonical();
+        let a = elf::read(&bytes).unwrap().canonical(&t.machine);
+        let b = elf::read(&std::fs::read(&theirs).unwrap()).unwrap().canonical(&t.machine);
         if a != b {
             failures.push(format!(
                 "{name}: our ELF object differs:\n{}",
@@ -176,7 +177,7 @@ fn sqlite_answers_as_clangs_build() {
             ));
             continue;
         }
-        match objdump::reads_back(&t, &Image::read(&bytes).unwrap(), &compiled.asm, ALIASES) {
+        match objdump::reads_back(&t, &Image::read(&bytes, &t.machine).unwrap(), &compiled.asm, ALIASES) {
             Ok(n) => println!("ok {name} ELF object, {n} instructions read back"),
             Err(e) => failures.push(format!("{name}: {e}")),
         }

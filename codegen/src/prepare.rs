@@ -37,9 +37,28 @@ use crate::target::sext;
 pub struct Ctx<'a> {
     pub m: &'a mut Module,
     pub dl: &'a DataLayout,
+    /// The machine description, for what it says about the machine as a
+    /// whole (its vector registers' width, which shuffles it has).
+    pub t: &'a crate::target::Target,
+    /// The features of the function being compiled.
+    pub features: crate::features::Features,
 }
 
 impl Ctx<'_> {
+    /// The width of the vector registers, or 0 if there are none (or their
+    /// feature is off): then vectors are done lane by lane.
+    pub fn vector_bits(&self) -> u32 {
+        match &self.t.machine.vector_feature {
+            Some(f) if !self.features.contains(f) => 0,
+            _ => self.t.machine.vector_bits,
+        }
+    }
+
+    /// Are instruction `i`'s features on?
+    pub fn enabled(&self, i: usize) -> bool {
+        self.t.instrs[i].features.iter().all(|f| self.features.contains(f))
+    }
+
     fn i64t(&mut self) -> TypeId {
         self.m.types.int(64)
     }
@@ -87,11 +106,16 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     expand_intrinsics(cx, &mut f);
     split_aggregate_memory(cx, &mut f);
     crate::legalize::legalize_vectors(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
+    // Element-wise intrinsics split into scalars expand as scalars do.
+    expand_intrinsics(cx, &mut f);
     lower_geps(cx, &mut f)?;
     promote_odd(cx, &mut f)?;
     widen_narrow(cx, &mut f);
     legalize_fp(cx, &mut f)?;
     lower_const_divs(cx, &mut f);
+    if cx.t.machine.compare_booleans {
+        compare_boolean_branches(cx, &mut f);
+    }
     split_phi_edges(&mut f);
     Ok(f)
 }
@@ -662,9 +686,12 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 k += n;
                 continue;
             }
-            // A vector funnel shift by a constant: two shifts and an or.
-            if base == "llvm.fshl"
-                && let Type::Vector { elem, .. } = cx.m.types.get(ty).clone()
+            // A funnel shift by a constant, of vectors or (where the
+            // description has no instruction for it) of scalars: two shifts
+            // and an or.
+            let vector = matches!(cx.m.types.get(ty), Type::Vector { .. });
+            if (base == "llvm.fshl" || base == "llvm.fshr")
+                && (vector || !cx.t.intrinsics.contains(&name))
                 && let Some(c) = crate::target::lit_of(
                     cx.m,
                     match args[2] {
@@ -674,20 +701,30 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 )
                 .filter(|_| matches!(args[2], Value::Const(_)))
             {
+                let elem = match cx.m.types.get(ty).clone() {
+                    Type::Vector { elem, .. } => elem,
+                    _ => ty,
+                };
                 let eb = match cx.m.types.get(elem) {
                     Type::Int(b) => *b as i64,
                     _ => 64,
                 };
                 let amt = c.0.rem_euclid(eb);
-                let splat = |cx: &mut Ctx, v: i64| -> Value {
+                let amount = |cx: &mut Ctx, v: i64| -> Value {
                     let e = cx.int(elem, v);
+                    if !vector {
+                        return e;
+                    }
                     let Value::Const(e) = e else { unreachable!() };
                     Value::Const(cx.m.consts.intern(Constant { ty, kind: ConstKind::Splat(e) }))
                 };
+                // fshl(a, b, c) is (a << c) | (b >> (w - c)); fshr(a, b, c) is
+                // fshl(a, b, w - c).
+                let amt = if base == "llvm.fshr" { (eb - amt) % eb } else { amt };
                 let value = if amt == 0 {
-                    args[0]
+                    if base == "llvm.fshr" { args[1] } else { args[0] }
                 } else {
-                    let (a, b) = (splat(cx, amt), splat(cx, eb - amt));
+                    let (a, b) = (amount(cx, amt), amount(cx, eb - amt));
                     let hi = s.bin(BinOp::Shl, args[0], a, ty);
                     let lo = s.bin(BinOp::LShr, args[1], b, ty);
                     s.bin(BinOp::Or, hi, lo, ty)
@@ -1146,6 +1183,38 @@ pub fn struct_fields(cx: &Ctx, ty: TypeId) -> Result<(Vec<TypeId>, bool), String
 
 /// Splits each edge from a block with several successors into a block
 /// with phis.
+/// For machines whose branches compare whole registers: a branch on a
+/// boolean that is not an integer comparison in the same block (whose
+/// branch can compare its operands) becomes a branch on the boolean,
+/// zero-extended, compared with zero. A boolean's bits above the lowest are
+/// undefined, so the extension is needed.
+fn compare_boolean_branches(cx: &mut Ctx, f: &mut Function) {
+    let i64t = cx.m.types.int(64);
+    let i1 = cx.m.types.int(1);
+    let zero = cx.int(i64t, 0);
+    for b in f.layout.clone() {
+        let Some(t) = f.terminator(b) else { continue };
+        let Op::CondBr { cond: Value::Local(c), then_dest, else_dest } = f.insts[t.index()].op.clone() else {
+            continue;
+        };
+        let compared_here = matches!(f.locals[c.index()].def,
+            LocalDef::Inst(d) if matches!(f.insts[d.index()].op, Op::ICmp { .. })
+                && f.blocks[b.index()].insts.contains(&d));
+        if compared_here {
+            continue;
+        }
+        let z = f.add_inst(
+            Op::Cast { op: CastOp::ZExt, flags: IntFlags::NONE, fmf: FastMath::default(), value: Value::Local(c) },
+            Some((None, i64t)),
+        );
+        let cmp =
+            f.add_inst(Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: f.result(z), rhs: zero }, Some((None, i1)));
+        let at = f.blocks[b.index()].insts.len() - 1;
+        f.blocks[b.index()].insts.splice(at..at, [z, cmp]);
+        f.insts[t.index()].op = Op::CondBr { cond: f.result(cmp), then_dest, else_dest };
+    }
+}
+
 fn split_phi_edges(f: &mut Function) {
     let blocks: Vec<BlockId> = f.layout.clone();
     for p in blocks {

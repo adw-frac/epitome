@@ -161,9 +161,9 @@ impl MFunc {
 // ---------------------------------------------------------------------------
 // Printing
 
-pub fn reg_name(r: Reg, class: Class) -> String {
+pub fn reg_name(t: &Target, r: Reg, class: Class) -> String {
     match r {
-        Reg::P(n) => class.name(n),
+        Reg::P(n) => t.machine.name(class, n),
         Reg::V(v) => format!(
             "%{}{v}",
             match class {
@@ -188,7 +188,7 @@ pub fn format_inst(t: &Target, f: &MFunc, inst: &MInst) -> String {
             };
             let c = Class::X.with_width(wide);
             let c = if fp { Class::D.with_width(wide) } else { c };
-            let r = |o: &MOp| if let MOp::Reg(r) = o { reg_name(*r, c) } else { "?".into() };
+            let r = |o: &MOp| if let MOp::Reg(r) = o { reg_name(t, *r, c) } else { "?".into() };
             format!("COPY {}, {}", r(&inst.ops[0]), r(&inst.ops[1]))
         }
         Opcode::Instr(i) => {
@@ -250,25 +250,30 @@ pub fn fill_template(t: &Target, abi: Option<&crate::abi::Abi>, i: usize, value:
         let o = &ins.operands[k];
         match (value(k), o.kind) {
             (Operand::Reg(r), Kind::Reg(class)) => {
+                let m = &t.machine;
                 // A vector arrangement, `{n:4s}`: v3.4s; or a lane's size,
                 // `{n:.s}`: v3.s (followed in the template by `[k]`).
                 if let Some(arr) =
                     modifier.filter(|m| m.len() >= 2 && (m.as_bytes()[0].is_ascii_digit() || m.starts_with('.')))
                 {
-                    let arr = arr.strip_prefix('.').map_or(format!(".{arr}"), |x| format!(".{x}"));
                     let arr = arr.trim_start_matches('.');
                     match r {
-                        Reg::P(n) => out.push_str(&format!("v{}.{arr}", n.wrapping_sub(32))),
+                        Reg::P(n) => {
+                            out.push_str(&format!("{}.{arr}", m.view("lanes", n).unwrap_or_else(|| "?".into())))
+                        }
                         Reg::V(v) => out.push_str(&format!("%v{v}.{arr}")),
                     }
                     continue;
                 }
-                // The scalar view of a vector register: `{n:s}` is s3.
-                if let Some(v @ ("b" | "h" | "s" | "d" | "q")) = modifier
-                    && class.is_fp()
-                {
+                // Another view of a vector register: `{n:s}` is s3.
+                if let Some(v) = modifier.filter(|v| class.is_fp() && !matches!(*v, "w" | "x")) {
                     match r {
-                        Reg::P(n) => out.push_str(&format!("{v}{}", n.wrapping_sub(32))),
+                        Reg::P(n) => out.push_str(
+                            &Class::parse(v)
+                                .map(|c| m.name(c, n))
+                                .or_else(|| m.view(v, n))
+                                .unwrap_or_else(|| "?".into()),
+                        ),
                         Reg::V(x) => out.push_str(&format!("%{v}{x}")),
                     }
                     continue;
@@ -278,7 +283,7 @@ pub fn fill_template(t: &Target, abi: Option<&crate::abi::Abi>, i: usize, value:
                     Some("x") => class.with_width(true),
                     _ => class,
                 };
-                out.push_str(&reg_name(r, class));
+                out.push_str(&reg_name(t, r, class));
             }
             (Operand::Imm(v), Kind::Cond) => {
                 out.push_str(t.conds.iter().find(|c| c.value == v).map_or("?", |c| c.asm.as_str()));
@@ -295,15 +300,13 @@ pub fn fill_template(t: &Target, abi: Option<&crate::abi::Abi>, i: usize, value:
                 }
             },
             (Operand::Text(s), _) => out.push_str(&s),
-            (Operand::Sym(s), _) => out.push_str(&match (abi, modifier) {
-                (Some(a), Some("page")) => a.page(&s),
-                (Some(a), Some("pageoff")) => a.pageoff(&s),
-                (Some(a), Some("gotpage")) => a.got_page(&s),
-                (Some(a), Some("gotpageoff")) => a.got_pageoff(&s),
-                (Some(a), _) => a.symbol(&s),
+            // A symbol, as the relocation that fills it in writes it.
+            (Operand::Sym(s), _) => out.push_str(&match (abi, ins.reloc) {
+                (Some(a), Some(k)) => t.machine.relocs[k.0 as usize].spell(a.syntax, &a.symbol(&s)),
+                (Some(a), None) => a.symbol(&s),
                 (None, _) => s,
             }),
-            (Operand::Reg(r), _) => out.push_str(&reg_name(r, Class::X)),
+            (Operand::Reg(r), _) => out.push_str(&reg_name(t, r, Class::X)),
         }
     }
     out.push_str(rest);

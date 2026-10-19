@@ -373,13 +373,13 @@ define i32 @FCVTZUWS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 11 001 000000 n
   ret i32 %r
 }
 
-define float @LDRSui(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="10 111 1 01 01 imm12:12=off/4 n:5 d:5" "asm"="ldr {d}, [{n}, #{off}]"  {
+define float @LDRSui(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="10 111 1 01 01 imm12:12=off/4 n:5 d:5" "asm"="ldr {d}, [{n}, #{off}]" "role"="load.s" {
   %p = getelementptr i8, ptr %n, i64 %off
   %v = load float, ptr %p
   ret float %v
 }
 
-define void @STRSui(float "reg"="s" %t, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="10 111 1 01 00 imm12:12=off/4 n:5 t:5" "asm"="str {t}, [{n}, #{off}]"  {
+define void @STRSui(float "reg"="s" %t, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="10 111 1 01 00 imm12:12=off/4 n:5 t:5" "asm"="str {t}, [{n}, #{off}]" "role"="store.s" {
   %p = getelementptr i8, ptr %n, i64 %off
   store float %t, ptr %p
   ret void

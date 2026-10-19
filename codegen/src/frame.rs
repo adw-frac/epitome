@@ -11,8 +11,6 @@
 use crate::mir::*;
 use crate::target::Target;
 
-const SP: u8 = 31;
-
 pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     let (fp_reg, lr_reg) = (f.abi.fp, f.abi.lr);
     let mut callee_saved = f.abi.callee_saved();
@@ -55,16 +53,50 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
         return Err(format!("{}: a frame of {size} bytes is too big for now", f.name));
     }
 
-    // Frame offsets become immediates.
+    // Frame offsets become immediates. Where one is more than the
+    // instruction's immediate holds (RISC-V's reach 2047 bytes), the
+    // address is made in a scratch register the instruction does not use:
+    // the offset, added to the base; the instruction then uses offset 0.
+    let far = f.abi.far_scratch;
     for b in &mut f.blocks {
-        for inst in &mut b.insts {
-            for op in &mut inst.ops {
+        let old = std::mem::take(&mut b.insts);
+        for mut inst in old {
+            let mut at = None;
+            for (k, op) in inst.ops.iter_mut().enumerate() {
                 match op {
-                    MOp::Frame(s, o) => *op = MOp::Imm(f.slots[*s].offset + *o),
-                    MOp::Incoming(o) => *op = MOp::Imm(size + *o),
+                    MOp::Frame(s, o) => {
+                        *op = MOp::Imm(f.slots[*s].offset + *o);
+                        at = Some(k);
+                    }
+                    MOp::Incoming(o) => {
+                        *op = MOp::Imm(size + *o);
+                        at = Some(k);
+                    }
                     _ => {}
                 }
             }
+            if let (Some(k), Opcode::Instr(i)) = (at, inst.op)
+                && k > 0
+                && let MOp::Imm(off) = inst.ops[k]
+                && let MOp::Reg(Reg::P(base)) = inst.ops[k - 1]
+            {
+                let values: Vec<Option<i64>> =
+                    inst.ops.iter().map(|o| if let MOp::Imm(v) = o { Some(*v) } else { None }).collect();
+                if !t.instrs[i].fits(&values) {
+                    let tmp = far.ok_or_else(|| {
+                        format!("{}: a frame offset of {off}, and the convention names no far-scratch register", f.name)
+                    })?;
+                    let add = t.role("add").ok_or("no \"add\" instruction for a far frame offset")?;
+                    constant(t, &mut b.insts, tmp, off)?;
+                    b.insts.push(MInst::new(
+                        add,
+                        vec![MOp::Reg(Reg::P(tmp)), MOp::Reg(Reg::P(base)), MOp::Reg(Reg::P(tmp))],
+                    ));
+                    inst.ops[k - 1] = MOp::Reg(Reg::P(tmp));
+                    inst.ops[k] = MOp::Imm(0);
+                }
+            }
+            b.insts.push(inst);
         }
     }
 
@@ -76,21 +108,40 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
         slots.push((lr_reg, fp_at + 8));
     }
     slots.extend(save_at.iter().copied());
-    let (saves, restores) = save_restore(t, &slots);
+    // Where the saves are too far from sp for a store's offset (RISC-V's
+    // reach 2047 bytes), the frame is made in two steps: the part above the
+    // lowest save first, with the saves near sp, then the rest.
+    let sp = t.machine.sp;
+    let reaches = |slots: &[(u8, i64)]| {
+        slots.iter().all(|&(reg, at)| {
+            let role = if reg >= 32 { "store.d" } else { "store.x" };
+            t.role(role).is_some_and(|i| t.instrs[i].fits(&[None, None, Some(at)]))
+        })
+    };
+    let low = if reaches(&slots) { 0 } else { slots.iter().map(|s| s.1).min().unwrap_or(0) / 16 * 16 };
+    let near: Vec<(u8, i64)> = slots.iter().map(|&(reg, at)| (reg, at - low)).collect();
+    let (saves, restores) = save_restore(t, &near);
     let mut prologue = Vec::new();
-    if size > 0 {
-        adjust(t, &mut prologue, SP, SP, -size);
+    if size - low > 0 {
+        adjust(t, &mut prologue, sp, sp, -(size - low), &f.abi.scratch)?;
     }
     prologue.extend(saves);
     if calls {
-        adjust(t, &mut prologue, fp_reg, SP, fp_at);
+        adjust(t, &mut prologue, fp_reg, sp, fp_at - low, &f.abi.scratch)?;
     }
-    let mut epilogue = restores;
-    if size > 0 {
-        adjust(t, &mut epilogue, SP, SP, size);
+    if low > 0 {
+        adjust(t, &mut prologue, sp, sp, -low, &f.abi.scratch)?;
+    }
+    let mut epilogue = Vec::new();
+    if low > 0 {
+        adjust(t, &mut epilogue, sp, sp, low, &f.abi.scratch)?;
+    }
+    epilogue.extend(restores);
+    if size - low > 0 {
+        adjust(t, &mut epilogue, sp, sp, size - low, &f.abi.scratch)?;
     }
 
-    let ret = t.by_name["RET"];
+    let ret = t.by_role("ret");
     for b in &mut f.blocks {
         let old = std::mem::take(&mut b.insts);
         for inst in old {
@@ -121,30 +172,51 @@ fn save_restore(t: &Target, slots: &[(u8, i64)]) -> (Vec<MInst>, Vec<MInst>) {
             && file(a) == file(b)
             && bt == at + 8
         {
-            let stp = t.by_role(&format!("store.pair.{}", file(a)));
-            let ldp = t.by_role(&format!("load.pair.{}", file(a)));
-            if t.instrs[stp].fits(&[None, None, None, Some(at)]) {
-                saves.push(MInst::new(stp, vec![r(a), r(b), r(SP), MOp::Imm(at)]));
-                restores.push(MInst::new(ldp, vec![r(a), r(b), r(SP), MOp::Imm(at)]));
+            let pair = t.role(&format!("store.pair.{}", file(a))).zip(t.role(&format!("load.pair.{}", file(a))));
+            if let Some((stp, ldp)) = pair
+                && t.instrs[stp].fits(&[None, None, None, Some(at)])
+            {
+                saves.push(MInst::new(stp, vec![r(a), r(b), r(t.machine.sp), MOp::Imm(at)]));
+                restores.push(MInst::new(ldp, vec![r(a), r(b), r(t.machine.sp), MOp::Imm(at)]));
                 k += 2;
                 continue;
             }
         }
         let st = t.by_role(&format!("store.{}", file(a)));
         let ld = t.by_role(&format!("load.{}", file(a)));
-        saves.push(MInst::new(st, vec![r(a), r(SP), MOp::Imm(at)]));
-        restores.push(MInst::new(ld, vec![r(a), r(SP), MOp::Imm(at)]));
+        saves.push(MInst::new(st, vec![r(a), r(t.machine.sp), MOp::Imm(at)]));
+        restores.push(MInst::new(ld, vec![r(a), r(t.machine.sp), MOp::Imm(at)]));
         k += 1;
     }
     (saves, restores)
 }
 
-/// `dst = src + amount`, for a frame's sizes: an immediate shifted by 12
-/// for the 4KB pages, then one for the rest.
-fn adjust(t: &Target, out: &mut Vec<MInst>, dst: u8, src: u8, amount: i64) {
+/// `dst = src + amount`, for a frame's sizes: one add (or subtract) of an
+/// immediate if the description has one that holds it; else, where it has
+/// them (AArch64), an immediate shifted by 12 for the 4KB pages and one for
+/// the rest.
+fn adjust(t: &Target, out: &mut Vec<MInst>, dst: u8, src: u8, amount: i64, scratch: &[u8]) -> Result<(), String> {
     let r = |n: u8| MOp::Reg(Reg::P(n));
-    let (op, op12) =
-        if amount < 0 { (t.by_role("subi"), t.by_role("subi12")) } else { (t.by_role("addi"), t.by_role("addi12")) };
+    let fits = |role: &str, v: i64| t.role(role).filter(|&i| t.instrs[i].fits(&[None, None, Some(v)]));
+    if let Some(i) = fits("addi", amount) {
+        out.push(MInst::new(i, vec![r(dst), r(src), MOp::Imm(amount)]));
+        return Ok(());
+    }
+    if amount < 0
+        && let Some(i) = fits("subi", -amount)
+    {
+        out.push(MInst::new(i, vec![r(dst), r(src), MOp::Imm(-amount)]));
+        return Ok(());
+    }
+    let (op, op12) = if amount < 0 { (t.role("subi"), t.role("subi12")) } else { (t.role("addi"), t.role("addi12")) };
+    let (Some(op), Some(op12)) = (op, op12) else {
+        // Else the amount, made in a scratch register, added.
+        let scratch = *scratch.first().ok_or("no scratch register for a large frame")?;
+        constant(t, out, scratch, amount)?;
+        let add = t.role("add").ok_or("no \"add\" instruction for a large frame")?;
+        out.push(MInst::new(add, vec![r(dst), r(src), r(scratch)]));
+        return Ok(());
+    };
     let a = amount.abs();
     let (pages, rest) = (a & !0xfff, a & 0xfff);
     let mut from = src;
@@ -155,15 +227,44 @@ fn adjust(t: &Target, out: &mut Vec<MInst>, dst: u8, src: u8, amount: i64) {
     if rest != 0 || pages == 0 {
         out.push(MInst::new(op, vec![r(dst), r(from), MOp::Imm(rest)]));
     }
+    Ok(())
+}
+
+/// Integer `v` in register `reg`, for frame sizes: by one of the
+/// description's constant instructions if it holds it, else by one for the
+/// high part and an add-immediate (`"addi"`) for the low 12 bits.
+fn constant(t: &Target, out: &mut Vec<MInst>, reg: u8, v: i64) -> Result<(), String> {
+    let r = |n: u8| MOp::Reg(Reg::P(n));
+    let wide = |ci: &usize| t.instrs[*ci].operands[0].bits == 64;
+    if let Some(&ci) = t.constants.iter().filter(|ci| wide(ci)).find(|&&ci| t.instrs[ci].fits(&[None, Some(v)])) {
+        out.push(MInst::new(ci, vec![r(reg), MOp::Imm(v)]));
+        return Ok(());
+    }
+    let add = t.role("addi").ok_or("no \"addi\" instruction")?;
+    let lo = (v << 52) >> 52;
+    let hi = v - lo;
+    let ci = t
+        .constants
+        .iter()
+        .copied()
+        .filter(|ci| wide(ci))
+        .find(|&ci| t.instrs[ci].fits(&[None, Some(hi)]))
+        .ok_or_else(|| format!("no way to make the frame size {v}"))?;
+    if !t.instrs[add].fits(&[None, None, Some(lo)]) {
+        return Err(format!("no way to make the frame size {v}"));
+    }
+    out.push(MInst::new(ci, vec![r(reg), MOp::Imm(hi)]));
+    out.push(MInst::new(add, vec![r(reg), r(reg), MOp::Imm(lo)]));
+    Ok(())
 }
 
 /// A block holding only `b X` is skipped: branches to it go to `X`. Blocks
 /// no longer reached are removed, and branches to the next block dropped.
 fn tidy_branches(t: &Target, f: &mut MFunc) {
-    let b_op = Opcode::Instr(t.by_name["B"]);
+    let b_op = Opcode::Instr(t.by_role("jump"));
     let ends_flow = |t: &Target, b: &MBlock| {
         b.insts.last().is_some_and(|i| match i.op {
-            Opcode::Instr(k) => matches!(t.instrs[k].name.as_str(), "B" | "RET" | "BRK"),
+            Opcode::Instr(k) => t.has_role(k, "jump") || t.has_role(k, "ret") || t.has_role(k, "trap"),
             _ => false,
         })
     };

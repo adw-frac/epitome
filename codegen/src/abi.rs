@@ -1,5 +1,6 @@
 //! Calling conventions and platforms, read from the description's named
-//! metadata (`!aarch64.abi.NAME`): which registers carry arguments and
+//! metadata (`!abi.NAME`), with registers named as the description names
+//! them (`machine.rs`): which registers carry arguments and
 //! results, which a call clobbers and which survive it, how arguments past
 //! the registers are laid out on the stack, where variadic arguments go,
 //! and the assembler's dialect.
@@ -24,6 +25,9 @@ pub enum Variadic {
     Stack,
     /// Where named arguments would go (AAPCS64).
     Named,
+    /// Where named arguments would go, but floating-point ones in the
+    /// integer registers (RISC-V).
+    Integer,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -41,6 +45,10 @@ pub struct Abi {
     pub saved: Vec<u8>,
     pub reserved: Vec<u8>,
     pub scratch: Vec<u8>,
+    /// A register for the addresses of stack slots too far for an
+    /// instruction's offset (`far-scratch`), never allocated; for machines
+    /// whose offsets reach only a little way (RISC-V's 2047 bytes).
+    pub far_scratch: Option<u8>,
     /// Floating-point registers (32-63 for d0-d31): arguments, result,
     /// those a call may change, those preserved, and scratch for spills.
     pub fp_args: Vec<u8>,
@@ -70,26 +78,6 @@ pub enum ArgLoc {
     Reg(u8),
     /// A byte offset from the stack pointer at the call.
     Stack(i64),
-}
-
-fn regs(names: &[String]) -> Result<Vec<u8>, String> {
-    let one = |s: &str| -> Result<u8, String> {
-        if let Some(n) = s.strip_prefix('d').and_then(|n| n.parse::<u8>().ok()).filter(|&n| n <= 31) {
-            return Ok(32 + n);
-        }
-        s.strip_prefix('x')
-            .and_then(|n| n.parse::<u8>().ok())
-            .filter(|&n| n <= 30)
-            .ok_or_else(|| format!("bad register {s}"))
-    };
-    let mut out = Vec::new();
-    for n in names {
-        match n.split_once('-') {
-            Some((a, b)) => out.extend(one(a)?..=one(b)?),
-            None => out.push(one(n)?),
-        }
-    }
-    Ok(out)
 }
 
 impl Abi {
@@ -139,8 +127,8 @@ impl Abi {
         let mut next_fp = 0;
         let mut stack: i64 = 0;
         for (k, parts) in args.iter().enumerate() {
-            let fp = parts.iter().all(|p| p.fp);
             let variadic = k >= named;
+            let fp = parts.iter().all(|p| p.fp) && !(variadic && self.variadic == Variadic::Integer);
             let n = parts.len();
             if variadic && self.variadic == Variadic::Stack {
                 let mut here = Vec::new();
@@ -199,37 +187,6 @@ impl Abi {
         }
     }
 
-    /// A reference to the 4KB page holding `sym`, and to its offset in it.
-    pub fn page(&self, sym: &str) -> String {
-        match self.syntax {
-            Syntax::MachO => format!("{}@PAGE", self.symbol(sym)),
-            Syntax::Elf => self.symbol(sym),
-        }
-    }
-
-    pub fn pageoff(&self, sym: &str) -> String {
-        match self.syntax {
-            Syntax::MachO => format!("{}@PAGEOFF", self.symbol(sym)),
-            Syntax::Elf => format!(":lo12:{}", self.symbol(sym)),
-        }
-    }
-
-    /// The page holding `sym`'s entry in the global offset table, and the
-    /// entry's offset in it.
-    pub fn got_page(&self, sym: &str) -> String {
-        match self.syntax {
-            Syntax::MachO => format!("{}@GOTPAGE", self.symbol(sym)),
-            Syntax::Elf => format!(":got:{}", self.symbol(sym)),
-        }
-    }
-
-    pub fn got_pageoff(&self, sym: &str) -> String {
-        match self.syntax {
-            Syntax::MachO => format!("{}@GOTPAGEOFF", self.symbol(sym)),
-            Syntax::Elf => format!(":got_lo12:{}", self.symbol(sym)),
-        }
-    }
-
     /// The directive that switches to a section of this kind.
     pub fn section_directive(&self, kind: SectionKind) -> &'static str {
         match (self.syntax, kind) {
@@ -247,7 +204,8 @@ impl Abi {
 }
 
 /// Every convention the description names.
-pub fn read(m: &Module, prefix: &str) -> Result<Vec<Abi>, String> {
+pub fn read(m: &Module, prefix: &str, machine: &crate::machine::Machine) -> Result<Vec<Abi>, String> {
+    let regs = |names: &[String]| machine.regs(names);
     let strings = |id: MdId| -> Vec<String> {
         match &m.metadata[id.index()].data {
             Metadata::Tuple { ops, .. } => ops
@@ -281,7 +239,12 @@ pub fn read(m: &Module, prefix: &str) -> Result<Vec<Abi>, String> {
             result: regs(&get("result")?)?[0],
             clobbers: regs(&get("clobbers")?)?,
             saved: regs(&get("saved")?)?,
-            reserved: regs(&get("reserved")?)?,
+            reserved: {
+                let mut r = regs(&get("reserved")?)?;
+                r.extend(props.get("far-scratch").map(|v| regs(v)).transpose()?.unwrap_or_default());
+                r
+            },
+            far_scratch: props.get("far-scratch").map(|v| regs(v)).transpose()?.and_then(|v| v.first().copied()),
             scratch: regs(&get("scratch")?)?,
             fp_args: regs(&get("fp-args")?)?,
             fp_result: regs(&get("fp-result")?)?[0],
@@ -298,6 +261,7 @@ pub fn read(m: &Module, prefix: &str) -> Result<Vec<Abi>, String> {
             variadic: match one("variadic")?.as_str() {
                 "stack" => Variadic::Stack,
                 "named" => Variadic::Named,
+                "integer" => Variadic::Integer,
                 s => return Err(format!("{name}: variadic {s}")),
             },
             syntax: match one("syntax")?.as_str() {

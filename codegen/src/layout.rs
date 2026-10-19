@@ -33,14 +33,14 @@ fn label_of(i: &MInst) -> Option<usize> {
 
 /// Splits each block into its body and how it ends.
 fn split(t: &Target, f: &MFunc) -> Vec<(Vec<MInst>, Exit)> {
-    let b_op = Opcode::Instr(t.by_name["B"]);
+    let b_op = Opcode::Instr(t.by_role("jump"));
     let n = f.blocks.len();
     let mut out = Vec::new();
     for (i, b) in f.blocks.iter().enumerate() {
         let mut body = b.insts.clone();
         let fall = i + 1;
         let leaves = |inst: &MInst| match inst.op {
-            Opcode::Instr(k) => matches!(t.instrs[k].name.as_str(), "RET" | "BRK"),
+            Opcode::Instr(k) => t.has_role(k, "ret") || t.has_role(k, "trap"),
             _ => false,
         };
         let exit = if body.last().is_some_and(leaves) {
@@ -165,7 +165,7 @@ pub fn place(t: &Target, f: &mut MFunc) {
     for (k, &b) in order.iter().enumerate() {
         index[b] = k;
     }
-    let b_op = t.by_name["B"];
+    let b_op = t.by_role("jump");
     let relabel = |inst: &mut MInst| {
         for op in &mut inst.ops {
             if let MOp::Label(x) = op {
@@ -235,7 +235,7 @@ fn reaches(t: &Target, inst: &MInst, pc: i64, target: i64) -> bool {
 /// range (19 bits of words for `b.cond` and `cbz`, 14 for `tbz`) becomes
 /// the opposite branch around an unconditional one, which reaches 128MB.
 pub fn relax(t: &Target, f: &mut MFunc) {
-    let b_op = t.by_name["B"];
+    let b_op = t.by_role("jump");
     for _ in 0..16 {
         let mut starts = Vec::new();
         let mut n = 0i64;
@@ -272,9 +272,19 @@ pub fn relax(t: &Target, f: &mut MFunc) {
                     None => Some(bi + 1),
                 };
                 let Some(not_taken) = not_taken else { continue };
+                // If the way not taken was a jump, it may be far too: the
+                // inverted branch goes to a new block just after, holding
+                // that jump.
+                let near = if after.is_some() {
+                    insert_after(f, bi, vec![MInst::new(b_op, vec![MOp::Label(not_taken)])]);
+                    bi + 1
+                } else {
+                    not_taken
+                };
+                let target = if target > bi { target + after.is_some() as usize } else { target };
                 for o in &mut inv.ops {
                     if let MOp::Label(x) = o {
-                        *x = not_taken;
+                        *x = near;
                     }
                 }
                 let far = MInst::new(b_op, vec![MOp::Label(target)]);
@@ -289,4 +299,41 @@ pub fn relax(t: &Target, f: &mut MFunc) {
             break;
         }
     }
+}
+
+/// Inserts a block holding `insts` (whose labels are numbered as before the
+/// insertion) after block `bi`, renumbering the labels of the blocks after
+/// it.
+fn insert_after(f: &mut MFunc, bi: usize, mut insts: Vec<MInst>) {
+    for inst in &mut insts {
+        for op in &mut inst.ops {
+            if let MOp::Label(x) = op
+                && *x > bi
+            {
+                *x += 1;
+            }
+        }
+    }
+    for b in &mut f.blocks {
+        for inst in &mut b.insts {
+            for op in &mut inst.ops {
+                if let MOp::Label(x) = op
+                    && *x > bi
+                {
+                    *x += 1;
+                }
+            }
+        }
+        for s in &mut b.succs {
+            if *s > bi {
+                *s += 1;
+            }
+        }
+    }
+    let label = format!("{}.far", f.blocks[bi].label);
+    let succs = insts
+        .iter()
+        .flat_map(|i| i.ops.iter().filter_map(|o| if let MOp::Label(x) = o { Some(*x) } else { None }))
+        .collect();
+    f.blocks.insert(bi + 1, MBlock { label, insts, succs, term_start: 0 });
 }

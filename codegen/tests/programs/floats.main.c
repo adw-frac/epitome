@@ -37,7 +37,7 @@ int main(void) {
     printf("%.17g %.17g: %.17g %.9g %.17g %d %d %.17g %.17g %lx\n", x, y, poly(x), (double)fpoly((float)x), mix(x, (float)y, i, i * 1000L),
            compare(x, y), fcompare((float)x, (float)y), fmax_of(x, y), pick(i & 1, x, y), bits_of(x));
     if (isfinite(x) && fabs(x) < 1e18) {
-      printf("  %ld %d %d %.17g %.17g %.9g\n", to_long(x), to_int((float)x), to_short(x * 100), widen((float)x), (double)narrow(x),
+      printf("  %ld %d %d %.17g %.17g %.9g\n", to_long(x), to_int((float)x), to_short(x / 8), widen((float)x), (double)narrow(x),
              (double)from_char((signed char)i));
       if (x >= 0) printf("  %lu\n", to_ulong(x));
     }

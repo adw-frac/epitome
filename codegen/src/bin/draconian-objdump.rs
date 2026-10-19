@@ -19,9 +19,13 @@ const USAGE: &str = "usage: draconian-objdump [options] <file>...
   --canonical             print an ELF or Mach-O file as sorted text without
                           file offsets or order, to diff two that should
                           say the same
-  --target=<path>         read the machine description from this .ll file,
-                          or the .ll files in this directory in name order
-                          (default: the built-in AArch64 description)
+  --target=<name|path>    the machine description: a .ll file, a directory
+                          of them (read in name order), or a name: aarch64
+                          is built in, others are directories of that name
+                          in DRACONIAN_TARGET_PATH (a list separated by
+                          colons); by default, for an ELF file, the one with its
+                          machine number, else aarch64
+  --target-add=<path>     read these .ll files too (may be given again)
 
 Options may be combined (-dr).";
 
@@ -29,6 +33,7 @@ fn main() -> ExitCode {
     let (mut d, mut r, mut t, mut h, mut s) = (false, false, false, false, false);
     let mut files = Vec::new();
     let mut target_file = None;
+    let mut adds: Vec<String> = Vec::new();
     let mut canonical = false;
     for a in std::env::args().skip(1) {
         match a.as_str() {
@@ -44,6 +49,7 @@ fn main() -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             x if x.starts_with("--target=") => target_file = Some(x["--target=".len()..].to_string()),
+            x if x.starts_with("--target-add=") => adds.push(x["--target-add=".len()..].to_string()),
             x if x.starts_with('-') && !x.starts_with("--") && x.len() > 1 => {
                 for c in x[1..].chars() {
                     match c {
@@ -74,26 +80,46 @@ fn main() -> ExitCode {
     if !(d || r || t || h || s) {
         d = true;
     }
-    let target = match target_file {
-        None => Target::aarch64(),
-        Some(path) => match Target::load_path(&path) {
-            Ok(t) => t,
+    // The target: the one named; else, for an ELF file, the one with its
+    // machine number; else the built-in one.
+    let named = match &target_file {
+        Some(_) => match Target::resolve(target_file.as_deref(), "", &adds) {
+            Ok(t) => Some(t),
             Err(e) => {
-                eprintln!("draconian-objdump: {path}: {e}");
+                eprintln!("draconian-objdump: {e}");
                 return ExitCode::FAILURE;
             }
         },
+        None => None,
+    };
+    let for_file = |bytes: &[u8]| -> Option<Target> {
+        let machine = draconian_codegen::elf::read(bytes).ok()?.machine;
+        Target::for_elf_machine(machine)
     };
     let mut status = ExitCode::SUCCESS;
     for f in &files {
+        let bytes = match std::fs::read(f) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("draconian-objdump: {f}: {e}");
+                status = ExitCode::FAILURE;
+                continue;
+            }
+        };
+        let fallback;
+        let target: &Target = match &named {
+            Some(t) => t,
+            None => {
+                fallback = for_file(&bytes).unwrap_or_else(Target::aarch64);
+                &fallback
+            }
+        };
         if canonical {
-            let text = std::fs::read(f).map_err(|e| e.to_string()).and_then(|b| {
-                if draconian_codegen::macho::is_macho(&b) {
-                    draconian_codegen::macho::read(&b).map(|m| m.canonical())
-                } else {
-                    draconian_codegen::elf::read(&b).map(|e| e.canonical())
-                }
-            });
+            let text = if draconian_codegen::macho::is_macho(&bytes) {
+                draconian_codegen::macho::read(&bytes).map(|m| m.canonical(&target.machine))
+            } else {
+                draconian_codegen::elf::read(&bytes).map(|e| e.canonical(&target.machine))
+            };
             match text {
                 Ok(t) => print!("{t}"),
                 Err(e) => {
@@ -103,7 +129,7 @@ fn main() -> ExitCode {
             }
             continue;
         }
-        let img = match std::fs::read(f).map_err(|e| e.to_string()).and_then(|b| Image::read(&b)) {
+        let img = match Image::read(&bytes, &target.machine) {
             Ok(i) => i,
             Err(e) => {
                 eprintln!("draconian-objdump: {f}: {e}");
@@ -124,7 +150,7 @@ fn main() -> ExitCode {
             out.push_str(&objdump::contents(&img));
         }
         if d {
-            out.push_str(&objdump::disassemble(&target, &img, r));
+            out.push_str(&objdump::disassemble(target, &img, r));
         } else if r {
             out.push_str(&objdump::relocations(&img));
         }

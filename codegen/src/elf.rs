@@ -1,10 +1,11 @@
-//! ELF relocatable files for AArch64: writing an [`Object`], and reading
+//! ELF relocatable files: writing an [`Object`], and reading
 //! any ELF file back (for `draconian-objdump` and the tests).
 //!
-//! From the System V ABI's ELF chapters and Arm's *ELF for the Arm 64-bit
-//! Architecture* (AAELF64), which gives the relocation numbers and the
-//! mapping symbols: `$x` where code starts in a section, `$d` where data
-//! does, so that disassemblers can tell them apart.
+//! From the System V ABI's ELF chapters. The machine number, flags and
+//! relocation numbers are the description's (`machine.rs`). Mapping
+//! symbols (from Arm's *ELF for the Arm 64-bit Architecture*, and used
+//! alike for other machines) mark where code starts in a section (`$x`)
+//! and where data does (`$d`), so that disassemblers can tell them apart.
 //!
 //! A written file has, after the null section: the object's sections, in
 //! its order (`.text`, `.data`, `.bss`, `.rodata`, `.data.rel.ro`); a
@@ -15,9 +16,9 @@
 //! symbols, then the object's own), then global ones, defined and
 //! undefined.
 
-use crate::object::{Object, RelocKind, RelocTarget, SectionKind, SymbolKind};
+use crate::machine::Machine;
+use crate::object::{Object, RelocTarget, SectionKind, SymbolKind};
 
-pub const EM_AARCH64: u16 = 183;
 pub const ET_REL: u16 = 1;
 
 pub const SHT_NULL: u32 = 0;
@@ -40,53 +41,6 @@ pub const STT_OBJECT: u8 = 1;
 pub const STT_FUNC: u8 = 2;
 pub const STT_SECTION: u8 = 3;
 pub const STT_FILE: u8 = 4;
-
-/// AAELF64's relocation numbers, with their names.
-pub const RELOCS: &[(u32, &str)] = &[
-    (0, "R_AARCH64_NONE"),
-    (257, "R_AARCH64_ABS64"),
-    (258, "R_AARCH64_ABS32"),
-    (259, "R_AARCH64_ABS16"),
-    (260, "R_AARCH64_PREL64"),
-    (261, "R_AARCH64_PREL32"),
-    (262, "R_AARCH64_PREL16"),
-    (274, "R_AARCH64_ADR_PREL_LO21"),
-    (275, "R_AARCH64_ADR_PREL_PG_HI21"),
-    (276, "R_AARCH64_ADR_PREL_PG_HI21_NC"),
-    (277, "R_AARCH64_ADD_ABS_LO12_NC"),
-    (278, "R_AARCH64_LDST8_ABS_LO12_NC"),
-    (279, "R_AARCH64_TSTBR14"),
-    (280, "R_AARCH64_CONDBR19"),
-    (282, "R_AARCH64_JUMP26"),
-    (283, "R_AARCH64_CALL26"),
-    (284, "R_AARCH64_LDST16_ABS_LO12_NC"),
-    (285, "R_AARCH64_LDST32_ABS_LO12_NC"),
-    (286, "R_AARCH64_LDST64_ABS_LO12_NC"),
-    (299, "R_AARCH64_LDST128_ABS_LO12_NC"),
-    (311, "R_AARCH64_ADR_GOT_PAGE"),
-    (312, "R_AARCH64_LD64_GOT_LO12_NC"),
-];
-
-/// The ELF relocation for each kind the description names.
-pub fn reloc_type(k: RelocKind) -> u32 {
-    match k {
-        RelocKind::Abs64 => 257,
-        RelocKind::Adrp => 275,
-        RelocKind::AddLo12 => 277,
-        RelocKind::Call26 => 283,
-        RelocKind::AdrpGot => 311,
-        RelocKind::Ld64GotLo12 => 312,
-    }
-}
-
-pub fn reloc_name(ty: u32) -> String {
-    RELOCS.iter().find(|r| r.0 == ty).map_or_else(|| format!("R_AARCH64_{ty}"), |r| r.1.to_string())
-}
-
-/// The kind a relocation number is, if it is one the description names.
-pub fn reloc_kind(ty: u32) -> Option<RelocKind> {
-    RelocKind::ALL.into_iter().find(|&k| reloc_type(k) == ty)
-}
 
 pub fn section_name(kind: SectionKind) -> &'static str {
     match kind {
@@ -140,8 +94,9 @@ struct Header {
     entsize: u64,
 }
 
-/// Writes `obj` as an ELF64 little-endian relocatable file for AArch64.
-pub fn write(obj: &Object) -> Vec<u8> {
+/// Writes `obj` as an ELF64 little-endian relocatable file for machine `m`
+/// (its `elf-machine` and `elf-flags`, and its relocations' numbers).
+pub fn write(obj: &Object, m: &Machine) -> Result<Vec<u8>, String> {
     let mut shstr = Strings::new();
     let mut strtab = Strings::new();
     let n = obj.sections.len();
@@ -230,7 +185,9 @@ pub fn write(obj: &Object) -> Vec<u8> {
                 RelocTarget::Section(i) => section_sym[i],
             };
             bytes.extend_from_slice(&r.offset.to_le_bytes());
-            bytes.extend_from_slice(&(((target as u64) << 32) | reloc_type(r.kind) as u64).to_le_bytes());
+            let def = &m.relocs[r.kind.0 as usize];
+            let ty = def.elf.ok_or_else(|| format!("relocation {} has no ELF number", def.name))?;
+            bytes.extend_from_slice(&(((target as u64) << 32) | ty as u64).to_le_bytes());
             bytes.extend_from_slice(&r.addend.to_le_bytes());
         }
         let offset = put(&mut out, &bytes, 8);
@@ -315,12 +272,12 @@ pub fn write(obj: &Object) -> Vec<u8> {
     h.extend_from_slice(&[0x7f, b'E', b'L', b'F', 2, 1, 1, 0]);
     h.extend_from_slice(&[0; 8]);
     h.extend_from_slice(&ET_REL.to_le_bytes());
-    h.extend_from_slice(&EM_AARCH64.to_le_bytes());
+    h.extend_from_slice(&m.elf_machine.to_le_bytes());
     h.extend_from_slice(&1u32.to_le_bytes());
     h.extend_from_slice(&0u64.to_le_bytes()); // entry
     h.extend_from_slice(&0u64.to_le_bytes()); // program headers
     h.extend_from_slice(&shoff.to_le_bytes());
-    h.extend_from_slice(&0u32.to_le_bytes()); // flags
+    h.extend_from_slice(&m.elf_flags.to_le_bytes());
     h.extend_from_slice(&64u16.to_le_bytes());
     h.extend_from_slice(&0u16.to_le_bytes());
     h.extend_from_slice(&0u16.to_le_bytes());
@@ -328,7 +285,7 @@ pub fn write(obj: &Object) -> Vec<u8> {
     h.extend_from_slice(&(headers.len() as u16).to_le_bytes());
     h.extend_from_slice(&((headers.len() - 1) as u16).to_le_bytes());
     out[..64].copy_from_slice(&h);
-    out
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -523,7 +480,7 @@ impl ElfFile {
     /// relocations (against names, section symbols by their section's),
     /// and the symbols other than section symbols. Where things are in the
     /// file, and in what order, is left out.
-    pub fn canonical(&self) -> String {
+    pub fn canonical(&self, m: &Machine) -> String {
         use std::fmt::Write;
         let mut out = String::new();
         let mut secs: Vec<&ElfSection> = self
@@ -545,7 +502,7 @@ impl ElfFile {
                     format!(
                         "  reloc {:06x} {} {}{:+#x}",
                         r.offset,
-                        reloc_name(r.rel_type),
+                        m.elf_name(r.rel_type),
                         self.reloc_target(r),
                         r.addend
                     )

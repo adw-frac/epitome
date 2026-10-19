@@ -17,13 +17,17 @@ const USAGE: &str = "usage: draconian-as [options] <file.s>
                           .build_version, else ELF)
   --max-errors=<n>        report this many lines that cannot be assembled
                           (default 20)
-  --target=<path>         read the machine description from this .ll file,
-                          or the .ll files in this directory in name order
-                          (default: the built-in AArch64 description)";
+  --target=<name|path>    the machine description: a .ll file, a directory
+                          of them (read in name order), or a name: aarch64
+                          is built in, others are directories of that name
+                          in DRACONIAN_TARGET_PATH (a list separated by
+                          colons); aarch64 by default
+  --target-add=<path>     read these .ll files too (may be given again)";
 
 fn main() -> ExitCode {
     let (mut input, mut output, mut target_file, mut syntax) = (None, None, None, None);
     let mut max_errors = 20;
+    let mut adds: Vec<String> = Vec::new();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -36,6 +40,7 @@ fn main() -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             s if s.starts_with("--target=") => target_file = Some(s["--target=".len()..].to_string()),
+            s if s.starts_with("--target-add=") => adds.push(s["--target-add=".len()..].to_string()),
             s if s.starts_with("--max-errors=") => match s["--max-errors=".len()..].parse() {
                 Ok(n) => max_errors = n,
                 Err(_) => {
@@ -55,15 +60,12 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let output = output.unwrap_or_else(|| format!("{}.o", input.strip_suffix(".s").unwrap_or(&input)));
-    let target = match target_file {
-        None => Target::aarch64(),
-        Some(path) => match Target::load_path(&path) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("draconian-as: {path}: {e}");
-                return ExitCode::FAILURE;
-            }
-        },
+    let target = match Target::resolve(target_file.as_deref(), "", &adds) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("draconian-as: {e}");
+            return ExitCode::FAILURE;
+        }
     };
     let text = match std::fs::read_to_string(&input) {
         Ok(t) => t,
@@ -81,7 +83,14 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if let Err(e) = std::fs::write(&output, assembled.file()) {
+    let bytes = match assembled.file(&target) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("draconian-as: {input}: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(e) = std::fs::write(&output, bytes) {
         eprintln!("draconian-as: {output}: {e}");
         return ExitCode::FAILURE;
     }

@@ -19,7 +19,9 @@
 
 use std::fmt::Write;
 
+use crate::abi::Syntax;
 use crate::enc::Env;
+use crate::machine::Machine;
 use crate::mir::{self, Operand, Reg};
 use crate::object::RelocKind;
 use crate::target::{Kind, Target};
@@ -84,17 +86,19 @@ pub struct ImageSymbol {
 
 impl Image {
     /// Reads an image from a file's bytes.
-    pub fn read(bytes: &[u8]) -> Result<Image, String> {
+    /// Reads an image from a file's bytes; machine `m` names its
+    /// relocations.
+    pub fn read(bytes: &[u8], m: &Machine) -> Result<Image, String> {
         if elf::is_elf(bytes) {
-            return Ok(Image::from_elf(&elf::read(bytes)?));
+            return Ok(Image::from_elf(&elf::read(bytes)?, m));
         }
         if macho::is_macho(bytes) {
-            return Ok(Image::from_macho(&macho::read(bytes)?));
+            return Ok(Image::from_macho(&macho::read(bytes)?, m));
         }
         Err("not a file format draconian-objdump reads (ELF, Mach-O)".into())
     }
 
-    pub fn from_macho(f: &macho::MachFile) -> Image {
+    pub fn from_macho(f: &macho::MachFile, m: &Machine) -> Image {
         let sections: Vec<ImageSection> = f
             .sections
             .iter()
@@ -119,8 +123,8 @@ impl Image {
                 .iter()
                 .map(|r| ImageReloc {
                     offset: r.offset,
-                    type_name: macho::reloc_name(r.rel_type),
-                    kind: macho::reloc_kind(r.rel_type, r.length),
+                    type_name: m.macho_name(r.rel_type),
+                    kind: m.by_macho(r.rel_type, r.length).map(|k| RelocKind(k as u16)),
                     target: if r.external {
                         f.symbols
                             .get(r.symbolnum as usize)
@@ -158,7 +162,7 @@ impl Image {
         img
     }
 
-    pub fn from_elf(f: &elf::ElfFile) -> Image {
+    pub fn from_elf(f: &elf::ElfFile, m: &Machine) -> Image {
         // The image keeps every section but the null one.
         let index = |shndx: u16| -> Option<usize> {
             (shndx != 0 && (shndx as usize) < f.sections.len() && shndx < 0xff00).then(|| shndx as usize - 1)
@@ -187,8 +191,8 @@ impl Image {
                         .iter()
                         .map(|r| ImageReloc {
                             offset: r.offset - if f.file_type == elf::ET_REL { 0 } else { s.addr },
-                            type_name: elf::reloc_name(r.rel_type),
-                            kind: elf::reloc_kind(r.rel_type),
+                            type_name: m.elf_name(r.rel_type),
+                            kind: m.by_elf(r.rel_type).map(|k| RelocKind(k as u16)),
                             target: f.reloc_target(r),
                             addend: r.addend,
                         })
@@ -216,7 +220,11 @@ impl Image {
                 },
             })
             .collect();
-        let format = if f.machine == elf::EM_AARCH64 { "elf64-littleaarch64" } else { "elf64-little" };
+        let format = match f.machine {
+            183 => "elf64-littleaarch64",
+            243 => "elf64-littleriscv",
+            _ => "elf64-little",
+        };
         Image { format: format.into(), macho: false, sections, symbols }
     }
 
@@ -325,33 +333,14 @@ pub fn contents(img: &Image) -> String {
     out
 }
 
-/// The address `v` (an operand's value) refers to, for an instruction at
-/// `pc` that refers to symbols this way.
-fn sym_address(kind: RelocKind, pc: u64, v: i64) -> Option<u64> {
-    match kind {
-        RelocKind::Call26 => Some(pc.wrapping_add(v as u64)),
-        RelocKind::Adrp | RelocKind::AdrpGot => Some((pc & !0xfff).wrapping_add((v as u64) << 12)),
-        _ => None,
-    }
-}
-
-/// How assembly writes a relocation's symbol in an instruction.
-fn reloc_operand(r: &ImageReloc, macho: bool) -> String {
+/// How assembly writes a relocation's symbol in an instruction, as the
+/// description spells it.
+fn reloc_operand(m: &Machine, r: &ImageReloc, macho: bool) -> String {
     let t = target_text(r);
-    if macho {
-        return match r.kind {
-            Some(RelocKind::Adrp) => format!("{t}@PAGE"),
-            Some(RelocKind::AddLo12) => format!("{t}@PAGEOFF"),
-            Some(RelocKind::AdrpGot) => format!("{t}@GOTPAGE"),
-            Some(RelocKind::Ld64GotLo12) => format!("{t}@GOTPAGEOFF"),
-            _ => t,
-        };
-    }
+    let syntax = if macho { Syntax::MachO } else { Syntax::Elf };
     match r.kind {
-        Some(RelocKind::AddLo12) => format!(":lo12:{t}"),
-        Some(RelocKind::AdrpGot) => format!(":got:{t}"),
-        Some(RelocKind::Ld64GotLo12) => format!(":got_lo12:{t}"),
-        _ => t,
+        Some(k) => m.relocs[k.0 as usize].spell(syntax, &t),
+        None => t,
     }
 }
 
@@ -483,8 +472,8 @@ pub fn instruction(
             Kind::Reg(_) => Operand::Reg(Reg::P(v as u8)),
             Kind::Label => Operand::Text(label(pc.wrapping_add(v as u64))),
             Kind::Sym => match reloc {
-                Some(r) => Operand::Text(reloc_operand(r, macho)),
-                None => match ins.reloc.and_then(|kind| sym_address(kind, pc, v)) {
+                Some(r) => Operand::Text(reloc_operand(&t.machine, r, macho)),
+                None => match ins.reloc.and_then(|kind| t.machine.relocs[kind.0 as usize].reaches(pc, v)) {
                     Some(a) => Operand::Text(label(a)),
                     None => Operand::Imm(v),
                 },

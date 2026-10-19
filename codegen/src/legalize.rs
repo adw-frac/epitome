@@ -62,10 +62,11 @@ fn split_count(cx: &Ctx, ty: TypeId) -> Option<usize> {
         return None;
     }
     let bits = len * eb;
-    if !len.is_power_of_two() || bits < 64 {
+    let vb = cx.vector_bits();
+    if vb == 0 || !len.is_power_of_two() || bits < vb / 2 {
         return Some(len as usize);
     }
-    (bits > 128).then_some((bits / 128) as usize)
+    (bits > vb).then_some((bits / vb) as usize)
 }
 
 /// The type of each part of a split vector of `len` lanes of `elem` (`eb`
@@ -73,7 +74,8 @@ fn split_count(cx: &Ctx, ty: TypeId) -> Option<usize> {
 /// itself. For masks, `elem` is i1 and `eb` the width of the
 /// lanes compared.
 fn part(cx: &mut Ctx, len: u32, elem: TypeId, eb: u32) -> TypeId {
-    if len.is_power_of_two() && len * eb >= 64 { vec_ty(cx, 128 / eb, elem) } else { elem }
+    let vb = cx.vector_bits();
+    if vb > 0 && len.is_power_of_two() && len * eb >= vb / 2 { vec_ty(cx, vb / eb, elem) } else { elem }
 }
 
 fn is_vec(cx: &Ctx, ty: TypeId) -> bool {
@@ -465,30 +467,11 @@ fn pointer_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     Ok(())
 }
 
-/// Is there an instruction for this shuffle of legal vectors (see the
-/// description's vector section): a splat of lane 0, a half, two halves
-/// joined, lanes reversed within each 64 bits, or two 64-bit lanes swapped?
-/// Others are done lane by lane.
-fn native_shuffle(cx: &Ctx, f: &Function, a: Value, b: Value, mask: ConstId) -> bool {
-    let Some(lanes) = crate::target::mask_lanes(cx.m, mask) else { return false };
-    let Some((src, _, eb)) = vec_info(cx, cx.value_ty(f, a)) else { return false };
-    let (len, src) = (lanes.len(), src as usize);
-    let one = matches!(b, Value::Const(c) if matches!(cx.m.constant(c).kind, ConstKind::Poison | ConstKind::Undef));
-    let seq = |from: usize, n: usize| lanes.iter().copied().eq((from..from + n).map(|l| l as i32));
-    if lanes.iter().all(|&l| l == 0) {
-        return true;
-    }
-    if src == 2 * len && (seq(0, len) || seq(len, len)) {
-        return true;
-    }
-    if len == 2 * src && seq(0, len) {
-        return true;
-    }
-    if one && len == src && eb < 64 {
-        let g = (64 / eb) as usize;
-        return lanes.iter().enumerate().all(|(k, &l)| l as usize == (k / g) * g + (g - 1 - k % g));
-    }
-    one && len == 2 && src == 2 && eb == 64 && lanes == [1, 0]
+/// Is there an instruction for this shuffle of legal vectors: a pattern in
+/// the description whose root is a shuffle by this mask? Others are done
+/// lane by lane.
+fn native_shuffle(cx: &Ctx, mask: ConstId) -> bool {
+    crate::target::mask_lanes(cx.m, mask).is_some_and(|lanes| cx.t.has_shuffle(&lanes))
 }
 
 /// Vector operations with no instruction of their own, rewritten: `icmp
@@ -623,7 +606,7 @@ fn expand_lanewise(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         let opname = rest.split('.').next().unwrap_or("");
                         let native = match opname {
                             "add" => true,
-                            "smax" | "smin" | "umax" | "umin" => eb < 64 && len * eb == 128 || eb < 32,
+                            "smax" | "smin" | "umax" | "umin" => eb < 64 && len * eb == cx.vector_bits() || eb < 32,
                             _ => false,
                         };
                         if !native
@@ -774,7 +757,7 @@ fn fix_masks(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         && is_mask(cx, cx.value_ty(f, m)) =>
                 {
                     let (len, _, _) = vec_info(cx, cx.value_ty(f, m)).unwrap();
-                    let w = mask_width(cx, f, m, &mut Vec::new()).unwrap_or((128 / len).max(8));
+                    let w = mask_width(cx, f, m, &mut Vec::new()).unwrap_or((cx.vector_bits() / len).max(8));
                     let e = cx.m.types.int(w);
                     let vt = vec_ty(cx, len, e);
                     let s = f.add_inst(
@@ -811,7 +794,7 @@ fn fix_masks(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
             let Op::InsertElement { element, .. } = f.insts[d.index()].op else { unreachable!() };
             let r = f.insts[i.index()].result.unwrap();
             let (len, _, _) = vec_info(cx, f.locals[r.index()].ty).unwrap();
-            let w = (128 / len).max(8);
+            let w = (cx.vector_bits() / len).max(8);
             let e = cx.m.types.int(w);
             let vt = vec_ty(cx, len, e);
             let mut new = Vec::new();
@@ -862,7 +845,7 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
             });
             let res_split = res_ty.and_then(|t| split_count(cx, t));
             let odd_shuffle = match &f.insts[i.index()].op {
-                Op::ShuffleVector { a, b, mask } => !native_shuffle(cx, f, *a, *b, *mask),
+                Op::ShuffleVector { mask, .. } => !native_shuffle(cx, *mask),
                 _ => false,
             };
             if !uses_split && res_split.is_none() && !odd_shuffle {
@@ -978,7 +961,7 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                     let n = res_split.unwrap();
                     let (vlen, elem, eb) = vec_info(cx, res_ty.unwrap()).unwrap();
                     let pt = part(cx, vlen, elem, eb);
-                    let step = if is_vec(cx, pt) { 16 } else { (eb / 8) as i64 };
+                    let step = if is_vec(cx, pt) { (cx.vector_bits() / 8) as i64 } else { (eb / 8) as i64 };
                     let i64t = cx.m.types.int(64);
                     let i8t = cx.m.types.int(8);
                     let ptr_ty = cx.m.types.ptr(0);
@@ -1015,7 +998,7 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                     let (vlen, elem, eb) = vec_info(cx, vt).unwrap();
                     let pt = part(cx, vlen, elem, eb);
                     let vs = parts_of(cx, &parts, bld.f, value, n, pt)?;
-                    let step = if is_vec(cx, pt) { 16 } else { (eb / 8) as i64 };
+                    let step = if is_vec(cx, pt) { (cx.vector_bits() / 8) as i64 } else { (eb / 8) as i64 };
                     let i64t = cx.m.types.int(64);
                     let i8t = cx.m.types.int(8);
                     let ptr_ty = cx.m.types.ptr(0);
@@ -1059,9 +1042,12 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                     // The source as 128-bit parts (one, if it is legal).
                     let src: Vec<Value> = match value {
                         Value::Local(x) if parts.contains_key(&x) => parts[&x].clone(),
-                        v if len * fe == 128 => vec![v],
+                        v if len * fe == cx.vector_bits() => vec![v],
                         // A legal vector cast to a scalarised one: its lanes.
-                        v if res_split.is_some() && fe > 1 && (!len.is_power_of_two() || len * te < 64) => {
+                        v if res_split.is_some()
+                            && fe > 1
+                            && (!len.is_power_of_two() || len * te < cx.vector_bits() / 2) =>
+                        {
                             let i64t = cx.m.types.int(64);
                             (0..len)
                                 .map(|l| {
@@ -1079,15 +1065,16 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         );
                     } else if fe == te || fe == 1 {
                         // Lane for lane: each part on its own.
-                        let pt = vec_ty(cx, 128 / te.max(8), te_ty);
+                        let pt = vec_ty(cx, cx.vector_bits() / te.max(8), te_ty);
                         out_parts = Some(
                             src.iter().map(|&s| bld.op(Op::Cast { op, flags, fmf, value: s }, Some(pt))).collect(),
                         );
                     } else if te == 2 * fe {
                         // Widening: each part's halves.
-                        let half_ty = vec_ty(cx, 64 / fe, fe_ty);
-                        let pt = vec_ty(cx, 64 / fe, te_ty);
-                        let l = (64 / fe) as i32;
+                        let half = cx.vector_bits() / 2;
+                        let half_ty = vec_ty(cx, half / fe, fe_ty);
+                        let pt = vec_ty(cx, half / fe, te_ty);
+                        let l = (half / fe) as i32;
                         let mut ps = Vec::new();
                         for &s in &src {
                             let pz = poison(cx, cx.value_ty(bld.f, s));
@@ -1102,9 +1089,10 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         if src.len() < 2 {
                             return Err("a narrowing of a legal vector to a split one".into());
                         }
-                        let half_ty = vec_ty(cx, 128 / fe, te_ty);
-                        let pt = vec_ty(cx, 128 / te, te_ty);
-                        let l = (128 / fe) as i32;
+                        let vb = cx.vector_bits();
+                        let half_ty = vec_ty(cx, vb / fe, te_ty);
+                        let pt = vec_ty(cx, vb / te, te_ty);
+                        let l = (vb / fe) as i32;
                         let mut ps = Vec::new();
                         for pair in src.chunks(2) {
                             let a = bld.op(Op::Cast { op, flags, fmf, value: pair[0] }, Some(half_ty));
@@ -1267,62 +1255,113 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         });
                     } else if name.starts_with("llvm.experimental.vector.partial.reduce.add.") {
                         let acc_ty = res_ty.unwrap();
-                        if split_count(cx, acc_ty).is_some() {
-                            return Err("a partial reduction into a split accumulator".into());
-                        }
-                        let (alen, elem, eb) = vec_info(cx, acc_ty).unwrap();
-                        let vt = cx.value_ty(bld.f, args[1]);
-                        let vs: Vec<Value> = match split_count(cx, vt) {
-                            Some(n) => {
-                                let pt = vec_ty(cx, 128 / eb, elem);
-                                parts_of(cx, &parts, bld.f, args[1], n, pt)?
+                        if let Some(n) = split_count(cx, acc_ty) {
+                            // The accumulator split too: each of the input's
+                            // lanes is added to the accumulator's lane it
+                            // falls on, counting round.
+                            let (alen, elem, eb) = vec_info(cx, acc_ty).unwrap();
+                            let pt = part(cx, alen, elem, eb);
+                            let mut acc = parts_of(cx, &parts, bld.f, args[0], n, pt)?;
+                            let vt = cx.value_ty(bld.f, args[1]);
+                            let (vlen, _, veb) = vec_info(cx, vt).ok_or("a partial reduction of a scalar")?;
+                            let lanes: Vec<Value> = match split_count(cx, vt) {
+                                Some(m) => {
+                                    let vpt = part(cx, vlen, elem, veb);
+                                    let vs = parts_of(cx, &parts, bld.f, args[1], m, vpt)?;
+                                    let i64t = cx.m.types.int(64);
+                                    let per = vlen as usize / m;
+                                    let mut out = Vec::new();
+                                    for v in vs {
+                                        if is_vec(cx, cx.value_ty(bld.f, v)) {
+                                            for l in 0..per {
+                                                let idx = cx.int(i64t, l as i64);
+                                                out.push(
+                                                    bld.op(Op::ExtractElement { vector: v, index: idx }, Some(elem)),
+                                                );
+                                            }
+                                        } else {
+                                            out.push(v);
+                                        }
+                                    }
+                                    out
+                                }
+                                None => {
+                                    return Err("a partial reduction of a legal vector into a split accumulator".into());
+                                }
+                            };
+                            if is_vec(cx, pt) {
+                                return Err("a partial reduction into an accumulator split in vectors".into());
                             }
-                            None => vec![args[1]],
-                        };
-                        let pt = cx.value_ty(bld.f, vs[0]);
-                        let mut s = vs[0];
-                        for &v in &vs[1..] {
-                            s = bld.op(
+                            for (j, v) in lanes.into_iter().enumerate() {
+                                let k = j % n;
+                                acc[k] = bld.op(
+                                    Op::Binary {
+                                        op: BinOp::Add,
+                                        flags: IntFlags::NONE,
+                                        fmf: FastMath::default(),
+                                        lhs: acc[k],
+                                        rhs: v,
+                                    },
+                                    Some(elem),
+                                );
+                            }
+                            out_parts = Some(acc);
+                        } else {
+                            let (alen, elem, eb) = vec_info(cx, acc_ty).unwrap();
+                            let vt = cx.value_ty(bld.f, args[1]);
+                            let vs: Vec<Value> = match split_count(cx, vt) {
+                                Some(n) => {
+                                    let pt = vec_ty(cx, cx.vector_bits() / eb, elem);
+                                    parts_of(cx, &parts, bld.f, args[1], n, pt)?
+                                }
+                                None => vec![args[1]],
+                            };
+                            let pt = cx.value_ty(bld.f, vs[0]);
+                            let mut s = vs[0];
+                            for &v in &vs[1..] {
+                                s = bld.op(
+                                    Op::Binary {
+                                        op: BinOp::Add,
+                                        flags: IntFlags::NONE,
+                                        fmf: FastMath::default(),
+                                        lhs: s,
+                                        rhs: v,
+                                    },
+                                    Some(pt),
+                                );
+                            }
+                            // Fold halves together down to the accumulator's lanes.
+                            let (mut slen, _, _) = vec_info(cx, pt).unwrap();
+                            while slen > alen {
+                                let half = slen / 2;
+                                let ht = vec_ty(cx, half, elem);
+                                let pz = poison(cx, cx.value_ty(bld.f, s));
+                                let lo = shuffle(&mut bld, cx, s, pz, &(0..half as i32).collect::<Vec<_>>(), ht);
+                                let hi =
+                                    shuffle(&mut bld, cx, s, pz, &(half as i32..slen as i32).collect::<Vec<_>>(), ht);
+                                s = bld.op(
+                                    Op::Binary {
+                                        op: BinOp::Add,
+                                        flags: IntFlags::NONE,
+                                        fmf: FastMath::default(),
+                                        lhs: lo,
+                                        rhs: hi,
+                                    },
+                                    Some(ht),
+                                );
+                                slen = half;
+                            }
+                            replace = Some(bld.op(
                                 Op::Binary {
                                     op: BinOp::Add,
                                     flags: IntFlags::NONE,
                                     fmf: FastMath::default(),
-                                    lhs: s,
-                                    rhs: v,
+                                    lhs: args[0],
+                                    rhs: s,
                                 },
-                                Some(pt),
-                            );
+                                Some(acc_ty),
+                            ));
                         }
-                        // Fold halves together down to the accumulator's lanes.
-                        let (mut slen, _, _) = vec_info(cx, pt).unwrap();
-                        while slen > alen {
-                            let half = slen / 2;
-                            let ht = vec_ty(cx, half, elem);
-                            let pz = poison(cx, cx.value_ty(bld.f, s));
-                            let lo = shuffle(&mut bld, cx, s, pz, &(0..half as i32).collect::<Vec<_>>(), ht);
-                            let hi = shuffle(&mut bld, cx, s, pz, &(half as i32..slen as i32).collect::<Vec<_>>(), ht);
-                            s = bld.op(
-                                Op::Binary {
-                                    op: BinOp::Add,
-                                    flags: IntFlags::NONE,
-                                    fmf: FastMath::default(),
-                                    lhs: lo,
-                                    rhs: hi,
-                                },
-                                Some(ht),
-                            );
-                            slen = half;
-                        }
-                        replace = Some(bld.op(
-                            Op::Binary {
-                                op: BinOp::Add,
-                                flags: IntFlags::NONE,
-                                fmf: FastMath::default(),
-                                lhs: args[0],
-                                rhs: s,
-                            },
-                            Some(acc_ty),
-                        ));
                     } else if name.starts_with("llvm.") && res_split.is_some() {
                         // An element-wise intrinsic: called for each part,
                         // declared again for the part's type.

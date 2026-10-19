@@ -1,10 +1,13 @@
-; The AArch64 machine description, as data. See docs/design/isel.md.
+; The AArch64 machine description, as data. See docs/design/isel.md and
+; docs/design/targets.md.
 ;
 ; It is in the .ll files of this directory, read in the order of their
-; names as one module (codegen/src/target.rs lists them):
+; names as one module (codegen/src/target.rs lists them, as it is built in):
 ;
 ;   00-base.ll      these conventions, the flags, condition forms,
 ;                   comparisons, branches and selects
+;   01-target.ll    the machine as a whole: registers, parameters, CPUs and
+;                   their features, relocations
 ;   10-integer.ll   arithmetic, logic, shifts, extensions, moves and
 ;                   constants, address arithmetic
 ;   20-memory.ll    loads and stores, atomics
@@ -47,13 +50,15 @@
 ;                         operand is inverted too)
 ;   "dclass"="wsp"        the result's register class, if not w or x
 ;   "nomatch"             not a pattern for selection
-;   "role"="..."          used by the code generator by role, not matched
+;   "role"="..."          used by the code generator by role (load.x,
+;                         addr.hi, jump, ...), comma-separated if several;
+;                         see docs/design/targets.md
+;   "feature"="neon"      used only when this feature is on (comma-separated
+;                         if several are needed)
 ;   "result2"             the second field of the result is a second register
 ;                         result, the operand called d2 (a load pair's)
-;   "reloc"="adrp"        how an object file fixes up its "sym" operand: call26
-;                         (the branch), adrp (the symbol's 4KB page),
-;                         add_lo12 (its offset in the page), adrp_got and
-;                         ld64_got_lo12 (the same for its GOT entry)
+;   "reloc"="adrp"        how an object file fixes up its "sym" operand, by
+;                         a relocation's name in !target.relocs (01-target.ll)
 
 target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
 
@@ -216,7 +221,7 @@ define %nzcv @TSTXri(i64 "reg"="x" %n, i64 "imm" %imm) "enc"="1 11 100100 nimm:1
 ; Branches. indirectbr to a label operand means "jump there"; ret void
 ; means "fall through".
 
-define void @B(ptr "label" %dest) "enc"="000101 imm26:s26=dest/4" "asm"="b {dest}" {
+define void @B(ptr "label" %dest) "enc"="000101 imm26:s26=dest/4" "asm"="b {dest}" "role"="jump" {
   indirectbr ptr %dest, []
 }
 
@@ -281,11 +286,11 @@ next:
   ret void
 }
 
-define void @RET() "enc"="1101011 0 0 10 11111 0000 0 0 11110 00000" "asm"="ret" {
+define void @RET() "enc"="1101011 0 0 10 11111 0000 0 0 11110 00000" "asm"="ret" "role"="ret" {
   ret void
 }
 
-define void @BRK() "enc"="11010100 001 0000000000000001 000 00" "asm"="brk #0x1" {
+define void @BRK() "enc"="11010100 001 0000000000000001 000 00" "asm"="brk #0x1" "role"="trap" {
   unreachable
 }
 

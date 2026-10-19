@@ -43,7 +43,9 @@ only so far), where only its size is stored.
 ### Relocations are data
 
 The description says how each instruction with a symbol operand is fixed
-up, in a `"reloc"` attribute:
+up, in a `"reloc"` attribute naming one of the relocations the description
+lists in `!target.relocs`, with their ELF and Mach-O numbers and how
+assembly writes them ([targets.md](targets.md)). AArch64's:
 
 | Instruction | `"reloc"` | ELF | Mach-O |
 | --- | --- | --- | --- |

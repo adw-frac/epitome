@@ -12,11 +12,20 @@ const USAGE: &str = "usage: draconian-llc [options] <file.ll>
                           ending in .o asks for an object file
   --filetype=asm|obj      assembly (the default) or an object file, Mach-O
                           or ELF as the convention uses
-  --target=<path>         read the machine description from this .ll file,
-                          or the .ll files in this directory in name order
-                          (default: the built-in AArch64 description)
+  --target=<name|path>    the machine description: a .ll file, a directory
+                          of them (read in name order), or a name: aarch64
+                          is built in, others are directories of that name
+                          in DRACONIAN_TARGET_PATH (a list separated by
+                          colons); by default, the one the module's triple names
+                          (riscv64-... is riscv64), else aarch64
+  --target-add=<path>     read these .ll files too, as more of the
+                          description (may be given again)
   --abi=darwin|aapcs64    the calling convention and platform (default:
                           from the module's target triple, else darwin)
+  --mcpu=<name>           the CPU, as the description names it (default:
+                          the one each function's IR names, or the
+                          description's)
+  --mattr=+f,-g,...       turn features on or off
   --reserve=x18,...       keep these registers out of allocation
   --syntax=macho|elf      the assembler dialect, if not the convention's
   --stop-after=isel|ra    print machine IR after selection or allocation
@@ -30,6 +39,7 @@ const USAGE: &str = "usage: draconian-llc [options] <file.ll>
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (mut input, mut output, mut target_file) = (None, None, None);
+    let mut adds: Vec<String> = Vec::new();
     let (mut hex, mut disasm, mut patterns, mut stats) = (false, false, false, false);
     let mut filetype = None;
     let mut stop = Stop::Done;
@@ -48,7 +58,10 @@ fn main() -> ExitCode {
             "--stop-after=isel" => stop = Stop::AfterSelection,
             "--stop-after=ra" => stop = Stop::AfterAllocation,
             s if s.starts_with("--target=") => target_file = Some(s["--target=".len()..].to_string()),
+            s if s.starts_with("--target-add=") => adds.push(s["--target-add=".len()..].to_string()),
             s if s.starts_with("--abi=") => opts.abi = Some(s["--abi=".len()..].to_string()),
+            s if s.starts_with("--mcpu=") => opts.mcpu = Some(s["--mcpu=".len()..].to_string()),
+            s if s.starts_with("--mattr=") => opts.mattr.push(s["--mattr=".len()..].to_string()),
             "--syntax=macho" => opts.syntax = Some(draconian_codegen::abi::Syntax::MachO),
             "--syntax=elf" => opts.syntax = Some(draconian_codegen::abi::Syntax::Elf),
             s if s.starts_with("--reserve=") => {
@@ -69,17 +82,15 @@ fn main() -> ExitCode {
             s => input = Some(s.to_string()),
         }
     }
-    let target = match target_file {
-        None => Target::aarch64(),
-        Some(path) => match Target::load_path(&path) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("draconian-llc: {path}: {e}");
-                return ExitCode::FAILURE;
-            }
-        },
+    let load = |triple: &str| match Target::resolve(target_file.as_deref(), triple, &adds) {
+        Ok(t) => Some(t),
+        Err(e) => {
+            eprintln!("draconian-llc: {e}");
+            None
+        }
     };
     if patterns {
+        let Some(target) = load("") else { return ExitCode::FAILURE };
         for p in &target.patterns {
             let emitted: Vec<&str> = p.emit.iter().map(|e| target.instrs[e.instr].name.as_str()).collect();
             println!("{:<40} {} IR ops -> {}", p.name, p.nodes, emitted.join(", "));
@@ -105,6 +116,8 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let triple = module.triple.as_ref().map(|s| String::from_utf8_lossy(s).into_owned()).unwrap_or_default();
+    let Some(target) = load(&triple) else { return ExitCode::FAILURE };
     let started = std::time::Instant::now();
     opts.stop = stop;
     let compiled = match compile(&target, &mut module, &opts) {

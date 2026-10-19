@@ -8,7 +8,8 @@
 //! as it is, and each hole takes what comes before the next piece of
 //! literal text. A hole's text is then read loosely, as what its operand
 //! is: a register (`w3`, `sp`, `v2.4s`, `q0`), a number (`#-12`, `0x1f`), a
-//! condition (`ne`), a symbol (`_x@PAGEOFF`, `:lo12:x`), or a label. Holes
+//! condition (`ne`), a symbol (spelled as the instruction's relocation
+//! spells it: `_x@PAGEOFF`, `:lo12:x`), or a label. Holes
 //! that are expressions (`#{=0-imm}`) are solved for their operand.
 //!
 //! A reading is kept only if the template, filled in with the values read,
@@ -52,10 +53,10 @@ pub struct Assembled {
 
 impl Assembled {
     /// The object file, in the format the assembly was written for.
-    pub fn file(&self) -> Vec<u8> {
+    pub fn file(&self, t: &Target) -> Result<Vec<u8>, String> {
         match self.syntax {
-            Syntax::Elf => crate::elf::write(&self.object),
-            Syntax::MachO => crate::macho::write(&self.object, self.min_os),
+            Syntax::Elf => crate::elf::write(&self.object, &t.machine),
+            Syntax::MachO => crate::macho::write(&self.object, self.min_os, &t.machine),
         }
     }
 }
@@ -127,42 +128,10 @@ fn parse_int(s: &str) -> Option<i64> {
     Some(if neg { v.wrapping_neg() } else { v })
 }
 
-/// A register's number, from any of its names; the template's printing of
-/// it decides whether the name was the right one.
-fn parse_reg(s: &str) -> Option<u8> {
-    match s {
-        "sp" | "wsp" | "xzr" | "wzr" => return Some(31),
-        _ => {}
-    }
-    let base = s.split('.').next()?;
-    let mut chars = base.chars();
-    if !matches!(chars.next()?, 'w' | 'x' | 'v' | 'q' | 'd' | 's' | 'h' | 'b') {
-        return None;
-    }
-    let n: u8 = chars.as_str().parse().ok()?;
-    (n < 32).then_some(n)
-}
-
 fn valid_symbol(s: &str) -> bool {
     !s.is_empty()
         && !s.starts_with(|c: char| c.is_ascii_digit())
         && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '$'))
-}
-
-/// The symbol in an operand written `text`, for a template hole with
-/// `modifier` (`page`, `pageoff`, `gotpage`, `gotpageoff`, or none).
-fn parse_sym(text: &str, modifier: Option<&str>, syntax: Syntax) -> Option<String> {
-    let name = match (syntax, modifier) {
-        (Syntax::MachO, Some("page")) => text.strip_suffix("@PAGE")?,
-        (Syntax::MachO, Some("pageoff")) => text.strip_suffix("@PAGEOFF")?,
-        (Syntax::MachO, Some("gotpage")) => text.strip_suffix("@GOTPAGE")?,
-        (Syntax::MachO, Some("gotpageoff")) => text.strip_suffix("@GOTPAGEOFF")?,
-        (Syntax::Elf, Some("pageoff")) => text.strip_prefix(":lo12:")?,
-        (Syntax::Elf, Some("gotpage")) => text.strip_prefix(":got:")?,
-        (Syntax::Elf, Some("gotpageoff")) => text.strip_prefix(":got_lo12:")?,
-        _ => text,
-    };
-    valid_symbol(name).then(|| name.to_string())
 }
 
 impl<'t> Assembler<'t> {
@@ -229,14 +198,18 @@ impl<'t> Assembler<'t> {
                 set(&mut r.env, &name, v)?;
                 continue;
             }
-            let (name, modifier) = match inner.split_once(':') {
+            let (name, _) = match inner.split_once(':') {
                 Some((n, m)) => (n, Some(m)),
                 None => (inner.as_str(), None),
             };
             let k = ins.operands.iter().position(|o| o.name == name)?;
             match ins.operands[k].kind {
                 Kind::Reg(class) => {
-                    let n = parse_reg(text)?;
+                    // By any of its names (a vector's without its
+                    // arrangement); the template, printing it back,
+                    // decides whether the name was the right one.
+                    let n = self.t.machine.lookup(text.split('.').next()?)?;
+                    let n = if class.is_fp() { n.wrapping_sub(32) } else { n };
                     set(&mut r.env, name, n as i64)?;
                     let p = if class.is_fp() { n + 32 } else { n };
                     r.shown.insert(k, Operand::Reg(Reg::P(p)));
@@ -247,7 +220,12 @@ impl<'t> Assembler<'t> {
                     set(&mut r.env, name, c.value)?;
                 }
                 Kind::Sym => {
-                    let s = parse_sym(text, modifier, syntax)?;
+                    // As the instruction's relocation spells it.
+                    let sym = match ins.reloc {
+                        Some(rk) => self.t.machine.relocs[rk.0 as usize].unspell(syntax, text)?,
+                        None => text,
+                    };
+                    let s = valid_symbol(sym).then(|| sym.to_string())?;
                     set(&mut r.env, name, 0)?;
                     r.sym = Some((k, s));
                     r.shown.insert(k, Operand::Text(text.to_string()));
@@ -546,7 +524,16 @@ impl<'t> Assembler<'t> {
                     }
                 }
                 Later::Data { section, offset, symbol, addend } => {
-                    pending.push(Pending { section, offset, kind: RelocKind::Abs64, symbol, addend, instr: None });
+                    let kind =
+                        self.t.machine.data_reloc(8).ok_or("the description has no relocation for pointers in data")?;
+                    pending.push(Pending {
+                        section,
+                        offset,
+                        kind: RelocKind(kind as u16),
+                        symbol,
+                        addend,
+                        instr: None,
+                    });
                 }
             }
         }

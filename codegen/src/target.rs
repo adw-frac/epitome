@@ -14,8 +14,10 @@ use draconian_ir::types::{Type, TypeId};
 
 use crate::enc::{self, Encoding, Env};
 
-/// A register class: which register names to print, and what number 31
-/// means.
+/// A register class, as the code generator knows them: integer registers
+/// of 32 and 64 bits (with or without the stack pointer), floating-point
+/// registers of 32 and 64 bits, and vectors of 64 and 128 bits. What the
+/// registers are called is the description's (`machine.rs`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Class {
     W,
@@ -56,22 +58,6 @@ impl Class {
     /// In the floating-point and vector registers, v0-v31.
     pub fn is_fp(self) -> bool {
         matches!(self, Class::D | Class::S | Class::Q | Class::V)
-    }
-
-    /// The register name for number `r`.
-    pub fn name(self, r: u8) -> String {
-        match (self, r) {
-            (Class::W, 31) => "wzr".into(),
-            (Class::X, 31) => "xzr".into(),
-            (Class::Wsp, 31) => "wsp".into(),
-            (Class::Xsp, 31) => "sp".into(),
-            (Class::D, r) => format!("d{}", r.wrapping_sub(32)),
-            (Class::S, r) => format!("s{}", r.wrapping_sub(32)),
-            (Class::Q, r) => format!("q{}", r.wrapping_sub(32)),
-            (Class::V, r) => format!("d{}", r.wrapping_sub(32)),
-            (c, r) if c.is_64() => format!("x{r}"),
-            (_, r) => format!("w{r}"),
-        }
     }
 
     /// The same class, but 32 or 64 bits wide.
@@ -130,6 +116,8 @@ pub struct Instr {
     pub reloc: Option<crate::object::RelocKind>,
     /// Operand 1 (`d2`) is a second register result.
     pub second_result: bool,
+    /// The features it needs (see `features.rs`).
+    pub features: Vec<String>,
     pub func: GlobalId,
 }
 
@@ -358,6 +346,8 @@ pub struct Pattern {
 
 pub struct Target {
     pub module: Module,
+    /// Registers, relocations and parameters (see `machine.rs`).
+    pub machine: crate::machine::Machine,
     pub instrs: Vec<Instr>,
     pub by_name: HashMap<String, usize>,
     pub conds: Vec<CondForm>,
@@ -384,10 +374,40 @@ fn attr<'a>(attrs: &'a [Attr], key: &str) -> Option<Option<&'a str>> {
     })
 }
 
+/// The directories of `DRACONIAN_TARGET_PATH`.
+fn target_dirs() -> Vec<String> {
+    std::env::var("DRACONIAN_TARGET_PATH")
+        .map(|p| p.split(':').filter(|d| !d.is_empty()).map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// The directory of target `name` in `DRACONIAN_TARGET_PATH`.
+fn search_path(name: &str) -> Option<String> {
+    target_dirs().into_iter().map(|d| format!("{d}/{name}")).find(|p| std::path::Path::new(p).is_dir())
+}
+
+/// A description's files: one file, or the `.ll` files of a directory in
+/// name order.
+fn read_path(path: &str) -> Result<Vec<(String, String)>, String> {
+    let p = std::path::Path::new(path);
+    let read = |f: &std::path::Path| std::fs::read_to_string(f).map_err(|e| format!("{}: {e}", f.display()));
+    if !p.is_dir() {
+        return Ok(vec![(p.file_name().map_or(path.to_string(), |n| n.to_string_lossy().into_owned()), read(p)?)]);
+    }
+    let mut names: Vec<std::path::PathBuf> = std::fs::read_dir(p)
+        .map_err(|e| format!("{path}: {e}"))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|f| f.extension().is_some_and(|x| x == "ll"))
+        .collect();
+    names.sort();
+    names.iter().map(|f| Ok((f.file_name().unwrap().to_string_lossy().into_owned(), read(f)?))).collect()
+}
+
 /// The built-in AArch64 description (`codegen/targets/aarch64/`), its files
 /// in order. Together they are one module.
 pub const AARCH64_FILES: &[(&str, &str)] = &[
     ("00-base.ll", include_str!("../targets/aarch64/00-base.ll")),
+    ("01-target.ll", include_str!("../targets/aarch64/01-target.ll")),
     ("10-integer.ll", include_str!("../targets/aarch64/10-integer.ll")),
     ("20-memory.ll", include_str!("../targets/aarch64/20-memory.ll")),
     ("25-pairs.ll", include_str!("../targets/aarch64/25-pairs.ll")),
@@ -527,26 +547,70 @@ impl Target {
         }
     }
 
+    /// A target: by `spec`, a path (a `.ll` file, or a directory of them) or
+    /// a name (`aarch64` is built in; others are directories of that name
+    /// in `DRACONIAN_TARGET_PATH`, a list separated by colons); or with no
+    /// `spec`, the one a module's `triple` names by its architecture
+    /// (`riscv64-unknown-linux-gnu` is `riscv64`), else the built-in one.
+    /// The files of `adds` (files, or directories of them) are read after
+    /// the target's own, as more of the same description.
+    pub fn resolve(spec: Option<&str>, triple: &str, adds: &[String]) -> Result<Target, String> {
+        let mut files: Vec<(String, String)> = Vec::new();
+        let built_in = |files: &mut Vec<(String, String)>| {
+            files.extend(AARCH64_FILES.iter().map(|(n, t)| (n.to_string(), t.to_string())));
+        };
+        let arch = triple.split('-').next().unwrap_or("");
+        match spec {
+            Some(p) if std::path::Path::new(p).exists() => files.extend(read_path(p)?),
+            Some("aarch64" | "arm64") => built_in(&mut files),
+            Some(name) => {
+                let dir = search_path(name).ok_or_else(|| {
+                    format!("no target {name}: not a path, not built in, and not in DRACONIAN_TARGET_PATH")
+                })?;
+                files.extend(read_path(&dir)?);
+            }
+            None if matches!(arch, "" | "aarch64" | "arm64" | "arm64e") => built_in(&mut files),
+            None => match search_path(arch) {
+                Some(dir) => files.extend(read_path(&dir)?),
+                None => {
+                    return Err(format!(
+                        "no target for {arch}: name one with --target, or put it in DRACONIAN_TARGET_PATH"
+                    ));
+                }
+            },
+        }
+        for a in adds {
+            files.extend(read_path(a)?);
+        }
+        let refs: Vec<(&str, &str)> = files.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect();
+        Target::load_files(&refs)
+    }
+
+    /// The target whose ELF machine number is `machine`: the built-in one,
+    /// or one in `DRACONIAN_TARGET_PATH`.
+    pub fn for_elf_machine(machine: u16) -> Option<Target> {
+        let t = Target::aarch64();
+        if t.machine.elf_machine == machine {
+            return Some(t);
+        }
+        for dir in target_dirs() {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for e in entries.flatten() {
+                if e.path().is_dir()
+                    && let Ok(t) = Target::load_path(&e.path().to_string_lossy())
+                    && t.machine.elf_machine == machine
+                {
+                    return Some(t);
+                }
+            }
+        }
+        None
+    }
+
     /// A description from a file, or from the `.ll` files in a directory,
     /// read in the order of their names.
     pub fn load_path(path: &str) -> Result<Target, String> {
-        let p = std::path::Path::new(path);
-        if !p.is_dir() {
-            return Target::load(&std::fs::read_to_string(p).map_err(|e| e.to_string())?);
-        }
-        let mut names: Vec<std::path::PathBuf> = std::fs::read_dir(p)
-            .map_err(|e| e.to_string())?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|f| f.extension().is_some_and(|x| x == "ll"))
-            .collect();
-        names.sort();
-        let mut files = Vec::new();
-        for f in &names {
-            files.push((
-                f.file_name().unwrap().to_string_lossy().into_owned(),
-                std::fs::read_to_string(f).map_err(|e| e.to_string())?,
-            ));
-        }
+        let files = read_path(path)?;
         let refs: Vec<(&str, &str)> = files.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect();
         Target::load_files(&refs)
     }
@@ -556,8 +620,10 @@ impl Target {
     }
 
     fn from_module(module: draconian_ir::Module) -> Result<Target, String> {
+        let machine = crate::machine::Machine::read(&module)?;
         let mut t = Target {
             module,
+            machine,
             instrs: Vec::new(),
             by_name: HashMap::new(),
             conds: Vec::new(),
@@ -571,7 +637,7 @@ impl Target {
             masks: Default::default(),
         };
         t.read()?;
-        t.abis = crate::abi::read(&t.module, "aarch64.abi.")?;
+        t.abis = crate::abi::read(&t.module, "abi.", &t.machine)?;
         t.build_patterns()?;
         let mut trie = Trie::default();
         for (i, p) in t.patterns.iter().enumerate() {
@@ -640,6 +706,12 @@ impl Target {
     }
 
     /// The number of a shuffle mask the description uses, if it does.
+    /// Is there a pattern whose root is a shuffle by this mask?
+    pub fn has_shuffle(&self, lanes: &[i32]) -> bool {
+        let Some(id) = self.find_mask(lanes) else { return false };
+        self.patterns.iter().any(|p| matches!(&p.tree, Tree::Op(Head::Shuffle(k, _), _) if *k == id))
+    }
+
     pub fn find_mask(&self, lanes: &[i32]) -> Option<u16> {
         self.masks.lock().unwrap().iter().position(|m| m == lanes).map(|i| i as u16)
     }
@@ -656,10 +728,18 @@ impl Target {
     }
 
     pub fn by_role(&self, role: &str) -> usize {
-        self.instrs
-            .iter()
-            .position(|i| i.role.as_deref() == Some(role))
-            .unwrap_or_else(|| panic!("no instruction has role {role}"))
+        self.role(role).unwrap_or_else(|| panic!("no instruction has role {role}"))
+    }
+
+    /// The instruction with this role, if one has it. (`"role"` may list
+    /// several, with commas.)
+    pub fn role(&self, role: &str) -> Option<usize> {
+        self.instrs.iter().position(|i| i.role.as_deref().is_some_and(|r| r.split(',').any(|x| x == role)))
+    }
+
+    /// Does instruction `i` have this role?
+    pub fn has_role(&self, i: usize, role: &str) -> bool {
+        self.instrs[i].role.as_deref().is_some_and(|r| r.split(',').any(|x| x == role))
     }
 
     fn read(&mut self) -> Result<(), String> {
@@ -776,11 +856,19 @@ impl Target {
                     writeback: attr(&p.attrs, "writeback").is_some(),
                 });
             }
-            let default_zext = if has_result && ret_bits <= 32 { 32 } else { 64 };
+            // A 32-bit result is zero above 32 bits where the machine zeroes
+            // the top half of the register; where it sign-extends, nothing
+            // is known.
+            let default_zext = if has_result && ret_bits <= 32 && self.machine.narrow == crate::machine::Narrow::Zero {
+                32
+            } else {
+                64
+            };
             let reloc = match attr(&f.fn_attrs, "reloc").flatten() {
-                Some(r) => {
-                    Some(crate::object::RelocKind::parse(r).ok_or_else(|| format!("@{name}: unknown reloc {r}"))?)
-                }
+                Some(r) => Some(crate::object::RelocKind(
+                    self.machine.reloc(r).ok_or_else(|| format!("@{name}: no relocation {r} in the description"))?
+                        as u16,
+                )),
                 None => None,
             };
             instrs.push(Instr {
@@ -802,6 +890,10 @@ impl Target {
                 inverse: attr(&f.fn_attrs, "inverse").flatten().map(str::to_string),
                 reloc,
                 second_result,
+                features: attr(&f.fn_attrs, "feature")
+                    .flatten()
+                    .map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect())
+                    .unwrap_or_default(),
                 func: g,
             });
         }

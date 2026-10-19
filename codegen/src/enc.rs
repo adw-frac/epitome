@@ -284,6 +284,23 @@ pub fn eval(e: &Expr, env: &Env) -> Option<i64> {
     })
 }
 
+/// If `e` is a slice of `name`'s bits (`name`, `name>>k`, `(name>>k)&m`
+/// or `name&m`), where its lowest bit is: `k`.
+fn slice_of(e: &Expr, name: &str) -> Option<i64> {
+    let shifted = |e: &Expr| match e {
+        Expr::Var(v) if v == name => Some(0),
+        Expr::Bin('>', a, k) if matches!(&**a, Expr::Var(v) if v == name) => match **k {
+            Expr::Int(k) => Some(k),
+            _ => None,
+        },
+        _ => None,
+    };
+    match e {
+        Expr::Bin('&', a, m) if matches!(**m, Expr::Int(m) if (m + 1).count_ones() == 1) => shifted(a),
+        _ => shifted(e),
+    }
+}
+
 /// Solves `e == target` for the one name in `e`, when `e` is made of
 /// steps that can be undone. Returns the name and its value.
 pub fn invert(e: &Expr, target: i64) -> Option<(String, i64)> {
@@ -370,6 +387,30 @@ impl Encoding {
         }
         let mut env = Env::new();
         for name in operands {
+            // An operand in several fields that are each a slice of its
+            // bits (`x>>12`, `(x>>5)&63`, `x&31`): the slices put back. A
+            // signed slice (the top one) gives the sign.
+            let holding: Vec<&Field> =
+                self.fields.iter().filter(|f| f.names.as_slice() == std::slice::from_ref(name)).collect();
+            // (Fields holding the same bits, as `rs1` and `rs2` both `n` do
+            // in `fmv.d`, are copies, not slices.)
+            let disjoint = |slices: &[i64]| {
+                let mut ranges: Vec<(i64, i64)> =
+                    holding.iter().zip(slices).map(|(f, &k)| (k, k + f.width as i64)).collect();
+                ranges.sort();
+                ranges.windows(2).all(|w| w[0].1 <= w[1].0)
+            };
+            if holding.len() > 1
+                && let Some(slices) = holding.iter().map(|f| slice_of(&f.expr, name)).collect::<Option<Vec<i64>>>()
+                && disjoint(&slices)
+            {
+                let v = holding
+                    .iter()
+                    .zip(&slices)
+                    .fold(0i64, |acc, (f, &k)| acc.wrapping_add(self.field_value(f, word).wrapping_shl(k as u32)));
+                env.insert(name.clone(), v);
+                continue;
+            }
             // Prefer a field that is just the operand, then any other.
             let mut best: Option<i64> = None;
             for pass in 0..2 {
@@ -551,5 +592,26 @@ mod tests {
         assert_eq!(encode_bitmask(0xff, 32), Some(0b0_000000_000111));
         assert_eq!(encode_bitmask(0, 32), None);
         assert_eq!(encode_bitmask(5, 32), None);
+    }
+}
+
+#[cfg(test)]
+mod slice_tests {
+    use super::*;
+
+    /// An operand split over four fields, as RISC-V's branch offsets are.
+    #[test]
+    fn slices_are_put_back() {
+        let e = parse("b12:s1=dest>>12 b10:6=(dest>>5)&63 m:5 n:5 100 b4:4=(dest>>1)&15 b11:1=(dest>>11)&1 1100011")
+            .unwrap();
+        let names = vec!["dest".to_string(), "m".to_string(), "n".to_string()];
+        for dest in [0i64, 2, 8, 2046, 2048, 4094, -2, -4096, -1234] {
+            let env: Env = [("dest".into(), dest), ("m".into(), 11), ("n".into(), 10)].into_iter().collect();
+            let w = e.encode(&env).unwrap();
+            assert_eq!(e.decode(w, &names).unwrap()["dest"], dest, "{dest}");
+        }
+        // blt a0, a1, +8 is 0x00b54463.
+        let env: Env = [("dest".into(), 8), ("m".into(), 11), ("n".into(), 10)].into_iter().collect();
+        assert_eq!(e.encode(&env), Some(0x00b54463));
     }
 }

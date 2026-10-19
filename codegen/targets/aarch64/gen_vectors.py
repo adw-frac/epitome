@@ -564,8 +564,14 @@ out.append("\n".join(o))
 
 def write():
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "50-vectors.ll")
+    # Every entry needs Advanced SIMD.
+    lines = []
+    for line in "".join(out).rstrip("\n").split("\n"):
+        if line.startswith("define") and '"enc"=' in line:
+            line = line.replace(' "enc"=', ' "feature"="neon" "enc"=', 1)
+        lines.append(line)
     with open(path, "w") as f:
-        f.write("".join(out).rstrip("\n") + "\n\n")
+        f.write("\n".join(lines) + "\n\n")
 
 
 write()

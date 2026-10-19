@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use draconian_ir::module::*;
 use draconian_ir::types::{Type, TypeId};
 
+use crate::machine::Narrow;
 use crate::mir::*;
 use crate::prepare::{self, Ctx};
 use crate::target::{Class, Head, Key, Kind, Src, Target, bin_bits, sext, wide_bits};
@@ -599,6 +600,10 @@ impl<'a, 'b> Sel<'a, 'b> {
         let mut best: Option<Match> = None;
         stats::add(&stats::CANDIDATES, raw.len() as u64);
         for (pat, binds, covered) in raw {
+            // Not with an instruction whose features are off.
+            if !self.t.patterns[pat].emit.iter().all(|e| self.cx.enabled(e.instr)) {
+                continue;
+            }
             let Some(m) = self.validate(pat, &binds, covered, layout_next) else { continue };
             stats::add(&stats::VALID, 1);
             let better = match &best {
@@ -623,9 +628,22 @@ impl<'a, 'b> Sel<'a, 'b> {
                 self.is_fp(self.ty_of(*value)) == self.is_fp(self.f.locals[r.index()].ty)
                     && self.bits(self.ty_of(*value)) == self.bits(self.f.locals[r.index()].ty)
             }
-            // A mask's lanes are already all ones or all zeros.
+            // A mask's lanes are already all ones or all zeros. Where 32-bit
+            // values are kept sign-extended, extending one to 64 bits is
+            // free (and truncating to 32 bits is not).
             Op::Cast { op: CastOp::SExt, value, .. } => {
+                let r = self.f.insts[i.index()].result.unwrap();
                 matches!(self.cx.m.types.get(self.ty_of(*value)), Type::Vector { elem, .. } if self.bits(*elem) == 1)
+                    || (self.t.machine.narrow == Narrow::Sign
+                        && self.bits(self.ty_of(*value)) == 32
+                        && self.bits(self.f.locals[r.index()].ty) == 64)
+            }
+            Op::Cast { op: CastOp::Trunc, value, .. }
+                if self.t.machine.narrow == Narrow::Sign
+                    && self.bits(self.f.locals[self.f.insts[i.index()].result.unwrap().index()].ty) == 32
+                    && !self.is_vector(self.ty_of(*value)) =>
+            {
+                false
             }
             // Scalar truncations read the low bits of the same register;
             // a vector's is xtn.
@@ -841,17 +859,18 @@ impl<'a, 'b> Sel<'a, 'b> {
                     GlobalKind::Variable(v) => v.init.is_none(),
                     _ => false,
                 };
-                let via_got = declared_only
-                    || (!gl.props.dso_local && !matches!(gl.props.linkage, Linkage::Internal | Linkage::Private));
+                let via_got = self.t.machine.external_via_got
+                    && (declared_only
+                        || (!gl.props.dso_local && !matches!(gl.props.linkage, Linkage::Internal | Linkage::Private)));
                 let d = self.mf.new_vreg(true);
                 if via_got {
-                    let adrp = self.t.by_role("adrp.got");
-                    let ldr = self.t.by_role("ldr.got");
+                    let adrp = self.t.by_role("got.hi");
+                    let ldr = self.t.by_role("got.lo");
                     self.push(MInst::new(adrp, vec![MOp::Reg(Reg::V(d)), MOp::Sym(name.clone())]));
                     self.push(MInst::new(ldr, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(d)), MOp::Sym(name)]));
                 } else {
-                    let adrp = self.t.by_role("adrp");
-                    let pageoff = self.t.by_role("pageoff");
+                    let adrp = self.t.by_role("addr.hi");
+                    let pageoff = self.t.by_role("addr.lo");
                     self.push(MInst::new(adrp, vec![MOp::Reg(Reg::V(d)), MOp::Sym(name.clone())]));
                     self.push(MInst::new(pageoff, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(d)), MOp::Sym(name)]));
                 }
@@ -859,15 +878,15 @@ impl<'a, 'b> Sel<'a, 'b> {
                     return Ok(Reg::V(d));
                 }
                 let r = self.mf.new_vreg(true);
-                let add = self.t.by_name["ADDXri"];
-                let sub = self.t.by_name["SUBXri_neg"];
+                let add = self.t.by_role("addi");
+                let sub = self.t.role("addi.neg");
                 if self.t.instrs[add].fits(&[None, None, Some(off)]) {
                     self.push(MInst::new(add, vec![MOp::Reg(Reg::V(r)), MOp::Reg(Reg::V(d)), MOp::Imm(off)]));
-                } else if self.t.instrs[sub].fits(&[None, None, Some(off)]) {
+                } else if let Some(sub) = sub.filter(|&s| self.t.instrs[s].fits(&[None, None, Some(off)])) {
                     self.push(MInst::new(sub, vec![MOp::Reg(Reg::V(r)), MOp::Reg(Reg::V(d)), MOp::Imm(off)]));
                 } else {
                     let o = self.int_reg(off, true, false)?;
-                    let addr = self.t.by_name["ADDXrr"];
+                    let addr = self.t.by_role("add");
                     self.push(MInst::new(addr, vec![MOp::Reg(Reg::V(r)), MOp::Reg(Reg::V(d)), MOp::Reg(o)]));
                 }
                 Ok(Reg::V(r))
@@ -944,8 +963,11 @@ impl<'a, 'b> Sel<'a, 'b> {
     /// A register holding integer `v`.
     pub fn int_reg(&mut self, v: i64, wide: bool, zr_ok: bool) -> Result<Reg, String> {
         let v = if wide { v } else { v as i32 as i64 };
-        if v == 0 && zr_ok {
-            return Ok(Reg::P(31));
+        if v == 0
+            && zr_ok
+            && let Some(z) = self.t.machine.zero
+        {
+            return Ok(Reg::P(z));
         }
         if self.hoisting() {
             if let Some(&r) = self.hoisted.get(&(v, wide)) {
@@ -969,7 +991,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         let u = (v as u64) & (u64::MAX >> (64 - bits));
         let shifted_movz = u != 0 && u.trailing_zeros() >= 16 && (u >> (u.trailing_zeros() / 16 * 16)) <= 0xffff;
         // One instruction, if the description has one that holds it.
-        for &ci in self.t.constants.iter().filter(|_| !shifted_movz) {
+        for &ci in self.t.constants.iter().filter(|&&ci| !shifted_movz && self.cx.enabled(ci)) {
             let ins = &self.t.instrs[ci];
             if (ins.operands[0].bits > 32) != wide {
                 continue;
@@ -978,6 +1000,10 @@ impl<'a, 'b> Sel<'a, 'b> {
                 self.push(MInst::new(ci, vec![MOp::Reg(Reg::V(d)), MOp::Imm(v)]));
                 return Ok(Reg::V(d));
             }
+        }
+        // Without movz and movk: a high part, plus the low bits by an add.
+        if self.t.role("movz.x").is_none() {
+            return self.make_int_pieces(d, v, wide);
         }
         // Otherwise sixteen bits at a time.
         let (movz, movk, pieces) = if wide {
@@ -992,6 +1018,56 @@ impl<'a, 'b> Sel<'a, 'b> {
         self.push(MInst::new(movz, vec![MOp::Reg(Reg::V(d)), MOp::Imm(first.0), MOp::Imm(first.1)]));
         for &(c, sh) in rest {
             self.push(MInst::new(movk, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(d)), MOp::Imm(c), MOp::Imm(sh)]));
+        }
+        Ok(Reg::V(d))
+    }
+
+    /// Integer `v` in register `d`, for machines that build constants from a
+    /// high part and an added low part (RISC-V's `lui` and `addi`). The low
+    /// part is the value's low bits, as a signed number of the width the
+    /// add-immediate (`"addi"`, or `"addi.w"` for 32 bits) holds; the high
+    /// part is made by one of the description's constant instructions if it
+    /// holds it, else made the same way, shifted into place (`"shli"`).
+    fn make_int_pieces(&mut self, d: VReg, v: i64, wide: bool) -> Result<Reg, String> {
+        let add = if wide { self.t.role("addi") } else { self.t.role("addi.w").or(self.t.role("addi")) }
+            .ok_or("no way to make this constant: no \"addi\" instruction")?;
+        let fits_add = |t: &Target, x: i64| t.instrs[add].fits(&[None, None, Some(x)]);
+        // The add's immediate width, by what it holds.
+        let mut k = 1;
+        while k < 32 && fits_add(self.t, (1i64 << k) - 1) && fits_add(self.t, -(1i64 << k)) {
+            k += 1;
+        }
+        let lo = (v << (64 - k)) >> (64 - k);
+        let mut hi = v.wrapping_sub(lo);
+        if !wide {
+            hi = hi as i32 as i64;
+        }
+        let constant = self.t.constants.iter().copied().filter(|&ci| self.cx.enabled(ci)).find(|&ci| {
+            let ins = &self.t.instrs[ci];
+            (ins.operands[0].bits > 32) == wide && ins.fits(&[None, Some(hi)])
+        });
+        let base = match constant {
+            Some(ci) => {
+                let r = self.mf.new_vreg(wide);
+                self.push(MInst::new(ci, vec![MOp::Reg(Reg::V(r)), MOp::Imm(hi)]));
+                Reg::V(r)
+            }
+            None => {
+                let shl = self.t.role("shli").ok_or("no way to make this constant: no \"shli\" instruction")?;
+                let sh = hi.trailing_zeros() as i64;
+                if sh == 0 || sh >= 64 {
+                    return self.err(format!("no way to make the constant {v}"));
+                }
+                let h = self.make_int(hi >> sh, wide)?;
+                let r = self.mf.new_vreg(wide);
+                self.push(MInst::new(shl, vec![MOp::Reg(Reg::V(r)), MOp::Reg(h), MOp::Imm(sh)]));
+                Reg::V(r)
+            }
+        };
+        if lo == 0 {
+            self.push(MInst::copy(Reg::V(d), base));
+        } else {
+            self.push(MInst::new(add, vec![MOp::Reg(Reg::V(d)), MOp::Reg(base), MOp::Imm(lo)]));
         }
         Ok(Reg::V(d))
     }
@@ -1107,7 +1183,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         if let Some(n) = m.next
             && Some(n) != layout_next
         {
-            let b = self.t.by_name["B"];
+            let b = self.t.by_role("jump");
             let target = self.bmap[&n];
             self.push(MInst::new(b, vec![MOp::Label(target)]));
         }
@@ -1169,7 +1245,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         for part in found {
             regs.push(match part {
                 Some(p) => self.reg_for(p, Class::X)?,
-                None => Reg::P(31),
+                None => self.int_reg(0, true, true)?,
             });
         }
         Ok(regs)
@@ -1187,15 +1263,9 @@ impl<'a, 'b> Sel<'a, 'b> {
 
     /// A store of `r`, `size` bytes wide, at `off` from the stack pointer.
     fn store_to_stack(&mut self, r: Reg, size: u64, off: i64, fp: bool) {
-        let name = match (size, fp) {
-            (4, true) => "STRSui",
-            (_, true) => "STRDui",
-            (1, _) => "STRBui",
-            (2, _) => "STRHui",
-            (4, _) => "STRWui",
-            _ => "STRXui",
-        };
-        self.push(MInst::new(self.t.by_name[name], vec![MOp::Reg(r), MOp::Reg(Reg::P(31)), MOp::Imm(off)]));
+        let role = format!("store.{}", mem_size(size, fp));
+        let sp = self.t.machine.sp;
+        self.push(MInst::new(self.t.by_role(&role), vec![MOp::Reg(r), MOp::Reg(Reg::P(sp)), MOp::Imm(off)]));
     }
 
     fn emit_call(&mut self, i: InstId) -> Result<(), String> {
@@ -1213,7 +1283,7 @@ impl<'a, 'b> Sel<'a, 'b> {
                 s if s.starts_with("llvm.memmove.") => "memmove".to_string(),
                 s if s.starts_with("llvm.memset.") => "memset".to_string(),
                 s if s.starts_with("llvm.trap") => {
-                    let brk = self.t.by_name["BRK"];
+                    let brk = self.t.by_role("trap");
                     self.push(MInst::new(brk, vec![]));
                     return Ok(());
                 }
@@ -1222,11 +1292,11 @@ impl<'a, 'b> Sel<'a, 'b> {
                     let ap = self.reg_for(args[0].value, Class::X)?;
                     let p = self.mf.new_vreg(true);
                     self.push(MInst::new(
-                        self.t.by_name["ADDXri"],
-                        vec![MOp::Reg(Reg::V(p)), MOp::Reg(Reg::P(31)), MOp::Incoming(self.va_offset)],
+                        self.t.by_role("addi"),
+                        vec![MOp::Reg(Reg::V(p)), MOp::Reg(Reg::P(self.t.machine.sp)), MOp::Incoming(self.va_offset)],
                     ));
                     self.push(MInst::new(
-                        self.t.by_name["STRXui"],
+                        self.t.by_role("store.x"),
                         vec![MOp::Reg(Reg::V(p)), MOp::Reg(ap), MOp::Imm(0)],
                     ));
                     return Ok(());
@@ -1237,11 +1307,11 @@ impl<'a, 'b> Sel<'a, 'b> {
                     let src = self.reg_for(args[1].value, Class::X)?;
                     let p = self.mf.new_vreg(true);
                     self.push(MInst::new(
-                        self.t.by_name["LDRXui"],
+                        self.t.by_role("load.x"),
                         vec![MOp::Reg(Reg::V(p)), MOp::Reg(src), MOp::Imm(0)],
                     ));
                     self.push(MInst::new(
-                        self.t.by_name["STRXui"],
+                        self.t.by_role("store.x"),
                         vec![MOp::Reg(Reg::V(p)), MOp::Reg(dst), MOp::Imm(0)],
                     ));
                     return Ok(());
@@ -1345,17 +1415,18 @@ impl<'a, 'b> Sel<'a, 'b> {
             return Ok(r);
         }
         let has = |w: &str| attrs.iter().any(|a| matches!(a, Attr::Word(x) if x == w));
-        let name = match (has("zeroext"), has("signext"), bits) {
-            (true, _, 1) => "UXT1W",
-            (true, _, 8) => "UXTBW",
-            (true, _, 16) => "UXTHW",
-            (_, true, 1) => "SBFX1W",
-            (_, true, 8) => "SXTBW",
-            (_, true, 16) => "SXTHW",
+        let role = match (has("zeroext"), has("signext"), bits) {
+            (true, _, 1) => "zext.1",
+            (true, _, 8) => "zext.8",
+            (true, _, 16) => "zext.16",
+            (_, true, 1) => "sext.1",
+            (_, true, 8) => "sext.8",
+            (_, true, 16) => "sext.16",
             _ => return Ok(r),
         };
         let d = self.mf.new_vreg(false);
-        self.push(MInst::new(self.t.by_name[name], vec![MOp::Reg(Reg::V(d)), MOp::Reg(r)]));
+        let ext = self.t.role(role).ok_or_else(|| format!("@{}: no instruction has role {role}", self.fname))?;
+        self.push(MInst::new(ext, vec![MOp::Reg(Reg::V(d)), MOp::Reg(r)]));
         Ok(Reg::V(d))
     }
 
@@ -1392,7 +1463,7 @@ impl<'a, 'b> Sel<'a, 'b> {
                         self.push(MInst::copy(Reg::P(to), r));
                         result = Some(to);
                     }
-                    let mut ret = MInst::new(self.t.by_name["RET"], vec![]);
+                    let mut ret = MInst::new(self.t.by_role("ret"), vec![]);
                     ret.imp_uses = result.into_iter().collect();
                     self.push(ret);
                     continue;
@@ -1403,32 +1474,25 @@ impl<'a, 'b> Sel<'a, 'b> {
                     let ap = self.reg_for(*list, Class::X)?;
                     let p = self.mf.new_vreg(true);
                     self.push(MInst::new(
-                        self.t.by_name["LDRXui"],
+                        self.t.by_role("load.x"),
                         vec![MOp::Reg(Reg::V(p)), MOp::Reg(ap), MOp::Imm(0)],
                     ));
                     if let Some(r) = inst.result {
                         let size = self.arg_size(Value::Local(r));
-                        let load = match (size, self.is_fp(self.f.locals[r.index()].ty)) {
-                            (4, true) => "LDRSui",
-                            (_, true) => "LDRDui",
-                            (1, _) => "LDRBui",
-                            (2, _) => "LDRHui",
-                            (4, _) => "LDRWui",
-                            _ => "LDRXui",
-                        };
+                        let load = format!("load.{}", mem_size(size, self.is_fp(self.f.locals[r.index()].ty)));
                         let d = self.vreg_of(r);
                         self.push(MInst::new(
-                            self.t.by_name[load],
+                            self.t.by_role(&load),
                             vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(p)), MOp::Imm(0)],
                         ));
                     }
                     let q = self.mf.new_vreg(true);
                     self.push(MInst::new(
-                        self.t.by_name["ADDXri"],
+                        self.t.by_role("addi"),
                         vec![MOp::Reg(Reg::V(q)), MOp::Reg(Reg::V(p)), MOp::Imm(8)],
                     ));
                     self.push(MInst::new(
-                        self.t.by_name["STRXui"],
+                        self.t.by_role("store.x"),
                         vec![MOp::Reg(Reg::V(q)), MOp::Reg(ap), MOp::Imm(0)],
                     ));
                     continue;
@@ -1446,7 +1510,7 @@ impl<'a, 'b> Sel<'a, 'b> {
                 Op::Br(d) => {
                     if Some(*d) != layout_next {
                         let target = self.bmap[d];
-                        self.push(MInst::new(self.t.by_name["B"], vec![MOp::Label(target)]));
+                        self.push(MInst::new(self.t.by_role("jump"), vec![MOp::Label(target)]));
                     }
                     continue;
                 }
@@ -1462,8 +1526,8 @@ impl<'a, 'b> Sel<'a, 'b> {
                     let slot = self.mf.slots.len() - 1;
                     let d = self.vreg_of(r);
                     self.push(MInst::new(
-                        self.t.by_name["ADDXri"],
-                        vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::P(31)), MOp::Frame(slot, 0)],
+                        self.t.by_role("addi"),
+                        vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::P(self.t.machine.sp)), MOp::Frame(slot, 0)],
                     ));
                     continue;
                 }
@@ -1613,10 +1677,10 @@ impl<'a, 'b> Sel<'a, 'b> {
                     match loc {
                         crate::abi::ArgLoc::Reg(r) => self.push(MInst::copy(Reg::V(d), Reg::P(r))),
                         crate::abi::ArgLoc::Stack(off) => {
-                            let ld = self.t.by_name["LDRXui"];
+                            let ld = self.t.by_role("load.x");
                             self.push(MInst::new(
                                 ld,
-                                vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::P(31)), MOp::Incoming(off)],
+                                vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::P(self.t.machine.sp)), MOp::Incoming(off)],
                             ));
                         }
                     }
@@ -1629,16 +1693,9 @@ impl<'a, 'b> Sel<'a, 'b> {
             match part_locs[k][0] {
                 crate::abi::ArgLoc::Reg(r) => self.push(MInst::copy(Reg::V(d), Reg::P(r))),
                 crate::abi::ArgLoc::Stack(off) => {
-                    let name = match (sizes[k], shapes[k][0].fp) {
-                        (4, true) => "LDRSui",
-                        (_, true) => "LDRDui",
-                        (1, _) => "LDRBui",
-                        (2, _) => "LDRHui",
-                        (4, _) => "LDRWui",
-                        _ => "LDRXui",
-                    };
-                    let ld = self.t.by_name[name];
-                    self.push(MInst::new(ld, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::P(31)), MOp::Incoming(off)]));
+                    let ld = self.t.by_role(&format!("load.{}", mem_size(sizes[k], shapes[k][0].fp)));
+                    let sp = self.t.machine.sp;
+                    self.push(MInst::new(ld, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::P(sp)), MOp::Incoming(off)]));
                 }
             }
         }
@@ -1669,5 +1726,17 @@ impl<'a, 'b> Sel<'a, 'b> {
         }
         self.emit_phi_copies()?;
         Ok(self.mf)
+    }
+}
+
+/// The size letter in the roles of loads and stores: `load.w` and the like.
+fn mem_size(size: u64, fp: bool) -> &'static str {
+    match (size, fp) {
+        (4, true) => "s",
+        (_, true) => "d",
+        (1, _) => "b",
+        (2, _) => "h",
+        (4, _) => "w",
+        _ => "x",
     }
 }

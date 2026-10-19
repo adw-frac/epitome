@@ -8,10 +8,12 @@ pub mod assembler;
 pub mod divconst;
 pub mod elf;
 pub mod enc;
+pub mod features;
 pub mod frame;
 pub mod isel;
 pub mod layout;
 pub mod legalize;
+pub mod machine;
 pub mod macho;
 pub mod mir;
 pub mod objdump;
@@ -66,6 +68,11 @@ pub struct Options {
     /// Report each function that cannot be compiled, and carry on with the
     /// rest, instead of stopping at the first.
     pub keep_going: bool,
+    /// The CPU, as the description names it; by default the one each
+    /// function's IR names, or the description's.
+    pub mcpu: Option<String>,
+    /// Features turned on or off: `+neon`, `-lse`, or lists of them.
+    pub mattr: Vec<String>,
 }
 
 /// The convention `opts` asks for, for module `m`.
@@ -88,7 +95,7 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
     let abi = choose_abi(t, m, opts)?;
     let spec = m.data_layout.as_ref().map(|d| String::from_utf8_lossy(d).into_owned());
     let dl = DataLayout::parse(spec.as_deref().unwrap_or(DARWIN_ARM64_LAYOUT))?;
-    let mut cx = Ctx { m, dl: &dl };
+    let mut cx = Ctx { m, dl: &dl, t, features: Default::default() };
     let order = cx.m.global_order.clone();
     let mut funcs = Vec::new();
     let mut errors = Vec::new();
@@ -101,6 +108,7 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
         let name = gl.name.clone().unwrap_or_else(|| format!("f{}", g.0));
         let global = !matches!(gl.props.linkage, Linkage::Private | Linkage::Internal);
         let f = (**f).clone();
+        cx.features = features::of_function(t, cx.m, &f.fn_attrs, opts.mcpu.as_deref(), &opts.mattr)?;
         let one = |cx: &mut Ctx| -> Result<MFunc, String> {
             let prepared = prepare::prepare(cx, &f, &name)?;
             let mut mf = isel::Sel::new(t, &abi, cx, &prepared, &name, global).run()?;
@@ -168,9 +176,9 @@ impl Compiled {
     /// The object file, in the convention's format: ELF or Mach-O.
     pub fn object_file(&self, t: &Target) -> Result<Vec<u8>, String> {
         let obj = self.object(t)?;
-        Ok(match self.abi.syntax {
-            abi::Syntax::Elf => elf::write(&obj),
-            abi::Syntax::MachO => macho::write(&obj, self.min_os),
-        })
+        match self.abi.syntax {
+            abi::Syntax::Elf => elf::write(&obj, &t.machine),
+            abi::Syntax::MachO => macho::write(&obj, self.min_os, &t.machine),
+        }
     }
 }

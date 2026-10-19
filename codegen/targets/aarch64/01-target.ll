@@ -1,0 +1,78 @@
+; The AArch64 description: the machine as a whole. The conventions are in
+; 00-base.ll, and the forms of these lists in codegen/src/machine.rs.
+
+; ===========================================================================
+; Registers: for each class, the names of its registers in number order.
+; Number 31 is the zero register in w and x, the stack pointer in wsp and
+; xsp. The floating-point and vector registers are numbered from 32.
+
+!target.registers = !{!1000, !1001, !1002, !1003, !1004, !1005, !1006, !1007, !1008, !1009, !1010}
+!1000 = !{!"w", !"w{0-30}", !"wzr"}
+!1001 = !{!"x", !"x{0-30}", !"xzr"}
+!1002 = !{!"wsp", !"w{0-30}", !"wsp"}
+!1003 = !{!"xsp", !"x{0-30}", !"sp"}
+!1004 = !{!"d", !"d{0-31}"}
+!1005 = !{!"s", !"s{0-31}"}
+!1006 = !{!"q", !"q{0-31}"}
+!1007 = !{!"v", !"d{0-31}"}
+; Views of the vector registers for templates: {n:b} is b3, {n:4s} is v3.4s.
+!1008 = !{!"b", !"b{0-31}"}
+!1009 = !{!"h", !"h{0-31}"}
+!1010 = !{!"lanes", !"v{0-31}"}
+
+; ===========================================================================
+; Parameters
+
+!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108}
+!1100 = !{!"sp", !"sp"}
+!1101 = !{!"zero", !"xzr"}
+!1102 = !{!"vector-bits", !"128", !"neon"}
+!1103 = !{!"narrow-results", !"zero"}
+!1104 = !{!"external-via-got", !"yes"}
+!1105 = !{!"elf-machine", !"183"}
+!1106 = !{!"elf-flags", !"0"}
+!1107 = !{!"macho-cpu", !"0x0100000c"}
+!1108 = !{!"cpu", !"generic"}
+
+; ===========================================================================
+; CPUs and their features, by LLVM's names for them (which clang's IR uses
+; in "target-cpu" and "target-features"). Only those the description uses
+; matter: neon (Advanced SIMD; the vector entries need it) and fp-armv8.
+
+!target.cpus = !{!1150, !1151}
+!1150 = !{!"generic", !"fp-armv8", !"neon"}
+!1151 = !{!"apple-m1", !"fp-armv8", !"neon", !"lse"}
+
+; ===========================================================================
+; Relocations: those instructions name in "reloc" (and data's pointers),
+; with how each object format numbers them and assembly writes them; then
+; others, by number and name only, for reading other compilers' objects.
+; From Arm's ELF for the Arm 64-bit Architecture, and Apple's
+; <mach-o/arm64/reloc.h>.
+
+!target.relocs = !{!1200, !1201, !1202, !1203, !1204, !1205, !1210, !1211, !1212, !1213, !1214, !1215, !1216, !1217, !1218, !1219, !1220, !1221, !1222, !1223, !1224, !1225, !1226, !1227, !1228}
+!1200 = !{!"name", !"call26", !"elf", !"283", !"elf-name", !"R_AARCH64_CALL26", !"macho", !"2", !"macho-name", !"ARM64_RELOC_BRANCH26", !"macho-pcrel", !"yes", !"macho-length", !"2", !"use", !"call", !"target", !"pc + v"}
+!1201 = !{!"name", !"adrp", !"elf", !"275", !"elf-name", !"R_AARCH64_ADR_PREL_PG_HI21", !"macho", !"3", !"macho-name", !"ARM64_RELOC_PAGE21", !"macho-pcrel", !"yes", !"macho-length", !"2", !"elf-syntax", !"{s}", !"macho-syntax", !"{s}@PAGE", !"target", !"(pc & -4096) + (v << 12)"}
+!1202 = !{!"name", !"add_lo12", !"elf", !"277", !"elf-name", !"R_AARCH64_ADD_ABS_LO12_NC", !"macho", !"4", !"macho-name", !"ARM64_RELOC_PAGEOFF12", !"macho-length", !"2", !"elf-syntax", !":lo12:{s}", !"macho-syntax", !"{s}@PAGEOFF"}
+!1203 = !{!"name", !"adrp_got", !"elf", !"311", !"elf-name", !"R_AARCH64_ADR_GOT_PAGE", !"macho", !"5", !"macho-name", !"ARM64_RELOC_GOT_LOAD_PAGE21", !"macho-pcrel", !"yes", !"macho-length", !"2", !"elf-syntax", !":got:{s}", !"macho-syntax", !"{s}@GOTPAGE", !"use", !"got", !"target", !"(pc & -4096) + (v << 12)"}
+!1204 = !{!"name", !"ld64_got_lo12", !"elf", !"312", !"elf-name", !"R_AARCH64_LD64_GOT_LO12_NC", !"macho", !"6", !"macho-name", !"ARM64_RELOC_GOT_LOAD_PAGEOFF12", !"macho-length", !"2", !"elf-syntax", !":got_lo12:{s}", !"macho-syntax", !"{s}@GOTPAGEOFF", !"use", !"got"}
+!1205 = !{!"name", !"abs64", !"elf", !"257", !"elf-name", !"R_AARCH64_ABS64", !"macho", !"0", !"macho-name", !"ARM64_RELOC_UNSIGNED", !"macho-length", !"3", !"use", !"data8"}
+!1210 = !{!"name", !"none", !"elf", !"0", !"elf-name", !"R_AARCH64_NONE"}
+!1211 = !{!"name", !"abs32", !"elf", !"258", !"elf-name", !"R_AARCH64_ABS32"}
+!1212 = !{!"name", !"abs16", !"elf", !"259", !"elf-name", !"R_AARCH64_ABS16"}
+!1213 = !{!"name", !"prel64", !"elf", !"260", !"elf-name", !"R_AARCH64_PREL64"}
+!1214 = !{!"name", !"prel32", !"elf", !"261", !"elf-name", !"R_AARCH64_PREL32"}
+!1215 = !{!"name", !"prel16", !"elf", !"262", !"elf-name", !"R_AARCH64_PREL16"}
+!1216 = !{!"name", !"adr_prel_lo21", !"elf", !"274", !"elf-name", !"R_AARCH64_ADR_PREL_LO21"}
+!1217 = !{!"name", !"adr_prel_pg_hi21_nc", !"elf", !"276", !"elf-name", !"R_AARCH64_ADR_PREL_PG_HI21_NC"}
+!1218 = !{!"name", !"ldst8_lo12", !"elf", !"278", !"elf-name", !"R_AARCH64_LDST8_ABS_LO12_NC"}
+!1219 = !{!"name", !"tstbr14", !"elf", !"279", !"elf-name", !"R_AARCH64_TSTBR14"}
+!1220 = !{!"name", !"condbr19", !"elf", !"280", !"elf-name", !"R_AARCH64_CONDBR19"}
+!1221 = !{!"name", !"jump26", !"elf", !"282", !"elf-name", !"R_AARCH64_JUMP26"}
+!1222 = !{!"name", !"ldst16_lo12", !"elf", !"284", !"elf-name", !"R_AARCH64_LDST16_ABS_LO12_NC"}
+!1223 = !{!"name", !"ldst32_lo12", !"elf", !"285", !"elf-name", !"R_AARCH64_LDST32_ABS_LO12_NC"}
+!1224 = !{!"name", !"ldst64_lo12", !"elf", !"286", !"elf-name", !"R_AARCH64_LDST64_ABS_LO12_NC"}
+!1225 = !{!"name", !"ldst128_lo12", !"elf", !"299", !"elf-name", !"R_AARCH64_LDST128_ABS_LO12_NC"}
+!1226 = !{!"name", !"macho_subtractor", !"macho", !"1", !"macho-name", !"ARM64_RELOC_SUBTRACTOR"}
+!1227 = !{!"name", !"macho_pointer_to_got", !"macho", !"7", !"macho-name", !"ARM64_RELOC_POINTER_TO_GOT"}
+!1228 = !{!"name", !"macho_addend", !"macho", !"10", !"macho-name", !"ARM64_RELOC_ADDEND"}

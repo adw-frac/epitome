@@ -4,19 +4,19 @@
 ; ===========================================================================
 ; Loads and stores, with an unsigned offset scaled by the size.
 
-define i8 @LDRBui(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="00 111 0 01 01 imm12:12=off n:5 d:5" "asm"="ldrb {d}, [{n}, #{off}]" "zext"="8" {
+define i8 @LDRBui(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="00 111 0 01 01 imm12:12=off n:5 d:5" "asm"="ldrb {d}, [{n}, #{off}]" "zext"="8" "role"="load.b" {
   %p = getelementptr i8, ptr %n, i64 %off
   %v = load i8, ptr %p
   ret i8 %v
 }
 
-define i16 @LDRHui(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="01 111 0 01 01 imm12:12=off/2 n:5 d:5" "asm"="ldrh {d}, [{n}, #{off}]" "zext"="16" {
+define i16 @LDRHui(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="01 111 0 01 01 imm12:12=off/2 n:5 d:5" "asm"="ldrh {d}, [{n}, #{off}]" "zext"="16" "role"="load.h" {
   %p = getelementptr i8, ptr %n, i64 %off
   %v = load i16, ptr %p
   ret i16 %v
 }
 
-define i32 @LDRWui(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="10 111 0 01 01 imm12:12=off/4 n:5 d:5" "asm"="ldr {d}, [{n}, #{off}]" {
+define i32 @LDRWui(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="10 111 0 01 01 imm12:12=off/4 n:5 d:5" "asm"="ldr {d}, [{n}, #{off}]" "role"="load.w" {
   %p = getelementptr i8, ptr %n, i64 %off
   %v = load i32, ptr %p
   ret i32 %v
@@ -62,19 +62,19 @@ define i64 @LDRSWui(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="10 111 0 01 10 im
   ret i64 %r
 }
 
-define void @STRBui(i8 "reg"="w" %t, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="00 111 0 01 00 imm12:12=off n:5 t:5" "asm"="strb {t}, [{n}, #{off}]" {
+define void @STRBui(i8 "reg"="w" %t, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="00 111 0 01 00 imm12:12=off n:5 t:5" "asm"="strb {t}, [{n}, #{off}]" "role"="store.b" {
   %p = getelementptr i8, ptr %n, i64 %off
   store i8 %t, ptr %p
   ret void
 }
 
-define void @STRHui(i16 "reg"="w" %t, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="01 111 0 01 00 imm12:12=off/2 n:5 t:5" "asm"="strh {t}, [{n}, #{off}]" {
+define void @STRHui(i16 "reg"="w" %t, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="01 111 0 01 00 imm12:12=off/2 n:5 t:5" "asm"="strh {t}, [{n}, #{off}]" "role"="store.h" {
   %p = getelementptr i8, ptr %n, i64 %off
   store i16 %t, ptr %p
   ret void
 }
 
-define void @STRWui(i32 "reg"="w" %t, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="10 111 0 01 00 imm12:12=off/4 n:5 t:5" "asm"="str {t}, [{n}, #{off}]" {
+define void @STRWui(i32 "reg"="w" %t, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="10 111 0 01 00 imm12:12=off/4 n:5 t:5" "asm"="str {t}, [{n}, #{off}]" "role"="store.w" {
   %p = getelementptr i8, ptr %n, i64 %off
   store i32 %t, ptr %p
   ret void

@@ -172,7 +172,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         let mine = tmp.join(format!("{stem}.ours.o"));
         let bytes = compiled.object_file(t).map_err(|e| format!("{stem}: {e}"))?;
         std::fs::write(&mine, &bytes).unwrap();
-        same_object(&mine, &obj, &stem)?;
+        same_object(t, &mine, &obj, &stem)?;
         // 8. draconian-as makes the same object of our assembly.
         same_assembled(t, &compiled.asm, &bytes, &stem)?;
         let exe = tmp.join(format!("{stem}.ours"));
@@ -238,7 +238,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         let mine = tmp.join(format!("{elf_stem}.ours.o"));
         let bytes = compiled.object_file(t).map_err(|e| format!("{elf_stem}: {e}"))?;
         std::fs::write(&mine, &bytes).unwrap();
-        same_object(&mine, &obj, &elf_stem)?;
+        same_object(t, &mine, &obj, &elf_stem)?;
         same_assembled(t, &compiled.asm, &bytes, &elf_stem)?;
 
         // 6. draconian-objdump reads our object back as our assembly.
@@ -249,13 +249,13 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
 
 /// Checks two object files, ELF or Mach-O, say the same (see
 /// `ElfFile::canonical` and `MachFile::canonical`).
-fn same_object(ours: &Path, theirs: &Path, stem: &str) -> Result<(), String> {
+fn same_object(t: &Target, ours: &Path, theirs: &Path, stem: &str) -> Result<(), String> {
     let read = |p: &Path| {
         let bytes = std::fs::read(p).unwrap();
         let text = if macho::is_macho(&bytes) {
-            macho::read(&bytes).map(|m| m.canonical())
+            macho::read(&bytes).map(|m| m.canonical(&t.machine))
         } else {
-            elf::read(&bytes).map(|e| e.canonical())
+            elf::read(&bytes).map(|e| e.canonical(&t.machine))
         };
         text.map_err(|e| format!("{stem}: {}: {e}", p.display()))
     };
@@ -269,13 +269,13 @@ fn same_object(ours: &Path, theirs: &Path, stem: &str) -> Result<(), String> {
 
 /// Checks draconian-as makes exactly `object` of `asm`.
 fn same_assembled(t: &Target, asm: &str, object: &[u8], stem: &str) -> Result<(), String> {
-    let assembled = Assembler::new(t).assemble(asm, None).map_err(|e| format!("{stem}: draconian-as: {e}"))?.file();
+    let assembled = Assembler::new(t).assemble(asm, None).map_err(|e| format!("{stem}: draconian-as: {e}"))?.file(t)?;
     if assembled == object { Ok(()) } else { Err(format!("{stem}: draconian-as makes another object of our assembly")) }
 }
 
 /// Checks draconian-objdump's disassembly of `obj` reads as `asm`.
 fn objdump_reads_back(t: &Target, obj: &Path, asm: &str, stem: &str) -> Result<(), String> {
-    let img = Image::read(&std::fs::read(obj).unwrap()).map_err(|e| format!("{stem}: {e}"))?;
+    let img = Image::read(&std::fs::read(obj).unwrap(), &t.machine).map_err(|e| format!("{stem}: {e}"))?;
     objdump::reads_back(t, &img, asm, ALIASES).map(|_| ()).map_err(|e| format!("{stem}: {e}"))
 }
 

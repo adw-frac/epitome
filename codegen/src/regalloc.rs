@@ -33,8 +33,9 @@ fn regs_of(t: &Target, inst: &MInst) -> (Vec<Reg>, Vec<Reg>) {
     defs.extend(inst.imp_defs.iter().map(|&r| Reg::P(r)));
     uses.extend(inst.imp_uses.iter().map(|&r| Reg::P(r)));
     // The zero register and the stack pointer are not allocated.
-    defs.retain(|r| *r != Reg::P(31));
-    uses.retain(|r| *r != Reg::P(31));
+    let fixed = |r: &Reg| *r == Reg::P(t.machine.sp) || t.machine.zero.is_some_and(|z| *r == Reg::P(z));
+    defs.retain(|r| !fixed(r));
+    uses.retain(|r| !fixed(r));
     (defs, uses)
 }
 
@@ -248,9 +249,13 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
         f.slots.push(Slot { size, align: size, offset: 0 });
         slot_of.insert(v, f.slots.len() - 1);
     }
-    let (ldr, str_) = (t.by_role("load.x"), t.by_role("store.x"));
-    let (ldr_d, str_d) = (t.by_role("load.d"), t.by_role("store.d"));
-    let (ldr_q, str_q) = (t.by_role("load.q"), t.by_role("store.q"));
+    // Spill code: loads and stores of each register file, as the
+    // description names them by role (those a machine lacks are needed only
+    // if values of that kind are spilled).
+    let pair = |l: &str, s: &str| t.role(l).zip(t.role(s));
+    let (ldr, str_) = pair("load.x", "store.x").ok_or("no instruction has role load.x or store.x")?;
+    let fp_spill = pair("load.d", "store.d");
+    let q_spill = pair("load.q", "store.q");
     let vfp = f.vfp.clone();
     let vq = f.vq.clone();
     let fname = f.name.clone();
@@ -287,18 +292,23 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
                     };
                     scratch.insert(*v, s);
                     let (ld, st) = if vq[*v as usize] {
-                        (ldr_q, str_q)
+                        q_spill.ok_or_else(|| format!("{fname}: no instruction spills a vector register"))?
                     } else if fp {
-                        (ldr_d, str_d)
+                        fp_spill.ok_or_else(|| format!("{fname}: no instruction spills a floating-point register"))?
                     } else {
                         (ldr, str_)
                     };
                     if uses.contains(r) {
-                        new.push(MInst::new(ld, vec![MOp::Reg(Reg::P(s)), MOp::Reg(Reg::P(31)), MOp::Frame(slot, 0)]));
+                        new.push(MInst::new(
+                            ld,
+                            vec![MOp::Reg(Reg::P(s)), MOp::Reg(Reg::P(t.machine.sp)), MOp::Frame(slot, 0)],
+                        ));
                     }
                     if defs.contains(r) {
-                        after
-                            .push(MInst::new(st, vec![MOp::Reg(Reg::P(s)), MOp::Reg(Reg::P(31)), MOp::Frame(slot, 0)]));
+                        after.push(MInst::new(
+                            st,
+                            vec![MOp::Reg(Reg::P(s)), MOp::Reg(Reg::P(t.machine.sp)), MOp::Frame(slot, 0)],
+                        ));
                     }
                 }
             }
@@ -306,7 +316,8 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
                 if let MOp::Reg(Reg::V(v)) = op {
                     *op = MOp::Reg(Reg::P(match scratch.get(v) {
                         Some(&s) => s,
-                        None => assigned[*v as usize].unwrap_or(31),
+                        // A result nothing reads: the zero register takes it.
+                        None => assigned[*v as usize].or(t.machine.zero).unwrap_or(abi.scratch[0]),
                     }));
                 }
             }

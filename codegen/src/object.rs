@@ -26,58 +26,15 @@
 use std::collections::HashMap;
 
 use crate::abi::{Abi, Syntax};
+use crate::machine::RelocUse;
 use crate::mir::{self, MFunc};
 use crate::target::{Kind, Target};
 
-/// How a relocation fills in its place: named in the description's
-/// `"reloc"` attribute, and mapped to each format's own numbers.
+/// How a relocation fills in its place: an index into the description's
+/// relocations (`Machine::relocs`), which say what each is called in each
+/// object format and how assembly writes it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum RelocKind {
-    /// `bl`: the distance to the symbol, in words, 26 bits.
-    Call26,
-    /// `adrp`: the distance to the symbol's 4KB page, in pages.
-    Adrp,
-    /// `add`: the symbol's offset in its page, 12 bits.
-    AddLo12,
-    /// `adrp` of the page of the symbol's GOT entry.
-    AdrpGot,
-    /// `ldr` of the GOT entry, its offset in its page.
-    Ld64GotLo12,
-    /// Data: the symbol's 64-bit address.
-    Abs64,
-}
-
-impl RelocKind {
-    pub const ALL: [RelocKind; 6] = [
-        RelocKind::Call26,
-        RelocKind::Adrp,
-        RelocKind::AddLo12,
-        RelocKind::AdrpGot,
-        RelocKind::Ld64GotLo12,
-        RelocKind::Abs64,
-    ];
-
-    /// The name the description uses.
-    pub fn name(self) -> &'static str {
-        match self {
-            RelocKind::Call26 => "call26",
-            RelocKind::Adrp => "adrp",
-            RelocKind::AddLo12 => "add_lo12",
-            RelocKind::AdrpGot => "adrp_got",
-            RelocKind::Ld64GotLo12 => "ld64_got_lo12",
-            RelocKind::Abs64 => "abs64",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<RelocKind> {
-        RelocKind::ALL.into_iter().find(|k| k.name() == s)
-    }
-
-    /// Does it address the symbol's GOT entry rather than the symbol?
-    pub fn via_got(self) -> bool {
-        matches!(self, RelocKind::AdrpGot | RelocKind::Ld64GotLo12)
-    }
-}
+pub struct RelocKind(pub u16);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SectionKind {
@@ -278,10 +235,12 @@ pub fn build(t: &Target, abi: &Abi, funcs: &[MFunc], globals: &[GlobalData]) -> 
                 Item::Bytes(b) => sec.data.extend_from_slice(b),
                 Item::Zero(n) => sec.data.resize(sec.data.len() + *n as usize, 0),
                 Item::Addr { symbol, offset } => {
+                    let kind =
+                        t.machine.data_reloc(8).ok_or("the description has no relocation for pointers in data")?;
                     pending.push(Pending {
                         section: s,
                         offset: sec.data.len() as u64,
-                        kind: RelocKind::Abs64,
+                        kind: RelocKind(kind as u16),
                         symbol: symbol.clone(),
                         addend: *offset,
                         instr: None,
@@ -328,7 +287,8 @@ pub fn resolve(t: &Target, obj: &mut Object, pending: Vec<Pending>, macho: bool)
         };
         let def = obj.symbols[sym].clone();
         // A call within the section: the distance is known.
-        if p.kind == RelocKind::Call26
+        let usage = t.machine.relocs[p.kind.0 as usize].usage;
+        if usage == RelocUse::Call
             && (macho || !def.global)
             && def.section == Some(p.section)
             && let Some(i) = p.instr
@@ -348,7 +308,7 @@ pub fn resolve(t: &Target, obj: &mut Object, pending: Vec<Pending>, macho: bool)
             continue;
         }
         let (target, addend) = match def.section {
-            Some(s) if !macho && !def.global && !p.kind.via_got() => {
+            Some(s) if !macho && !def.global && usage != RelocUse::Got => {
                 (RelocTarget::Section(s), p.addend + def.value as i64)
             }
             _ => (RelocTarget::Symbol(sym), p.addend),
