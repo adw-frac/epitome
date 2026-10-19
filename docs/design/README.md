@@ -50,6 +50,7 @@ how they were found in
 | Document | Used for |
 | --- | --- |
 | [LLVM's Analysis and Transform Passes](https://llvm.org/docs/Passes.html) | Every IR pass listed in `ir.md` |
+| Arm's A-profile Architecture Machine Readable Specification (AARCHMRS, open-source package, BSD 3-clause) | Checking the AArch64 description's encodings and mnemonics, and the bit layouts of entries generated from it (`isel.md`) |
 | [Using the New Pass Manager](https://llvm.org/docs/NewPassManager.html) | Pass manager design and pipeline syntax |
 | [The LLVM Target-Independent Code Generator](https://llvm.org/docs/CodeGenerator.html) | Codegen phases, data structures, SelectionDAG, register allocation, MC layer |
 | [Global Instruction Selection](https://llvm.org/docs/GlobalISel/index.html) and [Core Pipeline](https://llvm.org/docs/GlobalISel/Pipeline.html) | GlobalISel passes and generic MIR |

@@ -8,6 +8,8 @@
 ;   10-integer.ll   arithmetic, logic, shifts, extensions, moves and
 ;                   constants, address arithmetic
 ;   20-memory.ll    loads and stores, atomics
+;   25-pairs.ll     load and store pairs, written by gen_from_mrs.py from
+;                   Arm's machine-readable specification
 ;   30-bits.ll      bit manipulation
 ;   40-float.ll     floating point
 ;   50-vectors.ll   vectors (Advanced SIMD), written by gen_vectors.py
@@ -46,6 +48,8 @@
 ;   "dclass"="wsp"        the result's register class, if not w or x
 ;   "nomatch"             not a pattern for selection
 ;   "role"="..."          used by the code generator by role, not matched
+;   "result2"             the second field of the result is a second register
+;                         result, the operand called d2 (a load pair's)
 ;   "reloc"="adrp"        how an object file fixes up its "sym" operand: call26
 ;                         (the branch), adrp (the symbol's 4KB page),
 ;                         add_lo12 (its offset in the page), adrp_got and

@@ -83,7 +83,7 @@ impl MInst {
                     if !matches!(self.ops.get(k), Some(MOp::Reg(_))) {
                         continue;
                     }
-                    if k == 0 && ins.has_result {
+                    if (k == 0 && ins.has_result) || (k == 1 && ins.second_result) {
                         defs.push(k);
                     } else if matches!(o.kind, Kind::Reg(_)) {
                         uses.push(k);

@@ -128,6 +128,8 @@ pub struct Instr {
     pub inverse: Option<String>,
     /// How an object file fixes up its symbol operand.
     pub reloc: Option<crate::object::RelocKind>,
+    /// Operand 1 (`d2`) is a second register result.
+    pub second_result: bool,
     pub func: GlobalId,
 }
 
@@ -388,6 +390,7 @@ pub const AARCH64_FILES: &[(&str, &str)] = &[
     ("00-base.ll", include_str!("../targets/aarch64/00-base.ll")),
     ("10-integer.ll", include_str!("../targets/aarch64/10-integer.ll")),
     ("20-memory.ll", include_str!("../targets/aarch64/20-memory.ll")),
+    ("25-pairs.ll", include_str!("../targets/aarch64/25-pairs.ll")),
     ("30-bits.ll", include_str!("../targets/aarch64/30-bits.ll")),
     ("40-float.ll", include_str!("../targets/aarch64/40-float.ll")),
     ("50-vectors.ll", include_str!("../targets/aarch64/50-vectors.ll")),
@@ -727,6 +730,28 @@ impl Target {
                     writeback: false,
                 });
             }
+            // A second register result, `d2`: the second field of the
+            // result (a load pair's second register).
+            let second_result = attr(&f.fn_attrs, "result2").is_some();
+            if second_result {
+                let field = match m.types.get(ret) {
+                    Type::Struct { fields, .. } => fields.get(1).copied(),
+                    _ => None,
+                }
+                .ok_or_else(|| format!("@{name}: \"result2\" without a second result"))?;
+                let bits = type_bits(m, field);
+                let class = match operands.first().map(|o| o.kind) {
+                    Some(Kind::Reg(c)) => c,
+                    _ => return Err(format!("@{name}: \"result2\" without a first result")),
+                };
+                operands.push(Operand {
+                    name: "d2".into(),
+                    kind: Kind::Reg(class),
+                    bits,
+                    tied: false,
+                    writeback: false,
+                });
+            }
             for p in &f.params {
                 let local = &f.locals[p.local.index()];
                 let pname = local.name.clone().unwrap_or_default();
@@ -776,6 +801,7 @@ impl Target {
                 matchable: attr(&f.fn_attrs, "nomatch").is_none(),
                 inverse: attr(&f.fn_attrs, "inverse").flatten().map(str::to_string),
                 reloc,
+                second_result,
                 func: g,
             });
         }

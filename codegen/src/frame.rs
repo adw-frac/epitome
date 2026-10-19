@@ -68,30 +68,24 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
         }
     }
 
-    let ldr = t.by_role("load.x");
-    let str_ = t.by_role("store.x");
-    let r = |n: u8| MOp::Reg(Reg::P(n));
+    // Registers saved and restored two at a time where they can be: two of
+    // the same file at neighbouring slots, at an offset a pair reaches.
+    let mut slots: Vec<(u8, i64)> = Vec::new();
+    if calls {
+        slots.push((fp_reg, fp_at));
+        slots.push((lr_reg, fp_at + 8));
+    }
+    slots.extend(save_at.iter().copied());
+    let (saves, restores) = save_restore(t, &slots);
     let mut prologue = Vec::new();
     if size > 0 {
         adjust(t, &mut prologue, SP, SP, -size);
     }
+    prologue.extend(saves);
     if calls {
-        prologue.push(MInst::new(str_, vec![r(fp_reg), r(SP), MOp::Imm(fp_at)]));
-        prologue.push(MInst::new(str_, vec![r(lr_reg), r(SP), MOp::Imm(fp_at + 8)]));
         adjust(t, &mut prologue, fp_reg, SP, fp_at);
     }
-    let (ldr_d, str_d) = (t.by_role("load.d"), t.by_role("store.d"));
-    for &(reg, at) in &save_at {
-        prologue.push(MInst::new(if reg >= 32 { str_d } else { str_ }, vec![r(reg), r(SP), MOp::Imm(at)]));
-    }
-    let mut epilogue = Vec::new();
-    for &(reg, at) in &save_at {
-        epilogue.push(MInst::new(if reg >= 32 { ldr_d } else { ldr }, vec![r(reg), r(SP), MOp::Imm(at)]));
-    }
-    if calls {
-        epilogue.push(MInst::new(ldr, vec![r(fp_reg), r(SP), MOp::Imm(fp_at)]));
-        epilogue.push(MInst::new(ldr, vec![r(lr_reg), r(SP), MOp::Imm(fp_at + 8)]));
-    }
+    let mut epilogue = restores;
     if size > 0 {
         adjust(t, &mut epilogue, SP, SP, size);
     }
@@ -110,6 +104,39 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     entry.splice(0..0, prologue);
     tidy_branches(t, f);
     Ok(())
+}
+
+/// The stores that save registers at their offsets from `sp`, and the loads
+/// that restore them: `stp` and `ldp` for two of the same register file at
+/// neighbouring slots, if a pair's offset can hold it; else `str` and
+/// `ldr`.
+fn save_restore(t: &Target, slots: &[(u8, i64)]) -> (Vec<MInst>, Vec<MInst>) {
+    let r = |n: u8| MOp::Reg(Reg::P(n));
+    let file = |reg: u8| if reg >= 32 { "d" } else { "x" };
+    let (mut saves, mut restores) = (Vec::new(), Vec::new());
+    let mut k = 0;
+    while k < slots.len() {
+        let (a, at) = slots[k];
+        if let Some(&(b, bt)) = slots.get(k + 1)
+            && file(a) == file(b)
+            && bt == at + 8
+        {
+            let stp = t.by_role(&format!("store.pair.{}", file(a)));
+            let ldp = t.by_role(&format!("load.pair.{}", file(a)));
+            if t.instrs[stp].fits(&[None, None, None, Some(at)]) {
+                saves.push(MInst::new(stp, vec![r(a), r(b), r(SP), MOp::Imm(at)]));
+                restores.push(MInst::new(ldp, vec![r(a), r(b), r(SP), MOp::Imm(at)]));
+                k += 2;
+                continue;
+            }
+        }
+        let st = t.by_role(&format!("store.{}", file(a)));
+        let ld = t.by_role(&format!("load.{}", file(a)));
+        saves.push(MInst::new(st, vec![r(a), r(SP), MOp::Imm(at)]));
+        restores.push(MInst::new(ld, vec![r(a), r(SP), MOp::Imm(at)]));
+        k += 1;
+    }
+    (saves, restores)
 }
 
 /// `dst = src + amount`, for a frame's sizes: an immediate shifted by 12

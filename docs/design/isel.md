@@ -9,11 +9,30 @@ description is read at start-up and kept as data; nothing is generated from
 it at build time.
 
 The code is in the `codegen` crate. The AArch64 description is in
-`codegen/targets/aarch64/`: one module in eight files, read in name order
-(base and conditions, integer, memory, bits, floating point, vectors,
-recipes, calling conventions; `00-base.ll` lists them). For sources and
-status labels, see the
-[index](README.md).
+`codegen/targets/aarch64/`: one module in nine files, read in name order
+(base and conditions, integer, memory, load and store pairs, bits,
+floating point, vectors, recipes, calling conventions; `00-base.ll` lists
+them). For sources and status labels, see the [index](README.md).
+
+### Arm's machine-readable specification
+
+Arm publishes the A-profile architecture as data: AARCHMRS, whose
+open-source package (under the BSD 3-clause license) has every
+instruction's encoding and assembly syntax as JSON, though not its
+pseudocode. Two scripts read a copy of it (downloaded separately; nothing
+of Arm's is checked in except as below):
+
+- `check_mrs.py` checks every entry against it. An entry's literal bits must
+  lie inside one of Arm's encodings, and its mnemonic must be Arm's for that
+  encoding or an alias's. It also says how much of the instruction set the
+  description covers: at present 154 of Arm's 301 base A64 encodings, 151 of
+  1,116 floating-point and SIMD ones, and none of the optional extensions,
+  SVE or SME.
+- `gen_from_mrs.py` writes entries whose bit layouts come from Arm's
+  encodings: which bits are fixed, and which belong to which field. How the
+  fields are filled from the operands, the assembly template and the body
+  are ours. `25-pairs.ll` (the load and store pairs) is written this way,
+  and carries Arm's copyright notice and license, as the license asks.
 
 ## Why LLVM IR
 
@@ -193,7 +212,32 @@ define { i64, ptr } @LDRSWpost(ptr "reg"="xsp" "writeback" %n, i64 "imm" %off)
 }
 ```
 
-The first result is the pattern, as usual. The second is an *extra root*:
+A load pair writes two registers: `ldp x19, x20, [sp, #16]`. The second is
+a result too, the operand called `d2`, which the attribute `"result2"`
+asks for (and with pre- or post-indexing, the written-back base is a third
+result):
+
+```llvm
+define { i64, i64 } @LDPXi(ptr "reg"="xsp" %n, i64 "imm" %off)
+    "enc"="1010100101 imm7:s7=off/8 d2:5 n:5 d:5"
+    "asm"="ldp {d}, {d2}, [{n}, #{off}]" "result2" "role"="load.pair.x" "nomatch" {
+  %p = getelementptr i8, ptr %n, i64 %off
+  %a = load i64, ptr %p
+  %q = getelementptr i8, ptr %p, i64 8
+  %b = load i64, ptr %q
+  %r0 = insertvalue { i64, i64 } poison, i64 %a, 0
+  %r1 = insertvalue { i64, i64 } %r0, i64 %b, 1
+  ret { i64, i64 } %r1
+}
+```
+
+Pairs are not patterns yet; frames use them by role, saving and restoring
+two registers of the same file at neighbouring slots with one `stp` or
+`ldp` (one `str` or `ldr` for any left over, or where the offset does not
+fit a pair's 7-bit field).
+
+For a post-increment load, the first result is the pattern, as usual. The
+second is an *extra root*:
 after a match, the selector looks for an instruction later in the same
 block that matches it with the parameters already bound (here, a
 `getelementptr` of the same base by a constant that fits). That
@@ -462,15 +506,15 @@ minimum and maximum, byte swaps, bit counts, funnel shifts, atomic loads,
 stores and fences, switches, calls (with arguments on the stack, small
 structs, and to and from variadic functions) under Apple's convention and
 AAPCS64, locals, frames of any size up to 32KB, globals, and odd widths
-such as `i33`. The description has 271 instructions, 22 condition forms
-and 18 recipes; the table built from it has 1,294 patterns.
+such as `i33`. The description has 786 instructions, 22 condition forms
+and 45 recipes; the table built from it has 1,814 patterns.
 
 Instructions in the test programs, built without vectorising or unrolling,
 by LLVM's back end and ours:
 
 | Program | IR from | LLVM | Ours |
 | --- | --- | --- | --- |
-| `basic.c` (38 functions) | clang `-O2` | 426 | 509 |
+| `basic.c` (38 functions) | clang `-O2` | 429 | 496 |
 | `divs.c` (division by 90 constants) | clang `-O2` | 793 | 814 |
 | `loops.c` (9 array loops) | clang `-O2` | 106 | 119 |
 | `loops.c` | clang `-O0`, then `draconian-opt` | 106 (from `-O2`) | 103 |
@@ -479,9 +523,12 @@ And vectorised and unrolled (clang `-O2` as it is):
 
 | Program | LLVM | Ours |
 | --- | --- | --- |
-| `vectors.c` (26 loops) | 1,719 | 2,277 |
-| `loops.c` | 619 | 771 |
-| `basic.c` | 901 | 1,160 |
+| `vectors.c` (26 loops) | 1,719 | 2,381 |
+| `loops.c` | 619 | 885 |
+| `basic.c` | 901 | 1,147 |
+
+(The counts first recorded here for vectorised code were measured partway
+through the vector work; these are for the code as it is now.)
 
 Much of the difference is in lanes done one at a time (scalarised odd
 vectors, shuffles built from `umov` and `ins`) where LLVM has a better
