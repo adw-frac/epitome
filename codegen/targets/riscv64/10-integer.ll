@@ -246,7 +246,7 @@ define i1 @SLTUs(i64 "reg"="x" %n, i64 "reg"="x" %m) "enc"="0000000 rb:5=n ra:5=
   ret i1 %r
 }
 
-define i1 @SLTUI(i64 "reg"="x" %n, i64 "imm" %imm) "enc"="imm:s12 n:5 011 d:5 0010011" "asm"="sltui {d}, {n}, {imm}" "zext"="1" {
+define i1 @SLTUI(i64 "reg"="x" %n, i64 "imm" %imm) "enc"="imm:s12 n:5 011 d:5 0010011" "asm"="sltiu {d}, {n}, {imm}" "zext"="1" {
   %r = icmp ult i64 %n, %imm
   ret i1 %r
 }
@@ -261,7 +261,7 @@ define i1 @SLTUsw(i32 "reg"="w" %n, i32 "reg"="w" %m) "enc"="0000000 rb:5=n ra:5
   ret i1 %r
 }
 
-define i1 @SLTUIw(i32 "reg"="w" %n, i32 "imm" %imm) "enc"="imm:s12 n:5 011 d:5 0010011" "asm"="sltui {d}, {n}, {imm}" "zext"="1" "nodecode" {
+define i1 @SLTUIw(i32 "reg"="w" %n, i32 "imm" %imm) "enc"="imm:s12 n:5 011 d:5 0010011" "asm"="sltiu {d}, {n}, {imm}" "zext"="1" "nodecode" {
   %r = icmp ult i32 %n, %imm
   ret i1 %r
 }

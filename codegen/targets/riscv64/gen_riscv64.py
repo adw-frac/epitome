@@ -218,7 +218,7 @@ for name, pred, f3 in [("SLT", "slt", "010"), ("SLTU", "ult", "011")]:
                  R("0000000", "rb:5=n", "ra:5=m", f3, "d:5", OP),
                  f"{name.lower()} {{d}}, {{m}}, {{n}}", f"  %r = icmp {swapped} {ty} %n, %m\n  ret i1 %r", ' "zext"="1" "nodecode"'))
         w(define("i1", name + "I" + sfx, f'{ty} "reg"="{c}" %n, {ty} "imm" %imm', I("imm:s12", "n:5", f3, "d:5", OPI),
-                 f"{name.lower()}i {{d}}, {{n}}, {{imm}}", f"  %r = icmp {pred} {ty} %n, %imm\n  ret i1 %r",
+                 f"{ {'SLT': 'slti', 'SLTU': 'sltiu'}[name]} {{d}}, {{n}}, {{imm}}", f"  %r = icmp {pred} {ty} %n, %imm\n  ret i1 %r",
                  ' "zext"="1"' + extra))
 for c, ty, extra in [("x", "i64", ""), ("w", "i32", ' "nodecode"')]:
     sfx = "" if c == "x" else "w"
@@ -418,12 +418,13 @@ for t, ty, fmt, feat, cls in [("D", "double", "1", "d", "d"), ("S", "float", "0"
         F.append(define(ty, f"FCVT{t}{nm}U", f'{it} "reg"="{ic}" %n', R(f"11010" + f"0{fmt}", rs2u, "n:5", "111", "d:5", OPFP),
                         f"fcvt.{t.lower()}.{nm.lower()}u {{d}}, {{n}}", f"  %r = uitofp {it} %n to {ty}\n  ret {ty} %r", fa))
     # Moving bits between the register files.
-    it, ic, xn = ("i64", "x", "x") if t == "D" else ("i32", "w", "w")
+    # fmv.x.d and fmv.d.x; for floats, fmv.x.w and fmv.w.x.
+    it, ic, fx = ("i64", "x", "d") if t == "D" else ("i32", "w", "w")
     F.append(define(it, f"FMVX{t}", f'{ty} "reg"="{cls}" %n', R(f"11100" + f"0{fmt}", "00000", "n:5", "000", "d:5", OPFP),
-                    f"fmv.{xn}.{t.lower()} {{d}}, {{n}}", f"  %r = bitcast {ty} %n to {it}\n  ret {it} %r",
+                    f"fmv.x.{fx} {{d}}, {{n}}", f"  %r = bitcast {ty} %n to {it}\n  ret {it} %r",
                     fa + f' "role"="move.{ic}.{cls}"'))
     F.append(define(ty, f"FMV{t}X", f'{it} "reg"="{ic}" %n', R(f"11110" + f"0{fmt}", "00000", "n:5", "000", "d:5", OPFP),
-                    f"fmv.{t.lower()}.{xn} {{d}}, {{n}}", f"  %r = bitcast {it} %n to {ty}\n  ret {ty} %r",
+                    f"fmv.{fx}.x {{d}}, {{n}}", f"  %r = bitcast {it} %n to {ty}\n  ret {ty} %r",
                     fa + f' "role"="move.{cls}.{ic}"'))
     # Loads and stores.
     f3m = "011" if t == "D" else "010"

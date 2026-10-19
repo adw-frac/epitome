@@ -261,12 +261,12 @@ define float @FCVTSWU(i32 "reg"="w" %n) "enc"="1101000 00001 n:5 111 d:5 1010011
   ret float %r
 }
 
-define i32 @FMVXS(float "reg"="s" %n) "enc"="1110000 00000 n:5 000 d:5 1010011" "asm"="fmv.w.s {d}, {n}" "feature"="f" "role"="move.w.s" {
+define i32 @FMVXS(float "reg"="s" %n) "enc"="1110000 00000 n:5 000 d:5 1010011" "asm"="fmv.x.w {d}, {n}" "feature"="f" "role"="move.w.s" {
   %r = bitcast float %n to i32
   ret i32 %r
 }
 
-define float @FMVSX(i32 "reg"="w" %n) "enc"="1111000 00000 n:5 000 d:5 1010011" "asm"="fmv.s.w {d}, {n}" "feature"="f" "role"="move.s.w" {
+define float @FMVSX(i32 "reg"="w" %n) "enc"="1111000 00000 n:5 000 d:5 1010011" "asm"="fmv.w.x {d}, {n}" "feature"="f" "role"="move.s.w" {
   %r = bitcast i32 %n to float
   ret float %r
 }
