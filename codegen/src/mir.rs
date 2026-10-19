@@ -424,6 +424,15 @@ pub fn fill_template(t: &Target, abi: Option<&crate::abi::Abi>, i: usize, value:
                 Some("h64") => {
                     let _ = write!(out, "0x{:x}", v as u64);
                 }
+                // A floating-point immediate's bits, as the number, the
+                // way assemblers print fmov's (eight decimals hold every
+                // value it can).
+                Some("f64") => {
+                    let _ = write!(out, "{:.8}", f64::from_bits(v as u64));
+                }
+                Some("f32") => {
+                    let _ = write!(out, "{:.8}", f32::from_bits(v as u32));
+                }
                 _ => {
                     let _ = write!(out, "{v}");
                 }

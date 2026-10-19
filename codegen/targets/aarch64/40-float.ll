@@ -470,3 +470,13 @@ define i32 @FMOVWS(float "reg"="s" %n) "enc"="0 00 11110 00 1 00 110 000000 n:5 
   ret i32 %r
 }
 
+
+; Floating-point immediates: fmov's 8 bits hold (16 + f) / 16 times a power
+; of two from 2^-3 to 2^4, signed (0.5, 1.0, 2.5, -10.0, ...).
+define double @FMOVDi(double "imm" %c) "enc"="0 0 0 11110 01 1 imm8:8=fp8d(c) 100 00000 d:5" "asm"="fmov {d}, #{c:f64}" {
+  ret double %c
+}
+
+define float @FMOVSi(float "imm" %c) "enc"="0 0 0 11110 00 1 imm8:8=fp8s(c) 100 00000 d:5" "asm"="fmov {d}, #{c:f32}" {
+  ret float %c
+}

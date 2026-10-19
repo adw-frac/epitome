@@ -6070,10 +6070,6 @@ define void @SUBPS_64S_dp_2src.CMPP.0(i64 "reg"="xsp" %xn_sp, i64 "reg"="xsp" %x
   ret void
 }
 
-define void @RBIT_32_dp_1src.0(i64 "reg"="w" %wd, i64 "reg"="w" %wn) "enc"="0101101011000000000000 wn:5 wd:5" "asm"="rbit {wd}, {wn}" "asmonly" {
-  ret void
-}
-
 define void @CLS_32_dp_1src.0(i64 "reg"="w" %wd, i64 "reg"="w" %wn) "enc"="0101101011000000000101 wn:5 wd:5" "asm"="cls {wd}, {wn}" "asmonly" {
   ret void
 }
@@ -6087,10 +6083,6 @@ define void @CNT_32_dp_1src.0(i64 "reg"="w" %wd, i64 "reg"="w" %wn) "enc"="01011
 }
 
 define void @ABS_32_dp_1src.0(i64 "reg"="w" %wd, i64 "reg"="w" %wn) "enc"="0101101011000000001000 wn:5 wd:5" "asm"="abs {wd}, {wn}" "asmonly" {
-  ret void
-}
-
-define void @RBIT_64_dp_1src.0(i64 "reg"="x" %xd, i64 "reg"="x" %xn) "enc"="1101101011000000000000 xn:5 xd:5" "asm"="rbit {xd}, {xn}" "asmonly" {
   ret void
 }
 

@@ -4,8 +4,10 @@
 //! to 32 bits. A token is literal bits (`01011`) or a field
 //! `name:width[=expr]`, where a width written `s19` is signed. Expressions
 //! have integers, operand names, `+ - * / % & | ^ << >>`, and the
-//! functions `bitmask32`, `bitmask64` (logical immediates) and `log2`
-//! (defined only for powers of two). Without an
+//! functions `bitmask32`, `bitmask64` (logical immediates), `log2`
+//! (defined only for powers of two), and `fp8s`, `fp8d` (a `float`'s or
+//! `double`'s bits as an 8-bit floating-point immediate, defined only for
+//! the values one can hold). Without an
 //! expression the field holds the operand called `name`.
 //!
 //! Encoding evaluates each field's expression on the operands. Decoding
@@ -27,6 +29,9 @@ pub enum Expr {
     Bitmask(u32, Box<Expr>),
     /// `log2(x)`: defined only when `x` is a power of two.
     Log2(Box<Expr>),
+    /// `fp8s(x)` or `fp8d(x)`: a float's or double's bits as the 8-bit
+    /// immediate of `fmov` (sign, 3 bits of exponent, 4 of fraction).
+    Fp8(u32, Box<Expr>),
 }
 
 impl fmt::Display for Expr {
@@ -42,6 +47,7 @@ impl fmt::Display for Expr {
             },
             Expr::Bitmask(w, e) => write!(f, "bitmask{w}({e})"),
             Expr::Log2(e) => write!(f, "log2({e})"),
+            Expr::Fp8(w, e) => write!(f, "fp8{}({e})", if *w == 32 { "s" } else { "d" }),
         }
     }
 }
@@ -236,6 +242,15 @@ impl ExprParser {
             self.pos += 1;
             return Ok(Expr::Log2(Box::new(e)));
         }
+        if (t == "fp8s" || t == "fp8d") && self.peek() == Some("(") {
+            self.pos += 1;
+            let e = self.expr(0)?;
+            if self.peek() != Some(")") {
+                return Err("missing `)`".into());
+            }
+            self.pos += 1;
+            return Ok(Expr::Fp8(if t == "fp8s" { 32 } else { 64 }, Box::new(e)));
+        }
         if (t == "bitmask32" || t == "bitmask64") && self.peek() == Some("(") {
             self.pos += 1;
             let e = self.expr(0)?;
@@ -274,6 +289,7 @@ pub fn eval(e: &Expr, env: &Env) -> Option<i64> {
             }
         }
         Expr::Bitmask(w, a) => encode_bitmask(eval(a, env)? as u64, *w)? as i64,
+        Expr::Fp8(w, a) => encode_fp8(eval(a, env)? as u64, *w)? as i64,
         Expr::Log2(a) => {
             let v = eval(a, env)?;
             if v <= 0 || v & (v - 1) != 0 {
@@ -308,6 +324,7 @@ pub fn invert(e: &Expr, target: i64) -> Option<(String, i64)> {
         Expr::Var(v) => Some((v.clone(), target)),
         Expr::Neg(a) => invert(a, target.wrapping_neg()),
         Expr::Bitmask(w, a) => invert(a, decode_bitmask(target as u64, *w)? as i64),
+        Expr::Fp8(w, a) => invert(a, decode_fp8(u8::try_from(target).ok()?, *w) as i64),
         Expr::Log2(a) => invert(a, 1i64.checked_shl(u32::try_from(target).ok()?)?),
         Expr::Bin(op, a, b) => {
             let ka = eval(a, &Env::new());
@@ -341,6 +358,7 @@ fn substitute(e: &Expr, env: &Env) -> Expr {
         Expr::Neg(a) => Expr::Neg(Box::new(substitute(a, env))),
         Expr::Bitmask(w, a) => Expr::Bitmask(*w, Box::new(substitute(a, env))),
         Expr::Log2(a) => Expr::Log2(Box::new(substitute(a, env))),
+        Expr::Fp8(w, a) => Expr::Fp8(*w, Box::new(substitute(a, env))),
         Expr::Bin(op, a, b) => Expr::Bin(*op, Box::new(substitute(a, env)), Box::new(substitute(b, env))),
     }
 }
@@ -353,7 +371,7 @@ fn names_in(e: &Expr, out: &mut Vec<String>) {
             }
         }
         Expr::Int(_) => {}
-        Expr::Neg(a) | Expr::Bitmask(_, a) | Expr::Log2(a) => names_in(a, out),
+        Expr::Neg(a) | Expr::Bitmask(_, a) | Expr::Log2(a) | Expr::Fp8(_, a) => names_in(a, out),
         Expr::Bin(_, a, b) => {
             names_in(a, out);
             names_in(b, out);
@@ -519,6 +537,41 @@ fn ror(x: u64, r: u32, e: u32) -> u64 {
 
 /// The 13-bit N:immr:imms for `value` as a `width`-bit logical immediate:
 /// a rotated run of ones in an element of 2, 4, ..., 64 bits, repeated.
+/// A float's (`width` 32) or double's (64) bits as `fmov`'s 8-bit
+/// immediate `a:b:cd:efgh`, which stands for the value with sign `a`, an
+/// exponent of `NOT(b)`, `b` repeated, then `cd`, and a fraction of `efgh`
+/// then zeros: (16 + efgh) / 16 times a power of two from 2^-3 to 2^4.
+pub fn encode_fp8(bits: u64, width: u32) -> Option<u8> {
+    let (e, f) = if width == 32 { (8, 23) } else { (11, 52) };
+    if width == 32 && bits >> 32 != 0 {
+        return None;
+    }
+    let sign = (bits >> (e + f)) & 1;
+    let exp = (bits >> f) & ((1 << e) - 1);
+    let frac = bits & ((1u64 << f) - 1);
+    if frac & ((1u64 << (f - 4)) - 1) != 0 {
+        return None;
+    }
+    // The exponent's top bit and the e-3 below it: !b then b repeated.
+    let top = exp >> 2;
+    let b = match top {
+        t if t == 1 << (e - 3) => 0,
+        t if t == (1 << (e - 3)) - 1 => 1,
+        _ => return None,
+    };
+    Some(((sign << 7) | (b << 6) | ((exp & 3) << 4) | (frac >> (f - 4))) as u8)
+}
+
+/// The bits an 8-bit `fmov` immediate stands for (see `encode_fp8`).
+pub fn decode_fp8(imm: u8, width: u32) -> u64 {
+    let (e, f) = if width == 32 { (8u64, 23u64) } else { (11, 52) };
+    let imm = imm as u64;
+    let b = (imm >> 6) & 1;
+    let top = if b == 0 { 1 << (e - 3) } else { (1 << (e - 3)) - 1 };
+    let exp = (top << 2) | ((imm >> 4) & 3);
+    ((imm >> 7) << (e + f)) | (exp << f) | ((imm & 0xf) << (f - 4))
+}
+
 pub fn encode_bitmask(value: u64, width: u32) -> Option<u32> {
     let v = value & ones(width);
     if v == 0 || v == ones(width) {

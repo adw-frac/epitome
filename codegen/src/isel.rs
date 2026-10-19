@@ -117,6 +117,11 @@ pub struct Sel<'a, 'b> {
     in_loop: Vec<bool>,
     /// Constants made once in the entry block, for use in loops.
     hoisted: HashMap<(i64, bool), VReg>,
+    /// Constants made in registers in each block, by (block, value, wide)
+    /// for integers and (block, bits, class) for floating point: a later
+    /// use in the same block takes the same register.
+    block_ints: HashMap<(usize, i64, bool), VReg>,
+    block_floats: HashMap<(usize, u64, Class), VReg>,
     hoisted_addr: HashMap<ConstId, VReg>,
     /// The registers holding each part of a small struct parameter.
     agg_params: HashMap<LocalId, Vec<VReg>>,
@@ -289,6 +294,8 @@ impl<'a, 'b> Sel<'a, 'b> {
             cur: 0,
             in_loop: Vec::new(),
             hoisted: HashMap::new(),
+            block_ints: HashMap::new(),
+            block_floats: HashMap::new(),
             hoisted_addr: HashMap::new(),
             agg_params: HashMap::new(),
             va_offset: 0,
@@ -579,6 +586,8 @@ impl<'a, 'b> Sel<'a, 'b> {
             ConstKind::Int(a) if kb == 1 && bits > 1 => Some((a.low_u64() & 1) as i64),
             ConstKind::Int(a) => Some(sext(a.low_u64(), kb)),
             ConstKind::Null | ConstKind::Zero => Some(0),
+            // A floating-point constant: its bits.
+            ConstKind::Float(raw) => Some(*raw as i64),
             // A vector whose lanes are all the same: the lane, as for a
             // shift by a splat.
             _ if self.is_vector(k.ty) => {
@@ -1020,10 +1029,28 @@ impl<'a, 'b> Sel<'a, 'b> {
                 ConstKind::Zero | ConstKind::Undef | ConstKind::Poison => 0,
                 other => return self.err(format!("unsupported floating-point constant {other:?}")),
             };
+            if let Some(&r) = self.block_floats.get(&(self.cur, raw, class)) {
+                return Ok(Reg::V(r));
+            }
+            // One instruction, if the description has one that holds it
+            // (fmov's 8-bit immediate).
+            if raw != 0 {
+                for &ci in self.t.constants.iter().filter(|&&ci| self.cx.enabled(ci)) {
+                    let ins = &self.t.instrs[ci];
+                    let same_file = matches!(ins.operands[0].kind, Kind::Reg(c) if self.t.machine.def(c).file == self.t.machine.def(class).file);
+                    if same_file && ins.operands[0].bits == self.t.machine.def(class).bits.min(64) && ins.fits(&[None, Some(raw as i64)]) {
+                        let d = self.mf.new_vreg(class);
+                        self.push(MInst::new(ci, vec![MOp::Reg(Reg::V(d)), MOp::Imm(raw as i64)]));
+                        self.block_floats.insert((self.cur, raw, class), d);
+                        return Ok(Reg::V(d));
+                    }
+                }
+            }
             let wide = self.t.machine.def(class).bits > 32;
             let g = self.int_reg(raw as i64, wide, true)?;
             let d = self.mf.new_vreg(class);
             self.push(MInst::copy(Reg::V(d), g));
+            self.block_floats.insert((self.cur, raw, class), d);
             return Ok(Reg::V(d));
         }
         let bits = self.bits(k.ty);
@@ -1194,7 +1221,14 @@ impl<'a, 'b> Sel<'a, 'b> {
             }
             return Ok(r);
         }
-        self.make_int(v, wide)
+        if let Some(&r) = self.block_ints.get(&(self.cur, v, wide)) {
+            return Ok(Reg::V(r));
+        }
+        let r = self.make_int(v, wide)?;
+        if let Reg::V(x) = r {
+            self.block_ints.insert((self.cur, v, wide), x);
+        }
+        Ok(r)
     }
 
     fn make_int(&mut self, v: i64, wide: bool) -> Result<Reg, String> {

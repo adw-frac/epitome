@@ -65,3 +65,18 @@ define i64 @EXTRX(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %c) "enc"="1 00 
   ret i64 %r
 }
 
+
+declare i32 @llvm.bitreverse.i32(i32)
+declare i64 @llvm.bitreverse.i64(i64)
+
+; Reversing the bits. Count trailing zeros is clz of the bits reversed,
+; which prepare.rs writes when the description has both.
+define i32 @RBITW(i32 "reg"="w" %n) "enc"="0 1 0 11010110 00000 0000 00 n:5 d:5" "asm"="rbit {d}, {n}" {
+  %r = call i32 @llvm.bitreverse.i32(i32 %n)
+  ret i32 %r
+}
+
+define i64 @RBITX(i64 "reg"="x" %n) "enc"="1 1 0 11010110 00000 0000 00 n:5 d:5" "asm"="rbit {d}, {n}" {
+  %r = call i64 @llvm.bitreverse.i64(i64 %n)
+  ret i64 %r
+}

@@ -362,6 +362,7 @@ pub const AARCH64_FILES: &[(&str, &str)] = &[
     ("00-base.ll", include_str!("../targets/aarch64/00-base.ll")),
     ("01-target.ll", include_str!("../targets/aarch64/01-target.ll")),
     ("10-integer.ll", include_str!("../targets/aarch64/10-integer.ll")),
+    ("15-extend.ll", include_str!("../targets/aarch64/15-extend.ll")),
     ("20-memory.ll", include_str!("../targets/aarch64/20-memory.ll")),
     ("25-pairs.ll", include_str!("../targets/aarch64/25-pairs.ll")),
     ("30-bits.ll", include_str!("../targets/aarch64/30-bits.ll")),

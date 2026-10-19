@@ -225,7 +225,7 @@ impl<'t> Assembler<'t> {
                 set(&mut r.env, &name, v)?;
                 continue;
             }
-            let (name, _) = match inner.split_once(':') {
+            let (name, modifier) = match inner.split_once(':') {
                 Some((n, m)) => (n, Some(m)),
                 None => (inner.as_str(), None),
             };
@@ -239,6 +239,13 @@ impl<'t> Assembler<'t> {
                     let n = self.t.machine.field(class, p)?;
                     set(&mut r.env, name, n)?;
                     r.shown.insert(k, Operand::Reg(Reg::P(p)));
+                }
+                // A floating-point immediate, written as the number.
+                Kind::Imm if modifier == Some("f64") => {
+                    set(&mut r.env, name, text.parse::<f64>().ok()?.to_bits() as i64)?
+                }
+                Kind::Imm if modifier == Some("f32") => {
+                    set(&mut r.env, name, text.parse::<f32>().ok()?.to_bits() as i64)?
                 }
                 Kind::Imm => set(&mut r.env, name, parse_int(text)?)?,
                 Kind::Cond => {
