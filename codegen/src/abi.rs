@@ -6,6 +6,8 @@
 
 use draconian_ir::module::{MdId, Metadata, Module};
 
+use crate::object::SectionKind;
+
 /// How arguments that do not fit in registers are laid out on the stack.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StackArgs {
@@ -228,24 +230,18 @@ impl Abi {
         }
     }
 
-    pub fn text_section(&self) -> &'static str {
-        match self.syntax {
-            Syntax::MachO => ".section __TEXT,__text,regular,pure_instructions",
-            Syntax::Elf => ".text",
-        }
-    }
-
-    /// Where a global goes: constants without addresses in them are
-    /// read-only text; constants with addresses need relocating when the
-    /// program is loaded, so go where the loader may write.
-    pub fn data_section(&self, constant: bool, has_addresses: bool) -> &'static str {
-        match (self.syntax, constant, has_addresses) {
-            (Syntax::MachO, false, _) => ".section __DATA,__data",
-            (Syntax::MachO, true, false) => ".section __TEXT,__const",
-            (Syntax::MachO, true, true) => ".section __DATA,__const",
-            (Syntax::Elf, false, _) => ".data",
-            (Syntax::Elf, true, false) => ".section .rodata",
-            (Syntax::Elf, true, true) => ".section .data.rel.ro,\"aw\"",
+    /// The directive that switches to a section of this kind.
+    pub fn section_directive(&self, kind: SectionKind) -> &'static str {
+        match (self.syntax, kind) {
+            (Syntax::MachO, SectionKind::Text) => ".section __TEXT,__text,regular,pure_instructions",
+            (Syntax::MachO, SectionKind::Data | SectionKind::Bss) => ".section __DATA,__data",
+            (Syntax::MachO, SectionKind::ReadOnly) => ".section __TEXT,__const",
+            (Syntax::MachO, SectionKind::RelRo) => ".section __DATA,__const",
+            (Syntax::Elf, SectionKind::Text) => ".text",
+            (Syntax::Elf, SectionKind::Data) => ".data",
+            (Syntax::Elf, SectionKind::Bss) => ".bss",
+            (Syntax::Elf, SectionKind::ReadOnly) => ".section .rodata",
+            (Syntax::Elf, SectionKind::RelRo) => ".section .data.rel.ro,\"aw\"",
         }
     }
 }

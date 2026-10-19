@@ -12,5 +12,9 @@ draconian-ir = { path = "../ir" }
 name = "draconian-llc"
 path = "src/main.rs"
 
+[[bin]]
+name = "draconian-objdump"
+path = "src/bin/draconian-objdump.rs"
+
 [dev-dependencies]
 draconian-opt = { path = "../opt" }

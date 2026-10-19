@@ -56,7 +56,8 @@ pub struct Field {
     pub expr: Expr,
     /// The operands the expression reads.
     pub names: Vec<String>,
-    /// The expression has no `%`, so inverting it gives the operand exactly.
+    /// The expression has no `%` or `&`, so inverting it gives the operand
+    /// exactly.
     pub plain: bool,
 }
 
@@ -99,7 +100,7 @@ pub fn parse(text: &str) -> Result<Encoding, String> {
         total += width;
         let mut names = Vec::new();
         names_in(&expr, &mut names);
-        let plain = !format!("{expr}").contains('%');
+        let plain = !format!("{expr}").contains(['%', '&']);
         tokens.push((Some(Field { name: name.to_string(), lo: 0, width, signed, expr, names, plain }), String::new()));
     }
     if total != 32 {
@@ -305,8 +306,9 @@ fn invert(e: &Expr, target: i64) -> Option<(String, i64)> {
                 ('<', None, Some(k)) => invert(a, target.checked_shr(k as u32)?),
                 ('^', None, Some(k)) => invert(a, target ^ k),
                 ('^', Some(k), None) => invert(b, target ^ k),
-                // `x % m == f`: take `x = f`; the re-encoding check decides.
-                ('%', None, Some(_)) => invert(a, target),
+                // `x % m == f` or `x & m == f`: take `x = f` (the other
+                // fields put the rest back); the re-encoding check decides.
+                ('%' | '&', None, Some(_)) => invert(a, target),
                 _ => None,
             }
         }
@@ -387,7 +389,22 @@ impl Encoding {
                     break;
                 }
             }
-            env.insert(name.clone(), best?);
+            let mut v = best?;
+            // A value split over fields, `name>>k` and `name&m` (adrp's
+            // immhi and immlo), or `name/k` and `name%k`: the low bits go
+            // back on.
+            for f in &self.fields {
+                let Expr::Bin(op @ ('%' | '&'), a, k) = &f.expr else { continue };
+                if **a != Expr::Var(name.clone()) {
+                    continue;
+                }
+                match (op, &**k) {
+                    ('%', Expr::Int(k)) if *k > 0 => v = v - v.rem_euclid(*k) + self.field_value(f, word),
+                    ('&', Expr::Int(m)) if (*m + 1).count_ones() == 1 => v = (v & !*m) | self.field_value(f, word),
+                    _ => {}
+                }
+            }
+            env.insert(name.clone(), v);
         }
         (self.encode(&env)? == word).then_some(env)
     }

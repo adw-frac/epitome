@@ -1,4 +1,5 @@
-//! `draconian-llc`: compiles a `.ll` file to AArch64 assembly.
+//! `draconian-llc`: compiles a `.ll` file to AArch64 assembly, or to an ELF
+//! object file.
 
 use std::process::ExitCode;
 
@@ -7,7 +8,9 @@ use draconian_codegen::{Options, Stop, compile, mir};
 
 const USAGE: &str = "usage: draconian-llc [options] <file.ll>
 
-  -o <file>               write the assembly here instead of stdout
+  -o <file>               write the output here instead of stdout; a name
+                          ending in .o asks for an object file
+  --filetype=asm|obj      assembly (the default) or an ELF object file
   --target=<file.ll>      read the machine description from this file
                           (default: the built-in AArch64 description)
   --abi=darwin|aapcs64    the calling convention and platform (default:
@@ -26,6 +29,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (mut input, mut output, mut target_file) = (None, None, None);
     let (mut hex, mut disasm, mut patterns, mut stats) = (false, false, false, false);
+    let mut filetype = None;
     let mut stop = Stop::Done;
     let mut opts = Options::default();
     let mut it = args.iter();
@@ -37,6 +41,8 @@ fn main() -> ExitCode {
             "--patterns" => patterns = true,
             "--stats" => stats = true,
             "--keep-going" => opts.keep_going = true,
+            "--filetype=asm" => filetype = Some(false),
+            "--filetype=obj" => filetype = Some(true),
             "--stop-after=isel" => stop = Stop::AfterSelection,
             "--stop-after=ra" => stop = Stop::AfterAllocation,
             s if s.starts_with("--target=") => target_file = Some(s["--target=".len()..].to_string()),
@@ -129,6 +135,31 @@ fn main() -> ExitCode {
             (get(&NANOS) - get(&WALK_NANOS)) as f64 / roots.max(1) as f64,
             total.as_secs_f64() * 1e3
         );
+    }
+    let object = filetype.unwrap_or_else(|| output.as_deref().is_some_and(|o| o.ends_with(".o")));
+    if object {
+        if compiled.abi.syntax != draconian_codegen::abi::Syntax::Elf {
+            eprintln!(
+                "draconian-llc: object files are ELF only so far; use a Linux triple, --abi=aapcs64 or --syntax=elf"
+            );
+            return ExitCode::FAILURE;
+        }
+        let bytes = match compiled.object(&target) {
+            Ok(o) => draconian_codegen::elf::write(&o),
+            Err(e) => {
+                eprintln!("draconian-llc: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let Some(path) = output else {
+            eprintln!("draconian-llc: an object file needs -o");
+            return ExitCode::FAILURE;
+        };
+        if let Err(e) = std::fs::write(&path, bytes) {
+            eprintln!("draconian-llc: {path}: {e}");
+            return ExitCode::FAILURE;
+        }
+        return if compiled.errors.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE };
     }
     let mut text = compiled.asm.clone();
     if hex || disasm {

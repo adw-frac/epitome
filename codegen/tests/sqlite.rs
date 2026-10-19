@@ -14,12 +14,35 @@
 //!
 //! Each runs the scripts in `tests/sqlite/`, and must print what the
 //! reference prints.
+//!
+//! Builds 2 and 3 are also compiled to ELF (assembly and our own object
+//! file, from the same IR; the convention is still Apple's, which does not
+//! matter to the encoding), and our object must say what clang's assembler
+//! makes of our assembly (see `ElfFile::canonical`), and must disassemble
+//! back to that assembly with draconian-objdump's code. They are not run:
+//! there is no Linux here.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use draconian_codegen::abi::Syntax;
+use draconian_codegen::objdump::{self, Image};
 use draconian_codegen::target::Target;
-use draconian_codegen::{Options, compile};
+use draconian_codegen::{Options, compile, elf};
+
+/// Mnemonics objdump may print for an instruction we print another way.
+const ALIASES: &[(&str, &str)] = &[
+    ("add", "mov"),
+    ("mov", "orr"),
+    ("mov", "movz"),
+    ("mov", "movn"),
+    ("neg", "sub"),
+    ("sshll", "sxtl"),
+    ("ushll", "uxtl"),
+    ("sshll2", "sxtl2"),
+    ("ushll2", "uxtl2"),
+    ("ror", "extr"),
+];
 
 fn run(cmd: &mut Command) -> Result<String, String> {
     let out = cmd.output().map_err(|e| format!("{cmd:?}: {e}"))?;
@@ -97,6 +120,31 @@ fn sqlite_answers_as_clangs_build() {
             } else {
                 failures.push(format!("{name}: {script} differs"));
             }
+        }
+    }
+
+    // ELF: our object against the assembler's, and read back.
+    for (name, ll) in [("llc", &o2), ("llc-vec", &vec)] {
+        let text = std::fs::read_to_string(ll).unwrap();
+        let mut m = draconian_ir::parse_module(&text).unwrap();
+        let opts = Options { syntax: Some(Syntax::Elf), ..Options::default() };
+        let compiled = compile(&t, &mut m, &opts).unwrap();
+        let s = tmp.join(format!("sqlite3.{name}.elf.s"));
+        std::fs::write(&s, &compiled.asm).unwrap();
+        let theirs = tmp.join(format!("sqlite3.{name}.elf.o"));
+        run(Command::new("clang").args(["--target=aarch64-linux-gnu", "-c"]).arg(&s).arg("-o").arg(&theirs)).unwrap();
+        let bytes = elf::write(&compiled.object(&t).unwrap());
+        let mine = tmp.join(format!("sqlite3.{name}.elf.ours.o"));
+        std::fs::write(&mine, &bytes).unwrap();
+        let a = elf::read(&bytes).unwrap().canonical();
+        let b = elf::read(&std::fs::read(&theirs).unwrap()).unwrap().canonical();
+        if a != b {
+            failures.push(format!("{name}: our ELF object differs:\n{}", elf::differences(&a, &b, 8).join("\n")));
+            continue;
+        }
+        match objdump::reads_back(&t, &Image::read(&bytes).unwrap(), &compiled.asm, ALIASES) {
+            Ok(n) => println!("ok {name} ELF object, {n} instructions read back"),
+            Err(e) => failures.push(format!("{name}: {e}")),
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

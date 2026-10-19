@@ -29,6 +29,10 @@
 ;   "dclass"="wsp"        the result's register class, if not w or x
 ;   "nomatch"             not a pattern for selection
 ;   "role"="..."          used by the code generator by role, not matched
+;   "reloc"="adrp"        how an object file fixes up its "sym" operand: call26
+;                         (the branch), adrp (the symbol's 4KB page),
+;                         add_lo12 (its offset in the page), adrp_got and
+;                         ld64_got_lo12 (the same for its GOT entry)
 
 target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
 
@@ -264,7 +268,7 @@ define void @BRK() "enc"="11010100 001 0000000000000001 000 00" "asm"="brk #0x1"
   unreachable
 }
 
-define void @BL(ptr "sym" %s) "enc"="100101 imm26:s26=s/4" "asm"="bl {s}" "role"="call" "nomatch" {
+define void @BL(ptr "sym" %s) "enc"="100101 imm26:s26=s/4" "asm"="bl {s}" "reloc"="call26" "role"="call" "nomatch" {
   ret void
 }
 
@@ -854,21 +858,21 @@ define i64 @MOVKXi(i64 "reg"="x" "tied" %old, i64 "imm" %imm, i64 "imm" %sh) "en
 }
 
 ; Addresses of symbols: the 4KB page, then the offset in it.
-define ptr @ADRP(ptr "sym" %s) "enc"="1 immlo:2=s%4 10000 immhi:19=s/4 d:5" "asm"="adrp {d}, {s:page}" "role"="adrp" "nomatch" {
+define ptr @ADRP(ptr "sym" %s) "enc"="1 immlo:2=s&3 10000 immhi:s19=s>>2 d:5" "asm"="adrp {d}, {s:page}" "reloc"="adrp" "role"="adrp" "nomatch" {
   ret ptr %s
 }
 
-define ptr @ADDpageoff(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="1 0 0 100010 0 imm12:12=s n:5 d:5" "asm"="add {d}, {n}, {s:pageoff}" "dclass"="xsp" "role"="pageoff" "nomatch" "nodecode" {
+define ptr @ADDpageoff(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="1 0 0 100010 0 imm12:12=s n:5 d:5" "asm"="add {d}, {n}, {s:pageoff}" "reloc"="add_lo12" "dclass"="xsp" "role"="pageoff" "nomatch" "nodecode" {
   ret ptr %n
 }
 
 ; Addresses of symbols defined in other libraries, from the global offset
 ; table: the table entry's page, then a load of the entry.
-define ptr @ADRPgot(ptr "sym" %s) "enc"="1 immlo:2=s%4 10000 immhi:19=s/4 d:5" "asm"="adrp {d}, {s:gotpage}" "role"="adrp.got" "nomatch" "nodecode" {
+define ptr @ADRPgot(ptr "sym" %s) "enc"="1 immlo:2=s&3 10000 immhi:s19=s>>2 d:5" "asm"="adrp {d}, {s:gotpage}" "reloc"="adrp_got" "role"="adrp.got" "nomatch" "nodecode" {
   ret ptr %s
 }
 
-define ptr @LDRgot(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="11 111 0 01 01 imm12:12=s/8 n:5 d:5" "asm"="ldr {d}, [{n}, {s:gotpageoff}]" "role"="ldr.got" "nomatch" "nodecode" {
+define ptr @LDRgot(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="11 111 0 01 01 imm12:12=s/8 n:5 d:5" "asm"="ldr {d}, [{n}, {s:gotpageoff}]" "reloc"="ld64_got_lo12" "role"="ldr.got" "nomatch" "nodecode" {
   %v = load ptr, ptr %n
   ret ptr %v
 }
@@ -1948,17 +1952,17 @@ define <16 x i8> @ABSv16b(<16 x i8> "reg"="q" %n) "enc"="0 1 0 01110 00 10000 01
   ret <16 x i8> %r
 }
 
-define <16 x i8> @SHLv16b(<16 x i8> "reg"="q" %n, <16 x i8> "imm" %sh) "enc"="0 1 0 011110 immhb:7=8+sh 01010 1 n:5 d:5" "asm"="shl {d:16b}, {n:16b}, #{sh}" {
+define <16 x i8> @SHLv16b(<16 x i8> "reg"="q" %n, <16 x i8> "imm" %sh) "enc"="0 1 0 011110 0001 sh:3 01010 1 n:5 d:5" "asm"="shl {d:16b}, {n:16b}, #{sh}" {
   %r = shl <16 x i8> %n, %sh
   ret <16 x i8> %r
 }
 
-define <16 x i8> @USHRv16b(<16 x i8> "reg"="q" %n, <16 x i8> "imm" %sh) "enc"="0 1 1 011110 immhb:7=16-sh 00000 1 n:5 d:5" "asm"="ushr {d:16b}, {n:16b}, #{sh}" {
+define <16 x i8> @USHRv16b(<16 x i8> "reg"="q" %n, <16 x i8> "imm" %sh) "enc"="0 1 1 011110 0001 amt:3=8-sh 00000 1 n:5 d:5" "asm"="ushr {d:16b}, {n:16b}, #{sh}" {
   %r = lshr <16 x i8> %n, %sh
   ret <16 x i8> %r
 }
 
-define <16 x i8> @SSHRv16b(<16 x i8> "reg"="q" %n, <16 x i8> "imm" %sh) "enc"="0 1 0 011110 immhb:7=16-sh 00000 1 n:5 d:5" "asm"="sshr {d:16b}, {n:16b}, #{sh}" {
+define <16 x i8> @SSHRv16b(<16 x i8> "reg"="q" %n, <16 x i8> "imm" %sh) "enc"="0 1 0 011110 0001 amt:3=8-sh 00000 1 n:5 d:5" "asm"="sshr {d:16b}, {n:16b}, #{sh}" {
   %r = ashr <16 x i8> %n, %sh
   ret <16 x i8> %r
 }
@@ -2106,17 +2110,17 @@ define <8 x i16> @ABSv8h(<8 x i16> "reg"="q" %n) "enc"="0 1 0 01110 01 10000 010
   ret <8 x i16> %r
 }
 
-define <8 x i16> @SHLv8h(<8 x i16> "reg"="q" %n, <8 x i16> "imm" %sh) "enc"="0 1 0 011110 immhb:7=16+sh 01010 1 n:5 d:5" "asm"="shl {d:8h}, {n:8h}, #{sh}" {
+define <8 x i16> @SHLv8h(<8 x i16> "reg"="q" %n, <8 x i16> "imm" %sh) "enc"="0 1 0 011110 001 sh:4 01010 1 n:5 d:5" "asm"="shl {d:8h}, {n:8h}, #{sh}" {
   %r = shl <8 x i16> %n, %sh
   ret <8 x i16> %r
 }
 
-define <8 x i16> @USHRv8h(<8 x i16> "reg"="q" %n, <8 x i16> "imm" %sh) "enc"="0 1 1 011110 immhb:7=32-sh 00000 1 n:5 d:5" "asm"="ushr {d:8h}, {n:8h}, #{sh}" {
+define <8 x i16> @USHRv8h(<8 x i16> "reg"="q" %n, <8 x i16> "imm" %sh) "enc"="0 1 1 011110 001 amt:4=16-sh 00000 1 n:5 d:5" "asm"="ushr {d:8h}, {n:8h}, #{sh}" {
   %r = lshr <8 x i16> %n, %sh
   ret <8 x i16> %r
 }
 
-define <8 x i16> @SSHRv8h(<8 x i16> "reg"="q" %n, <8 x i16> "imm" %sh) "enc"="0 1 0 011110 immhb:7=32-sh 00000 1 n:5 d:5" "asm"="sshr {d:8h}, {n:8h}, #{sh}" {
+define <8 x i16> @SSHRv8h(<8 x i16> "reg"="q" %n, <8 x i16> "imm" %sh) "enc"="0 1 0 011110 001 amt:4=16-sh 00000 1 n:5 d:5" "asm"="sshr {d:8h}, {n:8h}, #{sh}" {
   %r = ashr <8 x i16> %n, %sh
   ret <8 x i16> %r
 }
@@ -2264,17 +2268,17 @@ define <4 x i32> @ABSv4s(<4 x i32> "reg"="q" %n) "enc"="0 1 0 01110 10 10000 010
   ret <4 x i32> %r
 }
 
-define <4 x i32> @SHLv4s(<4 x i32> "reg"="q" %n, <4 x i32> "imm" %sh) "enc"="0 1 0 011110 immhb:7=32+sh 01010 1 n:5 d:5" "asm"="shl {d:4s}, {n:4s}, #{sh}" {
+define <4 x i32> @SHLv4s(<4 x i32> "reg"="q" %n, <4 x i32> "imm" %sh) "enc"="0 1 0 011110 01 sh:5 01010 1 n:5 d:5" "asm"="shl {d:4s}, {n:4s}, #{sh}" {
   %r = shl <4 x i32> %n, %sh
   ret <4 x i32> %r
 }
 
-define <4 x i32> @USHRv4s(<4 x i32> "reg"="q" %n, <4 x i32> "imm" %sh) "enc"="0 1 1 011110 immhb:7=64-sh 00000 1 n:5 d:5" "asm"="ushr {d:4s}, {n:4s}, #{sh}" {
+define <4 x i32> @USHRv4s(<4 x i32> "reg"="q" %n, <4 x i32> "imm" %sh) "enc"="0 1 1 011110 01 amt:5=32-sh 00000 1 n:5 d:5" "asm"="ushr {d:4s}, {n:4s}, #{sh}" {
   %r = lshr <4 x i32> %n, %sh
   ret <4 x i32> %r
 }
 
-define <4 x i32> @SSHRv4s(<4 x i32> "reg"="q" %n, <4 x i32> "imm" %sh) "enc"="0 1 0 011110 immhb:7=64-sh 00000 1 n:5 d:5" "asm"="sshr {d:4s}, {n:4s}, #{sh}" {
+define <4 x i32> @SSHRv4s(<4 x i32> "reg"="q" %n, <4 x i32> "imm" %sh) "enc"="0 1 0 011110 01 amt:5=32-sh 00000 1 n:5 d:5" "asm"="sshr {d:4s}, {n:4s}, #{sh}" {
   %r = ashr <4 x i32> %n, %sh
   ret <4 x i32> %r
 }
@@ -2417,17 +2421,17 @@ define <2 x i64> @ABSv2d(<2 x i64> "reg"="q" %n) "enc"="0 1 0 01110 11 10000 010
   ret <2 x i64> %r
 }
 
-define <2 x i64> @SHLv2d(<2 x i64> "reg"="q" %n, <2 x i64> "imm" %sh) "enc"="0 1 0 011110 immhb:7=64+sh 01010 1 n:5 d:5" "asm"="shl {d:2d}, {n:2d}, #{sh}" {
+define <2 x i64> @SHLv2d(<2 x i64> "reg"="q" %n, <2 x i64> "imm" %sh) "enc"="0 1 0 011110 1 sh:6 01010 1 n:5 d:5" "asm"="shl {d:2d}, {n:2d}, #{sh}" {
   %r = shl <2 x i64> %n, %sh
   ret <2 x i64> %r
 }
 
-define <2 x i64> @USHRv2d(<2 x i64> "reg"="q" %n, <2 x i64> "imm" %sh) "enc"="0 1 1 011110 immhb:7=128-sh 00000 1 n:5 d:5" "asm"="ushr {d:2d}, {n:2d}, #{sh}" {
+define <2 x i64> @USHRv2d(<2 x i64> "reg"="q" %n, <2 x i64> "imm" %sh) "enc"="0 1 1 011110 1 amt:6=64-sh 00000 1 n:5 d:5" "asm"="ushr {d:2d}, {n:2d}, #{sh}" {
   %r = lshr <2 x i64> %n, %sh
   ret <2 x i64> %r
 }
 
-define <2 x i64> @SSHRv2d(<2 x i64> "reg"="q" %n, <2 x i64> "imm" %sh) "enc"="0 1 0 011110 immhb:7=128-sh 00000 1 n:5 d:5" "asm"="sshr {d:2d}, {n:2d}, #{sh}" {
+define <2 x i64> @SSHRv2d(<2 x i64> "reg"="q" %n, <2 x i64> "imm" %sh) "enc"="0 1 0 011110 1 amt:6=64-sh 00000 1 n:5 d:5" "asm"="sshr {d:2d}, {n:2d}, #{sh}" {
   %r = ashr <2 x i64> %n, %sh
   ret <2 x i64> %r
 }
@@ -2547,17 +2551,17 @@ define <8 x i8> @ABSv8b(<8 x i8> "reg"="v" %n) "enc"="0 0 0 01110 00 10000 01011
   ret <8 x i8> %r
 }
 
-define <8 x i8> @SHLv8b(<8 x i8> "reg"="v" %n, <8 x i8> "imm" %sh) "enc"="0 0 0 011110 immhb:7=8+sh 01010 1 n:5 d:5" "asm"="shl {d:8b}, {n:8b}, #{sh}" {
+define <8 x i8> @SHLv8b(<8 x i8> "reg"="v" %n, <8 x i8> "imm" %sh) "enc"="0 0 0 011110 0001 sh:3 01010 1 n:5 d:5" "asm"="shl {d:8b}, {n:8b}, #{sh}" {
   %r = shl <8 x i8> %n, %sh
   ret <8 x i8> %r
 }
 
-define <8 x i8> @USHRv8b(<8 x i8> "reg"="v" %n, <8 x i8> "imm" %sh) "enc"="0 0 1 011110 immhb:7=16-sh 00000 1 n:5 d:5" "asm"="ushr {d:8b}, {n:8b}, #{sh}" {
+define <8 x i8> @USHRv8b(<8 x i8> "reg"="v" %n, <8 x i8> "imm" %sh) "enc"="0 0 1 011110 0001 amt:3=8-sh 00000 1 n:5 d:5" "asm"="ushr {d:8b}, {n:8b}, #{sh}" {
   %r = lshr <8 x i8> %n, %sh
   ret <8 x i8> %r
 }
 
-define <8 x i8> @SSHRv8b(<8 x i8> "reg"="v" %n, <8 x i8> "imm" %sh) "enc"="0 0 0 011110 immhb:7=16-sh 00000 1 n:5 d:5" "asm"="sshr {d:8b}, {n:8b}, #{sh}" {
+define <8 x i8> @SSHRv8b(<8 x i8> "reg"="v" %n, <8 x i8> "imm" %sh) "enc"="0 0 0 011110 0001 amt:3=8-sh 00000 1 n:5 d:5" "asm"="sshr {d:8b}, {n:8b}, #{sh}" {
   %r = ashr <8 x i8> %n, %sh
   ret <8 x i8> %r
 }
@@ -2705,17 +2709,17 @@ define <4 x i16> @ABSv4h(<4 x i16> "reg"="v" %n) "enc"="0 0 0 01110 01 10000 010
   ret <4 x i16> %r
 }
 
-define <4 x i16> @SHLv4h(<4 x i16> "reg"="v" %n, <4 x i16> "imm" %sh) "enc"="0 0 0 011110 immhb:7=16+sh 01010 1 n:5 d:5" "asm"="shl {d:4h}, {n:4h}, #{sh}" {
+define <4 x i16> @SHLv4h(<4 x i16> "reg"="v" %n, <4 x i16> "imm" %sh) "enc"="0 0 0 011110 001 sh:4 01010 1 n:5 d:5" "asm"="shl {d:4h}, {n:4h}, #{sh}" {
   %r = shl <4 x i16> %n, %sh
   ret <4 x i16> %r
 }
 
-define <4 x i16> @USHRv4h(<4 x i16> "reg"="v" %n, <4 x i16> "imm" %sh) "enc"="0 0 1 011110 immhb:7=32-sh 00000 1 n:5 d:5" "asm"="ushr {d:4h}, {n:4h}, #{sh}" {
+define <4 x i16> @USHRv4h(<4 x i16> "reg"="v" %n, <4 x i16> "imm" %sh) "enc"="0 0 1 011110 001 amt:4=16-sh 00000 1 n:5 d:5" "asm"="ushr {d:4h}, {n:4h}, #{sh}" {
   %r = lshr <4 x i16> %n, %sh
   ret <4 x i16> %r
 }
 
-define <4 x i16> @SSHRv4h(<4 x i16> "reg"="v" %n, <4 x i16> "imm" %sh) "enc"="0 0 0 011110 immhb:7=32-sh 00000 1 n:5 d:5" "asm"="sshr {d:4h}, {n:4h}, #{sh}" {
+define <4 x i16> @SSHRv4h(<4 x i16> "reg"="v" %n, <4 x i16> "imm" %sh) "enc"="0 0 0 011110 001 amt:4=16-sh 00000 1 n:5 d:5" "asm"="sshr {d:4h}, {n:4h}, #{sh}" {
   %r = ashr <4 x i16> %n, %sh
   ret <4 x i16> %r
 }
@@ -2863,17 +2867,17 @@ define <2 x i32> @ABSv2s(<2 x i32> "reg"="v" %n) "enc"="0 0 0 01110 10 10000 010
   ret <2 x i32> %r
 }
 
-define <2 x i32> @SHLv2s(<2 x i32> "reg"="v" %n, <2 x i32> "imm" %sh) "enc"="0 0 0 011110 immhb:7=32+sh 01010 1 n:5 d:5" "asm"="shl {d:2s}, {n:2s}, #{sh}" {
+define <2 x i32> @SHLv2s(<2 x i32> "reg"="v" %n, <2 x i32> "imm" %sh) "enc"="0 0 0 011110 01 sh:5 01010 1 n:5 d:5" "asm"="shl {d:2s}, {n:2s}, #{sh}" {
   %r = shl <2 x i32> %n, %sh
   ret <2 x i32> %r
 }
 
-define <2 x i32> @USHRv2s(<2 x i32> "reg"="v" %n, <2 x i32> "imm" %sh) "enc"="0 0 1 011110 immhb:7=64-sh 00000 1 n:5 d:5" "asm"="ushr {d:2s}, {n:2s}, #{sh}" {
+define <2 x i32> @USHRv2s(<2 x i32> "reg"="v" %n, <2 x i32> "imm" %sh) "enc"="0 0 1 011110 01 amt:5=32-sh 00000 1 n:5 d:5" "asm"="ushr {d:2s}, {n:2s}, #{sh}" {
   %r = lshr <2 x i32> %n, %sh
   ret <2 x i32> %r
 }
 
-define <2 x i32> @SSHRv2s(<2 x i32> "reg"="v" %n, <2 x i32> "imm" %sh) "enc"="0 0 0 011110 immhb:7=64-sh 00000 1 n:5 d:5" "asm"="sshr {d:2s}, {n:2s}, #{sh}" {
+define <2 x i32> @SSHRv2s(<2 x i32> "reg"="v" %n, <2 x i32> "imm" %sh) "enc"="0 0 0 011110 01 amt:5=32-sh 00000 1 n:5 d:5" "asm"="sshr {d:2s}, {n:2s}, #{sh}" {
   %r = ashr <2 x i32> %n, %sh
   ret <2 x i32> %r
 }

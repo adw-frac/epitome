@@ -140,3 +140,24 @@ same way. The record is attached to the instruction after the call.
 - **`zeroinitializer` for target types.** It is rejected for
   `target("spirv.Image", void, 1)`: `invalid type for null constant`. Draconian
   accepts it today.
+
+## The assembler
+
+Found by assembling Draconian's own AArch64 assembly with
+`clang --target=aarch64-linux-gnu -c` and reading the object file (Apple
+clang 21.0.0, 2026-10-19). Draconian's object writer does the same, and
+`codegen/tests/programs.rs` and `codegen/tests/sqlite.rs` check it does.
+
+- **Calls to local functions in the same section are resolved** in place,
+  with no relocation. Calls to global functions keep `R_AARCH64_CALL26`,
+  even when defined in the same file.
+- **References to local symbols are made against the section**: a section
+  symbol, with the local symbol's offset as the addend (`.data+0x1b8`).
+  `:got:` references stay against the symbol.
+- **Relocated fields are zero**, the addend being in the RELA record.
+- **Mapping symbols**: `$x` at the start of `.text`, and `$d` at the start
+  of each data section that has contents or size, `.bss` included. Section
+  symbols are emitted only for sections that relocations refer to.
+- **`mov` with an immediate** is encoded as `movz` when the value is one
+  16-bit piece at any shift, before trying `movn`: `mov w0, #-65536` is
+  `movz w0, #0xffff, lsl #16`.

@@ -5,12 +5,16 @@
 pub mod abi;
 pub mod asm;
 pub mod divconst;
+pub mod elf;
 pub mod enc;
 pub mod frame;
 pub mod isel;
 pub mod layout;
 pub mod legalize;
+pub mod macho;
 pub mod mir;
+pub mod objdump;
+pub mod object;
 pub mod prepare;
 pub mod regalloc;
 pub mod target;
@@ -28,6 +32,9 @@ pub const DARWIN_ARM64_LAYOUT: &str = "e-m:o-i64:64-i128:128-n32:64-S128-Fn32";
 
 pub struct Compiled {
     pub funcs: Vec<MFunc>,
+    /// The globals with initial values.
+    pub globals: Vec<object::GlobalData>,
+    pub abi: abi::Abi,
     pub asm: String,
     /// With `keep_going`: the functions that could not be compiled, and why.
     pub errors: Vec<String>,
@@ -117,10 +124,22 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
         }
         funcs.push(mf);
     }
-    let mut out = format!("\t{}\n", abi.text_section());
+    let mut out = format!("\t{}\n", abi.section_directive(object::SectionKind::Text));
     for f in &funcs {
         asm::function(t, f, &mut out);
     }
-    asm::globals(&cx, &abi, &mut out)?;
-    Ok(Compiled { funcs, asm: out, errors })
+    let globals = asm::collect_globals(&cx, &abi)?;
+    asm::print_globals(&abi, &globals, &mut out);
+    if abi.syntax == abi::Syntax::Elf {
+        // The stack need not be executable.
+        out.push_str("\t.section .note.GNU-stack,\"\",%progbits\n");
+    }
+    Ok(Compiled { funcs, globals, abi, asm: out, errors })
+}
+
+impl Compiled {
+    /// The object file's contents, in the abstract (see `object`).
+    pub fn object(&self, t: &Target) -> Result<object::Object, String> {
+        object::build(t, &self.abi, &self.funcs, &self.globals)
+    }
 }

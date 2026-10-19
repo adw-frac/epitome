@@ -962,8 +962,14 @@ impl<'a, 'b> Sel<'a, 'b> {
 
     fn make_int(&mut self, v: i64, wide: bool) -> Result<Reg, String> {
         let d = self.mf.new_vreg(wide);
+        // One nonzero 16 bits above the lowest is a shifted movz, which is
+        // what an assembler makes of `mov` for such a value (it prefers
+        // movz to movn): written out so that both say the same.
+        let bits = if wide { 64 } else { 32 };
+        let u = (v as u64) & (u64::MAX >> (64 - bits));
+        let shifted_movz = u != 0 && u.trailing_zeros() >= 16 && (u >> (u.trailing_zeros() / 16 * 16)) <= 0xffff;
         // One instruction, if the description has one that holds it.
-        for &ci in &self.t.constants {
+        for &ci in self.t.constants.iter().filter(|_| !shifted_movz) {
             let ins = &self.t.instrs[ci];
             if (ins.operands[0].bits > 32) != wide {
                 continue;

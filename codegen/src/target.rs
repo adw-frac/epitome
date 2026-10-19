@@ -126,6 +126,8 @@ pub struct Instr {
     pub matchable: bool,
     /// For a conditional branch: the branch taken when this one is not.
     pub inverse: Option<String>,
+    /// How an object file fixes up its symbol operand.
+    pub reloc: Option<crate::object::RelocKind>,
     pub func: GlobalId,
 }
 
@@ -690,6 +692,12 @@ impl Target {
                 });
             }
             let default_zext = if has_result && ret_bits <= 32 { 32 } else { 64 };
+            let reloc = match attr(&f.fn_attrs, "reloc").flatten() {
+                Some(r) => {
+                    Some(crate::object::RelocKind::parse(r).ok_or_else(|| format!("@{name}: unknown reloc {r}"))?)
+                }
+                None => None,
+            };
             instrs.push(Instr {
                 name: name.clone(),
                 operands,
@@ -707,6 +715,7 @@ impl Target {
                 },
                 matchable: attr(&f.fn_attrs, "nomatch").is_none(),
                 inverse: attr(&f.fn_attrs, "inverse").flatten().map(str::to_string),
+                reloc,
                 func: g,
             });
         }

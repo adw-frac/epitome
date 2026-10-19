@@ -75,18 +75,22 @@ define {T} @ABSv{arr}({T} "reg"="{c}" %n) "enc"="0 {Q} 0 01110 {size} 10000 0101
   ret {T} %r
 }}
 ''')
-    # shifts by a constant
-    o.append(f'''define {T} @SHLv{arr}({T} "reg"="{c}" %n, {T} "imm" %sh) "enc"="0 {Q} 0 011110 immhb:7={e}+sh 01010 1 n:5 d:5" "asm"="shl {{d:{A}}}, {{n:{A}}}, #{{sh}}" {{
+    # shifts by a constant: immh:immb is the element size (its leading
+    # one, literal bits) and the shift (the bits below it), so that a word
+    # with immh zero (movi and its kin) is not read as a shift.
+    L = e.bit_length() - 1
+    size_bits = '0' * (6 - L) + '1'
+    o.append(f'''define {T} @SHLv{arr}({T} "reg"="{c}" %n, {T} "imm" %sh) "enc"="0 {Q} 0 011110 {size_bits} sh:{L} 01010 1 n:5 d:5" "asm"="shl {{d:{A}}}, {{n:{A}}}, #{{sh}}" {{
   %r = shl {T} %n, %sh
   ret {T} %r
 }}
 
-define {T} @USHRv{arr}({T} "reg"="{c}" %n, {T} "imm" %sh) "enc"="0 {Q} 1 011110 immhb:7={2*e}-sh 00000 1 n:5 d:5" "asm"="ushr {{d:{A}}}, {{n:{A}}}, #{{sh}}" {{
+define {T} @USHRv{arr}({T} "reg"="{c}" %n, {T} "imm" %sh) "enc"="0 {Q} 1 011110 {size_bits} amt:{L}={e}-sh 00000 1 n:5 d:5" "asm"="ushr {{d:{A}}}, {{n:{A}}}, #{{sh}}" {{
   %r = lshr {T} %n, %sh
   ret {T} %r
 }}
 
-define {T} @SSHRv{arr}({T} "reg"="{c}" %n, {T} "imm" %sh) "enc"="0 {Q} 0 011110 immhb:7={2*e}-sh 00000 1 n:5 d:5" "asm"="sshr {{d:{A}}}, {{n:{A}}}, #{{sh}}" {{
+define {T} @SSHRv{arr}({T} "reg"="{c}" %n, {T} "imm" %sh) "enc"="0 {Q} 0 011110 {size_bits} amt:{L}={e}-sh 00000 1 n:5 d:5" "asm"="sshr {{d:{A}}}, {{n:{A}}}, #{{sh}}" {{
   %r = ashr {T} %n, %sh
   ret {T} %r
 }}

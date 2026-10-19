@@ -173,6 +173,11 @@ To emit code, a target needs:
 
 The assembler matches mnemonic aliases first, then instruction aliases.
 
+Draconian has no streamer: assembly and object files are both written from
+the allocated machine IR and one description of each global's data. See
+[objects.md](objects.md) for object files (ELF: **Done**; Mach-O:
+**Planned**) and `draconian-objdump`.
+
 ### Optional sections
 
 | Flag | What it adds |
