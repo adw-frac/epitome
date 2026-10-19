@@ -57,6 +57,12 @@ pub struct Instr {
     /// Which flags it sets, if it is a comparison.
     pub sets: Option<String>,
     pub matchable: bool,
+    /// For assembly and disassembly only: its body says nothing (entries
+    /// written from Arm's specification, `80-asm.ll`).
+    pub asm_only: bool,
+    /// Other mnemonics it may be written with, by Arm's specification
+    /// (`cinc`, of `csinc`): for comparing with other disassemblers.
+    pub aliases: Vec<String>,
     /// For a conditional branch: the branch taken when this one is not.
     pub inverse: Option<String>,
     /// How an object file fixes up its symbol operand.
@@ -363,6 +369,7 @@ pub const AARCH64_FILES: &[(&str, &str)] = &[
     ("50-vectors.ll", include_str!("../targets/aarch64/50-vectors.ll")),
     ("60-recipes.ll", include_str!("../targets/aarch64/60-recipes.ll")),
     ("70-abi.ll", include_str!("../targets/aarch64/70-abi.ll")),
+    ("80-asm.ll", include_str!("../targets/aarch64/80-asm.ll")),
 ];
 
 pub fn type_bits(m: &Module, ty: TypeId) -> u32 {
@@ -842,7 +849,11 @@ impl Target {
                 } else {
                     None
                 },
-                matchable: attr(&f.fn_attrs, "nomatch").is_none(),
+                matchable: attr(&f.fn_attrs, "nomatch").is_none() && attr(&f.fn_attrs, "asmonly").is_none(),
+                asm_only: attr(&f.fn_attrs, "asmonly").is_some(),
+                aliases: attr(&f.fn_attrs, "aliases")
+                    .flatten()
+                    .map_or(vec![], |a| a.split(',').map(str::to_string).collect()),
                 inverse: attr(&f.fn_attrs, "inverse").flatten().map(str::to_string),
                 reloc,
                 second_result,

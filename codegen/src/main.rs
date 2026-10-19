@@ -36,6 +36,8 @@ const USAGE: &str = "usage: draconian-llc [options] <file.ll>
                           and exit: encodings, assembly, recipes, and a
                           smoke program compiled under each convention
   --verbose               with --check-target, every message
+  --sample-asm            print assembly with sample lines of every
+                          instruction of the description, and exit
   --stats                 print matching counts and timings to stderr
   --keep-going            report every function that cannot be compiled,
                           and compile the rest";
@@ -45,7 +47,7 @@ fn main() -> ExitCode {
     let (mut input, mut output, mut target_file) = (None, None, None);
     let mut adds: Vec<String> = Vec::new();
     let (mut hex, mut disasm, mut patterns, mut stats) = (false, false, false, false);
-    let (mut check, mut verbose) = (false, false);
+    let (mut check, mut verbose, mut sample) = (false, false, false);
     let mut reserve: Vec<String> = Vec::new();
     let mut filetype = None;
     let mut stop = Stop::Done;
@@ -58,6 +60,7 @@ fn main() -> ExitCode {
             "--disasm" => disasm = true,
             "--patterns" => patterns = true,
             "--check-target" => check = true,
+            "--sample-asm" => sample = true,
             "--verbose" => verbose = true,
             "--stats" => stats = true,
             "--keep-going" => opts.keep_going = true,
@@ -87,6 +90,12 @@ fn main() -> ExitCode {
             None
         }
     };
+    if sample {
+        let Some(target) = load("") else { return ExitCode::FAILURE };
+        let syntax = opts.syntax.unwrap_or(draconian_codegen::abi::Syntax::Elf);
+        print!("{}", draconian_codegen::check::sample_assembly(&target, syntax, 3));
+        return ExitCode::SUCCESS;
+    }
     if check {
         let Some(target) = load("") else { return ExitCode::FAILURE };
         let report = draconian_codegen::check::check(&target);

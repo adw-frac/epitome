@@ -91,6 +91,52 @@ Where a constant's only nonzero 16 bits are above the lowest, the selector
 now writes the shifted `movz` out, so that our encoding and the
 assembler's are the same.
 
+## Instructions for assembly only
+
+Instruction selection needs an entry to say what the instruction does,
+but the assembler and disassembler use only its encoding and template.
+So most of the A64 instruction set is described for them alone:
+`80-asm.ll` has 3,927 `"asmonly"` entries, written by `gen_mrs_asm.py`.
+Selection ignores them, and their bodies are empty.
+
+The generator has two sources:
+
+- **Arm's machine-readable specification:** each instruction's bit layout,
+  and its assembly syntax as a grammar. The grammar is expanded into
+  concrete templates: register families become operands of our classes;
+  vector arrangements, conditions and shift kinds become one entry each; a
+  rule used twice chooses alike. Arm's aliases (`cinc`, `sbfx`, `negs`,
+  `mvn`) are expanded too. They become `"nodecode"` entries, which the
+  assembler reads, and the instruction lists its alias mnemonics in an
+  `"aliases"` attribute.
+- **clang's assembler, on lines we write:** the open-source specification
+  does not say how an operand is held in its fields. For each template, the
+  generator assembles a base line, then lines with one operand varied, and
+  reads which bits change and how. It fits each operand to one of a few
+  forms: the value, shifted (a scaled offset, a PC-relative label), `c - v`
+  or `v + c` (shift encodings), a logical immediate (`bitmask64`), or,
+  for a field of several operands, their sum or difference and a constant
+  (`sbfx`'s `imms = lsb + width - 1`). A line clang encodes another way
+  (`add #-1` as `sub #1`) is discarded. So is a template whose fit fails.
+
+Templates an earlier file already covers are left out, and so are other
+spellings of an encoding already written: the first spelling is the one
+the disassembler writes, and the rest are `"nodecode"`.
+
+With them, the description covers 1,933 of Arm's 4,429 A64 encodings: 294
+of 301 base, 910 of 1,116 FP and SIMD, and 729 of 824 optional
+extensions. SVE and SME are not covered. Not yet: register lists
+(`ld1 {v0.16b, v1.16b}`), floating-point immediates (`fmov d0, #1.0`), and
+system registers beyond the first 48 per instruction (the
+`s3_0_c1_c2_3` form covers the rest).
+
+`draconian-llc --sample-asm` writes sample lines of every instruction:
+13,959 lines, with several operands per instruction. `tests/assemblers.rs`
+assembles them with `draconian-as` and with clang, and the code must be
+the same word for word. On clang's own builds of the test programs,
+`tests/objdump.rs` now decodes about 99% of the words, up from about 90%,
+and all as objdump reads them.
+
 ## Assembly as people write it
 
 Inline assembly is written by people, not by our templates, so the

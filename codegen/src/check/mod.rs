@@ -335,7 +335,15 @@ fn sample(t: &Target, i: usize, k: usize) -> Option<Env> {
     }
     let vals: Vec<Option<i64>> =
         ins.operands.iter().map(|o| if o.kind == Kind::Imm { Some(env[&o.name]) } else { None }).collect();
-    ins.fits(&vals).then_some(env)
+    if !ins.fits(&vals) {
+        return None;
+    }
+    // Registers fit as immediates do: some take only some registers (an
+    // even one, for a pair; v0-v15).
+    let fits_regs = ins.enc.encode(&env).and_then(|w| ins.decode(w)).is_none_or(|back| {
+        ins.operands.iter().filter(|o| matches!(o.kind, Kind::Reg(_))).all(|o| back.get(&o.name) == env.get(&o.name))
+    });
+    fits_regs.then_some(env)
 }
 
 fn mask(bits: u32) -> u64 {
@@ -351,17 +359,14 @@ fn encodings(t: &Target) -> Section {
         if ins.enc.mask == 0 {
             continue; // A recipe, or a pseudo-instruction.
         }
-        let mut fitted = 0;
+        let (mut fitted, mut encoded) = (0, 0);
         for k in 0..IMMS.len() {
             let Some(env) = sample(t, i, k) else { continue };
             fitted += 1;
-            let word = match ins.enc.encode(&env) {
-                Some(w) => w,
-                None => {
-                    s.errors.push(format!("{}: cannot encode {env:?}", ins.name));
-                    break;
-                }
-            };
+            // A register beyond a narrow field (v0-v15 only) does not
+            // encode: another sample may.
+            let Some(word) = ins.enc.encode(&env) else { continue };
+            encoded += 1;
             s.checked += 1;
             // Decoding as itself gives back the operands.
             let Some(back) = ins.decode(word) else {
@@ -409,6 +414,8 @@ fn encodings(t: &Target) -> Section {
         }
         if fitted == 0 {
             s.warnings.push(format!("{}: none of the sample immediates fit, so it was not checked", ins.name));
+        } else if encoded == 0 {
+            s.errors.push(format!("{}: none of its samples encode", ins.name));
         }
     }
     for ((i, j), word) in ambiguous {
@@ -770,4 +777,48 @@ fn smoke(t: &Target) -> Section {
         }
     }
     s
+}
+
+/// Assembly with sample lines of every instruction the description has
+/// (each operand's samples as the encodings check uses, as many lines as
+/// `per` of those that encode), for comparing assemblers. A branch goes to
+/// itself: the reach of some is short.
+pub fn sample_assembly(t: &Target, syntax: Syntax, per: usize) -> String {
+    let abi = t.abis.iter().find(|a| a.syntax == syntax).or(t.abis.first());
+    let label = match syntax {
+        Syntax::Elf => ".Lhere",
+        Syntax::MachO => "Lhere",
+    };
+    let mut out = "\t.text\n\t.p2align 2\n".to_string();
+    let mut n = 0;
+    for (i, ins) in t.instrs.iter().enumerate() {
+        if ins.enc.mask == 0 || ins.asm.is_empty() || ins.operands.iter().any(|o| o.kind == Kind::Sym) {
+            continue;
+        }
+        let mut written = 0;
+        for k in 0..IMMS.len() {
+            if written == per {
+                break;
+            }
+            let Some(env) = sample(t, i, k) else { continue };
+            if ins.enc.encode(&env).is_none() {
+                continue;
+            }
+            n += 1;
+            let here = format!("{label}{n}");
+            let line = mir::fill_template(t, abi, i, |k| {
+                let o = &ins.operands[k];
+                let v = env[&o.name];
+                match o.kind {
+                    Kind::Reg(c) => Operand::Reg(Reg::P(t.machine.phys(c, v))),
+                    Kind::Label => Operand::Text(here.clone()),
+                    Kind::Sym => Operand::Sym("sym".into()),
+                    Kind::Imm | Kind::Cond => Operand::Imm(v),
+                }
+            });
+            out.push_str(&format!("{here}:\t{line}\t{} {}\n", t.machine.asm_comment, ins.name));
+            written += 1;
+        }
+    }
+    out
 }

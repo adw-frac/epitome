@@ -87,7 +87,16 @@ fn compare(t: &Target, obj: &Path) -> Result<(usize, usize), String> {
             continue;
         };
         let other = plain_mnemonic(sys_mn);
-        if mine != other && !ALIASES.contains(&(mine, other)) && !ALIASES.contains(&(other, mine)) {
+        // An alias Arm's specification gives for the instruction we read.
+        let word = img
+            .sections
+            .iter()
+            .find(|s| s.code && addr >= s.addr && addr + 4 <= s.addr + s.data.len() as u64)
+            .map(|s| u32::from_le_bytes(s.data[(addr - s.addr) as usize..][..4].try_into().unwrap()));
+        let arm_alias = word
+            .and_then(|w| draconian_codegen::mir::decode(t, w))
+            .is_some_and(|(i, _)| t.instrs[i].aliases.iter().any(|a| a == other));
+        if mine != other && !arm_alias && !ALIASES.contains(&(mine, other)) && !ALIASES.contains(&(other, mine)) {
             wrong.push(format!("{addr:#x}: we read `{text}`, objdump `{sys_mn}`"));
         }
     }

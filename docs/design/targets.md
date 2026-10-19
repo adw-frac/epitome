@@ -374,6 +374,20 @@ with other tools, or running code, can show those. `tests/riscv.rs` and
 descriptions, and checks that the checks find the mistakes they are for:
 it breaks the RISC-V description in six ways, one at a time.
 
+## Descriptions for assembly only
+
+An entry can be marked `"asmonly"`. It has an encoding and a template, and
+an empty body. The assembler reads it and the disassembler writes it, but
+selection never uses it. That makes it cheap to cover a whole instruction
+set from a machine-readable source, and to check the entries against
+another assembler rather than write their semantics. AArch64's `80-asm.ll`
+is made this way ([objects.md](objects.md)).
+
+The checks apply to these entries as to any other: encodings, assembly
+round trips, and ambiguity. A register the encoding cannot hold (an odd
+one, for a pair; `v16` in a 4-bit field) does not fit, as an immediate out
+of range does not.
+
 ## RISC-V RV64
 
 `targets/riscv64/` is written by `gen_riscv64.py`, from the RISC-V

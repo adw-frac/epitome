@@ -18,6 +18,10 @@
 ;   50-vectors.ll   vectors (Advanced SIMD), written by gen_vectors.py
 ;   60-recipes.ll   recipes: IR with no single instruction
 ;   70-abi.ll       calling conventions and platforms
+;   80-asm.ll       for assembly and disassembly only: the rest of the A64
+;                   base, floating-point and Advanced SIMD instructions,
+;                   written by gen_mrs_asm.py from Arm's machine-readable
+;                   specification, with encodings checked against clang
 ;
 ; The order matters where entries compete: of two equal patterns,
 ; constants or decodings, the first wins.
@@ -57,6 +61,9 @@
 ;                         see docs/design/targets.md
 ;   "feature"="neon"      used only when this feature is on (comma-separated
 ;                         if several are needed)
+;   "asmonly"             for the assembler and disassembler only; not
+;                         selected, and its body says nothing
+;   "aliases"="cinc,cset" other mnemonics Arm writes it with
 ;   "result2"             the second field of the result is a second register
 ;                         result, the operand called d2 (a load pair's)
 ;   "reloc"="adrp"        how an object file fixes up its "sym" operand, by

@@ -333,6 +333,18 @@ pub fn invert(e: &Expr, target: i64) -> Option<(String, i64)> {
     }
 }
 
+/// `e` with the names `env` knows put in as numbers.
+fn substitute(e: &Expr, env: &Env) -> Expr {
+    match e {
+        Expr::Var(v) => env.get(v).map_or_else(|| e.clone(), |&k| Expr::Int(k)),
+        Expr::Int(_) => e.clone(),
+        Expr::Neg(a) => Expr::Neg(Box::new(substitute(a, env))),
+        Expr::Bitmask(w, a) => Expr::Bitmask(*w, Box::new(substitute(a, env))),
+        Expr::Log2(a) => Expr::Log2(Box::new(substitute(a, env))),
+        Expr::Bin(op, a, b) => Expr::Bin(*op, Box::new(substitute(a, env)), Box::new(substitute(b, env))),
+    }
+}
+
 fn names_in(e: &Expr, out: &mut Vec<String>) {
     match e {
         Expr::Var(v) => {
@@ -386,6 +398,7 @@ impl Encoding {
             return None;
         }
         let mut env = Env::new();
+        let mut unsolved: Vec<&String> = Vec::new();
         for name in operands {
             // An operand in several fields that are each a slice of its
             // bits (`x>>12`, `(x>>5)&63`, `x&31`): the slices put back. A
@@ -430,7 +443,10 @@ impl Encoding {
                     break;
                 }
             }
-            let mut v = best?;
+            let Some(mut v) = best else {
+                unsolved.push(name);
+                continue;
+            };
             // A value split over fields, `name>>k` and `name&m` (adrp's
             // immhi and immlo), or `name/k` and `name%k`: the low bits go
             // back on.
@@ -446,6 +462,30 @@ impl Encoding {
                 }
             }
             env.insert(name.clone(), v);
+        }
+        // Operands only in fields with others (sbfx's width, in `imms =
+        // lsb + width - 1`): solved once the others are known.
+        while !unsolved.is_empty() {
+            let before = unsolved.len();
+            unsolved.retain(|name| {
+                let solved = self.fields.iter().find_map(|f| {
+                    if !f.names.contains(name) || !f.names.iter().all(|n| n == *name || env.contains_key(n)) {
+                        return None;
+                    }
+                    let (n, v) = invert(&substitute(&f.expr, &env), self.field_value(f, word))?;
+                    (n == **name).then_some(v)
+                });
+                match solved {
+                    Some(v) => {
+                        env.insert((*name).clone(), v);
+                        false
+                    }
+                    None => true,
+                }
+            });
+            if unsolved.len() == before {
+                return None;
+            }
         }
         (self.encode(&env)? == word).then_some(env)
     }
