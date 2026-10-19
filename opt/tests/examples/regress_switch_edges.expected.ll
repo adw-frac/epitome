@@ -28,7 +28,7 @@ done:                                             ; preds = %entry
 }
 
 define i32 @main() {
-  %v = call i32 @f(i32 100)
-  %1 = call i32 (ptr, ...) @printf(ptr @fmt, i32 %v)
+  %v = tail call i32 @f(i32 100)
+  %1 = tail call i32 (ptr, ...) @printf(ptr @fmt, i32 %v)
   ret i32 0
 }

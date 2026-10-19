@@ -14,8 +14,9 @@ const USAGE: &str = "usage: draconian-opt [options] <file.ll>
   -j <n>                  threads (default: one per core)
   -o <file>               write the result here instead of stdout
   --passes=<list>         which passes to run, from sroa, mem2reg, inline,
-                          recursion, combine, simplifycfg, loops, cse and
-                          memory (the combiner's memory rules),
+                          recursion, combine, simplifycfg, loops, cse,
+                          memory (the combiner's memory rules) and
+                          tailmark (marking calls tail),
                           separated by commas (default: all)
   --no-inline             do not inline
   --no-combine            do not run the combiner
@@ -70,7 +71,7 @@ fn main() -> ExitCode {
             s if s.starts_with("--passes=") => {
                 let list: Vec<&str> = s["--passes=".len()..].split(',').filter(|p| !p.is_empty()).collect();
                 if let Some(bad) = list.iter().find(|p| {
-                    !["sroa", "mem2reg", "inline", "recursion", "combine", "simplifycfg", "loops", "cse", "memory"]
+                    !["sroa", "mem2reg", "inline", "recursion", "combine", "simplifycfg", "loops", "cse", "memory", "tailmark"]
                         .contains(p)
                 }) {
                     return usage(&format!("unknown pass {bad}"));
@@ -79,6 +80,7 @@ fn main() -> ExitCode {
                 opts.combine = list.contains(&"combine");
                 opts.cse = list.contains(&"cse");
                 opts.memory = list.contains(&"memory");
+                opts.tailmark = list.contains(&"tailmark");
                 opts.mem2reg = list.contains(&"mem2reg");
                 opts.sroa = list.contains(&"sroa");
                 opts.simplifycfg = list.contains(&"simplifycfg");
@@ -266,6 +268,9 @@ fn main() -> ExitCode {
         }
         if report.licm.hoisted > 0 {
             eprintln!("; licm: {} instructions moved out of loops ({} loads)", report.licm.hoisted, report.licm.loads);
+        }
+        if report.tail_marked > 0 {
+            eprintln!("; tailmark: {} calls marked tail", report.tail_marked);
         }
         if report.memcpyopt.memsets > 0 {
             eprintln!("; memcpyopt: {} stores made {} memsets", report.memcpyopt.stores, report.memcpyopt.memsets);

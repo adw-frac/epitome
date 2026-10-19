@@ -111,7 +111,10 @@ instruction in program order. For each it:
    repeated variables agree, its condition holds, its replacement
    type-checks, and it makes no more new instructions than the match
    leaves unused;
-5. otherwise reassociates it, if it is the top of a chain (see below).
+5. otherwise tries the built-in steps about bits: known bits, funnel
+   shifts, `extractvalue` of `insertvalue`, and demanded bits (see below);
+6. otherwise collects it as a linear combination, or reassociates it, if
+   it is the top of a sum or a chain (see below).
 
 ### Reassociation
 
@@ -143,6 +146,69 @@ as `nsw` are dropped, since they were only true of the order written.
 **Open:** a chain is taken at most 256 leaves deep from its top. Nodes
 below that are left in the order written: they are part of a longer chain,
 so they leave the work to its top.
+
+### Linear combinations
+
+A sum is often written so that a value appears in it more than once:
+`f(x, x + 1, x + 2)` inlined into `a - b + c` gives `x - (x + 1) + (x +
+2)`. At the top of an `add` or `sub`, the step walks down through operands
+that are `add`, `sub`, or `shl` or `mul` by a constant, with no other use,
+giving each leaf a coefficient: `+1`, `-1` under a `sub`, times `2^k` under
+a `shl`. A leaf's coefficients are added modulo the width, and constants
+add up into one. The sum is rebuilt only when that takes fewer
+instructions than it did: the positive terms in rank order, then the
+negative ones subtracted, then the constant. A term whose coefficient is
+not 1 is a `shl` (a power of two) or a `mul`. With no positive term the
+constant comes first, `sub K, x`.
+
+`tests/examples/linear.ll` has examples: `(x + 1) - (x + 3) + x - 2 * (x +
+7)` becomes `-16 - x`. Since a rebuild must be smaller, the step ends, and
+reassociation still sorts what it leaves. `tests/linear.rs` checks the two
+steps against an evaluator: 400 random functions of `add`, `sub`, `mul` and
+`shl` at 8, 32 and 64 bits, each on 144 pairs of inputs.
+
+### Bits
+
+SROA packs a small struct into an integer and takes it apart again with
+shifts, masks and truncations (see [sroa](sroa.md)). After inlining, most of
+that packing is undone by four steps. They work from `ones`, the bits of a
+value that may be set: a constant's own bits, through `and`, `or`, `xor`,
+shifts by constants and `zext`, and every bit otherwise. The search stops six
+levels down.
+
+- **Known bits.** An `and` with a constant that keeps every bit that may be
+  set is its operand. A shift left and back right by the same amount (or
+  right and back left) that loses none of them is the value shifted.
+  `zext (trunc y)` is `y` when `y` fits in the narrow type. A value with no
+  bit that may be set is 0.
+- **Demanded bits.** Some instructions read only some bits of their
+  operand: `trunc` the low ones, `lshr` and `ashr` by a constant the high
+  ones, `shl` by a constant the low ones, and `and` with a constant those
+  set. Such an instruction may read them from a simpler value, already
+  made, that has the same bits there. Through an `or`, one side can go if
+  it cannot set any of those bits. Through an `and` with a constant, the
+  constant must keep them all. Through `zext (trunc y)`, only the narrow
+  bits may be wanted. The operand is changed in place, and the
+  instruction's value stays the same. The low half of
+  `(x & 0xffffffff00000000) | zext y` is read from `y`.
+- **Funnel shifts.** `(x << a) | (y >> (w - a))` is `llvm.fshl(x, y, a)`,
+  a rotation when `x` and `y` are the same. Code generation selects it as
+  one instruction (`extr`, `ror`) where there is one, and otherwise writes
+  it back as the two shifts and the `or`. The pipeline declares
+  `llvm.fshl` for 8, 16, 32 and 64 bits before its parallel phase, and
+  removes any declaration nothing uses.
+- **`extractvalue` of `insertvalue`.** It is the inserted element, if
+  inserted at the same place. Below insertions at other places, the
+  extraction reads the aggregate underneath instead.
+
+A float constant's `bitcast` to an integer of its width also folds, to its
+raw bits.
+
+`tests/linear.rs` checks these steps against an evaluator, as it does
+linear combinations: 500 random functions on `i64` of masks, `or`, `xor`,
+shifts, `add` and `trunc`/`zext` pairs, each on 81 pairs of inputs. Weakening
+a condition of any of the three steps (the `and` in demanded bits, the
+widths of a funnel shift, the mask in known bits) makes it fail.
 
 ### Loads from constant globals
 

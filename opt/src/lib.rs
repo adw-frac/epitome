@@ -48,3 +48,4 @@ pub mod simplifycfg;
 pub mod sroa;
 pub mod ssa;
 pub mod table;
+pub mod tailmark;

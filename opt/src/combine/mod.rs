@@ -454,6 +454,431 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
         Some(acc)
     }
 
+    /// Linear combinations: an `add` or `sub` over operands that are
+    /// `add`, `sub`, or `shl` or `mul` by a constant, with no other use, is
+    /// a sum of its leaves times constants, plus a constant. Each leaf's
+    /// coefficients are added up (modulo the width), and the sum is rebuilt
+    /// when that takes fewer instructions than it did: `(x + 1) - (x + 3)`
+    /// is `-2`, and `x - (x + 1) + x` is `x - 1`. Positive terms come first,
+    /// sorted by `rank`, then the negative ones, then the constant. Flags
+    /// are dropped, as for `reassociate`.
+    fn linear(&mut self, i: InstId) -> Option<Value> {
+        let Op::Binary { op: BinOp::Add | BinOp::Sub, .. } = self.f.insts[i.index()].op else { return None };
+        let r = self.f.insts[i.index()].result?;
+        let ty = self.f.locals[r.index()].ty;
+        let bits = eval::int_bits(self.sh.types(), ty).filter(|&b| b <= 64)?;
+        let m = eval::mask(bits);
+        // An operand that is part of the sum: (op, lhs, rhs), with the
+        // constant of a shift or multiply.
+        let node = |me: &Self, d: InstId| -> Option<(BinOp, Value, Value, u64)> {
+            let Op::Binary { op, lhs, rhs, .. } = me.f.insts[d.index()].op else { return None };
+            match op {
+                BinOp::Add | BinOp::Sub => Some((op, lhs, rhs, 0)),
+                BinOp::Shl | BinOp::Mul => {
+                    let Value::Const(c) = rhs else { return None };
+                    let k = me.int(c)?.value;
+                    (op == BinOp::Mul || k < bits as u64).then_some((op, lhs, rhs, k))
+                }
+                _ => None,
+            }
+        };
+        let inner = |me: &Self, v: Value| -> Option<(BinOp, Value, Value, u64)> {
+            let Value::Local(l) = v else { return None };
+            let LocalDef::Inst(d) = me.f.locals[l.index()].def else { return None };
+            if me.erased[d.index()] || me.uses[l.index()].len() != 1 || me.f.locals[l.index()].ty != ty {
+                return None;
+            }
+            node(me, d)
+        };
+        // Part of a larger sum: its top does the work.
+        if let [u] = self.uses[r.index()][..]
+            && let Some(ur) = self.f.insts[u.index()].result
+            && self.f.locals[ur.index()].ty == ty
+            && node(self, u).is_some_and(|(o, a, b, _)| {
+                a == Value::Local(r) || (b == Value::Local(r) && matches!(o, BinOp::Add | BinOp::Sub))
+            })
+        {
+            return None;
+        }
+        let mut terms: Vec<(Value, u64)> = Vec::new();
+        let mut index: HashMap<Value, usize> = HashMap::default();
+        let mut konst = 0u64;
+        let mut interior = 0usize;
+        let mut stack = vec![(Value::Local(r), 1u64)];
+        while let Some((v, c)) = stack.pop() {
+            if let Value::Const(k) = v
+                && let Some(k) = self.int(k)
+            {
+                konst = konst.wrapping_add(c.wrapping_mul(k.value)) & m;
+                continue;
+            }
+            let here = if v == Value::Local(r) {
+                node(self, i)
+            } else if interior < MAX_CHAIN {
+                inner(self, v)
+            } else {
+                None
+            };
+            match here {
+                Some((BinOp::Add, a, b, _)) => {
+                    stack.push((b, c));
+                    stack.push((a, c));
+                }
+                Some((BinOp::Sub, a, b, _)) => {
+                    stack.push((b, c.wrapping_neg() & m));
+                    stack.push((a, c));
+                }
+                Some((BinOp::Shl, a, _, k)) => stack.push((a, (c << k) & m)),
+                Some((_, a, _, k)) => stack.push((a, c.wrapping_mul(k) & m)),
+                None => {
+                    let at = *index.entry(v).or_insert_with(|| {
+                        terms.push((v, 0));
+                        terms.len() - 1
+                    });
+                    terms[at].1 = terms[at].1.wrapping_add(c) & m;
+                    continue;
+                }
+            }
+            interior += 1;
+        }
+        terms.retain(|t| t.1 != 0);
+        terms.sort_by_key(|t| self.rank(t.0));
+        // Positive and negative terms, by their coefficients' signs.
+        let (pos, neg): (Vec<(Value, u64)>, Vec<(Value, u64)>) =
+            terms.into_iter().partition(|t| eval::sext(t.1, bits) > 0 || t.1 == 1);
+        let neg: Vec<(Value, u64)> = neg.into_iter().map(|(v, c)| (v, c.wrapping_neg() & m)).collect();
+        let scaled = pos.iter().chain(&neg).filter(|t| t.1 != 1).count();
+        let cost = scaled + pos.len().saturating_sub(1) + neg.len() + (konst != 0 && !pos.is_empty()) as usize;
+        if cost >= interior || !self.allowed("(linear)", i) {
+            return None;
+        }
+        let mut last = None;
+        let mut emit = |me: &mut Self, op: BinOp, lhs: Value, rhs: Value| -> Value {
+            let new = me.f.add_inst(
+                Op::Binary { op, flags: IntFlags::NONE, fmf: FastMath::default(), lhs, rhs },
+                Some((None, ty)),
+            );
+            me.grow();
+            me.block_of[new.index()] = me.block_of[i.index()];
+            me.before.entry(i).or_default().push(new);
+            me.add_uses(new);
+            me.push(new);
+            last = Some(new);
+            me.f.result(new)
+        };
+        let mut term = |me: &mut Self, (v, c): (Value, u64)| -> Option<Value> {
+            if c == 1 {
+                return Some(v);
+            }
+            Some(if c.is_power_of_two() {
+                let k = me.int_value(ty, c.trailing_zeros() as u64)?;
+                emit(me, BinOp::Shl, v, k)
+            } else {
+                let k = me.int_value(ty, c)?;
+                emit(me, BinOp::Mul, v, k)
+            })
+        };
+        let pos: Vec<Value> = pos.into_iter().map(|t| term(self, t)).collect::<Option<_>>()?;
+        let neg: Vec<Value> = neg.into_iter().map(|t| term(self, t)).collect::<Option<_>>()?;
+        drop(term);
+        let k = self.int_value(ty, konst)?;
+        // With no positive term, the constant (perhaps 0) comes first.
+        let mut acc = pos.first().copied().unwrap_or(k);
+        for &p in pos.iter().skip(1) {
+            acc = emit(self, BinOp::Add, acc, p);
+        }
+        for &n in &neg {
+            acc = emit(self, BinOp::Sub, acc, n);
+        }
+        if konst != 0 && !pos.is_empty() {
+            acc = emit(self, BinOp::Add, acc, k);
+        }
+        drop(emit);
+        if let Some(last) = last {
+            let name = self.f.locals[r.index()].name.take();
+            let new = self.f.insts[last.index()].result.unwrap();
+            self.f.locals[new.index()].name = name;
+        }
+        Some(acc)
+    }
+
+    /// Demanded bits: an instruction that reads only some of its operand's
+    /// bits (`trunc` the low ones, `lshr` by a constant the high ones, `shl`
+    /// by a constant the low ones, `and` with a constant those set) may read
+    /// them from a simpler value that has the same bits there. Through an
+    /// `or` one side can go if it cannot set any of those bits, and through
+    /// an `and` with a constant if the constant keeps them all. This takes
+    /// apart the integers SROA packs small structs into: the low half of
+    /// `(x & 0xffffffff00000000) | zext y` is `y`'s. The operand is changed
+    /// in place; the instruction's value is the same.
+    fn demanded(&mut self, i: InstId) -> bool {
+        let (operand, demand) = match &self.f.insts[i.index()].op {
+            Op::Cast { op: CastOp::Trunc, value, .. } => {
+                let Some(to) = self.f.insts[i.index()].result else { return false };
+                let Some(w) = eval::int_bits(self.sh.types(), self.f.locals[to.index()].ty) else { return false };
+                (*value, eval::mask(w))
+            }
+            Op::Binary { op: op @ (BinOp::LShr | BinOp::AShr | BinOp::Shl | BinOp::And), lhs, rhs: Value::Const(c), .. } => {
+                let Some(k) = self.int(*c) else { return false };
+                let m = eval::mask(k.bits);
+                let d = match op {
+                    BinOp::And => k.value,
+                    _ if k.value >= k.bits as u64 => return false,
+                    BinOp::LShr | BinOp::AShr => m & !eval::mask(k.value as u32),
+                    _ => eval::mask(k.bits - k.value as u32),
+                };
+                (*lhs, d)
+            }
+            _ => return false,
+        };
+        let Some(bits) = self.value_type(operand).and_then(|t| eval::int_bits(self.sh.types(), t)).filter(|&b| b <= 64)
+        else {
+            return false;
+        };
+        let demand = demand & eval::mask(bits);
+        let Some(w) = self.simpler_for(operand, demand, bits, 8) else { return false };
+        if w == operand || !self.allowed("(demanded bits)", i) {
+            return false;
+        }
+        self.set_operand(i, w);
+        true
+    }
+
+    /// Changes the first operand of `i` (the value of a cast, the left of
+    /// a binary operation, the aggregate of an `extractvalue`), keeping the
+    /// use lists right, and visits it again.
+    fn set_operand(&mut self, i: InstId, w: Value) {
+        let old = match &mut self.f.insts[i.index()].op {
+            Op::Cast { value: x, .. } | Op::Binary { lhs: x, .. } | Op::ExtractValue { aggregate: x, .. } => {
+                std::mem::replace(x, w)
+            }
+            _ => return,
+        };
+        if let Value::Local(l) = old {
+            let list = &mut self.uses[l.index()];
+            if let Some(k) = list.iter().position(|&x| x == i) {
+                list.swap_remove(k);
+            }
+            self.push_def(old);
+        }
+        if let Value::Local(l) = w {
+            self.uses[l.index()].push(i);
+        }
+        self.push(i);
+    }
+
+    /// Folds from the bits that may be set (`ones`): an `and` with a
+    /// constant that keeps all of them is its operand; a shift left and back
+    /// right (or right and back left) by the same amount that loses none of
+    /// them is the value shifted; and a value with no bit that may be set is
+    /// 0.
+    fn known_bits(&self, i: InstId) -> Option<Value> {
+        let r = self.f.insts[i.index()].result?;
+        let ty = self.f.locals[r.index()].ty;
+        let bits = eval::int_bits(self.sh.types(), ty).filter(|&b| b <= 64)?;
+        if !matches!(self.sh.types().get(ty), Type::Int(_)) {
+            return None;
+        }
+        let m = eval::mask(bits);
+        let shifted = |me: &Self, v: Value, want: BinOp, k: u64| -> Option<Value> {
+            let Value::Local(l) = v else { return None };
+            let LocalDef::Inst(d) = me.f.locals[l.index()].def else { return None };
+            let Op::Binary { op, lhs, rhs: Value::Const(c), .. } = me.f.insts[d.index()].op else { return None };
+            (op == want && me.int(c)?.value == k && !me.erased[d.index()]).then_some(lhs)
+        };
+        let v = match self.f.insts[i.index()].op {
+            Op::Binary { op: BinOp::And, lhs, rhs: Value::Const(c), .. } => {
+                let k = self.int(c)?.value;
+                (self.ones(lhs, bits, 6) & !k & m == 0).then_some(lhs)
+            }
+            Op::Binary { op: BinOp::LShr, lhs, rhs: Value::Const(c), .. } => {
+                let k = self.int(c)?.value;
+                if k >= bits as u64 {
+                    return None;
+                }
+                shifted(self, lhs, BinOp::Shl, k).filter(|&x| self.ones(x, bits, 6) & !eval::mask(bits - k as u32) == 0)
+            }
+            Op::Binary { op: BinOp::Shl, lhs, rhs: Value::Const(c), .. } => {
+                let k = self.int(c)?.value;
+                if k >= bits as u64 {
+                    return None;
+                }
+                shifted(self, lhs, BinOp::LShr, k).filter(|&x| self.ones(x, bits, 6) & eval::mask(k as u32) == 0)
+            }
+            _ => None,
+        };
+        if v.is_some() {
+            return v;
+        }
+        // zext (trunc y) is y, if y fits in the narrow type.
+        if let Op::Cast { op: CastOp::ZExt, value, .. } = self.f.insts[i.index()].op
+            && let Some((y, narrow)) = self.trunc_of(value)
+            && self.value_type(y) == Some(ty)
+            && self.ones(y, bits, 6) & !eval::mask(narrow) == 0
+        {
+            return Some(y);
+        }
+        match self.f.insts[i.index()].op {
+            Op::Binary { op: BinOp::And | BinOp::Or | BinOp::Xor | BinOp::Shl | BinOp::LShr, .. }
+            | Op::Cast { op: CastOp::ZExt, .. }
+                if self.ones(Value::Local(r), bits, 6) == 0 =>
+            {
+                self.int_value(ty, 0)
+            }
+            _ => None,
+        }
+    }
+
+    /// A funnel shift written out: `(x << a) | (y >> (w - a))` is
+    /// `llvm.fshl(x, y, a)`, a rotation when x and y are the same, which
+    /// code generation selects as one instruction where there is one, and
+    /// writes back as the two shifts where there is not.
+    fn funnel(&mut self, i: InstId) -> Option<Value> {
+        let Op::Binary { op: BinOp::Or, lhs, rhs, .. } = self.f.insts[i.index()].op else { return None };
+        let r = self.f.insts[i.index()].result?;
+        let ty = self.f.locals[r.index()].ty;
+        let Type::Int(w) = *self.sh.types().get(ty) else { return None };
+        let k = [8, 16, 32, 64].iter().position(|&b| b == w)?;
+        let g = self.sh.intrinsics.fshl[k]?;
+        let shift = |me: &Self, v: Value, want: BinOp| -> Option<(Value, u64)> {
+            let Value::Local(l) = v else { return None };
+            let LocalDef::Inst(d) = me.f.locals[l.index()].def else { return None };
+            let Op::Binary { op, lhs, rhs: Value::Const(c), .. } = me.f.insts[d.index()].op else { return None };
+            (op == want && !me.erased[d.index()]).then_some(())?;
+            Some((lhs, me.int(c)?.value))
+        };
+        let (hi, lo) = match (shift(self, lhs, BinOp::Shl), shift(self, rhs, BinOp::LShr)) {
+            (Some(h), Some(l)) => (h, l),
+            _ => (shift(self, rhs, BinOp::Shl)?, shift(self, lhs, BinOp::LShr)?),
+        };
+        if hi.1 == 0 || hi.1 >= w as u64 || hi.1 + lo.1 != w as u64 || !self.allowed("(funnel shift)", i) {
+            return None;
+        }
+        let amount = self.int_value(ty, hi.1)?;
+        let fn_ty = self.sh.published(g)?.ty;
+        let call = crate::inline::plain_call(fn_ty, self.sh.global_ref(g), vec![hi.0, lo.0, amount]);
+        let new = self.f.add_inst(Op::Call(Box::new(call)), Some((None, ty)));
+        self.grow();
+        self.block_of[new.index()] = self.block_of[i.index()];
+        self.before.entry(i).or_default().push(new);
+        self.add_uses(new);
+        self.push(new);
+        let name = self.f.locals[r.index()].name.take();
+        let v = self.f.insts[new.index()].result.unwrap();
+        self.f.locals[v.index()].name = name;
+        Some(Value::Local(v))
+    }
+
+    /// `extractvalue` from an `insertvalue`: the element inserted at the
+    /// same place, or (`Err`) the aggregate below a chain of insertions at
+    /// other places, to extract from instead.
+    fn extract_insert(&self, i: InstId) -> Option<Result<Value, Value>> {
+        let Op::ExtractValue { aggregate, ref indices } = self.f.insts[i.index()].op else { return None };
+        let mut agg = aggregate;
+        for _ in 0..64 {
+            let Value::Local(l) = agg else { break };
+            let LocalDef::Inst(d) = self.f.locals[l.index()].def else { break };
+            if self.erased[d.index()] {
+                break;
+            }
+            let Op::InsertValue { aggregate: below, element, indices: ref at } = self.f.insts[d.index()].op else {
+                break;
+            };
+            if at == indices {
+                return Some(Ok(element));
+            }
+            // One a prefix of the other: the insertion overlaps.
+            let n = at.len().min(indices.len());
+            if at[..n] == indices[..n] {
+                break;
+            }
+            agg = below;
+        }
+        (agg != aggregate).then_some(Err(agg))
+    }
+
+    /// A value, other than `v` and already made, with the same bits as `v`
+    /// where `demand` has them set.
+    fn simpler_for(&self, v: Value, demand: u64, bits: u32, depth: u32) -> Option<Value> {
+        let Value::Local(l) = v else { return None };
+        let LocalDef::Inst(d) = self.f.locals[l.index()].def else { return None };
+        if depth == 0 || self.erased[d.index()] {
+            return None;
+        }
+        let deeper = |w: Value| Some(self.simpler_for(w, demand, bits, depth - 1).unwrap_or(w));
+        match self.f.insts[d.index()].op {
+            Op::Binary { op: BinOp::Or, lhs, rhs, .. } => {
+                if self.ones(lhs, bits, 6) & demand == 0 {
+                    deeper(rhs)
+                } else if self.ones(rhs, bits, 6) & demand == 0 {
+                    deeper(lhs)
+                } else {
+                    None
+                }
+            }
+            Op::Binary { op: BinOp::And, lhs, rhs: Value::Const(c), .. } => {
+                let k = self.int(c)?;
+                if k.value & demand == demand { deeper(lhs) } else { None }
+            }
+            // zext (trunc y), where only the narrow bits are wanted: y.
+            Op::Cast { op: CastOp::ZExt, value, .. } => {
+                let (y, narrow) = self.trunc_of(value)?;
+                (self.value_type(y) == self.value_type(v) && demand & !eval::mask(narrow) == 0).then(|| deeper(y))?
+            }
+            _ => None,
+        }
+    }
+
+    /// `v` as `trunc y`: y and the narrow width.
+    fn trunc_of(&self, v: Value) -> Option<(Value, u32)> {
+        let Value::Local(l) = v else { return None };
+        let LocalDef::Inst(d) = self.f.locals[l.index()].def else { return None };
+        let Op::Cast { op: CastOp::Trunc, value, .. } = self.f.insts[d.index()].op else { return None };
+        if self.erased[d.index()] {
+            return None;
+        }
+        Some((value, eval::int_bits(self.sh.types(), self.f.locals[l.index()].ty)?))
+    }
+
+    /// The bits of `v` that may be set (`bits` wide): a mask the value is
+    /// known to fit in.
+    fn ones(&self, v: Value, bits: u32, depth: u32) -> u64 {
+        let all = eval::mask(bits);
+        match v {
+            Value::Const(c) => match &self.sh.consts().get(c).kind {
+                ConstKind::Int(_) | ConstKind::Zero => self.int(c).map_or(all, |k| k.value),
+                _ => all,
+            },
+            Value::Local(l) if depth > 0 => {
+                let LocalDef::Inst(d) = self.f.locals[l.index()].def else { return all };
+                match self.f.insts[d.index()].op {
+                    Op::Binary { op: BinOp::And, lhs, rhs, .. } => {
+                        self.ones(lhs, bits, depth - 1) & self.ones(rhs, bits, depth - 1)
+                    }
+                    Op::Binary { op: BinOp::Or | BinOp::Xor, lhs, rhs, .. } => {
+                        self.ones(lhs, bits, depth - 1) | self.ones(rhs, bits, depth - 1)
+                    }
+                    Op::Binary { op: BinOp::Shl, lhs, rhs: Value::Const(c), .. } => match self.int(c) {
+                        Some(k) if k.value < bits as u64 => (self.ones(lhs, bits, depth - 1) << k.value) & all,
+                        _ => all,
+                    },
+                    Op::Binary { op: BinOp::LShr, lhs, rhs: Value::Const(c), .. } => match self.int(c) {
+                        Some(k) if k.value < bits as u64 => self.ones(lhs, bits, depth - 1) >> k.value,
+                        _ => all,
+                    },
+                    Op::Cast { op: CastOp::ZExt, value, .. } => {
+                        match self.value_type(value).and_then(|t| eval::int_bits(self.sh.types(), t)) {
+                            Some(w) if w < bits => self.ones(value, w, depth - 1),
+                            _ => all,
+                        }
+                    }
+                    _ => all,
+                }
+            }
+            _ => all,
+        }
+    }
+
     /// An earlier load of the same address and type, before this one on
     /// every path, under the same write (both loads' clobbers are the same
     /// write, found exactly): nothing between them can have changed the
@@ -657,6 +1082,40 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
             && let Some((name, v)) = self.apply_rules(i)
         {
             self.stats.hit(&name);
+            self.replace(i, v);
+            return;
+        }
+        if let Some(v) = self.known_bits(i)
+            && self.allowed("(known bits)", i)
+        {
+            self.stats.hit("(known bits)");
+            self.replace(i, v);
+            return;
+        }
+        if let Some(v) = self.funnel(i) {
+            self.stats.hit("(funnel shift)");
+            self.replace(i, v);
+            return;
+        }
+        match self.extract_insert(i) {
+            Some(Ok(v)) if self.allowed("(extract of insert)", i) => {
+                self.stats.hit("(extract of insert)");
+                self.replace(i, v);
+                return;
+            }
+            Some(Err(agg)) if self.allowed("(extract below inserts)", i) => {
+                self.stats.hit("(extract below inserts)");
+                self.set_operand(i, agg);
+                return;
+            }
+            _ => {}
+        }
+        if self.demanded(i) {
+            self.stats.hit("(demanded bits)");
+            return;
+        }
+        if let Some(v) = self.linear(i) {
+            self.stats.hit("(linear)");
             self.replace(i, v);
             return;
         }
@@ -965,6 +1424,15 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
                     return Some(sh.poison(ty));
                 }
                 let Value::Const(c) = value else { return None };
+                // A float's bits as an integer of its width: the raw bits.
+                if op == CastOp::BitCast
+                    && let ConstKind::Float(raw) = sh.consts().get(c).kind
+                    && let Some(w) = eval::int_bits(sh.types(), ty).filter(|&w| w <= 64)
+                    && matches!(sh.types().get(ty), Type::Int(_))
+                    && FloatKind::of(sh.types().get(sh.consts().get(c).ty)).is_some_and(|k| k.bits() == w)
+                {
+                    return self.int_value(ty, raw as u64);
+                }
                 let x = self.int(c)?;
                 let to = eval::int_bits(sh.types(), ty)?;
                 match eval::fold_cast(op, flags, x.value, x.bits, to)? {

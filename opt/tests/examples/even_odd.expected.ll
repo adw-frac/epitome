@@ -33,7 +33,7 @@ yes:                                              ; preds = %recur.i, %entry.rec
 
 define i32 @main() {
 entry:
-  %e = call i1 @is_even(i32 77)
+  %e = tail call i1 @is_even(i32 77)
   %x = zext i1 %e to i32
   ret i32 %x
 }

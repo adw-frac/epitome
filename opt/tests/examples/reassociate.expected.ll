@@ -1,4 +1,4 @@
-; @f: combine: (dead) x5, (reassociated) x2, add_add_const x1
+; @f: combine: (dead) x4, (linear) x1, (reassociated) x1
 ; @f: cse: 3 merged, 0 loads reused, 0 stores forwarded
 ; @f: combine: (dead) x1, add_zero x1, xor_self x1
 

@@ -87,7 +87,7 @@ rec.pop1:                                         ; preds = %rec.pop
 
 define i32 @main() {
 entry:
-  %x = call i32 @fib(i32 20)
+  %x = tail call i32 @fib(i32 20)
   ret i32 %x
 }
 

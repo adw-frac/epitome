@@ -37,6 +37,8 @@ fn options(src: &str) -> (Options, bool) {
                 opts.inline = list.contains(&"inline");
                 opts.combine = list.contains(&"combine");
                 opts.cse = list.contains(&"cse");
+                opts.memory = list.contains(&"memory");
+                opts.tailmark = list.contains(&"tailmark");
                 opts.mem2reg = list.contains(&"mem2reg");
                 opts.sroa = list.contains(&"sroa");
                 opts.simplifycfg = list.contains(&"simplifycfg");

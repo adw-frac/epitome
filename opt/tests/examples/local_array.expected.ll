@@ -28,6 +28,6 @@ done:                                             ; preds = %recur, %entry.rec
 
 define i32 @main() {
 entry:
-  %x = call i32 @walk(i32 10)
+  %x = tail call i32 @walk(i32 10)
   ret i32 %x
 }

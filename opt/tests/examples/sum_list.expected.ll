@@ -33,6 +33,6 @@ empty:                                            ; preds = %more, %entry.rec
 
 define i32 @main() {
 entry:
-  %x = call i32 @sum(ptr @n1, i32 2)
+  %x = tail call i32 @sum(ptr @n1, i32 2)
   ret i32 %x
 }

@@ -24,6 +24,6 @@ L:                                                ; preds = %small.exit
 }
 
 define i32 @main() {
-  %v = call i32 @caller(i32 1)
+  %v = tail call i32 @caller(i32 1)
   ret i32 %v
 }

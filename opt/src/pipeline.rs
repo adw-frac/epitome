@@ -41,6 +41,8 @@ pub struct Options {
     /// The combiner's rules and steps about memory: forwarding stored
     /// values, reusing loads, deleting dead stores (memory SSA).
     pub memory: bool,
+    /// Marking calls that may reuse the frame `tail` (`tailmark.rs`).
+    pub tailmark: bool,
     pub mem2reg: bool,
     pub sroa: bool,
     pub simplifycfg: bool,
@@ -62,6 +64,7 @@ impl Default for Options {
             combine: true,
             cse: true,
             memory: true,
+            tailmark: true,
             mem2reg: true,
             sroa: true,
             simplifycfg: true,
@@ -98,6 +101,8 @@ pub struct Report {
     pub rotated: usize,
     pub indvars: crate::indvars::Stats,
     pub tail_calls: usize,
+    /// Calls marked `tail` (`tailmark.rs`).
+    pub tail_marked: usize,
     pub accumulator_calls: usize,
     pub frame_calls: usize,
     /// Remarks per function, in module order.
@@ -159,6 +164,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     let rotated = AtomicUsize::new(0);
     let iv_stats = std::sync::Mutex::new(crate::indvars::Stats::default());
     let tail_calls = AtomicUsize::new(0);
+    let tail_marked = AtomicUsize::new(0);
     let accumulator_calls = AtomicUsize::new(0);
     let frame_calls = AtomicUsize::new(0);
     let task_nanos: Vec<std::sync::atomic::AtomicU64> = (0..cg.sccs.len()).map(|_| Default::default()).collect();
@@ -457,6 +463,12 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                         all.stores += s.stores;
                     }
                 }
+                // Last, once the allocas that could go are gone: which calls
+                // may reuse the frame.
+                if opts.tailmark {
+                    let n = crate::tailmark::run(sh, f);
+                    tail_marked.fetch_add(n, Ordering::Relaxed);
+                }
             }
             for (g, f) in bodies {
                 sh.publish(g, f);
@@ -485,6 +497,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     report.rotated = rotated.into_inner();
     report.indvars = iv_stats.into_inner().unwrap();
     report.tail_calls = tail_calls.into_inner();
+    report.tail_marked = tail_marked.into_inner();
     report.accumulator_calls = accumulator_calls.into_inner();
     report.frame_calls = frame_calls.into_inner();
     report.remarks = remarks
@@ -512,6 +525,10 @@ fn declare_intrinsics(m: &mut Module) -> Intrinsics {
     let restore_ty = m.types.intern(Type::Function { ret: void, params: vec![ptr], varargs: false });
     let (i8t, i64t, i1t) = (m.types.int(8), m.types.int(64), m.types.int(1));
     let memset_ty = m.types.intern(Type::Function { ret: void, params: vec![ptr, i8t, i64t, i1t], varargs: false });
+    let fsh = [8u32, 16, 32, 64].map(|w| {
+        let t = m.types.int(w);
+        (w, t, m.types.intern(Type::Function { ret: t, params: vec![t, t, t], varargs: false }))
+    });
     let mut declare = |name: &str, ty, params: &[draconian_ir::types::TypeId]| -> GlobalId {
         if let Some(i) = m.globals.iter().position(|g| g.name.as_deref() == Some(name)) {
             return GlobalId(i as u32);
@@ -535,6 +552,7 @@ fn declare_intrinsics(m: &mut Module) -> Intrinsics {
         stacksave: Some(declare("llvm.stacksave.p0", save_ty, &[])),
         stackrestore: Some(declare("llvm.stackrestore.p0", restore_ty, &[ptr])),
         memset: Some(declare("llvm.memset.p0.i64", memset_ty, &[ptr, i8t, i64t, i1t])),
+        fshl: fsh.map(|(w, t, ty)| Some(declare(&format!("llvm.fshl.i{w}"), ty, &[t, t, t]))),
     }
 }
 

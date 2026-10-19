@@ -128,5 +128,34 @@ Other passes worth having, each small:
   `rbit`, with trailing zeros as `clz` of the reversed bits; `fmov` with an
   8-bit floating-point immediate (`fp8s`, `fp8d` in encodings, `{c:f64}` in
   assembly).
+- **More of the description:** `ror` by a register, with a rotation left
+  as one right by the negated amount; population counts with the vector
+  unit (`fmov`, `cnt`, `addv`, a recipe), as clang does.
 - **Selection:** a constant made in a block is reused by later uses in the
   same block.
+- **Frames:** slots too far for an offset are reached through a free spill
+  scratch register, so large frames (over 4KB of bytes) compile.
+- **The optimiser:** calls are marked `tail` where the function's frame
+  holds nothing a callee could use (`tailmark.rs`), so code generation
+  makes them jumps.
+
+With these, the table above reads:
+
+| | Instructions | Against clang |
+| --- | --- | --- |
+| clang | 3,085 | 1.00x |
+| ours | 3,523 | 1.14x |
+| backend only | 3,503 | 1.14x |
+
+The optimiser then gained linear combinations and the bit steps of the
+combiner (`combine.md`). The aggregates program's `main` went from 173
+instructions to 128, and `call_many` from 16 to 3, as clang has it:
+
+| | Instructions | Against clang |
+| --- | --- | --- |
+| clang | 3,085 | 1.00x |
+| ours | 3,445 | 1.12x |
+| backend only | 3,503 | 1.14x |
+
+Our pipeline now does a little better than clang's own optimised IR does
+through our backend.

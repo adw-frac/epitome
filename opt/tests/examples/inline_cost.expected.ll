@@ -381,7 +381,7 @@ mode_op.exit1:                                    ; preds = %other.i1, %add.i1, 
   %t106.i2 = xor i32 %t105.i2, 745
   %t108.i2 = add i32 %t106.i2, 7
   %t109.i2 = mul i32 %t108.i2, 766
-  %h = call i32 @never(i32 %t109.i1)
+  %h = tail call i32 @never(i32 %t109.i1)
   %0 = add i32 %h, %t109.i
   %1 = add i32 %0, %t109.i1
   %sum = add i32 %1, %t109.i2
@@ -389,8 +389,8 @@ mode_op.exit1:                                    ; preds = %other.i1, %add.i1, 
   br i1 %bad, label %fail, label %ok
 
 fail:                                             ; preds = %mode_op.exit1
-  %z = call i32 @big(i32 %sum)
-  call void @abort()
+  %z = tail call i32 @big(i32 %sum)
+  tail call void @abort()
   unreachable
 
 ok:                                               ; preds = %mode_op.exit1

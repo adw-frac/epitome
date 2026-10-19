@@ -21,6 +21,6 @@ done:                                             ; preds = %entry
 
 define i32 @main() {
 entry:
-  %x = call i32 @gcd(i32 1071, i32 462)
+  %x = tail call i32 @gcd(i32 1071, i32 462)
   ret i32 %x
 }

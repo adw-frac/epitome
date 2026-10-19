@@ -140,19 +140,20 @@ exists.
 | Pass | What it does | Status |
 | --- | --- | --- |
 | `instcombine` | Combines and simplifies instructions into a canonical form. The rule-driven combiner covers arithmetic, comparisons, selects, casts and constant folding; see [combines](combine.md). | Done |
-| `aggressive-instcombine` | Matches larger expression patterns and may change the CFG. Factoring, distribution and the identities of `and`, `or` and `xor` of two values are combine rules; see [combines](combine.md). Recognising idioms such as popcount and rotates is not done yet. | Partial |
+| `aggressive-instcombine` | Matches larger expression patterns and may change the CFG. Factoring, distribution and the identities of `and`, `or` and `xor` of two values are combine rules; see [combines](combine.md). Rotates and funnel shifts written as two shifts and an `or` are recognised (`llvm.fshl`); recognising popcount written out is not done yet. | Partial |
 | `simplifycfg` | Removes unreachable blocks, merges blocks, removes trivial PHIs and branch-only blocks. Branch folding is in the combiner; see [simplifying the CFG](simplifycfg.md). | Done |
-| `dce` | Removes dead instructions, and anything that becomes dead as a result. | Planned |
+| `dce` | Removes dead instructions, and anything that becomes dead as a result. A step of the combiner: an unused instruction without effects goes, and its operands go back on the list. | Done |
+| `bdce` | Removes computation of bits nothing reads. The combiner's demanded-bits step reads a narrower use's bits from a simpler value already made; see [combines](combine.md). Bits demanded across several uses are not tracked. | Partial |
 | `adce` | Aggressive dead code elimination: everything is dead until proven live. | Planned |
 | `dse` | Removes stores that are overwritten before being read. A step of the combiner: overwritten on every path before any read (across blocks and loops, within a budget), or to a local never read again, or of the value already there; see [combines](combine.md). | Done |
 | `sccp` | Sparse conditional constant propagation. Finds constants and dead blocks. | Planned |
-| `reassociate` | Reorders commutative expressions to help constant folding, CSE and LICM. A step of the combiner; see [combines](combine.md). | Done |
+| `reassociate` | Reorders commutative expressions to help constant folding, CSE and LICM. A step of the combiner, with sums collected into linear combinations; see [combines](combine.md). | Done |
 | `early-cse` | Removes instructions and loads that repeat a dominating one, in one walk of the dominator tree. Not on the Passes page; see [CSE](cse.md). | Done |
 | `gvn` | Removes fully and partially redundant instructions and loads. CSE covers the fully redundant ones within a dominator path; the combiner forwards stored values to loads and reuses loads under the same memory version, across joins ([combines](combine.md)). Partial redundancy is not done. | Partial |
 | `jump-threading` | Routes edges past blocks whose branch result is already known. | Planned |
 | `sink` | Moves instructions into the successor blocks that need them. | Later |
 | `memcpyopt` | Removes `memcpy` calls and turns runs of stores into `memset`. Runs of stores become `memset` (`opt/src/memcpyopt.rs`), which code generation writes back as wide stores when small. Removing copies is not done. | Partial |
-| `tailcallelim` | Turns self-recursive tail calls into loops. Part of recursion removal; see [parallel](parallel.md). | Done |
+| `tailcallelim` | Turns self-recursive tail calls into loops. Part of recursion removal; see [parallel](parallel.md). Marking the calls that may reuse the caller's frame `tail`, in functions with no allocas, variable arguments or `byval` parameters, is `tailmark.rs`. | Done |
 | `normalize` | Renames and reorders instructions into a form that diffs well. | Later |
 
 ### Memory to registers

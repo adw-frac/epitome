@@ -153,16 +153,16 @@ rec.pop:                                          ; preds = %rec.shrink, %rec.re
 
 define internal i32 @c(i32 %n) noinline {
 entry:
-  %x = call i32 @a(i32 %n)
+  %x = tail call i32 @a(i32 %n)
   %s = add i32 %x, %n
   ret i32 %s
 }
 
 define i32 @main() {
-  %v = call i32 @a(i32 15)
-  %1 = call i32 (ptr, ...) @printf(ptr @fmt, i32 %v)
-  %w = call i32 @b(i32 12)
-  %2 = call i32 (ptr, ...) @printf(ptr @fmt, i32 %w)
+  %v = tail call i32 @a(i32 15)
+  %1 = tail call i32 (ptr, ...) @printf(ptr @fmt, i32 %v)
+  %w = tail call i32 @b(i32 12)
+  %2 = tail call i32 (ptr, ...) @printf(ptr @fmt, i32 %w)
   ret i32 0
 }
 

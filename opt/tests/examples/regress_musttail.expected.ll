@@ -22,13 +22,13 @@ base:                                             ; preds = %entry
 
 rec:                                              ; preds = %entry
   %a = add i32 %n, -1
-  %r = call i32 @f(i32 %a)
+  %r = tail call i32 @f(i32 %a)
   %s = add i32 %r, %n
   ret i32 %s
 }
 
 define i32 @main() {
-  %v = call i32 @f(i32 10)
-  %1 = call i32 (ptr, ...) @printf(ptr @fmt, i32 %v)
+  %v = tail call i32 @f(i32 10)
+  %1 = tail call i32 (ptr, ...) @printf(ptr @fmt, i32 %v)
   ret i32 0
 }

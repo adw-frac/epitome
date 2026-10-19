@@ -52,6 +52,8 @@ pub struct Intrinsics {
     pub stackrestore: Option<GlobalId>,
     /// `void @llvm.memset.p0.i64(ptr, i8, i64, i1)`
     pub memset: Option<GlobalId>,
+    /// `iN @llvm.fshl.iN(iN, iN, iN)` for N = 8, 16, 32, 64, in that order.
+    pub fshl: [Option<GlobalId>; 4],
 }
 
 pub struct Shared<'m> {
