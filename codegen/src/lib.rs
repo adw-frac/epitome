@@ -5,6 +5,7 @@
 pub mod abi;
 pub mod asm;
 pub mod assembler;
+pub mod check;
 pub mod divconst;
 pub mod elf;
 pub mod enc;
@@ -59,7 +60,7 @@ pub enum Stop {
 pub struct Options {
     pub stop: Stop,
     /// The calling convention and platform, by name; by default, the one
-    /// the module's target triple names, or else `darwin`.
+    /// the module's target triple names, or else the description's first.
     pub abi: Option<String>,
     /// Further registers to keep out of allocation.
     pub reserve: Vec<u8>,
@@ -80,7 +81,7 @@ pub fn choose_abi(t: &Target, m: &Module, opts: &Options) -> Result<abi::Abi, St
     let triple = m.triple.as_ref().map(|s| String::from_utf8_lossy(s).into_owned()).unwrap_or_default();
     let mut abi = match &opts.abi {
         Some(name) => t.abi(name).ok_or_else(|| format!("no calling convention {name}"))?,
-        None => t.abi_for_triple(&triple).or_else(|| t.abi("darwin")).ok_or("no calling convention")?,
+        None => t.abi_for_triple(&triple).or_else(|| t.abis.first()).ok_or("no calling convention")?,
     }
     .clone();
     abi.reserved.extend(&opts.reserve);

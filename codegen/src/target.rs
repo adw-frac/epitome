@@ -13,66 +13,13 @@ use draconian_ir::module::*;
 use draconian_ir::types::{Type, TypeId};
 
 use crate::enc::{self, Encoding, Env};
+use crate::machine::Holds;
 
-/// A register class, as the code generator knows them: integer registers
-/// of 32 and 64 bits (with or without the stack pointer), floating-point
-/// registers of 32 and 64 bits, and vectors of 64 and 128 bits. What the
-/// registers are called is the description's (`machine.rs`).
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-pub enum Class {
-    W,
-    X,
-    /// Like `W`, but 31 is the stack pointer.
-    Wsp,
-    Xsp,
-    /// Floating-point and SIMD registers, as 64 and 32 bits. Physical
-    /// registers 32-63 are v0-v31.
-    D,
-    S,
-    /// Vectors: 128 bits in a q register, and 64 bits in a d register.
-    /// Templates print them `q3` and `d3`, or with an arrangement, as in
-    /// `{n:4s}`, `v3.4s`.
-    Q,
-    V,
-}
-
-impl Class {
-    pub fn parse(s: &str) -> Option<Class> {
-        Some(match s {
-            "w" => Class::W,
-            "x" => Class::X,
-            "wsp" => Class::Wsp,
-            "xsp" => Class::Xsp,
-            "d" => Class::D,
-            "s" => Class::S,
-            "q" => Class::Q,
-            "v" => Class::V,
-            _ => return None,
-        })
-    }
-
-    pub fn is_64(self) -> bool {
-        matches!(self, Class::X | Class::Xsp | Class::D | Class::V | Class::Q)
-    }
-
-    /// In the floating-point and vector registers, v0-v31.
-    pub fn is_fp(self) -> bool {
-        matches!(self, Class::D | Class::S | Class::Q | Class::V)
-    }
-
-    /// The same class, but 32 or 64 bits wide.
-    pub fn with_width(self, wide: bool) -> Class {
-        match (self, wide) {
-            (Class::W | Class::X, false) => Class::W,
-            (Class::W | Class::X, true) => Class::X,
-            (Class::Wsp | Class::Xsp, false) => Class::Wsp,
-            (Class::Wsp | Class::Xsp, true) => Class::Xsp,
-            (Class::D | Class::S, false) => Class::S,
-            (Class::D | Class::S, true) => Class::D,
-            (c @ (Class::Q | Class::V), _) => c,
-        }
-    }
-}
+/// A register class: its index in the description's list of them
+/// (`machine.rs` reads them: their registers, file, width and what they
+/// hold).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct Class(pub u8);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
@@ -794,13 +741,19 @@ impl Target {
             let mut operands = Vec::new();
             if has_result {
                 let class = match attr(&f.fn_attrs, "dclass").flatten() {
-                    Some(c) => Class::parse(c).ok_or_else(|| format!("@{name}: bad dclass"))?,
-                    None if res_ty.is_some_and(|t| is_vector_type(m, t)) && ret_bits > 64 => Class::Q,
-                    None if res_ty.is_some_and(|t| is_vector_type(m, t)) => Class::V,
-                    None if res_fp && ret_bits <= 32 => Class::S,
-                    None if res_fp => Class::D,
-                    None if ret_bits <= 32 => Class::W,
-                    None => Class::X,
+                    Some(c) => self.machine.class(c).ok_or_else(|| format!("@{name}: no register class {c}"))?,
+                    None => {
+                        let holds = if res_ty.is_some_and(|t| is_vector_type(m, t)) {
+                            Holds::Vector
+                        } else if res_fp {
+                            Holds::Float
+                        } else {
+                            Holds::Int
+                        };
+                        self.machine
+                            .value_class(holds, ret_bits)
+                            .ok_or_else(|| format!("@{name}: no register class holds its result"))?
+                    }
                 };
                 operands.push(Operand {
                     name: "d".into(),
@@ -836,7 +789,7 @@ impl Target {
                 let local = &f.locals[p.local.index()];
                 let pname = local.name.clone().unwrap_or_default();
                 let kind = if let Some(Some(c)) = attr(&p.attrs, "reg") {
-                    Kind::Reg(Class::parse(c).ok_or_else(|| format!("@{name}: bad register class {c}"))?)
+                    Kind::Reg(self.machine.class(c).ok_or_else(|| format!("@{name}: no register class {c}"))?)
                 } else if attr(&p.attrs, "imm").is_some() {
                     Kind::Imm
                 } else if attr(&p.attrs, "label").is_some() {
@@ -879,7 +832,10 @@ impl Target {
                 asm: attr(&f.fn_attrs, "asm").flatten().unwrap_or("").to_string(),
                 decode: attr(&f.fn_attrs, "nodecode").is_none(),
                 zext: attr(&f.fn_attrs, "zext").flatten().and_then(|z| z.parse().ok()).unwrap_or(default_zext),
-                copy: attr(&f.fn_attrs, "copy").flatten().and_then(Class::parse),
+                copy: match attr(&f.fn_attrs, "copy").flatten() {
+                    Some(c) => Some(self.machine.class(c).ok_or_else(|| format!("@{name}: no register class {c}"))?),
+                    None => None,
+                },
                 role: attr(&f.fn_attrs, "role").flatten().map(str::to_string),
                 sets: if flags {
                     Some(attr(&f.fn_attrs, "sets").flatten().unwrap_or("nzcv").to_string())
@@ -1264,7 +1220,7 @@ impl Target {
             let mut params = Vec::new();
             for p in &f.params {
                 let kind = match attr(&p.attrs, "reg") {
-                    Some(Some(c)) => Kind::Reg(Class::parse(c).ok_or("bad class")?),
+                    Some(Some(c)) => Kind::Reg(self.machine.class(c).ok_or_else(|| format!("no register class {c}"))?),
                     _ => Kind::Imm,
                 };
                 params.push(PParam { kind, bits: type_bits(m, f.locals[p.local.index()].ty) });
@@ -1631,9 +1587,37 @@ impl Target {
                             pick(a >= b)
                         } else if name.starts_with("llvm.umin.") {
                             pick(a <= b)
+                        } else if name.starts_with("llvm.abs.") {
+                            sa.unsigned_abs() & m
                         } else {
                             return None;
                         }
+                    }
+                    Head::FCmp(p, bits) => {
+                        let (a, b) = if bits & !FP == 32 {
+                            (f64::from(f32::from_bits(k[0] as u32)), f64::from(f32::from_bits(k[1] as u32)))
+                        } else {
+                            (f64::from_bits(k[0]), f64::from_bits(k[1]))
+                        };
+                        let uno = a.is_nan() || b.is_nan();
+                        u64::from(match p {
+                            FCmpPred::False => false,
+                            FCmpPred::True => true,
+                            FCmpPred::Oeq => !uno && a == b,
+                            FCmpPred::Ogt => !uno && a > b,
+                            FCmpPred::Oge => !uno && a >= b,
+                            FCmpPred::Olt => !uno && a < b,
+                            FCmpPred::Ole => !uno && a <= b,
+                            FCmpPred::One => !uno && a != b,
+                            FCmpPred::Ord => !uno,
+                            FCmpPred::Ueq => uno || a == b,
+                            FCmpPred::Ugt => uno || a > b,
+                            FCmpPred::Uge => uno || a >= b,
+                            FCmpPred::Ult => uno || a < b,
+                            FCmpPred::Ule => uno || a <= b,
+                            FCmpPred::Une => uno || a != b,
+                            FCmpPred::Uno => uno,
+                        })
                     }
                     _ => return None,
                 }

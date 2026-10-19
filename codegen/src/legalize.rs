@@ -474,21 +474,20 @@ fn native_shuffle(cx: &Ctx, mask: ConstId) -> bool {
     crate::target::mask_lanes(cx.m, mask).is_some_and(|lanes| cx.t.has_shuffle(&lanes))
 }
 
-/// Vector operations with no instruction of their own, rewritten: `icmp
-/// ne` against other than zero (as `icmp ne (xor ..), 0`, which `cmtst`
-/// does), and shifts by amounts that are not one constant (as `ushl` and
-/// `sshl`, which shift each lane by its own amount, right for negative
-/// amounts).
+/// Vector operations rewritten into a form instructions more often have:
+/// `icmp ne` against other than zero, as `icmp ne (xor ..), 0` (which
+/// AArch64's `cmtst` does). (Shifts by a vector of amounts are the
+/// description's: AArch64's recipes shift with `ushl` and `sshl`.)
 fn rewrite_vector_ops(cx: &mut Ctx, f: &mut Function) {
     let blocks: Vec<BlockId> = f.layout.clone();
     for b in blocks {
         let mut k = 0;
         while k < f.blocks[b.index()].insts.len() {
             let i = f.blocks[b.index()].insts[k];
-            let Some(r) = f.insts[i.index()].result else {
+            if f.insts[i.index()].result.is_none() {
                 k += 1;
                 continue;
-            };
+            }
             let mut new = Vec::new();
             match f.insts[i.index()].op.clone() {
                 Op::ICmp { pred: ICmpPred::Ne, samesign, lhs, rhs }
@@ -503,44 +502,6 @@ fn rewrite_vector_ops(cx: &mut Ctx, f: &mut Function) {
                     new.push(x);
                     let zero = Value::Const(cx.m.consts.intern(Constant { ty: t, kind: ConstKind::Zero }));
                     f.insts[i.index()].op = Op::ICmp { pred: ICmpPred::Ne, samesign, lhs: f.result(x), rhs: zero };
-                }
-                Op::Binary { op: op @ (BinOp::Shl | BinOp::LShr | BinOp::AShr), lhs, rhs, .. }
-                    if vec_info(cx, f.locals[r.index()].ty).is_some_and(|(_, _, eb)| eb > 1)
-                        && !matches!(rhs, Value::Const(c) if matches!(cx.m.constant(c).kind, ConstKind::Splat(_) | ConstKind::Zero)) =>
-                {
-                    let t = f.locals[r.index()].ty;
-                    let amount = if op == BinOp::Shl {
-                        rhs
-                    } else {
-                        let zero = Value::Const(cx.m.consts.intern(Constant { ty: t, kind: ConstKind::Zero }));
-                        let n = f.add_inst(
-                            Op::Binary {
-                                op: BinOp::Sub,
-                                flags: IntFlags::NONE,
-                                fmf: FastMath::default(),
-                                lhs: zero,
-                                rhs,
-                            },
-                            Some((None, t)),
-                        );
-                        new.push(n);
-                        f.result(n)
-                    };
-                    let name = if op == BinOp::AShr { "sshl" } else { "ushl" };
-                    let callee = declare(cx, &format!("llvm.aarch64.neon.{name}.{}", mangle(cx, t)), t, &[t, t]);
-                    let fn_ty = cx.m.types.intern(Type::Function { ret: t, params: vec![t, t], varargs: false });
-                    f.insts[i.index()].op = Op::Call(Box::new(Call {
-                        tail: TailKind::None,
-                        fmf: FastMath::default(),
-                        cconv: CallConv::default(),
-                        ret_attrs: vec![],
-                        addrspace: None,
-                        fn_ty,
-                        callee,
-                        args: [lhs, amount].into_iter().map(|value| CallArg { value, attrs: vec![] }).collect(),
-                        fn_attrs: vec![],
-                        bundles: vec![],
-                    }));
                 }
                 _ => {}
             }

@@ -371,7 +371,7 @@ o.append('''define <2 x i64> @MOVIzero() "enc"="0 1 1 0111100000 000 1110 01 000
   ret <2 x i64> zeroinitializer
 }
 
-define <2 x i64> @MOVq(<2 x i64> "reg"="q" %n) "enc"="0 1 0 01110 10 1 m:5=n 00011 1 n:5 d:5" "asm"="mov {d:16b}, {n:16b}" "role"="copy.q" "nomatch" {
+define <2 x i64> @MOVq(<2 x i64> "reg"="q" %n) "enc"="0 1 0 01110 10 1 m:5=n 00011 1 n:5 d:5" "asm"="mov {d:16b}, {n:16b}" "copy"="q" "nomatch" {
   ret <2 x i64> %n
 }
 ''')
@@ -548,6 +548,21 @@ define {M} @CMNEZv{arr}({T} "reg"="{c}" %n) "enc"="0 {Q} 0 01110 {size} 1 rm:5=n
 
 define {T} @{name}v{arr}({T} "reg"="{c}" %n, {T} "reg"="{c}" %m) "enc"="0 {Q} {U} 01110 {size} 1 m:5 01000 1 n:5 d:5" "asm"="{name.lower()} {{d:{arr}}}, {{n:{arr}}}, {{m:{arr}}}" {{
   %r = call {T} @{f}({T} %n, {T} %m)
+  ret {T} %r
+}}
+''')
+    # Shifts by a vector of amounts: ushl and sshl shift each lane left by
+    # its own amount, or right by a negative one.
+    for ir, name, neg in [('shl', 'USHL', False), ('lshr', 'USHL', True), ('ashr', 'SSHL', True)]:
+        amount = f'%m' if not neg else '%neg'
+        negate = f'  %neg = call {T} @NEGv{arr}({T} %m)\n' if neg else ''
+        o.append(f'''define {T} @{ir}.v{arr}({T} "reg"="{c}" %n, {T} "reg"="{c}" %m) "recipe"="{ir}.v{arr}.expand" {{
+  %r = {ir} {T} %n, %m
+  ret {T} %r
+}}
+
+define {T} @{ir}.v{arr}.expand({T} %n, {T} %m) {{
+{negate}  %r = call {T} @{name}v{arr}({T} %n, {T} {amount})
   ret {T} %r
 }}
 ''')

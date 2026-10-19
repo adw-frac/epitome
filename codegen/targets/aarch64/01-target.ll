@@ -4,7 +4,9 @@
 ; ===========================================================================
 ; Registers: for each class, the names of its registers in number order.
 ; Number 31 is the zero register in w and x, the stack pointer in wsp and
-; xsp. The floating-point and vector registers are numbered from 32.
+; xsp ("sp"="yes"). There are two files: the integer registers, and the
+; floating-point and vector registers (v0-v31), which d, s, q and v name as
+; 64-bit, 32-bit and 128-bit values and 64-bit vectors.
 
 !target.registers = !{!1000, !1001, !1002, !1003, !1004, !1005, !1006, !1007, !1008, !1009, !1010}
 !1000 = !{!"w", !"w{0-30}", !"wzr"}
@@ -20,10 +22,25 @@
 !1009 = !{!"h", !"h{0-31}"}
 !1010 = !{!"lanes", !"v{0-31}"}
 
+; What each class holds, and in which file. The first of a kind and width
+; is where values of it are put; b, h and lanes only name registers.
+!target.classes = !{!1020, !1021, !1022, !1023, !1024, !1025, !1026, !1027, !1028, !1029, !1030}
+!1020 = !{!"w", !"file", !"r", !"bits", !"32", !"holds", !"int"}
+!1021 = !{!"x", !"file", !"r", !"bits", !"64", !"holds", !"int"}
+!1022 = !{!"wsp", !"file", !"r", !"bits", !"32", !"holds", !"int", !"sp", !"yes"}
+!1023 = !{!"xsp", !"file", !"r", !"bits", !"64", !"holds", !"int", !"sp", !"yes"}
+!1024 = !{!"d", !"file", !"v", !"bits", !"64", !"holds", !"float"}
+!1025 = !{!"s", !"file", !"v", !"bits", !"32", !"holds", !"float"}
+!1026 = !{!"q", !"file", !"v", !"bits", !"128", !"holds", !"vector"}
+!1027 = !{!"v", !"file", !"v", !"bits", !"64", !"holds", !"vector"}
+!1028 = !{!"b", !"file", !"v"}
+!1029 = !{!"h", !"file", !"v"}
+!1030 = !{!"lanes", !"file", !"v"}
+
 ; ===========================================================================
 ; Parameters
 
-!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108}
+!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109}
 !1100 = !{!"sp", !"sp"}
 !1101 = !{!"zero", !"xzr"}
 !1102 = !{!"vector-bits", !"128", !"neon"}
@@ -33,6 +50,7 @@
 !1106 = !{!"elf-flags", !"0"}
 !1107 = !{!"macho-cpu", !"0x0100000c"}
 !1108 = !{!"cpu", !"generic"}
+!1109 = !{!"elf-format", !"elf64-littleaarch64"}
 
 ; ===========================================================================
 ; CPUs and their features, by LLVM's names for them (which clang's IR uses

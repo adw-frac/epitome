@@ -13,8 +13,8 @@ pub type VReg = u32;
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Reg {
     V(VReg),
-    /// A physical register: 0-30, or 31 for the zero register or the stack
-    /// pointer, as the operand's class says.
+    /// A physical register, numbered as `machine.rs` numbers them: the
+    /// files one after another.
     P(u8),
 }
 
@@ -46,15 +46,14 @@ pub struct MInst {
     pub ops: Vec<MOp>,
     pub imp_uses: Vec<u8>,
     pub imp_defs: Vec<u8>,
-    /// For a copy: 64 bits wide, rather than 32.
-    pub wide: bool,
-    /// For a copy: a whole 128-bit vector register.
-    pub q: bool,
+    /// For a copy: the class of what is copied (recorded before register
+    /// allocation, while the virtual registers say).
+    pub class: Option<Class>,
 }
 
 impl MInst {
     pub fn new(op: usize, ops: Vec<MOp>) -> MInst {
-        MInst { op: Opcode::Instr(op), ops, imp_uses: Vec::new(), imp_defs: Vec::new(), wide: true, q: false }
+        MInst { op: Opcode::Instr(op), ops, imp_uses: Vec::new(), imp_defs: Vec::new(), class: None }
     }
 
     pub fn copy(dst: Reg, src: Reg) -> MInst {
@@ -63,8 +62,7 @@ impl MInst {
             ops: vec![MOp::Reg(dst), MOp::Reg(src)],
             imp_uses: Vec::new(),
             imp_defs: Vec::new(),
-            wide: true,
-            q: false,
+            class: None,
         }
     }
 
@@ -120,12 +118,8 @@ pub struct MFunc {
     pub name: String,
     pub global: bool,
     pub blocks: Vec<MBlock>,
-    /// For each virtual register: is it 64 bits wide?
-    pub vwide: Vec<bool>,
-    /// For each virtual register: is it a floating-point register?
-    pub vfp: Vec<bool>,
-    /// For each virtual register: is it a whole 128-bit vector register?
-    pub vq: Vec<bool>,
+    /// Each virtual register's class.
+    pub vclass: Vec<Class>,
     pub slots: Vec<Slot>,
     pub frame_size: i64,
     /// Bytes at the bottom of the frame for arguments to calls.
@@ -134,27 +128,9 @@ pub struct MFunc {
 }
 
 impl MFunc {
-    pub fn new_vreg(&mut self, wide: bool) -> VReg {
-        self.vwide.push(wide);
-        self.vfp.push(false);
-        self.vq.push(false);
-        (self.vwide.len() - 1) as VReg
-    }
-
-    /// A 128-bit vector register.
-    pub fn new_q_vreg(&mut self) -> VReg {
-        self.vwide.push(true);
-        self.vfp.push(true);
-        self.vq.push(true);
-        (self.vwide.len() - 1) as VReg
-    }
-
-    /// A floating-point virtual register: `double` if wide, else `float`.
-    pub fn new_fp_vreg(&mut self, wide: bool) -> VReg {
-        self.vwide.push(wide);
-        self.vfp.push(true);
-        self.vq.push(false);
-        (self.vwide.len() - 1) as VReg
+    pub fn new_vreg(&mut self, class: Class) -> VReg {
+        self.vclass.push(class);
+        (self.vclass.len() - 1) as VReg
     }
 }
 
@@ -164,16 +140,7 @@ impl MFunc {
 pub fn reg_name(t: &Target, r: Reg, class: Class) -> String {
     match r {
         Reg::P(n) => t.machine.name(class, n),
-        Reg::V(v) => format!(
-            "%{}{v}",
-            match class {
-                Class::D | Class::V => "d",
-                Class::S => "s",
-                Class::Q => "q",
-                c if c.is_64() => "x",
-                _ => "w",
-            }
-        ),
+        Reg::V(v) => format!("%{}{v}", t.machine.def(class).name),
     }
 }
 
@@ -181,14 +148,20 @@ pub fn reg_name(t: &Target, r: Reg, class: Class) -> String {
 pub fn format_inst(t: &Target, f: &MFunc, inst: &MInst) -> String {
     match inst.op {
         Opcode::Copy => {
-            let (wide, fp) = match &inst.ops[0] {
-                MOp::Reg(Reg::V(v)) => (f.vwide[*v as usize], f.vfp[*v as usize]),
-                MOp::Reg(Reg::P(p)) => (true, *p >= 32),
-                _ => (true, false),
+            let class = |o: &MOp| match o {
+                MOp::Reg(Reg::V(v)) => Some(f.vclass[*v as usize]),
+                _ => inst.class,
             };
-            let c = Class::X.with_width(wide);
-            let c = if fp { Class::D.with_width(wide) } else { c };
-            let r = |o: &MOp| if let MOp::Reg(r) = o { reg_name(t, *r, c) } else { "?".into() };
+            let r = |o: &MOp| match (o, class(o).or(class(&inst.ops[0])).or(class(&inst.ops[1]))) {
+                (MOp::Reg(Reg::P(p)), Some(c)) if t.machine.field(c, *p).is_none() => {
+                    let file = t.machine.file_of(*p);
+                    let c = t.machine.scalar_in(file, t.machine.def(c).bits).unwrap_or(c);
+                    reg_name(t, Reg::P(*p), c)
+                }
+                (MOp::Reg(r), Some(c)) => reg_name(t, *r, c),
+                (MOp::Reg(Reg::P(p)), None) => format!("r{p}"),
+                _ => "?".into(),
+            };
             format!("COPY {}, {}", r(&inst.ops[0]), r(&inst.ops[1]))
         }
         Opcode::Instr(i) => {
@@ -257,31 +230,24 @@ pub fn fill_template(t: &Target, abi: Option<&crate::abi::Abi>, i: usize, value:
                     modifier.filter(|m| m.len() >= 2 && (m.as_bytes()[0].is_ascii_digit() || m.starts_with('.')))
                 {
                     let arr = arr.trim_start_matches('.');
-                    match r {
-                        Reg::P(n) => {
-                            out.push_str(&format!("{}.{arr}", m.view("lanes", n).unwrap_or_else(|| "?".into())))
-                        }
-                        Reg::V(v) => out.push_str(&format!("%v{v}.{arr}")),
+                    match (r, m.class("lanes")) {
+                        (Reg::P(n), Some(lanes)) => out.push_str(&format!("{}.{arr}", m.name(lanes, n))),
+                        (Reg::P(_), None) => out.push('?'),
+                        (Reg::V(v), _) => out.push_str(&format!("%v{v}.{arr}")),
                     }
                     continue;
                 }
-                // Another view of a vector register: `{n:s}` is s3.
-                if let Some(v) = modifier.filter(|v| class.is_fp() && !matches!(*v, "w" | "x")) {
-                    match r {
-                        Reg::P(n) => out.push_str(
-                            &Class::parse(v)
-                                .map(|c| m.name(c, n))
-                                .or_else(|| m.view(v, n))
-                                .unwrap_or_else(|| "?".into()),
-                        ),
-                        Reg::V(x) => out.push_str(&format!("%{v}{x}")),
-                    }
-                    continue;
-                }
+                // The register as another class names it: `{n:w}` is w3,
+                // `{n:s}` s3, `{n:b}` b3.
                 let class = match modifier {
-                    Some("w") => class.with_width(false),
-                    Some("x") => class.with_width(true),
-                    _ => class,
+                    Some(v) => match m.class(v) {
+                        Some(c) => c,
+                        None => {
+                            out.push('?');
+                            continue;
+                        }
+                    },
+                    None => class,
                 };
                 out.push_str(&reg_name(t, r, class));
             }
@@ -306,7 +272,10 @@ pub fn fill_template(t: &Target, abi: Option<&crate::abi::Abi>, i: usize, value:
                 (Some(a), None) => a.symbol(&s),
                 (None, _) => s,
             }),
-            (Operand::Reg(r), _) => out.push_str(&reg_name(t, r, Class::X)),
+            (Operand::Reg(r), _) => out.push_str(&match r {
+                Reg::P(p) => format!("r{p}"),
+                Reg::V(v) => format!("%{v}"),
+            }),
         }
     }
     out.push_str(rest);
@@ -342,8 +311,7 @@ pub fn encode_function(t: &Target, f: &MFunc) -> Result<(Vec<u32>, Vec<Fixup>), 
             let mut env = Env::new();
             for (o, op) in ins.operands.iter().zip(&inst.ops) {
                 let v = match op {
-                    // v0-v31 are physical registers 32-63.
-                    MOp::Reg(Reg::P(r)) => (*r & 31) as i64,
+                    MOp::Reg(Reg::P(r)) => t.machine.index(*r),
                     MOp::Reg(Reg::V(_)) => return Err(format!("{}: a virtual register left after allocation", f.name)),
                     MOp::Imm(v) => *v,
                     MOp::Label(target) => starts[*target] as i64 - pc as i64,
@@ -400,8 +368,7 @@ pub fn disassemble(t: &Target, word: u32, pc: u64) -> String {
                 let o = &ins.operands[k];
                 let v = env[&o.name];
                 match o.kind {
-                    Kind::Reg(c) if c.is_fp() => Operand::Reg(Reg::P(v as u8 + 32)),
-                    Kind::Reg(_) => Operand::Reg(Reg::P(v as u8)),
+                    Kind::Reg(c) => Operand::Reg(Reg::P(t.machine.phys(c, v))),
                     Kind::Label => Operand::Text(format!("0x{:x}", (pc as i64 + v) as u64)),
                     Kind::Sym => Operand::Text("<symbol>".into()),
                     Kind::Imm | Kind::Cond => Operand::Imm(v),

@@ -450,22 +450,22 @@ define float @FCVTSD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 0001 00 10000 
 }
 
 ; Between the register files, bit for bit.
-define double @FMOVDX(i64 "reg"="x" %n) "enc"="1 00 11110 01 1 00 111 000000 n:5 d:5" "asm"="fmov {d}, {n}" "role"="fmov.d.x" {
+define double @FMOVDX(i64 "reg"="x" %n) "enc"="1 00 11110 01 1 00 111 000000 n:5 d:5" "asm"="fmov {d}, {n}" "role"="move.d.x" {
   %r = bitcast i64 %n to double
   ret double %r
 }
 
-define i64 @FMOVXD(double "reg"="d" %n) "enc"="1 00 11110 01 1 00 110 000000 n:5 d:5" "asm"="fmov {d}, {n}" "role"="fmov.x.d" {
+define i64 @FMOVXD(double "reg"="d" %n) "enc"="1 00 11110 01 1 00 110 000000 n:5 d:5" "asm"="fmov {d}, {n}" "role"="move.x.d" {
   %r = bitcast double %n to i64
   ret i64 %r
 }
 
-define float @FMOVSW(i32 "reg"="w" %n) "enc"="0 00 11110 00 1 00 111 000000 n:5 d:5" "asm"="fmov {d}, {n}" "role"="fmov.s.w" {
+define float @FMOVSW(i32 "reg"="w" %n) "enc"="0 00 11110 00 1 00 111 000000 n:5 d:5" "asm"="fmov {d}, {n}" "role"="move.s.w" {
   %r = bitcast i32 %n to float
   ret float %r
 }
 
-define i32 @FMOVWS(float "reg"="s" %n) "enc"="0 00 11110 00 1 00 110 000000 n:5 d:5" "asm"="fmov {d}, {n}" "role"="fmov.w.s" {
+define i32 @FMOVWS(float "reg"="s" %n) "enc"="0 00 11110 00 1 00 110 000000 n:5 d:5" "asm"="fmov {d}, {n}" "role"="move.w.s" {
   %r = bitcast float %n to i32
   ret i32 %r
 }

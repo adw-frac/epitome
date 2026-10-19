@@ -221,7 +221,7 @@ fn reaches(t: &Target, inst: &MInst, pc: i64, target: i64) -> bool {
     let mut env = crate::enc::Env::new();
     for (o, op) in ins.operands.iter().zip(&inst.ops) {
         let v = match op {
-            MOp::Reg(Reg::P(r)) => (*r & 31) as i64,
+            MOp::Reg(Reg::P(r)) => t.machine.index(*r),
             MOp::Imm(v) => *v,
             MOp::Label(_) => target - pc,
             _ => 0,

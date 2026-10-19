@@ -4,6 +4,8 @@
 //! ```llvm
 //! !target.registers = !{!1, ...}
 //! !1 = !{!"x", !"x{0-30}", !"xzr"}        ; class x: x0 ... x30, then xzr
+//! !target.classes = !{!4, ...}
+//! !4 = !{!"x", !"file", !"gpr", !"bits", !"64", !"holds", !"int"}
 //! !target.params = !{!2, ...}
 //! !2 = !{!"sp", !"sp"}                     ; the stack pointer, by name
 //! !target.relocs = !{!3, ...}
@@ -11,11 +13,21 @@
 //! ```
 //!
 //! Each register class lists the names of its registers in number order;
-//! `x{0-30}` stands for x0 to x30. The floating-point and vector classes
-//! (`d`, `s`, `q`, `v`) number their registers from 32 in the code
-//! generator, so their names are of registers 32 and up. Further *views*
-//! name the same registers another way for templates: `b` and `h` (scalar
-//! views of the vector registers) and `lanes` (`v3` in `v3.4s`).
+//! `x{0-30}` stands for x0 to x30. `!target.classes` says, for each class:
+//!
+//! - `file`: the register file its registers are in. Classes of one file
+//!   name the same registers (`w3` is `x3`). The code generator numbers
+//!   the registers of all files together, each file after the one before
+//!   (in the order they are first named), so AArch64's integer registers
+//!   are 0-31 and its floating-point and vector registers 32-63;
+//! - `bits`: how wide a value it holds;
+//! - `holds`: `int`, `float` or `vector`: what values. Of the classes that
+//!   hold a kind of value at a width, the first is where such values are
+//!   put; a class without `holds` only names registers for templates (a
+//!   *view*: `{n:b}` is `b3`, and `lanes` gives `v3` in `{n:4s}`, `v3.4s`);
+//! - `sp`: `yes` if a number it shares with the zero register means the
+//!   stack pointer in this class (AArch64's `xsp`), so that the zero
+//!   register cannot be named in it.
 //!
 //! The parameters:
 //!
@@ -28,7 +40,8 @@
 //!   RISC-V), which decides which extensions and truncations are free;
 //! - `external-via-got`: `yes` if symbols another module defines are
 //!   reached through the global offset table;
-//! - `elf-machine`, `elf-flags`, `macho-cpu`: the object files' identity;
+//! - `elf-machine`, `elf-flags`, `macho-cpu`: the object files' identity,
+//!   and `elf-format`, what objdump calls the format (`elf64-littleriscv`);
 //! - `cpu`: the CPU to assume when none is named;
 //! - `boolean-branches`: `bit` if a branch can test a boolean's lowest bit
 //!   (the rest being undefined), or `compare` if branches compare whole
@@ -135,13 +148,39 @@ impl RelocDef {
     }
 }
 
+/// What values a register class holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Holds {
+    Int,
+    Float,
+    Vector,
+}
+
+#[derive(Clone, Debug)]
+pub struct ClassDef {
+    pub name: String,
+    pub file: usize,
+    /// How wide a value it holds (0 for a view).
+    pub bits: u32,
+    pub holds: Option<Holds>,
+    /// The number it shares with the zero register is the stack pointer.
+    pub sp: bool,
+    /// Its registers' names, in number order within the file.
+    pub names: Vec<String>,
+}
+
+/// A register file: its registers are numbers `base` to `base + size - 1`.
+#[derive(Clone, Debug)]
+pub struct FileDef {
+    pub name: String,
+    pub base: u8,
+    pub size: u8,
+}
+
 #[derive(Clone, Debug)]
 pub struct Machine {
-    /// The names of each class's registers, in number order (from 32, for
-    /// the floating-point and vector classes).
-    pub names: HashMap<Class, Vec<String>>,
-    /// Other names for the vector registers, for templates.
-    pub views: HashMap<String, Vec<String>>,
+    pub classes: Vec<ClassDef>,
+    pub files: Vec<FileDef>,
     pub sp: u8,
     pub zero: Option<u8>,
     pub vector_bits: u32,
@@ -149,6 +188,8 @@ pub struct Machine {
     pub external_via_got: bool,
     pub elf_machine: u16,
     pub elf_flags: u32,
+    /// How objdump names the ELF format (`elf64-littleaarch64`).
+    pub elf_format: String,
     pub macho_cpu: Option<u32>,
     pub relocs: Vec<RelocDef>,
     /// The feature the vector registers come with, if they are optional.
@@ -203,22 +244,55 @@ fn expand(names: &[String]) -> Result<Vec<String>, String> {
 
 impl Machine {
     pub fn read(m: &Module) -> Result<Machine, String> {
-        let mut names = HashMap::new();
-        let mut views = HashMap::new();
+        let props: HashMap<String, HashMap<String, String>> = tuples(m, "target.classes")
+            .into_iter()
+            .filter_map(|t| {
+                let (name, rest) = t.split_first()?;
+                Some((name.clone(), rest.chunks(2).filter_map(|c| Some((c[0].clone(), c.get(1)?.clone()))).collect()))
+            })
+            .collect();
+        let mut classes: Vec<ClassDef> = Vec::new();
+        let mut files: Vec<FileDef> = Vec::new();
         for t in tuples(m, "target.registers") {
             let Some((class, list)) = t.split_first() else { continue };
-            let list = expand(list)?;
-            match Class::parse(class) {
-                Some(c) => {
-                    names.insert(c, list);
-                }
+            let names = expand(list)?;
+            let p = props.get(class).ok_or_else(|| format!("register class {class} is not in !target.classes"))?;
+            let fname = p.get("file").ok_or_else(|| format!("register class {class}: no file"))?;
+            let file = match files.iter().position(|f| f.name == *fname) {
+                Some(k) => k,
                 None => {
-                    views.insert(class.clone(), list);
+                    files.push(FileDef { name: fname.clone(), base: 0, size: 0 });
+                    files.len() - 1
                 }
+            };
+            files[file].size = files[file].size.max(names.len().min(255) as u8);
+            let bits = match p.get("bits") {
+                Some(b) => b.parse().map_err(|_| format!("register class {class}: bits {b}"))?,
+                None => 0,
+            };
+            let holds = match p.get("holds").map(String::as_str) {
+                None => None,
+                Some("int") => Some(Holds::Int),
+                Some("float") => Some(Holds::Float),
+                Some("vector") => Some(Holds::Vector),
+                Some(o) => return Err(format!("register class {class}: holds {o}")),
+            };
+            if holds.is_some() && bits == 0 {
+                return Err(format!("register class {class} holds values, but has no bits"));
             }
+            let sp = p.get("sp").is_some_and(|v| v == "yes");
+            classes.push(ClassDef { name: class.clone(), file, bits, holds, sp, names });
         }
-        if names.is_empty() {
+        if classes.is_empty() {
             return Err("the description names no registers (!target.registers)".into());
+        }
+        let mut base = 0u32;
+        for f in &mut files {
+            f.base = base as u8;
+            base += f.size as u32;
+        }
+        if base > 255 {
+            return Err(format!("the register files have {base} registers in all; at most 255 are allowed"));
         }
         let all_params = tuples(m, "target.params");
         let params: HashMap<String, String> = all_params
@@ -226,8 +300,8 @@ impl Machine {
             .filter_map(|t| Some((t.first()?.clone(), t.get(1).cloned().unwrap_or_default())))
             .collect();
         let mut mc = Machine {
-            names,
-            views,
+            classes,
+            files,
             sp: 0,
             zero: None,
             vector_bits: 0,
@@ -235,6 +309,7 @@ impl Machine {
             external_via_got: false,
             elf_machine: 0,
             elf_flags: 0,
+            elf_format: String::new(),
             macho_cpu: None,
             relocs: Vec::new(),
             vector_feature: None,
@@ -278,6 +353,7 @@ impl Machine {
         mc.external_via_got = params.get("external-via-got").is_some_and(|v| v == "yes");
         mc.elf_machine = num("elf-machine")?.unwrap_or(0) as u16;
         mc.elf_flags = num("elf-flags")?.unwrap_or(0) as u32;
+        mc.elf_format = params.get("elf-format").cloned().unwrap_or_else(|| "elf64-little".into());
         mc.macho_cpu = num("macho-cpu")?.map(|v| v as u32);
         for t in tuples(m, "target.relocs") {
             let p: HashMap<&str, &str> =
@@ -314,15 +390,102 @@ impl Machine {
         Ok(mc)
     }
 
-    /// The name of register `r` in class `class`.
-    pub fn name(&self, class: Class, r: u8) -> String {
-        let k = if class.is_fp() { r.wrapping_sub(32) } else { r } as usize;
-        self.names.get(&class).and_then(|n| n.get(k)).cloned().unwrap_or_else(|| format!("r{r}?"))
+    /// The class called `name`.
+    pub fn class(&self, name: &str) -> Option<Class> {
+        self.classes.iter().position(|c| c.name == name).map(|k| Class(k as u8))
     }
 
-    /// The name of register `r` (32 and up) in a view: `lanes`, `b`, `h`.
-    pub fn view(&self, view: &str, r: u8) -> Option<String> {
-        self.views.get(view).and_then(|n| n.get(r.wrapping_sub(32) as usize)).cloned()
+    pub fn def(&self, c: Class) -> &ClassDef {
+        &self.classes[c.0 as usize]
+    }
+
+    /// The name of register `r` in class `class`.
+    pub fn name(&self, class: Class, r: u8) -> String {
+        self.field(class, r)
+            .and_then(|k| self.def(class).names.get(k as usize))
+            .cloned()
+            .unwrap_or_else(|| format!("r{r}?"))
+    }
+
+    /// Register `r`'s number within its file, if it is in `class`'s.
+    pub fn field(&self, class: Class, r: u8) -> Option<i64> {
+        let f = &self.files[self.def(class).file];
+        (r >= f.base && r < f.base.saturating_add(f.size)).then(|| (r - f.base) as i64)
+    }
+
+    /// The register numbered `k` within `class`'s file.
+    pub fn phys(&self, class: Class, k: i64) -> u8 {
+        let f = &self.files[self.def(class).file];
+        (f.base as i64 + k.clamp(0, f.size as i64 - 1)) as u8
+    }
+
+    /// Register `r`'s number within its file, as encodings hold it.
+    pub fn index(&self, r: u8) -> i64 {
+        (r - self.files[self.file_of(r)].base) as i64
+    }
+
+    /// The file register `r` is in.
+    pub fn file_of(&self, r: u8) -> usize {
+        self.files.iter().position(|f| r >= f.base && r < f.base.saturating_add(f.size)).unwrap_or(0)
+    }
+
+    /// The class values of this kind and width are put in: the narrowest
+    /// that holds them, the first declared of equals.
+    pub fn value_class(&self, holds: Holds, bits: u32) -> Option<Class> {
+        let mut best: Option<usize> = None;
+        for (k, c) in self.classes.iter().enumerate() {
+            if c.holds == Some(holds) && !c.sp && c.bits >= bits && best.is_none_or(|b| c.bits < self.classes[b].bits) {
+                best = Some(k);
+            }
+        }
+        best.map(|k| Class(k as u8))
+    }
+
+    /// The class of file `file` holding scalars of `bits` bits, for the
+    /// other side of a copy between files.
+    pub fn scalar_in(&self, file: usize, bits: u32) -> Option<Class> {
+        self.classes
+            .iter()
+            .position(|c| {
+                c.file == file && c.bits == bits && matches!(c.holds, Some(Holds::Int | Holds::Float)) && !c.sp
+            })
+            .map(|k| Class(k as u8))
+    }
+
+    /// Can the zero register be named in this class?
+    pub fn zero_in(&self, class: Class) -> bool {
+        let c = self.def(class);
+        self.zero.is_some_and(|z| self.file_of(z) == c.file && !(c.sp && z == self.sp))
+    }
+
+    /// The class a register of file `file` is saved and restored as, by a
+    /// function that must preserve it: its widest scalar class (AArch64's
+    /// d, of q, d and s: only the low 64 bits of v8-v15 are preserved).
+    pub fn save_class(&self, file: usize) -> Option<Class> {
+        let mut best: Option<usize> = None;
+        for (k, c) in self.classes.iter().enumerate() {
+            if c.file == file
+                && !c.sp
+                && matches!(c.holds, Some(Holds::Int | Holds::Float))
+                && best.is_none_or(|b| c.bits > self.classes[b].bits)
+            {
+                best = Some(k);
+            }
+        }
+        best.map(|k| Class(k as u8))
+    }
+
+    /// Register `r`'s name, as its file's save class names it (`x3`, `d8`).
+    pub fn lookup_name(&self, r: u8) -> String {
+        match self.save_class(self.file_of(r)) {
+            Some(c) => self.name(c, r),
+            None => format!("r{r}"),
+        }
+    }
+
+    /// The name of the class register `r` is saved as (`x`, `d`).
+    pub fn save_name(&self, r: u8) -> &str {
+        self.save_class(self.file_of(r)).map_or("?", |c| self.def(c).name.as_str())
     }
 
     /// The register a name names, in any class or view.
@@ -331,17 +494,10 @@ impl Machine {
     }
 
     pub fn lookup(&self, name: &str) -> Option<u8> {
-        for (c, names) in &self.names {
-            if let Some(k) = names.iter().position(|n| n == name) {
-                return Some(if c.is_fp() { 32 + k as u8 } else { k as u8 });
-            }
-        }
-        for names in self.views.values() {
-            if let Some(k) = names.iter().position(|n| n == name) {
-                return Some(32 + k as u8);
-            }
-        }
-        None
+        self.classes.iter().find_map(|c| {
+            let k = c.names.iter().position(|n| n == name)?;
+            Some(self.files[c.file].base + k as u8)
+        })
     }
 
     /// Registers in a list such as `["x0-x7", "x30"]`.
@@ -388,5 +544,50 @@ impl Machine {
             Some(r) => r.macho_name.clone(),
             None => format!("RELOC_{ty}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Files are numbered one after another, however many registers each
+    /// has, and classes are found by what they hold.
+    #[test]
+    fn files_and_classes() {
+        let src = r#"
+!target.registers = !{!0, !1, !2, !3, !4}
+!0 = !{!"r", !"r{0-15}"}
+!1 = !{!"rsp", !"r{0-14}", !"sp"}
+!2 = !{!"f", !"f{0-7}"}
+!3 = !{!"v", !"v{0-31}"}
+!4 = !{!"p", !"p{0-7}"}
+!target.classes = !{!10, !11, !12, !13, !14}
+!10 = !{!"r", !"file", !"gpr", !"bits", !"64", !"holds", !"int"}
+!11 = !{!"rsp", !"file", !"gpr", !"bits", !"64", !"holds", !"int", !"sp", !"yes"}
+!12 = !{!"f", !"file", !"fpr", !"bits", !"64", !"holds", !"float"}
+!13 = !{!"v", !"file", !"vec", !"bits", !"256", !"holds", !"vector"}
+!14 = !{!"p", !"file", !"pred"}
+!target.params = !{!20, !21}
+!20 = !{!"sp", !"sp"}
+!21 = !{!"zero", !"r15"}
+"#;
+        let m = Machine::read(&draconian_ir::parse_module(src).unwrap()).unwrap();
+        let bases: Vec<(&str, u8, u8)> = m.files.iter().map(|f| (f.name.as_str(), f.base, f.size)).collect();
+        assert_eq!(bases, [("gpr", 0, 16), ("fpr", 16, 8), ("vec", 24, 32), ("pred", 56, 8)]);
+        assert_eq!(m.lookup("f3"), Some(19));
+        assert_eq!(m.lookup("v0"), Some(24));
+        assert_eq!(m.lookup("p7"), Some(63));
+        let (r, rsp, v) = (m.class("r").unwrap(), m.class("rsp").unwrap(), m.class("v").unwrap());
+        assert_eq!(m.name(r, 15), "r15");
+        assert_eq!(m.name(rsp, 15), "sp");
+        assert_eq!(m.index(m.lookup("v5").unwrap()), 5);
+        assert_eq!(m.value_class(Holds::Int, 32), Some(r));
+        assert_eq!(m.value_class(Holds::Vector, 128), Some(v));
+        assert_eq!(m.value_class(Holds::Float, 128), None);
+        // The zero register shares its number with sp: not in rsp.
+        assert!(m.zero_in(r) && !m.zero_in(rsp));
+        assert_eq!(m.save_class(1), m.class("f"));
+        assert_eq!(m.save_class(3), None);
     }
 }

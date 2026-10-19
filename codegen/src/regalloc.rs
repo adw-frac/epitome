@@ -46,7 +46,8 @@ fn overlaps(a: Interval, b: Interval) -> bool {
 }
 
 pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
-    record_copy_widths(f);
+    record_copy_classes(f);
+    let m = &t.machine;
     let abi = f.abi.clone();
     let caller_saved = abi.caller_saved();
     let callee_saved = abi.callee_saved();
@@ -58,7 +59,15 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
             || fp_caller_saved.contains(&r)
             || fp_callee_saved.contains(&r)
     };
-    let nv = f.vwide.len();
+    let nv = f.vclass.len();
+    let file_of_v = |v: VReg| m.def(f.vclass[v as usize]).file;
+    // A value wider than the registers a function preserves (a vector, of
+    // which only the low 64 bits of AArch64's v8-v15 survive a call) cannot
+    // be kept in one across a call.
+    let too_wide = |v: VReg| {
+        let c = m.def(f.vclass[v as usize]);
+        m.save_class(c.file).is_none_or(|s| c.bits > m.def(s).bits)
+    };
     // Positions.
     let mut block_range: Vec<Interval> = Vec::new();
     let mut n = 0u32;
@@ -212,24 +221,22 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
             }
             frontier = next;
         }
-        // Only registers of the value's own file.
-        let fp = f.vfp[v as usize];
-        cands.retain(|&p| (p >= 32) == fp);
-        // Only the low 64 bits of the saved floating-point registers
-        // survive a call, so a whole vector live across one is spilled.
         let no_saved: Vec<u8> = Vec::new();
-        let callee_fp = if f.vq[v as usize] { &no_saved } else { &fp_callee_saved };
-        if f.vq[v as usize] && across_call {
+        let wide = too_wide(v);
+        if wide && across_call {
             cands.clear();
         }
-        let (caller, callee) = if fp { (&fp_caller_saved, callee_fp) } else { (&caller_saved, &callee_saved) };
+        let (callee, fp_callee) = if wide { (&no_saved, &no_saved) } else { (&callee_saved, &fp_callee_saved) };
+        let caller = caller_saved.iter().chain(&fp_caller_saved);
+        let callee = callee.iter().chain(fp_callee);
         if across_call {
-            cands.extend(callee.iter().copied());
-            cands.extend(caller.iter().copied());
+            cands.extend(callee.chain(caller).copied());
         } else {
-            cands.extend(caller.iter().copied());
-            cands.extend(callee.iter().copied());
+            cands.extend(caller.chain(callee).copied());
         }
+        // Only registers of the value's own file.
+        let file = file_of_v(v);
+        cands.retain(|&p| m.file_of(p) == file);
         let free = cands
             .into_iter()
             .find(|p| taken.get(p).is_none_or(|list| list.iter().all(|&s| mine.iter().all(|&m| !overlaps(s, m)))));
@@ -245,27 +252,36 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
     // Spill slots, and loads and stores around each use and definition.
     let mut slot_of: HashMap<VReg, usize> = HashMap::new();
     for &v in &spilled {
-        let size = if f.vq[v as usize] { 16 } else { 8 };
+        let size = (m.def(f.vclass[v as usize]).bits as u64 / 8).max(8);
         f.slots.push(Slot { size, align: size, offset: 0 });
         slot_of.insert(v, f.slots.len() - 1);
     }
-    // Spill code: loads and stores of each register file, as the
+    // Spill code: a value is spilled as its file's registers are saved
+    // (load.x, load.d), or, if wider, by its own class's (load.q), as the
     // description names them by role (those a machine lacks are needed only
     // if values of that kind are spilled).
-    let pair = |l: &str, s: &str| t.role(l).zip(t.role(s));
-    let (ldr, str_) = pair("load.x", "store.x").ok_or("no instruction has role load.x or store.x")?;
-    let fp_spill = pair("load.d", "store.d");
-    let q_spill = pair("load.q", "store.q");
-    let vfp = f.vfp.clone();
-    let vq = f.vq.clone();
+    let spill_of = |c: crate::target::Class| -> Option<(usize, usize)> {
+        let d = m.def(c);
+        let as_class = match m.save_class(d.file) {
+            Some(s) if m.def(s).bits >= d.bits => s,
+            _ => c,
+        };
+        let n = &m.def(as_class).name;
+        t.role(&format!("load.{n}")).zip(t.role(&format!("store.{n}")))
+    };
+    let vclass = f.vclass.clone();
     let fname = f.name.clone();
+    // Each file's scratch registers, for spill code.
+    let pool_of = |file: usize| -> Vec<u8> {
+        abi.scratch.iter().chain(&abi.fp_scratch).copied().filter(|&r| m.file_of(r) == file).collect()
+    };
     for b in &mut f.blocks {
         let old = std::mem::take(&mut b.insts);
         let mut new = Vec::with_capacity(old.len());
         for mut inst in old {
             let (defs, uses) = regs_of(t, &inst);
             let mut scratch: HashMap<VReg, u8> = HashMap::new();
-            let (mut next, mut next_fp) = (0, 0);
+            let mut next: HashMap<usize, usize> = HashMap::new();
             let mut after = Vec::new();
             // Operands read first, then results: a result whose scratch
             // registers have run out can share one an operand used, since
@@ -277,8 +293,9 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
                     && let Some(&slot) = slot_of.get(v)
                     && !scratch.contains_key(v)
                 {
-                    let fp = vfp[*v as usize];
-                    let (pool, k) = if fp { (&abi.fp_scratch, &mut next_fp) } else { (&abi.scratch, &mut next) };
+                    let class = vclass[*v as usize];
+                    let pool = pool_of(m.def(class).file);
+                    let k = next.entry(m.def(class).file).or_default();
                     let s = match pool.get(*k) {
                         Some(&s) => {
                             *k += 1;
@@ -291,13 +308,9 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
                         None => return Err(format!("{fname}: more spilled operands than scratch registers")),
                     };
                     scratch.insert(*v, s);
-                    let (ld, st) = if vq[*v as usize] {
-                        q_spill.ok_or_else(|| format!("{fname}: no instruction spills a vector register"))?
-                    } else if fp {
-                        fp_spill.ok_or_else(|| format!("{fname}: no instruction spills a floating-point register"))?
-                    } else {
-                        (ldr, str_)
-                    };
+                    let (ld, st) = spill_of(class).ok_or_else(|| {
+                        format!("{fname}: no instructions load and store a {} register to spill it", m.def(class).name)
+                    })?;
                     if uses.contains(r) {
                         new.push(MInst::new(
                             ld,
@@ -314,10 +327,22 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
             }
             for op in &mut inst.ops {
                 if let MOp::Reg(Reg::V(v)) = op {
+                    let class = vclass[*v as usize];
                     *op = MOp::Reg(Reg::P(match scratch.get(v) {
                         Some(&s) => s,
-                        // A result nothing reads: the zero register takes it.
-                        None => assigned[*v as usize].or(t.machine.zero).unwrap_or(abi.scratch[0]),
+                        None => match assigned[*v as usize] {
+                            Some(p) => p,
+                            // A result nothing reads: the zero register
+                            // takes it, or a scratch register of its file
+                            // that spill code is not using.
+                            None if m.zero_in(class) => m.zero.unwrap(),
+                            None => {
+                                let pool = pool_of(m.def(class).file);
+                                *pool.iter().rev().find(|r| !scratch.values().any(|s| s == *r)).ok_or_else(|| {
+                                    format!("{fname}: no register for an unused {} result", m.def(class).name)
+                                })?
+                            }
+                        },
                     }));
                 }
             }
@@ -326,13 +351,15 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
         }
         b.insts = new;
     }
-    lower_copies(t, f);
-    Ok(())
+    lower_copies(t, f)
 }
 
-/// Turns copies into moves, dropping those between the same register.
-fn lower_copies(t: &Target, f: &mut MFunc) {
-    use crate::target::Class;
+/// Turns copies into moves, dropping those between the same register:
+/// within a file, by the copy of the class (or of a wider one of its file:
+/// AArch64 copies 64-bit vectors as d registers); between files, by the
+/// instruction with role `move.<to>.<from>` (`move.d.x`, `fmov d0, x1`).
+fn lower_copies(t: &Target, f: &mut MFunc) -> Result<(), String> {
+    let m = &t.machine;
     for b in &mut f.blocks {
         let old = std::mem::take(&mut b.insts);
         for inst in old {
@@ -347,44 +374,49 @@ fn lower_copies(t: &Target, f: &mut MFunc) {
             if d == s {
                 continue;
             }
-            let wide = inst.wide;
-            // Within a register file, or across it with fmov.
-            let op = match (*d >= 32, *s >= 32, wide) {
-                (true, true, _) if inst.q => t.by_role("copy.q"),
-                (false, false, true) => t.copies[&Class::X],
-                (false, false, false) => t.copies[&Class::W],
-                (true, true, true) => t.copies[&Class::D],
-                (true, true, false) => t.copies[&Class::S],
-                (true, false, true) => t.by_role("fmov.d.x"),
-                (true, false, false) => t.by_role("fmov.s.w"),
-                (false, true, true) => t.by_role("fmov.x.d"),
-                (false, true, false) => t.by_role("fmov.w.s"),
+            let (fd, fs) = (m.file_of(*d), m.file_of(*s));
+            let class = inst.class.or_else(|| m.save_class(fd)).ok_or("a copy of no class")?;
+            let bits = m.def(class).bits;
+            let op = if fd == fs {
+                let mut within: Vec<(u32, usize)> = t
+                    .copies
+                    .iter()
+                    .filter(|(c, _)| m.def(**c).file == fd && !m.def(**c).sp && m.def(**c).bits >= bits)
+                    .map(|(c, &i)| (m.def(*c).bits, i))
+                    .collect();
+                within.sort();
+                within
+                    .first()
+                    .map(|w| w.1)
+                    .ok_or_else(|| format!("{}: no \"copy\" instruction for {} registers", f.name, m.files[fd].name))?
+            } else {
+                let name = |file: usize| m.scalar_in(file, bits).map(|c| m.def(c).name.clone());
+                let (Some(to), Some(from)) = (name(fd), name(fs)) else {
+                    return Err(format!("{}: no {bits}-bit class to copy between register files", f.name));
+                };
+                t.role(&format!("move.{to}.{from}"))
+                    .ok_or_else(|| format!("{}: no instruction has role move.{to}.{from}", f.name))?
             };
             b.insts.push(MInst::new(op, vec![MOp::Reg(Reg::P(*d)), MOp::Reg(Reg::P(*s))]));
         }
     }
+    Ok(())
 }
 
-/// Records each copy's width before allocation, while its virtual
-/// registers still say how wide they are.
-fn record_copy_widths(f: &mut MFunc) {
-    let vwide = f.vwide.clone();
-    let vq = f.vq.clone();
+/// Records each copy's class before allocation, while its virtual
+/// registers still say.
+fn record_copy_classes(f: &mut MFunc) {
+    let vclass = f.vclass.clone();
     for b in &mut f.blocks {
         for inst in &mut b.insts {
             if inst.op != Opcode::Copy {
                 continue;
             }
-            let w = |o: &MOp| match o {
-                MOp::Reg(Reg::V(v)) => Some(vwide[*v as usize]),
+            let c = |o: &MOp| match o {
+                MOp::Reg(Reg::V(v)) => Some(vclass[*v as usize]),
                 _ => None,
             };
-            inst.wide = w(&inst.ops[0]).or(w(&inst.ops[1])).unwrap_or(true);
-            let q = |o: &MOp| match o {
-                MOp::Reg(Reg::V(v)) => Some(vq[*v as usize]),
-                _ => None,
-            };
-            inst.q = q(&inst.ops[0]).or(q(&inst.ops[1])).unwrap_or(false);
+            inst.class = c(&inst.ops[0]).or(c(&inst.ops[1]));
         }
     }
 }

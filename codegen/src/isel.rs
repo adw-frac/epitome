@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use draconian_ir::module::*;
 use draconian_ir::types::{Type, TypeId};
 
-use crate::machine::Narrow;
+use crate::machine::{Holds, Narrow};
 use crate::mir::*;
 use crate::prepare::{self, Ctx};
 use crate::target::{Class, Head, Key, Kind, Src, Target, bin_bits, sext, wide_bits};
@@ -137,9 +137,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             name: fname.to_string(),
             global,
             blocks: Vec::new(),
-            vwide: Vec::new(),
-            vfp: Vec::new(),
-            vq: Vec::new(),
+            vclass: Vec::new(),
             slots: Vec::new(),
             frame_size: 0,
             out_size: 0,
@@ -210,13 +208,46 @@ impl<'a, 'b> Sel<'a, 'b> {
         self.hbits(self.ty_of(v))
     }
 
-    /// The register class a value of this type lives in.
-    fn class_of_ty(&self, ty: TypeId) -> Class {
+    /// What a value of this type is.
+    fn holds(&self, ty: TypeId) -> Holds {
         if self.is_vector(ty) {
-            return if self.bits(ty) > 64 { Class::Q } else { Class::V };
+            Holds::Vector
+        } else if self.is_fp(ty) {
+            Holds::Float
+        } else {
+            Holds::Int
         }
-        let wide = self.bits(ty) > 32;
-        if self.is_fp(ty) { Class::D.with_width(wide) } else { Class::X.with_width(wide) }
+    }
+
+    /// The register class a value of this type lives in (the description's
+    /// narrowest that holds it).
+    fn class_of_ty(&self, ty: TypeId) -> Class {
+        let bits = self.bits(ty).max(1);
+        let m = &self.t.machine;
+        m.value_class(self.holds(ty), bits)
+            .or_else(|| m.value_class(Holds::Int, 64))
+            .expect("the description has an integer register class")
+    }
+
+    /// The class of integers of 64 bits (`wide`) or 32, as pointers and
+    /// integers are held.
+    fn int_class(&self, wide: bool) -> Class {
+        let m = &self.t.machine;
+        m.value_class(Holds::Int, if wide { 64 } else { 32 })
+            .or_else(|| m.value_class(Holds::Int, 64))
+            .expect("the description has an integer register class")
+    }
+
+    /// A virtual integer register of 64 bits (`wide`) or 32.
+    fn ivreg(&mut self, wide: bool) -> VReg {
+        let c = self.int_class(wide);
+        self.mf.new_vreg(c)
+    }
+
+    /// Does this class hold floating-point values or vectors (which go in
+    /// the convention's fp registers)?
+    fn fp_class(&self, c: Class) -> bool {
+        matches!(self.t.machine.def(c).holds, Some(Holds::Float | Holds::Vector))
     }
 
     fn class_of(&self, v: Value) -> Class {
@@ -228,14 +259,8 @@ impl<'a, 'b> Sel<'a, 'b> {
             return v;
         }
         let ty = self.f.locals[x.index()].ty;
-        let wide = self.bits(ty) > 32;
-        let v = if self.is_vector(ty) && self.bits(ty) > 64 {
-            self.mf.new_q_vreg()
-        } else if self.is_fp(ty) {
-            self.mf.new_fp_vreg(wide)
-        } else {
-            self.mf.new_vreg(wide)
-        };
+        let class = self.class_of_ty(ty);
+        let v = self.mf.new_vreg(class);
         self.vreg.insert(x, v);
         v
     }
@@ -532,19 +557,17 @@ impl<'a, 'b> Sel<'a, 'b> {
                     let Term::V(v) = t else { return None };
                     let ty = self.ty_of(v);
                     let bits = self.bits(ty);
-                    let vector_class = matches!(class, Class::Q | Class::V);
+                    let def = self.t.machine.def(class);
+                    let holds = self.holds(ty);
                     if bits == 0
-                        || (bits > 64 && class != Class::Q)
-                        || (bits > 32) != (pp.bits > 32)
-                        || self.is_fp(ty) != class.is_fp()
-                        || self.is_vector(ty) != vector_class
-                        || (class == Class::Q && bits != 128)
-                        || (class == Class::V && bits != 64)
+                        || def.holds != Some(holds)
+                        || (holds == Holds::Vector && bits != def.bits)
+                        || (holds != Holds::Vector && (bits > 64 || (bits > 32) != (pp.bits > 32)))
                     {
                         return None;
                     }
                     if let Value::Const(_) = v {
-                        let zr = matches!(class, Class::W | Class::X) && self.is_zero_like(t);
+                        let zr = def.holds == Some(Holds::Int) && self.t.machine.zero_in(class) && self.is_zero_like(t);
                         if !zr {
                             materialize += 1;
                         }
@@ -800,26 +823,27 @@ impl<'a, 'b> Sel<'a, 'b> {
 
     fn const_reg(&mut self, c: ConstId, class: Class) -> Result<Reg, String> {
         let k = self.cx.m.constant(c).clone();
-        if matches!(class, Class::Q | Class::V) {
+        let holds = self.t.machine.def(class).holds;
+        if holds == Some(Holds::Vector) {
             return self.vector_const(c, class);
         }
         // A floating-point constant: its bits, made in an integer register
         // and moved across (zero from the zero register).
-        if class.is_fp() {
+        if holds == Some(Holds::Float) {
             let raw = match &k.kind {
                 ConstKind::Float(raw) => *raw as u64,
                 ConstKind::Zero | ConstKind::Undef | ConstKind::Poison => 0,
                 other => return self.err(format!("unsupported floating-point constant {other:?}")),
             };
-            let wide = class == Class::D;
+            let wide = self.t.machine.def(class).bits > 32;
             let g = self.int_reg(raw as i64, wide, true)?;
-            let d = self.mf.new_fp_vreg(wide);
+            let d = self.mf.new_vreg(class);
             self.push(MInst::copy(Reg::V(d), g));
             return Ok(Reg::V(d));
         }
         let bits = self.bits(k.ty);
-        let wide = class.is_64() || bits > 32;
-        let zr_ok = matches!(class, Class::W | Class::X);
+        let wide = self.t.machine.def(class).bits > 32 || bits > 32;
+        let zr_ok = self.t.machine.zero_in(class);
         match &k.kind {
             ConstKind::Int(a) => {
                 let v = sext(a.low_u64(), bits);
@@ -862,7 +886,7 @@ impl<'a, 'b> Sel<'a, 'b> {
                 let via_got = self.t.machine.external_via_got
                     && (declared_only
                         || (!gl.props.dso_local && !matches!(gl.props.linkage, Linkage::Internal | Linkage::Private)));
-                let d = self.mf.new_vreg(true);
+                let d = self.ivreg(true);
                 if via_got {
                     let adrp = self.t.by_role("got.hi");
                     let ldr = self.t.by_role("got.lo");
@@ -877,7 +901,7 @@ impl<'a, 'b> Sel<'a, 'b> {
                 if off == 0 {
                     return Ok(Reg::V(d));
                 }
-                let r = self.mf.new_vreg(true);
+                let r = self.ivreg(true);
                 let add = self.t.by_role("addi");
                 let sub = self.t.role("addi.neg");
                 if self.t.instrs[add].fits(&[None, None, Some(off)]) {
@@ -936,8 +960,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             ConstKind::Vector(es) => es.iter().map(|&e| lane(self.cx.m, e)).collect(),
             other => return self.err(format!("unsupported vector constant {other:?}")),
         };
-        let q = class == Class::Q;
-        let d = if q { self.mf.new_q_vreg() } else { self.mf.new_fp_vreg(true) };
+        let d = self.mf.new_vreg(class);
         let arr = arrangement(len, ebits);
         if lanes.iter().all(|&l| l == lanes[0]) && lanes[0] != 0 {
             let g = self.int_reg(lanes[0], ebits > 32, true)?;
@@ -983,7 +1006,7 @@ impl<'a, 'b> Sel<'a, 'b> {
     }
 
     fn make_int(&mut self, v: i64, wide: bool) -> Result<Reg, String> {
-        let d = self.mf.new_vreg(wide);
+        let d = self.ivreg(wide);
         // One nonzero 16 bits above the lowest is a shifted movz, which is
         // what an assembler makes of `mov` for such a value (it prefers
         // movz to movn): written out so that both say the same.
@@ -1048,7 +1071,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         });
         let base = match constant {
             Some(ci) => {
-                let r = self.mf.new_vreg(wide);
+                let r = self.ivreg(wide);
                 self.push(MInst::new(ci, vec![MOp::Reg(Reg::V(r)), MOp::Imm(hi)]));
                 Reg::V(r)
             }
@@ -1059,7 +1082,7 @@ impl<'a, 'b> Sel<'a, 'b> {
                     return self.err(format!("no way to make the constant {v}"));
                 }
                 let h = self.make_int(hi >> sh, wide)?;
-                let r = self.mf.new_vreg(wide);
+                let r = self.ivreg(wide);
                 self.push(MInst::new(shl, vec![MOp::Reg(Reg::V(r)), MOp::Reg(h), MOp::Imm(sh)]));
                 Reg::V(r)
             }
@@ -1121,19 +1144,14 @@ impl<'a, 'b> Sel<'a, 'b> {
                     Src::Temp(t) => {
                         // A temporary of the register class its producer
                         // writes.
-                        let wide = ins.operands[j].bits > 32;
                         let class = match ins.operands[j].kind {
                             Kind::Reg(c) => c,
-                            _ => Class::X,
+                            _ => self.int_class(true),
                         };
                         let v = match temps.get(t) {
                             Some(&v) => v,
                             None => {
-                                let v = match class {
-                                    Class::Q => self.mf.new_q_vreg(),
-                                    c if c.is_fp() => self.mf.new_fp_vreg(c.is_64()),
-                                    _ => self.mf.new_vreg(wide),
-                                };
+                                let v = self.mf.new_vreg(class);
                                 temps.insert(*t, v);
                                 v
                             }
@@ -1244,7 +1262,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         let mut regs = Vec::new();
         for part in found {
             regs.push(match part {
-                Some(p) => self.reg_for(p, Class::X)?,
+                Some(p) => self.reg_for(p, self.int_class(true))?,
                 None => self.int_reg(0, true, true)?,
             });
         }
@@ -1289,8 +1307,8 @@ impl<'a, 'b> Sel<'a, 'b> {
                 }
                 // A va_list is a pointer to the next variable argument.
                 s if s.starts_with("llvm.va_start") => {
-                    let ap = self.reg_for(args[0].value, Class::X)?;
-                    let p = self.mf.new_vreg(true);
+                    let ap = self.reg_for(args[0].value, self.int_class(true))?;
+                    let p = self.ivreg(true);
                     self.push(MInst::new(
                         self.t.by_role("addi"),
                         vec![MOp::Reg(Reg::V(p)), MOp::Reg(Reg::P(self.t.machine.sp)), MOp::Incoming(self.va_offset)],
@@ -1303,9 +1321,9 @@ impl<'a, 'b> Sel<'a, 'b> {
                 }
                 s if s.starts_with("llvm.va_end") => return Ok(()),
                 s if s.starts_with("llvm.va_copy") => {
-                    let dst = self.reg_for(args[0].value, Class::X)?;
-                    let src = self.reg_for(args[1].value, Class::X)?;
-                    let p = self.mf.new_vreg(true);
+                    let dst = self.reg_for(args[0].value, self.int_class(true))?;
+                    let src = self.reg_for(args[1].value, self.int_class(true))?;
+                    let p = self.ivreg(true);
                     self.push(MInst::new(
                         self.t.by_role("load.x"),
                         vec![MOp::Reg(Reg::V(p)), MOp::Reg(src), MOp::Imm(0)],
@@ -1358,18 +1376,19 @@ impl<'a, 'b> Sel<'a, 'b> {
             let bits = self.vbits(a.value);
             let class = self.class_of(a.value);
             let mut r = self.reg_for(a.value, class)?;
-            if !class.is_fp() {
+            let fp = self.fp_class(class);
+            if !fp {
                 r = self.extend_for_abi(r, bits, &a.attrs)?;
             }
             regs.push(r);
             locs.push(part_locs[k][0]);
             sizes.push(shapes[k][0].size);
-            fps.push(class.is_fp());
+            fps.push(fp);
             is_named.push(k < named);
         }
         let callee_reg = match (&target, call.callee) {
             (Some(_), _) => None,
-            (None, v) => Some(self.reg_for(v, Class::X)?),
+            (None, v) => Some(self.reg_for(v, self.int_class(true))?),
         };
         // Stack arguments first, while every argument register is free;
         // a variable argument takes a whole 8-byte slot.
@@ -1424,7 +1443,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             (_, true, 16) => "sext.16",
             _ => return Ok(r),
         };
-        let d = self.mf.new_vreg(false);
+        let d = self.ivreg(false);
         let ext = self.t.role(role).ok_or_else(|| format!("@{}: no instruction has role {role}", self.fname))?;
         self.push(MInst::new(ext, vec![MOp::Reg(Reg::V(d)), MOp::Reg(r)]));
         Ok(Reg::V(d))
@@ -1454,7 +1473,7 @@ impl<'a, 'b> Sel<'a, 'b> {
                         let bits = self.vbits(*v);
                         let class = self.class_of(*v);
                         let mut r = self.reg_for(*v, class)?;
-                        let to = if class.is_fp() {
+                        let to = if self.fp_class(class) {
                             self.mf.abi.fp_result
                         } else {
                             r = self.extend_for_abi(r, bits, &f.ret_attrs)?;
@@ -1471,8 +1490,8 @@ impl<'a, 'b> Sel<'a, 'b> {
                 // The next variable argument: load it through the pointer,
                 // and step the pointer over its 8-byte slot.
                 Op::VaArg { list } => {
-                    let ap = self.reg_for(*list, Class::X)?;
-                    let p = self.mf.new_vreg(true);
+                    let ap = self.reg_for(*list, self.int_class(true))?;
+                    let p = self.ivreg(true);
                     self.push(MInst::new(
                         self.t.by_role("load.x"),
                         vec![MOp::Reg(Reg::V(p)), MOp::Reg(ap), MOp::Imm(0)],
@@ -1486,7 +1505,7 @@ impl<'a, 'b> Sel<'a, 'b> {
                             vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(p)), MOp::Imm(0)],
                         ));
                     }
-                    let q = self.mf.new_vreg(true);
+                    let q = self.ivreg(true);
                     self.push(MInst::new(
                         self.t.by_role("addi"),
                         vec![MOp::Reg(Reg::V(q)), MOp::Reg(Reg::V(p)), MOp::Imm(8)],
@@ -1591,9 +1610,9 @@ impl<'a, 'b> Sel<'a, 'b> {
                     }
                     let Some(&(v, _)) = incoming.iter().find(|(_, from)| *from == p) else { continue };
                     let ty = f.locals[r.index()].ty;
-                    let wide = self.bits(ty) > 32;
-                    let src = self.reg_for(v, self.class_of_ty(ty))?;
-                    let tmp = if self.is_fp(ty) { self.mf.new_fp_vreg(wide) } else { self.mf.new_vreg(wide) };
+                    let class = self.class_of_ty(ty);
+                    let src = self.reg_for(v, class)?;
+                    let tmp = self.mf.new_vreg(class);
                     self.push(MInst::copy(Reg::V(tmp), src));
                     let d = self.vreg_of(r);
                     finals.push(MInst::copy(Reg::V(d), Reg::V(tmp)));
@@ -1673,7 +1692,7 @@ impl<'a, 'b> Sel<'a, 'b> {
                 // A small struct: a register for each part.
                 let mut regs = Vec::new();
                 for &loc in &part_locs[k] {
-                    let d = self.mf.new_vreg(true);
+                    let d = self.ivreg(true);
                     match loc {
                         crate::abi::ArgLoc::Reg(r) => self.push(MInst::copy(Reg::V(d), Reg::P(r))),
                         crate::abi::ArgLoc::Stack(off) => {

@@ -1,131 +1,86 @@
-//! Checks of the AArch64 description itself.
+//! Checks of the descriptions themselves, and of the checks.
 
-use draconian_codegen::enc::Env;
-use draconian_codegen::target::{Kind, Target};
+use draconian_codegen::check;
+use draconian_codegen::target::Target;
 
-/// Every instruction encodes and decodes back to itself, for registers and
-/// immediates spread over their ranges.
+/// The descriptions pass `draconian-llc --check-target`'s checks: every
+/// instruction encodes, decodes, disassembles and assembles back to itself;
+/// each recipe's instructions, by their bodies, compute what the IR it
+/// replaces computes; and the smoke program compiles and reads back.
 #[test]
-fn encodings_round_trip() {
-    let t = Target::aarch64();
-    let imms: &[i64] = &[
-        0,
-        1,
-        2,
-        3,
-        4,
-        7,
-        8,
-        12,
-        16,
-        31,
-        32,
-        48,
-        63,
-        255,
-        256,
-        4095,
-        4096,
-        65535,
-        -1,
-        -8,
-        -256,
-        0xff,
-        0xff00,
-        0x5555_5555,
-    ];
-    let mut checked = 0;
-    for ins in &t.instrs {
-        let names = ins.operand_names();
-        for (k, &imm) in imms.iter().enumerate() {
-            let mut env = Env::new();
-            for (j, o) in ins.operands.iter().enumerate() {
-                let v = match o.kind {
-                    Kind::Reg(_) => ((j * 7 + k * 3) % 31) as i64,
-                    Kind::Imm => imm,
-                    Kind::Label => 4 * (imm % 1000),
-                    Kind::Sym => 0,
-                    Kind::Cond => t.conds[k % t.conds.len()].value,
-                };
-                env.insert(o.name.clone(), v);
-            }
-            for o in ins.operands.iter().filter(|o| o.tied) {
-                env.insert(o.name.clone(), env["d"]);
-            }
-            let vals: Vec<Option<i64>> =
-                ins.operands.iter().map(|o| if o.kind == Kind::Imm { Some(env[&o.name]) } else { None }).collect();
-            if !ins.fits(&vals) {
-                continue;
-            }
-            let word = ins.enc.encode(&env).unwrap();
-            let back = ins.decode(word).unwrap_or_else(|| panic!("{}: {word:08x} does not decode", ins.name));
-            for n in &names {
-                if ins.operands.iter().any(|o| o.name == *n && o.kind == Kind::Sym) {
-                    continue;
-                }
-                let m = ins.operands.iter().find(|o| o.name == *n).map_or(64, |o| o.bits);
-                let mask = if m >= 64 { u64::MAX } else { (1u64 << m) - 1 };
-                assert_eq!(back[n] as u64 & mask, env[n] as u64 & mask, "{}: operand {n} of {word:08x}", ins.name);
-            }
-            checked += 1;
-        }
+fn descriptions_pass_their_checks() {
+    for t in [Target::aarch64(), Target::load_path(&riscv_dir()).unwrap()] {
+        let report = check::check(&t);
+        assert_eq!(report.errors(), 0, "{}", report.render(true));
+        let encodings = report.sections.iter().find(|s| s.name == "encodings").unwrap();
+        assert!(encodings.checked > 1000, "{}", encodings.checked);
     }
-    assert!(checked > 1000, "{checked}");
 }
 
-/// Each recipe's instructions, by their bodies, compute what the IR they
-/// replace computes.
+fn riscv_dir() -> String {
+    format!("{}/targets/riscv64", env!("CARGO_MANIFEST_DIR"))
+}
+
+/// The RISC-V description with one change, checked: the errors of section
+/// `section`.
+fn broken(file: &str, from: &str, to: &str, section: &str) -> Vec<String> {
+    let mut files: Vec<(String, String)> = std::fs::read_dir(riscv_dir())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "ll"))
+        .map(|p| (p.file_name().unwrap().to_string_lossy().into_owned(), std::fs::read_to_string(&p).unwrap()))
+        .collect();
+    files.sort();
+    let f = files.iter_mut().find(|f| f.0 == file).unwrap();
+    assert_eq!(f.1.matches(from).count(), 1, "{from}");
+    f.1 = f.1.replace(from, to);
+    let refs: Vec<(&str, &str)> = files.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect();
+    let t = Target::load_files(&refs).unwrap();
+    let report = check::check(&t);
+    report.sections.into_iter().find(|s| s.name == section).unwrap().errors
+}
+
+/// The checks find mistakes of the kinds a description's author makes.
 #[test]
-fn recipes_are_right() {
-    let t = Target::aarch64();
-    let samples: &[u64] = &[
-        0,
-        1,
-        2,
-        3,
-        5,
-        7,
-        100,
-        0x7fff_ffff,
-        0x8000_0000,
-        0xffff_ffff,
-        0xffff_fffe,
-        0x8000_0000_0000_0000,
-        u64::MAX,
-        0x1234_5678_9abc_def0,
-    ];
-    let recipes = t.recipe_trees().unwrap();
-    assert!(recipes.len() >= 10);
-    for (name, bits, want, got) in recipes {
-        let mut tried = 0;
-        let n = bits.len();
-        let mut idx = vec![0usize; n];
-        loop {
-            let args: Vec<u64> = idx
-                .iter()
-                .zip(&bits)
-                .map(|(&i, &b)| samples[i] & if b >= 64 { u64::MAX } else { (1u64 << b) - 1 })
-                .collect();
-            if let Some(w) = t.eval_tree(&want, &args) {
-                let g = t.eval_tree(&got, &args);
-                assert_eq!(Some(w), g, "{name} on {args:x?}");
-                tried += 1;
-            }
-            let mut k = 0;
-            while k < n {
-                idx[k] += 1;
-                if idx[k] < samples.len() {
-                    break;
-                }
-                idx[k] = 0;
-                k += 1;
-            }
-            if k == n {
-                break;
-            }
-        }
-        assert!(tried > 0, "{name}");
-    }
+fn checks_find_mistakes() {
+    let has = |errors: &[String], want: &str| {
+        assert!(errors.iter().any(|e| e.contains(want)), "no error with {want:?} in {errors:#?}");
+    };
+    // SUB given ADD's encoding: the disassembler cannot tell them apart.
+    let e = broken(
+        "10-integer.ll",
+        "\"enc\"=\"0100000 m:5 n:5 000 d:5 0110011\"",
+        "\"enc\"=\"0000000 m:5 n:5 000 d:5 0110011\"",
+        "encodings",
+    );
+    has(&e, "SUB");
+    // A template that names the wrong operand.
+    let xor = "@XOR(i64 \"reg\"=\"x\" %n, i64 \"reg\"=\"x\" %m) \"enc\"=\"0000000 m:5 n:5 100 d:5 0110011\" \"asm\"=\"xor {d}, {n}, ";
+    let e = broken("10-integer.ll", &format!("{xor}{{m}}\""), &format!("{xor}{{n}}\""), "assembly");
+    has(&e, "XOR");
+    // A recipe that adds where it should subtract.
+    let e = broken(
+        "60-recipes.ll",
+        "  %r = call i64 @SUB(i64 %x, i64 %s)\n  ret i64 %r\n}\n\ndeclare i32 @llvm.abs.i32",
+        "  %r = call i64 @ADD(i64 %x, i64 %s)\n  ret i64 %r\n}\n\ndeclare i32 @llvm.abs.i32",
+        "recipes",
+    );
+    has(&e, "abs.x.expand");
+    // No instruction for branches.
+    let e = broken("10-integer.ll", "\"asm\"=\"j {dest}\" \"role\"=\"jump\"", "\"asm\"=\"j {dest}\"", "structure");
+    has(&e, "role jump");
+    // A relocation without its ELF number, under an ELF convention.
+    let e =
+        broken("00-base.ll", "!\"name\", !\"lo12_i\", !\"elf\", !\"27\", ", "!\"name\", !\"lo12_i\", ", "structure");
+    has(&e, "no elf number");
+    // A convention whose saved registers are also clobbered.
+    let e = broken(
+        "70-abi.ll",
+        "!{!\"saved\", !\"s1\", !\"s2-s11\"}",
+        "!{!\"saved\", !\"s1\", !\"s2-s11\", !\"t0\"}",
+        "structure",
+    );
+    has(&e, "both saved and clobbered");
 }
 
 #[test]

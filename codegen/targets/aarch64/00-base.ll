@@ -28,8 +28,9 @@
 ; Manual) and "asm" its assembly. The result is the operand called `d`.
 ;
 ; Operand kinds, from parameter attributes:
-;   "reg"="w" / "x"       register; number 31 is the zero register
-;   "reg"="wsp" / "xsp"   register; number 31 is the stack pointer
+;   "reg"="w" / "x"       register of that class (01-target.ll lists them);
+;                         number 31 is the zero register in w and x, and
+;                         the stack pointer in wsp and xsp
 ;   "imm"                 constant; it fits if the encoding can hold it
 ;   "label"               branch target
 ;   "sym"                 symbol (fixed up by the linker)
@@ -48,7 +49,8 @@
 ;   "copy"                a register-to-register move of this class
 ;   "inverse"="CBNZW"     the branch taken when this one is not (a "cond"
 ;                         operand is inverted too)
-;   "dclass"="wsp"        the result's register class, if not w or x
+;   "dclass"="wsp"        the result's register class, if not the one its
+;                         type is put in (w, x, s, d, v, q)
 ;   "nomatch"             not a pattern for selection
 ;   "role"="..."          used by the code generator by role (load.x,
 ;                         addr.hi, jump, ...), comma-separated if several;

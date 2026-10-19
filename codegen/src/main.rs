@@ -32,6 +32,10 @@ const USAGE: &str = "usage: draconian-llc [options] <file.ll>
   --hex                   print each function's machine code in hex
   --disasm                disassemble each function's machine code
   --patterns              list the selection patterns and exit
+  --check-target          check the description (--target, --target-add)
+                          and exit: encodings, assembly, recipes, and a
+                          smoke program compiled under each convention
+  --verbose               with --check-target, every message
   --stats                 print matching counts and timings to stderr
   --keep-going            report every function that cannot be compiled,
                           and compile the rest";
@@ -41,6 +45,8 @@ fn main() -> ExitCode {
     let (mut input, mut output, mut target_file) = (None, None, None);
     let mut adds: Vec<String> = Vec::new();
     let (mut hex, mut disasm, mut patterns, mut stats) = (false, false, false, false);
+    let (mut check, mut verbose) = (false, false);
+    let mut reserve: Vec<String> = Vec::new();
     let mut filetype = None;
     let mut stop = Stop::Done;
     let mut opts = Options::default();
@@ -51,6 +57,8 @@ fn main() -> ExitCode {
             "--hex" => hex = true,
             "--disasm" => disasm = true,
             "--patterns" => patterns = true,
+            "--check-target" => check = true,
+            "--verbose" => verbose = true,
             "--stats" => stats = true,
             "--keep-going" => opts.keep_going = true,
             "--filetype=asm" => filetype = Some(false),
@@ -64,17 +72,7 @@ fn main() -> ExitCode {
             s if s.starts_with("--mattr=") => opts.mattr.push(s["--mattr=".len()..].to_string()),
             "--syntax=macho" => opts.syntax = Some(draconian_codegen::abi::Syntax::MachO),
             "--syntax=elf" => opts.syntax = Some(draconian_codegen::abi::Syntax::Elf),
-            s if s.starts_with("--reserve=") => {
-                for r in s["--reserve=".len()..].split(',') {
-                    match r.strip_prefix('x').and_then(|n| n.parse::<u8>().ok()) {
-                        Some(n) if n <= 30 => opts.reserve.push(n),
-                        _ => {
-                            eprintln!("draconian-llc: bad register {r}");
-                            return ExitCode::FAILURE;
-                        }
-                    }
-                }
-            }
+            s if s.starts_with("--reserve=") => reserve.extend(s["--reserve=".len()..].split(',').map(str::to_string)),
             s if s.starts_with('-') => {
                 eprintln!("draconian-llc: unknown option {s}\n\n{USAGE}");
                 return ExitCode::FAILURE;
@@ -89,6 +87,12 @@ fn main() -> ExitCode {
             None
         }
     };
+    if check {
+        let Some(target) = load("") else { return ExitCode::FAILURE };
+        let report = draconian_codegen::check::check(&target);
+        print!("{}", report.render(verbose));
+        return if report.errors() == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE };
+    }
     if patterns {
         let Some(target) = load("") else { return ExitCode::FAILURE };
         for p in &target.patterns {
@@ -118,6 +122,13 @@ fn main() -> ExitCode {
     };
     let triple = module.triple.as_ref().map(|s| String::from_utf8_lossy(s).into_owned()).unwrap_or_default();
     let Some(target) = load(&triple) else { return ExitCode::FAILURE };
+    match target.machine.regs(&reserve) {
+        Ok(r) => opts.reserve.extend(r),
+        Err(e) => {
+            eprintln!("draconian-llc: --reserve: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
     let started = std::time::Instant::now();
     opts.stop = stop;
     let compiled = match compile(&target, &mut module, &opts) {

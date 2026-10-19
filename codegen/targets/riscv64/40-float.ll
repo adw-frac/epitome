@@ -120,12 +120,12 @@ define double @FCVTDWU(i32 "reg"="w" %n) "enc"="1101001 00001 n:5 111 d:5 101001
   ret double %r
 }
 
-define i64 @FMVXD(double "reg"="d" %n) "enc"="1110001 00000 n:5 000 d:5 1010011" "asm"="fmv.x.d {d}, {n}" "feature"="d" "role"="fmov.x.d" {
+define i64 @FMVXD(double "reg"="d" %n) "enc"="1110001 00000 n:5 000 d:5 1010011" "asm"="fmv.x.d {d}, {n}" "feature"="d" "role"="move.x.d" {
   %r = bitcast double %n to i64
   ret i64 %r
 }
 
-define double @FMVDX(i64 "reg"="x" %n) "enc"="1111001 00000 n:5 000 d:5 1010011" "asm"="fmv.d.x {d}, {n}" "feature"="d" "role"="fmov.d.x" {
+define double @FMVDX(i64 "reg"="x" %n) "enc"="1111001 00000 n:5 000 d:5 1010011" "asm"="fmv.d.x {d}, {n}" "feature"="d" "role"="move.d.x" {
   %r = bitcast i64 %n to double
   ret double %r
 }
@@ -261,12 +261,12 @@ define float @FCVTSWU(i32 "reg"="w" %n) "enc"="1101000 00001 n:5 111 d:5 1010011
   ret float %r
 }
 
-define i32 @FMVXS(float "reg"="s" %n) "enc"="1110000 00000 n:5 000 d:5 1010011" "asm"="fmv.w.s {d}, {n}" "feature"="f" "role"="fmov.w.s" {
+define i32 @FMVXS(float "reg"="s" %n) "enc"="1110000 00000 n:5 000 d:5 1010011" "asm"="fmv.w.s {d}, {n}" "feature"="f" "role"="move.w.s" {
   %r = bitcast float %n to i32
   ret i32 %r
 }
 
-define float @FMVSX(i32 "reg"="w" %n) "enc"="1111000 00000 n:5 000 d:5 1010011" "asm"="fmv.s.w {d}, {n}" "feature"="f" "role"="fmov.s.w" {
+define float @FMVSX(i32 "reg"="w" %n) "enc"="1111000 00000 n:5 000 d:5 1010011" "asm"="fmv.s.w {d}, {n}" "feature"="f" "role"="move.s.w" {
   %r = bitcast i32 %n to float
   ret float %r
 }

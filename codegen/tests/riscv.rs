@@ -15,7 +15,8 @@
 //! 2. checks draconian-as makes the same object of our assembly;
 //! 3. checks draconian-objdump reads each object back as our assembly;
 //! 4. does 1 again with Zbb on (`--mattr=+zbb`), whose instructions replace
-//!    recipes for minimum, maximum and more.
+//!    recipes for minimum, maximum and more, and `bits.c` with M off
+//!    (`--mattr=-m`).
 //!
 //! `varargs.c` is left out: its IR's `va_list` is AArch64's. The test is
 //! skipped when `clang` is not installed.
@@ -93,10 +94,18 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         &[("O2", &["-O2", "-fno-vectorize", "-fno-slp-vectorize", "-fno-unroll-loops"]), ("vec", &["-O2"])];
     for (config, flags) in configs {
         let flags: Vec<&str> = flags.iter().chain(wrap).copied().collect();
-        for mattr in [vec![], vec!["+zbb".to_string()]] {
-            let stem = format!("{name}.{config}{}", if mattr.is_empty() { "" } else { "+zbb" });
+        // bits.c also without M, whose population counts then add bytes
+        // up without a multiply.
+        let mut mattrs = vec![vec![], vec!["+zbb".to_string()]];
+        if name == "bits" {
+            mattrs.push(vec!["-m".to_string()]);
+        }
+        for mattr in mattrs {
+            let stem = format!("{name}.{config}{}", mattr.first().map_or("", |m| m.as_str()));
             let (a, asm_a) = object(t, &src, &flags, tmp, &mattr)?;
-            let (b, asm_b) = object(t, &main, &flags, tmp, &mattr)?;
+            // main is built with the default features, but for Zbb.
+            let main_mattr: Vec<String> = mattr.iter().filter(|m| m.starts_with('+')).cloned().collect();
+            let (b, asm_b) = object(t, &main, &flags, tmp, &main_mattr)?;
             // 2, 3. The assembler and the disassembler agree with the
             // object written directly.
             for (bytes, asm) in [(&a, &asm_a), (&b, &asm_b)] {
@@ -141,7 +150,7 @@ fn programs_run_on_riscv() {
     let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("riscv");
     std::fs::create_dir_all(&tmp).unwrap();
     let mut failures = Vec::new();
-    for name in ["basic", "divs", "loops", "calls", "floats", "vectors"] {
+    for name in ["basic", "bits", "divs", "loops", "calls", "floats", "vectors"] {
         match check_program(&t, &dir, &tmp, name) {
             Ok(r) => r.iter().for_each(|l| println!("ok {l}")),
             Err(e) => failures.push(e),

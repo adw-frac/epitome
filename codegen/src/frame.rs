@@ -114,8 +114,8 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     let sp = t.machine.sp;
     let reaches = |slots: &[(u8, i64)]| {
         slots.iter().all(|&(reg, at)| {
-            let role = if reg >= 32 { "store.d" } else { "store.x" };
-            t.role(role).is_some_and(|i| t.instrs[i].fits(&[None, None, Some(at)]))
+            let role = format!("store.{}", t.machine.save_name(reg));
+            t.role(&role).is_some_and(|i| t.instrs[i].fits(&[None, None, Some(at)]))
         })
     };
     let low = if reaches(&slots) { 0 } else { slots.iter().map(|s| s.1).min().unwrap_or(0) / 16 * 16 };
@@ -163,7 +163,7 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
 /// `ldr`.
 fn save_restore(t: &Target, slots: &[(u8, i64)]) -> (Vec<MInst>, Vec<MInst>) {
     let r = |n: u8| MOp::Reg(Reg::P(n));
-    let file = |reg: u8| if reg >= 32 { "d" } else { "x" };
+    let file = |reg: u8| t.machine.save_name(reg);
     let (mut saves, mut restores) = (Vec::new(), Vec::new());
     let mut k = 0;
     while k < slots.len() {

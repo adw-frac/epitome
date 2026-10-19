@@ -324,7 +324,8 @@ reshapes first, as LLVM's type legalisation does:
   mask to iN), 0`, whether any lane is set, is `umaxv`.
 - What has no instruction is rewritten: `icmp ne` against other than zero
   is `cmtst` of an `eor`; shifts by amounts that are not one constant are
-  `ushl` and `sshl` (with the amount negated for right shifts); divisions,
+  recipes of the description's, `ushl` and `sshl` (with the amount
+  negated for right shifts); divisions,
   64-bit multiplications and reductions without an across-lanes
   instruction go lane by lane; ordered floating-point reductions are added
   in order, as written. Vectors of pointers become vectors of `i64`.
@@ -461,11 +462,15 @@ aggregates and vectors, defining variadic functions under AAPCS64 (whose
 
 ## Checks
 
-- `codegen/tests/describe.rs`: every instruction encodes and decodes back
-  to itself over a spread of operands; each recipe's instructions, by
-  their bodies, compute what the IR it replaces computes, on edge values;
-  the table has the combinations it should, and not those it must not
-  (`tst` with a condition that reads the carry).
+- `codegen/tests/describe.rs`: both descriptions pass the checks of
+  `draconian-llc --check-target` ([targets.md](targets.md)): every
+  instruction encodes, decodes, disassembles and assembles back to itself;
+  each recipe's instructions, by their bodies, compute what the IR they
+  replace computes, on edge values; a smoke program compiles under every
+  convention. It also breaks the RISC-V description on purpose, to show
+  the checks find each kind of mistake, and checks that the table has the
+  combinations it should, and not those it must not (`tst` with a
+  condition that reads the carry).
 - `codegen/tests/programs.rs`: C functions in `tests/programs/*.c`, built
   four ways (clang `-O0`, that through `draconian-opt`, clang `-O2` without
   vectorising, and clang `-O2` as it is, vectorised and unrolled) and

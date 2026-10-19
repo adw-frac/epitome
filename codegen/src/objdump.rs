@@ -220,12 +220,7 @@ impl Image {
                 },
             })
             .collect();
-        let format = match f.machine {
-            183 => "elf64-littleaarch64",
-            243 => "elf64-littleriscv",
-            _ => "elf64-little",
-        };
-        Image { format: format.into(), macho: false, sections, symbols }
+        Image { format: m.elf_format.clone(), macho: false, sections, symbols }
     }
 
     /// A symbol's name as printed: a section symbol is its section's name.
@@ -468,8 +463,7 @@ pub fn instruction(
         let o = &ins.operands[k];
         let v = env[&o.name];
         match o.kind {
-            Kind::Reg(c) if c.is_fp() => Operand::Reg(Reg::P(v as u8 + 32)),
-            Kind::Reg(_) => Operand::Reg(Reg::P(v as u8)),
+            Kind::Reg(c) => Operand::Reg(Reg::P(t.machine.phys(c, v))),
             Kind::Label => Operand::Text(label(pc.wrapping_add(v as u64))),
             Kind::Sym => match reloc {
                 Some(r) => Operand::Text(reloc_operand(&t.machine, r, macho)),

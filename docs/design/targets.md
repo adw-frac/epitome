@@ -85,15 +85,45 @@ in number order:
 !1004 = !{!"d", !"ft{0-7}", !"fs{0-1}", !"fa{0-7}", !"fs{2-11}", !"ft{8-11}"}
 ```
 
-The numbering has a few fixed points:
+`{0-30}` is a range. `!target.classes` says what each class is:
 
-- Integer classes number from 0.
-- Floating-point and vector classes (`d`, `s`, `q`, `v`) number from 32.
-- `{0-30}` is a range.
+```llvm
+!1010 = !{!"x", !"file", !"x", !"bits", !"64", !"holds", !"int"}
+!1012 = !{!"xsp", !"file", !"x", !"bits", !"64", !"holds", !"int", !"sp", !"yes"}
+!1014 = !{!"d", !"file", !"f", !"bits", !"64", !"holds", !"float"}
+```
 
-Templates print these names, and the assembler and the conventions' lists
-read them. Extra *views* name the same registers differently for
-templates. AArch64 uses `b` and `h`, and `lanes` (the `v3` of `v3.4s`).
+| Property | Meaning |
+| --- | --- |
+| `file` | the register file its registers are in; the classes of one file name the same registers (`w3` is `x3`, `s3` is `d3`) |
+| `bits` | how wide a value it holds |
+| `holds` | `int`, `float` or `vector`; without it, the class is a *view* that only names registers for templates (`{n:b}` is `b3`; `lanes` gives the `v3` of `{n:4s}`, `v3.4s`) |
+| `sp` | `yes` if the number it shares with the zero register is the stack pointer in this class (AArch64's `xsp`), so the zero register cannot be named in it |
+
+Inside the code generator, registers are numbered file after file, in the
+order the files are first named. AArch64's integer registers are 0–31 and
+its vector registers 32–63. A machine with 16 integer registers and three
+other files is numbered the same way, up to 255 registers in all. A class
+is an index into this list, and the Rust names none.
+
+Of the classes that hold a kind of value, the narrowest wide enough is
+where such values are put, and the first declared wins between equals.
+So an `i32` goes in `w` and a `<2 x i64>` in `q`. Everything else is
+derived from the class and its file:
+
+- which registers a value may be allocated to;
+- which instruction copies it (its class's `"copy"`, or that of a wider
+  class of its file: AArch64 copies 64-bit vectors as `d` registers);
+- how it is moved between files (role `move.<to>.<from>`, for example
+  `move.d.x`);
+- how it is spilled, saved and restored (`load.<class>`, `store.<class>`).
+  A function saves a register as its file's widest scalar class (`x`,
+  `d`), and a value wider than that, such as a `q`, is not kept in a
+  saved register across a call.
+
+Templates print the names, and the assembler and the conventions' lists
+read them. A template writes a register as another class names it with
+`{n:w}`, `{n:s}`, `{n:b}`.
 
 ### Parameters
 
@@ -187,9 +217,17 @@ When a feature is off:
   splits every vector into scalars, partial reductions included.
 
 So RISC-V without Zbb computes `smax` with a branch-free recipe, and with
-`+zbb` it uses `max`. Intrinsics with no instruction, such as a funnel
-shift on a machine with no `fshl` entry, are expanded generically in IR by
-`prepare`.
+`+zbb` it uses `max`. Intrinsics with no instruction that is on are
+expanded generically in IR by `prepare`:
+
+- **Funnel shifts and rotations:** two shifts and an or. With a variable
+  amount, one of the shifts is done in two steps, so it is never by the
+  full width.
+- **Bit counts and byte swaps:** done at a wider width the description has
+  an instruction for. For example, RISC-V's `llvm.bswap.i32` becomes Zbb's
+  64-bit `rev8` and a shift. With no such width, they are done with shifts
+  and masks. A population count adds up its bytes with a multiply, or with
+  shifts when the machine has no multiply.
 
 ## What the code generator asks of a description
 
@@ -200,20 +238,77 @@ several roles: `"role"="addi,addi12"`.
 
 | Roles | Used for | Needed |
 | --- | --- | --- |
-| `load.x`, `store.x`, and `load.b/h/w/s/d`, `store.b/h/w/s/d` | spills, saves, arguments on the stack, by size | `x` always; the others where values of that size are spilled or passed |
+| `load.<class>`, `store.<class>`, and `load.b/h`, `store.b/h` | spills, saves, arguments on the stack | for each file's widest scalar class (`x`, `d`), for classes wider than that (`q`), and for the sizes of arguments passed |
 | `addi`, `subi`, `addi.neg`, `addi12`, `subi12`, `addi.w`, `add`, `shli` | frame adjustment, addresses of stack slots, building large constants | `addi` and `add` |
 | `call`, `callr`, `jump`, `ret`, `trap` | calls, branches, returns, `unreachable` | yes |
 | `addr.hi`, `addr.lo`, `got.hi`, `got.lo` | the address of a global: the two halves of its address, and of its GOT entry's | `addr.*`; `got.*` with `external-via-got` |
 | `movz.*`, `movk.*`, `movi.zero` | AArch64's constant building | no: otherwise `lui`/`addi`/`shli` pieces are found from the constants the description allows |
 | `zext.1/8/16`, `sext.1/8/16` | extending `zeroext`/`signext` arguments and results | for the widths a program passes so |
-| `fmov.*`, `copy.q`, `dup.*`, `ins.*` | moves between classes, vector building | where the machine has those classes |
-| `load.pair.*`, `store.pair.*`, `load.q`, `store.q` | saving pairs of registers, 128-bit spills | no |
+| `move.<to>.<from>` (`move.d.x`) | copies between register files: floating-point constants, bit-casts | for each floating-point class, from the integer class of its width |
+| `dup.*`, `ins.*` | building vectors | where the machine has vectors |
+| `load.pair.<class>`, `store.pair.<class>` | saving two registers at once | no |
 
 The calling convention adds a few registers:
 
 - `scratch` and `fp-scratch`: for spill code;
 - `far-scratch`: for the address of a stack slot further away than an
   instruction's offset can reach (beyond 2,047 bytes on RISC-V).
+
+## What is still built in
+
+The Rust names no instruction, register, class, relocation or CPU. What it
+still assumes about a machine:
+
+- **Instructions are 32-bit words, little-endian.** That rules out x86,
+  RISC-V's C extension and Thumb.
+- **Pointers are 64 bits.** That rules out RV32 and Arm32.
+- **Object files are ELF64 and Mach-O.**
+- **The vocabularies are fixed:** of conventions (`args`, `saved`,
+  `stack-args`, ...), parameters and roles. A convention passes integers
+  and floating-point values in two lists of registers. A machine needing
+  something they cannot say (delay slots, register windows, AArch64's
+  `va_list` for another convention) needs Rust.
+- **Flags are a lazy comparison** (`%nzcv`, the two values last compared),
+  which suits AArch64's flags and machines without them alike.
+- **No state between instructions** beyond registers and flags, such as
+  RVV's vector length.
+
+## Checking a description
+
+`draconian-llc --check-target` checks a description, with the same
+`--target` and `--target-add` options, and exits with failure if it finds
+errors (`--verbose` lists every message):
+
+```
+$ draconian-llc --check-target --target=codegen/targets/riscv64
+208 instructions, 0 condition forms, 300 patterns, 1 convention (lp64d), 1 CPU, 13 relocations
+warn structure  33 requirements
+       warning: feature zbb is needed by entries, but no CPU has it (only --mattr=+zbb turns it on)
+ok   encodings  4863 words encoded, decoded and disassembled
+ok   assembly   622 instructions written and read back
+ok   recipes    54 recipes evaluated on edge values
+ok   smoke      5 compilations of the smoke program
+       note: without m, 10 of the 38 smoke functions cannot be compiled: arith32, ...
+0 errors, 1 warnings
+```
+
+It takes well under a second. `codegen/src/check/` has the checks:
+
+| Check | Finds |
+| --- | --- |
+| **structure** | Missing roles, copies or register names. A `"sym"` operand without a `"reloc"`. A relocation with no number in a format a convention writes. A convention whose registers contradict each other (saved and clobbered, scratch and argument). A default CPU that isn't listed. |
+| **encodings** | Each instruction, over a spread of operands, must encode, decode back to the same operands, and be read by the disassembler as an entry that encodes the same word. It is an error for two entries to share words when neither accepts fewer words than the other, unless both write each word alike. The allowed cases are an alias like `cmp` of `subs`, and one instruction described once per IR type. |
+| **assembly** | Each template must write every operand the encoding holds, and the assembler must read the written instruction back as the same word. Two entries that read back as one another are reported as a warning. |
+| **recipes** | Each recipe's instructions, by their bodies, must compute what the IR it replaces computes. This is tested on edge values, including NaN, -0.0, the extremes and the sign boundaries. |
+| **smoke** | The smoke program (`smoke.c`, about 40 functions: every width, division, constants, loops, switches, globals, many arguments, a variadic call, a 12KB frame, register pressure, floating point, vectorised loops, structs, traps) must compile under every convention and CPU. The object written must equal what the assembler makes of the assembly, and every word must disassemble. It also reports which functions each optional feature is needed for. |
+
+It cannot show that an instruction's body says what the hardware does, or
+that a template is written as other assemblers write it. A template whose
+operands are in the wrong order still reads back as itself. Only comparing
+with other tools, or running code, can show those. `tests/riscv.rs` and
+`tests/programs.rs` run code. `codegen/tests/describe.rs` checks both
+descriptions, and checks that the checks find the mistakes they are for:
+it breaks the RISC-V description in six ways, one at a time.
 
 ## RISC-V RV64
 
@@ -254,10 +349,10 @@ general, or is driven by a parameter:
 
 `codegen/tests/riscv.rs` tests it without a RISC-V toolchain:
 
-- **Compiling.** `basic`, `divs`, `loops`, `calls`, `floats` and `vectors`
-  from `tests/programs/` are built from clang's IR (LP64, unsigned `char`).
-  There are four configurations: `-O2` and vectorised `-O2`, each with and
-  without `+zbb`.
+- **Compiling.** `basic`, `bits`, `divs`, `loops`, `calls`, `floats` and
+  `vectors` from `tests/programs/` are built from clang's IR (LP64,
+  unsigned `char`). There are four configurations: `-O2` and vectorised
+  `-O2`, each with and without `+zbb`. `bits` is also built with `-m`.
 - **Round trip.** `draconian-as` must make the same bytes from our
   assembly, and `draconian-objdump` must read it back.
 - **Running.** The objects are linked and run on a small RV64IMFD+Zbb
@@ -266,7 +361,7 @@ general, or is driven by a parameter:
   glibc's does. Each program must print exactly what the native build
   prints.
 
-All 24 runs pass. The test was also what found the bugs listed above.
+All 30 runs pass. The test was also what found the bugs listed above.
 
 Not yet:
 
@@ -277,9 +372,10 @@ Not yet:
 
 Adding V would mean:
 
-1. vector register classes;
+1. a third register file (`v0`–`v31`), with its classes;
 2. `vector-bits` with the feature `v`;
 3. vector entries tagged `"feature"="v"`.
 
-The Rust would not need to change, beyond any vector shapes it doesn't
-know yet.
+The files and classes are now data, but V's vector length is set at run
+time (`vsetvli`). That is state the code generator would have to track
+between instructions, and it has nothing for that yet.

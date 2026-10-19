@@ -2345,7 +2345,7 @@ define <2 x i64> @MOVIzero() "feature"="neon" "enc"="0 1 1 0111100000 000 1110 0
   ret <2 x i64> zeroinitializer
 }
 
-define <2 x i64> @MOVq(<2 x i64> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110 10 1 m:5=n 00011 1 n:5 d:5" "asm"="mov {d:16b}, {n:16b}" "role"="copy.q" "nomatch" {
+define <2 x i64> @MOVq(<2 x i64> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110 10 1 m:5=n 00011 1 n:5 d:5" "asm"="mov {d:16b}, {n:16b}" "copy"="q" "nomatch" {
   ret <2 x i64> %n
 }
 define i8 @UMOVb64(<8 x i8> "reg"="v" %n, i64 "imm" %idx) "feature"="neon" "enc"="0 0 0 01110000 imm5:5=idx*2+1 0 0111 1 n:5 d:5" "asm"="umov {d}, {n:.b}[{idx}]" "nodecode" {
@@ -2851,6 +2851,38 @@ define <16 x i8> @SSHLv16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "feat
   ret <16 x i8> %r
 }
 
+define <16 x i8> @shl.v16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "recipe"="shl.v16b.expand" {
+  %r = shl <16 x i8> %n, %m
+  ret <16 x i8> %r
+}
+
+define <16 x i8> @shl.v16b.expand(<16 x i8> %n, <16 x i8> %m) {
+  %r = call <16 x i8> @USHLv16b(<16 x i8> %n, <16 x i8> %m)
+  ret <16 x i8> %r
+}
+
+define <16 x i8> @lshr.v16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "recipe"="lshr.v16b.expand" {
+  %r = lshr <16 x i8> %n, %m
+  ret <16 x i8> %r
+}
+
+define <16 x i8> @lshr.v16b.expand(<16 x i8> %n, <16 x i8> %m) {
+  %neg = call <16 x i8> @NEGv16b(<16 x i8> %m)
+  %r = call <16 x i8> @USHLv16b(<16 x i8> %n, <16 x i8> %neg)
+  ret <16 x i8> %r
+}
+
+define <16 x i8> @ashr.v16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "recipe"="ashr.v16b.expand" {
+  %r = ashr <16 x i8> %n, %m
+  ret <16 x i8> %r
+}
+
+define <16 x i8> @ashr.v16b.expand(<16 x i8> %n, <16 x i8> %m) {
+  %neg = call <16 x i8> @NEGv16b(<16 x i8> %m)
+  %r = call <16 x i8> @SSHLv16b(<16 x i8> %n, <16 x i8> %neg)
+  ret <16 x i8> %r
+}
+
 define <8 x i1> @CMTSTv8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 01 1 m:5 10001 1 n:5 d:5" "asm"="cmtst {d:8h}, {n:8h}, {m:8h}" "dclass"="q" {
   %a = and <8 x i16> %n, %m
   %r = icmp ne <8 x i16> %a, zeroinitializer
@@ -2873,6 +2905,38 @@ declare <8 x i16> @llvm.aarch64.neon.sshl.v8i16(<8 x i16>, <8 x i16>)
 
 define <8 x i16> @SSHLv8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 01 1 m:5 01000 1 n:5 d:5" "asm"="sshl {d:8h}, {n:8h}, {m:8h}" {
   %r = call <8 x i16> @llvm.aarch64.neon.sshl.v8i16(<8 x i16> %n, <8 x i16> %m)
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @shl.v8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "recipe"="shl.v8h.expand" {
+  %r = shl <8 x i16> %n, %m
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @shl.v8h.expand(<8 x i16> %n, <8 x i16> %m) {
+  %r = call <8 x i16> @USHLv8h(<8 x i16> %n, <8 x i16> %m)
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @lshr.v8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "recipe"="lshr.v8h.expand" {
+  %r = lshr <8 x i16> %n, %m
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @lshr.v8h.expand(<8 x i16> %n, <8 x i16> %m) {
+  %neg = call <8 x i16> @NEGv8h(<8 x i16> %m)
+  %r = call <8 x i16> @USHLv8h(<8 x i16> %n, <8 x i16> %neg)
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @ashr.v8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "recipe"="ashr.v8h.expand" {
+  %r = ashr <8 x i16> %n, %m
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @ashr.v8h.expand(<8 x i16> %n, <8 x i16> %m) {
+  %neg = call <8 x i16> @NEGv8h(<8 x i16> %m)
+  %r = call <8 x i16> @SSHLv8h(<8 x i16> %n, <8 x i16> %neg)
   ret <8 x i16> %r
 }
 
@@ -2901,6 +2965,38 @@ define <4 x i32> @SSHLv4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "featu
   ret <4 x i32> %r
 }
 
+define <4 x i32> @shl.v4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "recipe"="shl.v4s.expand" {
+  %r = shl <4 x i32> %n, %m
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @shl.v4s.expand(<4 x i32> %n, <4 x i32> %m) {
+  %r = call <4 x i32> @USHLv4s(<4 x i32> %n, <4 x i32> %m)
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @lshr.v4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "recipe"="lshr.v4s.expand" {
+  %r = lshr <4 x i32> %n, %m
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @lshr.v4s.expand(<4 x i32> %n, <4 x i32> %m) {
+  %neg = call <4 x i32> @NEGv4s(<4 x i32> %m)
+  %r = call <4 x i32> @USHLv4s(<4 x i32> %n, <4 x i32> %neg)
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @ashr.v4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "recipe"="ashr.v4s.expand" {
+  %r = ashr <4 x i32> %n, %m
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @ashr.v4s.expand(<4 x i32> %n, <4 x i32> %m) {
+  %neg = call <4 x i32> @NEGv4s(<4 x i32> %m)
+  %r = call <4 x i32> @SSHLv4s(<4 x i32> %n, <4 x i32> %neg)
+  ret <4 x i32> %r
+}
+
 define <2 x i1> @CMTSTv2d(<2 x i64> "reg"="q" %n, <2 x i64> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 11 1 m:5 10001 1 n:5 d:5" "asm"="cmtst {d:2d}, {n:2d}, {m:2d}" "dclass"="q" {
   %a = and <2 x i64> %n, %m
   %r = icmp ne <2 x i64> %a, zeroinitializer
@@ -2923,6 +3019,38 @@ declare <2 x i64> @llvm.aarch64.neon.sshl.v2i64(<2 x i64>, <2 x i64>)
 
 define <2 x i64> @SSHLv2d(<2 x i64> "reg"="q" %n, <2 x i64> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 11 1 m:5 01000 1 n:5 d:5" "asm"="sshl {d:2d}, {n:2d}, {m:2d}" {
   %r = call <2 x i64> @llvm.aarch64.neon.sshl.v2i64(<2 x i64> %n, <2 x i64> %m)
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @shl.v2d(<2 x i64> "reg"="q" %n, <2 x i64> "reg"="q" %m) "recipe"="shl.v2d.expand" {
+  %r = shl <2 x i64> %n, %m
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @shl.v2d.expand(<2 x i64> %n, <2 x i64> %m) {
+  %r = call <2 x i64> @USHLv2d(<2 x i64> %n, <2 x i64> %m)
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @lshr.v2d(<2 x i64> "reg"="q" %n, <2 x i64> "reg"="q" %m) "recipe"="lshr.v2d.expand" {
+  %r = lshr <2 x i64> %n, %m
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @lshr.v2d.expand(<2 x i64> %n, <2 x i64> %m) {
+  %neg = call <2 x i64> @NEGv2d(<2 x i64> %m)
+  %r = call <2 x i64> @USHLv2d(<2 x i64> %n, <2 x i64> %neg)
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @ashr.v2d(<2 x i64> "reg"="q" %n, <2 x i64> "reg"="q" %m) "recipe"="ashr.v2d.expand" {
+  %r = ashr <2 x i64> %n, %m
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @ashr.v2d.expand(<2 x i64> %n, <2 x i64> %m) {
+  %neg = call <2 x i64> @NEGv2d(<2 x i64> %m)
+  %r = call <2 x i64> @SSHLv2d(<2 x i64> %n, <2 x i64> %neg)
   ret <2 x i64> %r
 }
 
@@ -2951,6 +3079,38 @@ define <8 x i8> @SSHLv8b(<8 x i8> "reg"="v" %n, <8 x i8> "reg"="v" %m) "feature"
   ret <8 x i8> %r
 }
 
+define <8 x i8> @shl.v8b(<8 x i8> "reg"="v" %n, <8 x i8> "reg"="v" %m) "recipe"="shl.v8b.expand" {
+  %r = shl <8 x i8> %n, %m
+  ret <8 x i8> %r
+}
+
+define <8 x i8> @shl.v8b.expand(<8 x i8> %n, <8 x i8> %m) {
+  %r = call <8 x i8> @USHLv8b(<8 x i8> %n, <8 x i8> %m)
+  ret <8 x i8> %r
+}
+
+define <8 x i8> @lshr.v8b(<8 x i8> "reg"="v" %n, <8 x i8> "reg"="v" %m) "recipe"="lshr.v8b.expand" {
+  %r = lshr <8 x i8> %n, %m
+  ret <8 x i8> %r
+}
+
+define <8 x i8> @lshr.v8b.expand(<8 x i8> %n, <8 x i8> %m) {
+  %neg = call <8 x i8> @NEGv8b(<8 x i8> %m)
+  %r = call <8 x i8> @USHLv8b(<8 x i8> %n, <8 x i8> %neg)
+  ret <8 x i8> %r
+}
+
+define <8 x i8> @ashr.v8b(<8 x i8> "reg"="v" %n, <8 x i8> "reg"="v" %m) "recipe"="ashr.v8b.expand" {
+  %r = ashr <8 x i8> %n, %m
+  ret <8 x i8> %r
+}
+
+define <8 x i8> @ashr.v8b.expand(<8 x i8> %n, <8 x i8> %m) {
+  %neg = call <8 x i8> @NEGv8b(<8 x i8> %m)
+  %r = call <8 x i8> @SSHLv8b(<8 x i8> %n, <8 x i8> %neg)
+  ret <8 x i8> %r
+}
+
 define <4 x i1> @CMTSTv4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 01 1 m:5 10001 1 n:5 d:5" "asm"="cmtst {d:4h}, {n:4h}, {m:4h}" "dclass"="q" {
   %a = and <4 x i16> %n, %m
   %r = icmp ne <4 x i16> %a, zeroinitializer
@@ -2976,6 +3136,38 @@ define <4 x i16> @SSHLv4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "featu
   ret <4 x i16> %r
 }
 
+define <4 x i16> @shl.v4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "recipe"="shl.v4h.expand" {
+  %r = shl <4 x i16> %n, %m
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @shl.v4h.expand(<4 x i16> %n, <4 x i16> %m) {
+  %r = call <4 x i16> @USHLv4h(<4 x i16> %n, <4 x i16> %m)
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @lshr.v4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "recipe"="lshr.v4h.expand" {
+  %r = lshr <4 x i16> %n, %m
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @lshr.v4h.expand(<4 x i16> %n, <4 x i16> %m) {
+  %neg = call <4 x i16> @NEGv4h(<4 x i16> %m)
+  %r = call <4 x i16> @USHLv4h(<4 x i16> %n, <4 x i16> %neg)
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @ashr.v4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "recipe"="ashr.v4h.expand" {
+  %r = ashr <4 x i16> %n, %m
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @ashr.v4h.expand(<4 x i16> %n, <4 x i16> %m) {
+  %neg = call <4 x i16> @NEGv4h(<4 x i16> %m)
+  %r = call <4 x i16> @SSHLv4h(<4 x i16> %n, <4 x i16> %neg)
+  ret <4 x i16> %r
+}
+
 define <2 x i1> @CMTSTv2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 10 1 m:5 10001 1 n:5 d:5" "asm"="cmtst {d:2s}, {n:2s}, {m:2s}" "dclass"="q" {
   %a = and <2 x i32> %n, %m
   %r = icmp ne <2 x i32> %a, zeroinitializer
@@ -2998,6 +3190,38 @@ declare <2 x i32> @llvm.aarch64.neon.sshl.v2i32(<2 x i32>, <2 x i32>)
 
 define <2 x i32> @SSHLv2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 10 1 m:5 01000 1 n:5 d:5" "asm"="sshl {d:2s}, {n:2s}, {m:2s}" {
   %r = call <2 x i32> @llvm.aarch64.neon.sshl.v2i32(<2 x i32> %n, <2 x i32> %m)
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @shl.v2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "recipe"="shl.v2s.expand" {
+  %r = shl <2 x i32> %n, %m
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @shl.v2s.expand(<2 x i32> %n, <2 x i32> %m) {
+  %r = call <2 x i32> @USHLv2s(<2 x i32> %n, <2 x i32> %m)
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @lshr.v2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "recipe"="lshr.v2s.expand" {
+  %r = lshr <2 x i32> %n, %m
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @lshr.v2s.expand(<2 x i32> %n, <2 x i32> %m) {
+  %neg = call <2 x i32> @NEGv2s(<2 x i32> %m)
+  %r = call <2 x i32> @USHLv2s(<2 x i32> %n, <2 x i32> %neg)
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @ashr.v2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "recipe"="ashr.v2s.expand" {
+  %r = ashr <2 x i32> %n, %m
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @ashr.v2s.expand(<2 x i32> %n, <2 x i32> %m) {
+  %neg = call <2 x i32> @NEGv2s(<2 x i32> %m)
+  %r = call <2 x i32> @SSHLv2s(<2 x i32> %n, <2 x i32> %neg)
   ret <2 x i32> %r
 }
 

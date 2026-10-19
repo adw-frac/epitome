@@ -32,7 +32,7 @@ use draconian_ir::layout::DataLayout;
 use draconian_ir::module::*;
 use draconian_ir::types::{Type, TypeId};
 
-use crate::target::sext;
+use crate::target::{Head, Tree, sext};
 
 pub struct Ctx<'a> {
     pub m: &'a mut Module,
@@ -57,6 +57,26 @@ impl Ctx<'_> {
     /// Are instruction `i`'s features on?
     pub fn enabled(&self, i: usize) -> bool {
         self.t.instrs[i].features.iter().all(|f| self.features.contains(f))
+    }
+
+    /// Is there a pattern, of instructions that are on, with an IR node
+    /// `want` accepts?
+    fn selects(&self, want: impl Fn(&Head) -> bool) -> bool {
+        fn has(t: &Tree, want: &dyn Fn(&Head) -> bool) -> bool {
+            match t {
+                Tree::Op(h, kids) => want(h) || kids.iter().any(|k| has(k, want)),
+                _ => false,
+            }
+        }
+        self.t.patterns.iter().any(|p| has(&p.tree, &want) && p.emit.iter().all(|e| self.enabled(e.instr)))
+    }
+
+    /// Is there an instruction for intrinsic `name` (`llvm.ctlz.i64`)?
+    pub fn selects_intrinsic(&self, name: &str) -> bool {
+        match self.t.intrinsics.iter().position(|n| n == name) {
+            Some(id) => self.selects(|h| matches!(h, Head::Intrinsic(k, _) if *k as usize == id)),
+            None => false,
+        }
     }
 
     fn i64t(&mut self) -> TypeId {
@@ -688,19 +708,11 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
             }
             // A funnel shift by a constant, of vectors or (where the
             // description has no instruction for it) of scalars: two shifts
-            // and an or.
+            // and an or. By a variable amount, which no instruction takes,
+            // the same with the amount masked, and the other shift done in
+            // two steps so that it is never by the full width.
             let vector = matches!(cx.m.types.get(ty), Type::Vector { .. });
-            if (base == "llvm.fshl" || base == "llvm.fshr")
-                && (vector || !cx.t.intrinsics.contains(&name))
-                && let Some(c) = crate::target::lit_of(
-                    cx.m,
-                    match args[2] {
-                        Value::Const(c) => c,
-                        _ => ConstId(u32::MAX),
-                    },
-                )
-                .filter(|_| matches!(args[2], Value::Const(_)))
-            {
+            if base == "llvm.fshl" || base == "llvm.fshr" {
                 let elem = match cx.m.types.get(ty).clone() {
                     Type::Vector { elem, .. } => elem,
                     _ => ty,
@@ -709,7 +721,6 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                     Type::Int(b) => *b as i64,
                     _ => 64,
                 };
-                let amt = c.0.rem_euclid(eb);
                 let amount = |cx: &mut Ctx, v: i64| -> Value {
                     let e = cx.int(elem, v);
                     if !vector {
@@ -718,23 +729,54 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                     let Value::Const(e) = e else { unreachable!() };
                     Value::Const(cx.m.consts.intern(Constant { ty, kind: ConstKind::Splat(e) }))
                 };
-                // fshl(a, b, c) is (a << c) | (b >> (w - c)); fshr(a, b, c) is
-                // fshl(a, b, w - c).
-                let amt = if base == "llvm.fshr" { (eb - amt) % eb } else { amt };
-                let value = if amt == 0 {
-                    if base == "llvm.fshr" { args[1] } else { args[0] }
-                } else {
-                    let (a, b) = (amount(cx, amt), amount(cx, eb - amt));
-                    let hi = s.bin(BinOp::Shl, args[0], a, ty);
-                    let lo = s.bin(BinOp::LShr, args[1], b, ty);
-                    s.bin(BinOp::Or, hi, lo, ty)
+                let constant = match args[2] {
+                    Value::Const(c) => crate::target::lit_of(cx.m, c),
+                    _ => None,
                 };
-                let new = std::mem::take(&mut s.new);
-                f.replace_uses(Value::Local(r), value);
-                let n = new.len();
-                f.blocks[b.index()].insts.splice(k..=k, new);
-                k += n;
-                continue;
+                let value = match constant {
+                    Some(_) if !vector && cx.selects_intrinsic(&name) => None,
+                    Some(c) => {
+                        // fshl(a, b, c) is (a << c) | (b >> (w - c)); fshr(a, b, c)
+                        // is fshl(a, b, w - c).
+                        let amt = c.0.rem_euclid(eb);
+                        let amt = if base == "llvm.fshr" { (eb - amt) % eb } else { amt };
+                        Some(if amt == 0 {
+                            if base == "llvm.fshr" { args[1] } else { args[0] }
+                        } else {
+                            let (a, b) = (amount(cx, amt), amount(cx, eb - amt));
+                            let hi = s.bin(BinOp::Shl, args[0], a, ty);
+                            let lo = s.bin(BinOp::LShr, args[1], b, ty);
+                            s.bin(BinOp::Or, hi, lo, ty)
+                        })
+                    }
+                    None => {
+                        // fshl: (a << c) | ((b >> 1) >> (w - 1 - c));
+                        // fshr: ((a << 1) << (w - 1 - c)) | (b >> c); c mod w.
+                        let mask = amount(cx, eb - 1);
+                        let one = amount(cx, 1);
+                        let c = s.bin(BinOp::And, args[2], mask, ty);
+                        let rest = s.bin(BinOp::Xor, c, mask, ty);
+                        Some(if base == "llvm.fshl" {
+                            let hi = s.bin(BinOp::Shl, args[0], c, ty);
+                            let lo = s.bin(BinOp::LShr, args[1], one, ty);
+                            let lo = s.bin(BinOp::LShr, lo, rest, ty);
+                            s.bin(BinOp::Or, hi, lo, ty)
+                        } else {
+                            let hi = s.bin(BinOp::Shl, args[0], one, ty);
+                            let hi = s.bin(BinOp::Shl, hi, rest, ty);
+                            let lo = s.bin(BinOp::LShr, args[1], c, ty);
+                            s.bin(BinOp::Or, hi, lo, ty)
+                        })
+                    }
+                };
+                if let Some(value) = value {
+                    let new = std::mem::take(&mut s.new);
+                    f.replace_uses(Value::Local(r), value);
+                    let n = new.len();
+                    f.blocks[b.index()].insts.splice(k..=k, new);
+                    k += n;
+                    continue;
+                }
             }
             // ctlz and cttz may say a zero input gives poison; giving the
             // full width instead is always allowed, and is what clz does.
@@ -743,6 +785,20 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 if let Op::Call(c) = &mut s.f.insts[i.index()].op {
                     c.args[1].value = no;
                 }
+            }
+            // Bit counts and byte swaps without an instruction: widened to
+            // a width that has one, or done with shifts and masks.
+            if scalar
+                && matches!(base.as_str(), "llvm.ctpop" | "llvm.ctlz" | "llvm.cttz" | "llvm.bswap")
+                && !cx.selects_intrinsic(&name)
+            {
+                let value = bit_intrinsic(cx, &mut s, &base, args[0], bits, ty);
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), value);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
             }
             let value = match (minmax, base.as_str()) {
                 // Narrow minimum and maximum: compare and select.
@@ -789,36 +845,6 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                         ),
                     )
                 }
-                // Population count: sums of bits in pairs, nibbles and
-                // bytes, then a multiply to add the bytes up.
-                (_, "llvm.ctpop") if scalar => {
-                    let w = if bits <= 32 { 32 } else { 64 };
-                    let wt = cx.m.types.int(w);
-                    let mut x = if bits < w { s.cast(CastOp::ZExt, args[0], wt) } else { args[0] };
-                    let rep = |byte: u64| -> i64 { (0..w / 8).fold(0u64, |acc, k| acc | (byte << (8 * k))) as i64 };
-                    let c = |cx: &mut Ctx, v: i64| cx.int(wt, v);
-                    let one = c(cx, 1);
-                    let half = s.bin(BinOp::LShr, x, one, wt);
-                    let m1 = c(cx, rep(0x55));
-                    let half = s.bin(BinOp::And, half, m1, wt);
-                    x = s.bin(BinOp::Sub, x, half, wt);
-                    let m2 = c(cx, rep(0x33));
-                    let lo = s.bin(BinOp::And, x, m2, wt);
-                    let two = c(cx, 2);
-                    let hi = s.bin(BinOp::LShr, x, two, wt);
-                    let hi = s.bin(BinOp::And, hi, m2, wt);
-                    x = s.bin(BinOp::Add, lo, hi, wt);
-                    let four = c(cx, 4);
-                    let sh = s.bin(BinOp::LShr, x, four, wt);
-                    x = s.bin(BinOp::Add, x, sh, wt);
-                    let m4 = c(cx, rep(0x0f));
-                    x = s.bin(BinOp::And, x, m4, wt);
-                    let ones = c(cx, rep(0x01));
-                    x = s.bin(BinOp::Mul, x, ones, wt);
-                    let top = c(cx, w as i64 - 8);
-                    x = s.bin(BinOp::LShr, x, top, wt);
-                    Some(if bits < w { s.cast(CastOp::Trunc, x, ty) } else { x })
-                }
                 _ => None,
             };
             let new = std::mem::take(&mut s.new);
@@ -833,6 +859,144 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
             }
         }
     }
+}
+
+/// `base` (`llvm.ctpop`, `llvm.ctlz`, `llvm.cttz` or `llvm.bswap`) of `x`,
+/// an integer of `bits` bits, of type `ty`, where the description has no
+/// instruction for it: by the same at a wider width it has one for, or
+/// with shifts and masks. Zero gives the full width.
+fn bit_intrinsic(cx: &mut Ctx, s: &mut Seq, base: &str, x: Value, bits: u32, ty: TypeId) -> Value {
+    let i1 = cx.m.types.int(1);
+    let wide = [16, 32, 64].into_iter().find(|&w| w > bits && cx.selects_intrinsic(&format!("{base}.i{w}")));
+    let w = wide.unwrap_or(if bits <= 32 { 32 } else { 64 });
+    let wt = cx.m.types.int(w);
+    let c = |cx: &mut Ctx, v: i64| cx.int(wt, v);
+    let mut x = if bits < w { s.cast(CastOp::ZExt, x, wt) } else { x };
+    let narrow = |s: &mut Seq, v: Value| if bits < w { s.cast(CastOp::Trunc, v, ty) } else { v };
+    // A zero input counts as having its lowest bit just above the value.
+    if base == "llvm.cttz" && bits < w {
+        let top = c(cx, 1i64 << bits);
+        x = s.bin(BinOp::Or, x, top, wt);
+    }
+    if wide.is_some() {
+        let name = format!("{base}.i{w}");
+        let no = cx.int(i1, 0);
+        let args = if base == "llvm.ctlz" || base == "llvm.cttz" { vec![x, no] } else { vec![x] };
+        let params: Vec<TypeId> = args.iter().map(|a| if *a == no { i1 } else { wt }).collect();
+        let callee = crate::legalize::declare(cx, &name, wt, &params);
+        let fn_ty = cx.m.types.intern(Type::Function { ret: wt, params, varargs: false });
+        let mut v = s.op(
+            Op::Call(Box::new(Call {
+                tail: TailKind::None,
+                fmf: FastMath::default(),
+                cconv: CallConv::default(),
+                ret_attrs: vec![],
+                addrspace: None,
+                fn_ty,
+                callee,
+                args: args.into_iter().map(|value| CallArg { value, attrs: vec![] }).collect(),
+                fn_attrs: vec![],
+                bundles: vec![],
+            })),
+            wt,
+        );
+        if base == "llvm.ctlz" && bits < w {
+            let d = c(cx, (w - bits) as i64);
+            v = s.bin(BinOp::Sub, v, d, wt);
+        }
+        if base == "llvm.bswap" && bits < w {
+            let d = c(cx, (w - bits) as i64);
+            v = s.bin(BinOp::LShr, v, d, wt);
+        }
+        return narrow(s, v);
+    }
+    let rep =
+        |pattern: u64, every: u32| -> i64 { (0..w / every).fold(0u64, |acc, k| acc | (pattern << (every * k))) as i64 };
+    let v = match base {
+        "llvm.bswap" => {
+            // Swap bytes, then pairs of them, then halves.
+            let mut step = 8;
+            while step < w {
+                let m = c(cx, rep((1u64 << step) - 1, 2 * step));
+                let sh = c(cx, step as i64);
+                let lo = s.bin(BinOp::And, x, m, wt);
+                let lo = s.bin(BinOp::Shl, lo, sh, wt);
+                let hi = s.bin(BinOp::LShr, x, sh, wt);
+                let hi = s.bin(BinOp::And, hi, m, wt);
+                x = s.bin(BinOp::Or, hi, lo, wt);
+                step *= 2;
+            }
+            if bits < w {
+                let d = c(cx, (w - bits) as i64);
+                x = s.bin(BinOp::LShr, x, d, wt);
+            }
+            x
+        }
+        "llvm.ctlz" => {
+            // Every bit below the highest set, counted, from the width.
+            let mut step = 1;
+            while step < w {
+                let sh = c(cx, step as i64);
+                let y = s.bin(BinOp::LShr, x, sh, wt);
+                x = s.bin(BinOp::Or, x, y, wt);
+                step *= 2;
+            }
+            let n = popcount(cx, s, x, w);
+            let full = c(cx, bits as i64);
+            s.bin(BinOp::Sub, full, n, wt)
+        }
+        "llvm.cttz" => {
+            // The bits below the lowest set: !x & (x - 1).
+            let one = c(cx, 1);
+            let all = c(cx, -1);
+            let below = s.bin(BinOp::Sub, x, one, wt);
+            let not = s.bin(BinOp::Xor, x, all, wt);
+            let y = s.bin(BinOp::And, not, below, wt);
+            popcount(cx, s, y, w)
+        }
+        _ => popcount(cx, s, x, w),
+    };
+    narrow(s, v)
+}
+
+/// The number of bits set in `x`, an integer of `w` (32 or 64) bits: sums
+/// of bits in pairs, nibbles and bytes, then the bytes added up, with a
+/// multiply if the machine has one.
+fn popcount(cx: &mut Ctx, s: &mut Seq, x: Value, w: u32) -> Value {
+    let wt = cx.m.types.int(w);
+    let rep = |byte: u64| -> i64 { (0..w / 8).fold(0u64, |acc, k| acc | (byte << (8 * k))) as i64 };
+    let c = |cx: &mut Ctx, v: i64| cx.int(wt, v);
+    let one = c(cx, 1);
+    let half = s.bin(BinOp::LShr, x, one, wt);
+    let m1 = c(cx, rep(0x55));
+    let half = s.bin(BinOp::And, half, m1, wt);
+    let mut x = s.bin(BinOp::Sub, x, half, wt);
+    let m2 = c(cx, rep(0x33));
+    let lo = s.bin(BinOp::And, x, m2, wt);
+    let two = c(cx, 2);
+    let hi = s.bin(BinOp::LShr, x, two, wt);
+    let hi = s.bin(BinOp::And, hi, m2, wt);
+    x = s.bin(BinOp::Add, lo, hi, wt);
+    let four = c(cx, 4);
+    let sh = s.bin(BinOp::LShr, x, four, wt);
+    x = s.bin(BinOp::Add, x, sh, wt);
+    let m4 = c(cx, rep(0x0f));
+    x = s.bin(BinOp::And, x, m4, wt);
+    if cx.selects(|h| *h == Head::Bin(BinOp::Mul, w)) {
+        let ones = c(cx, rep(0x01));
+        x = s.bin(BinOp::Mul, x, ones, wt);
+        let top = c(cx, w as i64 - 8);
+        return s.bin(BinOp::LShr, x, top, wt);
+    }
+    let mut step = 8;
+    while step < w {
+        let sh = c(cx, step as i64);
+        let y = s.bin(BinOp::LShr, x, sh, wt);
+        x = s.bin(BinOp::Add, x, y, wt);
+        step *= 2;
+    }
+    let m = c(cx, 0x7f);
+    s.bin(BinOp::And, x, m, wt)
 }
 
 /// Builds instructions to go before another, of one integer type.

@@ -78,10 +78,11 @@ out("00-base.ll", HEADER.format(what="the files, and the machine as a whole") + 
 ; Not yet: compressed instructions (C), atomics (A), vectors (V), PIC.
 
 ; ===========================================================================
-; Registers, by their ABI names. Integer registers are x0-x31 (x0 reads as
-; zero); the floating-point ones f0-f31 are numbered from 32. The w classes
-; are the same registers, holding 32-bit values, which are kept
-; sign-extended to 64 bits ("narrow-results"="sign").
+; Registers, by their ABI names, in two files: the integer registers
+; x0-x31 (x0 reads as zero) and the floating-point ones f0-f31. The w
+; classes are the integer registers holding 32-bit values, which are kept
+; sign-extended to 64 bits ("narrow-results"="sign"); s and d are the
+; floating-point registers holding floats and doubles.
 
 !target.registers = !{!1000, !1001, !1002, !1003, !1004, !1005}
 !1000 = !{!"x", !"zero", !"ra", !"sp", !"gp", !"tp", !"t{0-2}", !"s{0-1}", !"a{0-7}", !"s{2-11}", !"t{3-6}"}
@@ -91,12 +92,20 @@ out("00-base.ll", HEADER.format(what="the files, and the machine as a whole") + 
 !1004 = !{!"d", !"ft{0-7}", !"fs{0-1}", !"fa{0-7}", !"fs{2-11}", !"ft{8-11}"}
 !1005 = !{!"s", !"ft{0-7}", !"fs{0-1}", !"fa{0-7}", !"fs{2-11}", !"ft{8-11}"}
 
+!target.classes = !{!1010, !1011, !1012, !1013, !1014, !1015}
+!1010 = !{!"x", !"file", !"x", !"bits", !"64", !"holds", !"int"}
+!1011 = !{!"w", !"file", !"x", !"bits", !"32", !"holds", !"int"}
+!1012 = !{!"xsp", !"file", !"x", !"bits", !"64", !"holds", !"int", !"sp", !"yes"}
+!1013 = !{!"wsp", !"file", !"x", !"bits", !"32", !"holds", !"int", !"sp", !"yes"}
+!1014 = !{!"d", !"file", !"f", !"bits", !"64", !"holds", !"float"}
+!1015 = !{!"s", !"file", !"f", !"bits", !"32", !"holds", !"float"}
+
 ; ===========================================================================
 ; Parameters. No vector registers (V is not described): vectors are done
 ; lane by lane. Globals are reached by their absolute addresses (the medlow
 ; code model), not through a GOT. Branches compare whole registers.
 
-!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108}
+!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109}
 !1100 = !{!"sp", !"sp"}
 !1101 = !{!"zero", !"zero"}
 !1102 = !{!"vector-bits", !"0"}
@@ -107,6 +116,7 @@ out("00-base.ll", HEADER.format(what="the files, and the machine as a whole") + 
 !1106 = !{!"elf-flags", !"4"}
 !1107 = !{!"cpu", !"generic-rv64"}
 !1108 = !{!"boolean-branches", !"compare"}
+!1109 = !{!"elf-format", !"elf64-littleriscv"}
 
 ; ===========================================================================
 ; CPUs, by LLVM's names for them and their features.
@@ -411,10 +421,10 @@ for t, ty, fmt, feat, cls in [("D", "double", "1", "d", "d"), ("S", "float", "0"
     it, ic, xn = ("i64", "x", "x") if t == "D" else ("i32", "w", "w")
     F.append(define(it, f"FMVX{t}", f'{ty} "reg"="{cls}" %n', R(f"11100" + f"0{fmt}", "00000", "n:5", "000", "d:5", OPFP),
                     f"fmv.{xn}.{t.lower()} {{d}}, {{n}}", f"  %r = bitcast {ty} %n to {it}\n  ret {it} %r",
-                    fa + f' "role"="fmov.{ic}.{cls}"'))
+                    fa + f' "role"="move.{ic}.{cls}"'))
     F.append(define(ty, f"FMV{t}X", f'{it} "reg"="{ic}" %n', R(f"11110" + f"0{fmt}", "00000", "n:5", "000", "d:5", OPFP),
                     f"fmv.{t.lower()}.{xn} {{d}}, {{n}}", f"  %r = bitcast {it} %n to {ty}\n  ret {ty} %r",
-                    fa + f' "role"="fmov.{cls}.{ic}"'))
+                    fa + f' "role"="move.{cls}.{ic}"'))
     # Loads and stores.
     f3m = "011" if t == "D" else "010"
     F.append(define(ty, f"FL{t}", 'ptr "reg"="x" %n, i64 "imm" %off', I("off:s12", "n:5", f3m, "d:5", LOADFP),

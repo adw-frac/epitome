@@ -41,7 +41,7 @@ use crate::abi::Syntax;
 use crate::enc::{self, Env};
 use crate::mir::{self, Operand, Reg};
 use crate::object::{self, Object, Pending, RelocKind, Section, SectionKind, Symbol, SymbolKind};
-use crate::target::{Class, Kind, Target};
+use crate::target::{Kind, Target};
 
 /// An assembled file.
 pub struct Assembled {
@@ -208,10 +208,9 @@ impl<'t> Assembler<'t> {
                     // By any of its names (a vector's without its
                     // arrangement); the template, printing it back,
                     // decides whether the name was the right one.
-                    let n = self.t.machine.lookup(text.split('.').next()?)?;
-                    let n = if class.is_fp() { n.wrapping_sub(32) } else { n };
-                    set(&mut r.env, name, n as i64)?;
-                    let p = if class.is_fp() { n + 32 } else { n };
+                    let p = self.t.machine.lookup(text.split('.').next()?)?;
+                    let n = self.t.machine.field(class, p)?;
+                    set(&mut r.env, name, n)?;
                     r.shown.insert(k, Operand::Reg(Reg::P(p)));
                 }
                 Kind::Imm => set(&mut r.env, name, parse_int(text)?)?,
@@ -299,7 +298,7 @@ impl<'t> Assembler<'t> {
                 continue;
             }
             let sp_classes =
-                ins.operands.iter().filter(|o| matches!(o.kind, Kind::Reg(Class::Wsp | Class::Xsp))).count();
+                ins.operands.iter().filter(|o| matches!(o.kind, Kind::Reg(c) if self.t.machine.def(c).sp)).count();
             if best.as_ref().is_none_or(|b| sp_classes < b.0) {
                 best = Some((sp_classes, tpl.instr, word, r.sym.map(|s| s.1)));
             }
