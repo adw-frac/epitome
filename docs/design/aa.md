@@ -84,7 +84,20 @@ For a call:
 - argument memory counts only if the location may alias one of the
   call's pointer arguments;
 - lifetime markers count as writing their object, so nothing is carried
-  across them.
+  across them;
+- `memcpy` and `memmove` write their destination's bytes and read their
+  source's, and `memset` writes its destination's, the length being the
+  size when it is a constant. Volatile ones are ordinary calls.
+
+`effects` gives what an instruction may do to memory at all, whatever the
+location, which is how [memory SSA](memssa.md) decides what is a write and
+what is a read.
+
+Each pointer's decomposition (base, constant offset, scaled terms) is
+worked out once per function and kept, since walks ask about the same
+pointers many times. A pointer's address never changes: an SSA value is
+defined once, and a pass that replaces an operand puts an equal value in
+its place.
 
 A `noalias` argument that does not escape is treated as reachable only
 through itself for the function's own accesses, but not for calls: its

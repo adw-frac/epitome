@@ -13,6 +13,8 @@
 //!   whether an instruction can read or write a location.
 //! - `sroa`: splitting allocas into pieces `mem2reg` can promote.
 //! - `mem2reg`: promoting allocas to SSA values.
+//! - `memssa`: memory SSA, and the walker that finds a load's clobbering
+//!   write on demand.
 //! - `simplifycfg`: unreachable blocks, empty blocks, diamonds to
 //!   selects, straight lines; branches themselves fold in the combiner.
 //! - `cse`: common-subexpression elimination, by hashing a canonical key
@@ -35,6 +37,7 @@ pub mod inline;
 pub mod loops;
 pub mod lsr;
 pub mod mem2reg;
+pub mod memssa;
 pub mod par;
 pub mod pipeline;
 pub mod recursion;

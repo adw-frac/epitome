@@ -102,7 +102,7 @@ places in it.
 | `basic-aa` | Stateless alias analysis from simple facts, such as two distinct globals never aliasing. See [alias analysis](aa.md). | Done |
 | `globals-aa` | Alias and mod/ref facts for globals whose address is never taken, plus pure functions. | Later |
 | `scev-aa` | Alias analysis using scalar evolution, within one loop iteration. | Later |
-| `memdep` | Finds the earlier memory operations a memory operation depends on, computed lazily. | Planned |
+| `memdep` | Finds the earlier memory operations a memory operation depends on, computed lazily. Done as memory SSA with a walker that answers on demand; see [memory SSA](memssa.md). Not yet used by any pass. | Partial |
 | `lazy-value-info` | Computes value range facts on demand. Used by jump threading. | Planned |
 | `da` | Dependence analysis between memory accesses. | Later |
 | `iv-users` | Tracks the uses of induction-variable expressions. Used by `loop-reduce`. | Later |

@@ -44,7 +44,7 @@ pub enum AliasResult {
 }
 
 /// A memory access: where it starts, and how many bytes, if known.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Location {
     pub ptr: Value,
     pub size: Option<u64>,
@@ -57,8 +57,10 @@ pub struct ModRef {
 }
 
 impl ModRef {
-    const NONE: ModRef = ModRef { mods: false, refs: false };
-    const ALL: ModRef = ModRef { mods: true, refs: true };
+    pub const NONE: ModRef = ModRef { mods: false, refs: false };
+    pub const ALL: ModRef = ModRef { mods: true, refs: true };
+    pub const READ: ModRef = ModRef { mods: false, refs: true };
+    pub const WRITE: ModRef = ModRef { mods: true, refs: false };
 }
 
 /// The objects a pointer can be based on.
@@ -91,11 +93,94 @@ pub struct BasicAa<'s, 'm> {
     sh: &'s Shared<'m>,
     /// Allocas and allocations whose address never escapes.
     local_only: HashSet<LocalId>,
+    /// Pointers already decomposed. A pointer's address never changes (SSA
+    /// values are defined once, and a pass that replaces an operand puts an
+    /// equal value in its place), so the answers stay right while the
+    /// function is edited.
+    decomposed: std::cell::RefCell<HashMap<Value, std::rc::Rc<Decomposed>>>,
+}
+
+/// The memory intrinsics, whose locations are their pointer and length
+/// arguments.
+enum MemIntrinsic {
+    /// `memcpy` and `memmove`: (destination, source, length).
+    Copy(Value, Value, Value),
+    /// `memset`: (destination, length).
+    Set(Value, Value),
 }
 
 impl<'s, 'm> BasicAa<'s, 'm> {
     pub fn new(sh: &'s Shared<'m>, f: &Function) -> Self {
-        BasicAa { sh, local_only: not_captured(sh, f) }
+        BasicAa { sh, local_only: not_captured(sh, f), decomposed: Default::default() }
+    }
+
+    /// `llvm.memcpy`, `llvm.memmove` or `llvm.memset` (and their `.inline`
+    /// forms), if `call` is one and not volatile.
+    fn mem_intrinsic(&self, call: &Call) -> Option<MemIntrinsic> {
+        let g = self.sh.direct_callee(call)?;
+        let name = self.sh.module.global(g).name.as_deref()?;
+        let arg = |k: usize| call.args.get(k).map(|a| a.value);
+        // The last argument is `isvolatile`.
+        let volatile = arg(3).and_then(|v| self.int_value(v)) != Some(0);
+        if volatile {
+            return None;
+        }
+        if name.starts_with("llvm.memcpy.") || name.starts_with("llvm.memmove.") {
+            Some(MemIntrinsic::Copy(arg(0)?, arg(1)?, arg(2)?))
+        } else if name.starts_with("llvm.memset.") {
+            Some(MemIntrinsic::Set(arg(0)?, arg(2)?))
+        } else {
+            None
+        }
+    }
+
+    /// The bytes from `ptr` that a memory intrinsic of length `len` covers.
+    fn span(&self, ptr: Value, len: Value) -> Location {
+        Location { ptr, size: self.int_value(len).filter(|&n| n >= 0).map(|n| n as u64) }
+    }
+
+    /// Whether `inst` may write or read any memory at all, whatever the
+    /// location: what memory SSA needs to know to place it.
+    pub fn effects(&self, inst: &Inst) -> ModRef {
+        match &inst.op {
+            Op::Load { volatile: true, .. } | Op::Load { atomic: Some(_), .. } => ModRef::ALL,
+            Op::Store { volatile: true, .. } | Op::Store { atomic: Some(_), .. } => ModRef::ALL,
+            Op::Load { .. } => ModRef::READ,
+            Op::Store { .. } => ModRef::WRITE,
+            Op::Call(call) | Op::Invoke { call, .. } | Op::CallBr { call, .. } => {
+                let sh = self.sh;
+                let name =
+                    sh.direct_callee(call).and_then(|g| sh.module.global(g).name.as_deref()).unwrap_or("").to_string();
+                if ["llvm.dbg.", "llvm.assume", "llvm.experimental.noalias.scope.decl"]
+                    .iter()
+                    .any(|p| name.starts_with(p))
+                {
+                    return ModRef::NONE;
+                }
+                if name.starts_with("llvm.lifetime.") {
+                    return ModRef::WRITE;
+                }
+                if let Some(mi) = self.mem_intrinsic(call) {
+                    return match mi {
+                        MemIntrinsic::Copy(..) => ModRef::ALL,
+                        MemIntrinsic::Set(..) => ModRef::WRITE,
+                    };
+                }
+                let mut e = MemoryEffects::parse(sh.module, &call.fn_attrs);
+                if let Some(body) = sh.direct_callee(call).and_then(|g| sh.published(g)) {
+                    e = e.intersect(MemoryEffects::parse(sh.module, &body.fn_attrs));
+                }
+                let k = e.argmem.union(e.other);
+                ModRef { mods: k.0 & MemKind::WRITE.0 != 0, refs: k.0 & MemKind::READ.0 != 0 }
+            }
+            Op::AtomicRmw { .. } | Op::CmpXchg { .. } | Op::Fence { .. } | Op::VaArg { .. } => ModRef::ALL,
+            _ => ModRef::NONE,
+        }
+    }
+
+    /// The type of a constant.
+    pub fn const_type(&self, c: ConstId) -> TypeId {
+        self.sh.consts().get(c).ty
     }
 
     /// The location a load or store of type `ty` through `ptr` accesses.
@@ -147,8 +232,17 @@ impl<'s, 'm> BasicAa<'s, 'm> {
         Some(eval::sext(k.value, k.bits))
     }
 
-    /// Walks `getelementptr`s back to the base pointer.
-    fn decompose(&self, f: &Function, mut v: Value) -> Decomposed {
+    /// Walks `getelementptr`s back to the base pointer, once per pointer.
+    fn decompose(&self, f: &Function, v: Value) -> std::rc::Rc<Decomposed> {
+        if let Some(d) = self.decomposed.borrow().get(&v) {
+            return d.clone();
+        }
+        let d = std::rc::Rc::new(self.decompose_uncached(f, v));
+        self.decomposed.borrow_mut().insert(v, d.clone());
+        d
+    }
+
+    fn decompose_uncached(&self, f: &Function, mut v: Value) -> Decomposed {
         let sh = self.sh;
         let (types, dl) = (sh.types(), &sh.layout);
         let mut offset: i64 = 0;
@@ -387,7 +481,17 @@ impl<'s, 'm> BasicAa<'s, 'm> {
                 ModRef { mods: false, refs: touches(*ptr, ty) }
             }
             Op::Store { ptr, value, .. } => ModRef { mods: touches(*ptr, self.type_of(f, *value)), refs: false },
-            Op::Call(call) | Op::Invoke { call, .. } | Op::CallBr { call, .. } => self.call_mod_ref(f, call, loc),
+            Op::Call(call) | Op::Invoke { call, .. } | Op::CallBr { call, .. } => match self.mem_intrinsic(call) {
+                // Its own bytes: the destination written, the source read.
+                Some(MemIntrinsic::Copy(dst, src, len)) => ModRef {
+                    mods: self.alias(f, loc, self.span(dst, len)) != AliasResult::NoAlias,
+                    refs: self.alias(f, loc, self.span(src, len)) != AliasResult::NoAlias,
+                },
+                Some(MemIntrinsic::Set(dst, len)) => {
+                    ModRef { mods: self.alias(f, loc, self.span(dst, len)) != AliasResult::NoAlias, refs: false }
+                }
+                None => self.call_mod_ref(f, call, loc),
+            },
             Op::AtomicRmw { .. } | Op::CmpXchg { .. } | Op::Fence { .. } | Op::VaArg { .. } => ModRef::ALL,
             _ => ModRef::NONE,
         }

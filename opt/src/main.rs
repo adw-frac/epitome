@@ -29,7 +29,10 @@ const USAGE: &str = "usage: draconian-opt [options] <file.ll>
   --remarks               print each decision to stderr
   --print-cycles          print the call graph's cycles to stderr
   --stats                 print counts and timings to stderr
-  --verify                check the output is well-formed SSA";
+  --verify                check the output is well-formed SSA
+  --print-memssa          print memory SSA for the result (each access, and
+                          the write that reaches each load and store) as
+                          comments; with --passes= alone, for the input";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -37,6 +40,7 @@ fn main() -> ExitCode {
     let mut input = None;
     let mut output = None;
     let (mut remarks, mut cycles, mut stats, mut verify) = (false, false, false, false);
+    let mut memssa = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -53,7 +57,7 @@ fn main() -> ExitCode {
             "--no-simplifycfg" => opts.simplifycfg = false,
             "--no-loops" => opts.loops = false,
             s if s.starts_with("--passes=") => {
-                let list: Vec<&str> = s["--passes=".len()..].split(',').collect();
+                let list: Vec<&str> = s["--passes=".len()..].split(',').filter(|p| !p.is_empty()).collect();
                 if let Some(bad) = list.iter().find(|p| {
                     !["sroa", "mem2reg", "inline", "recursion", "combine", "simplifycfg", "loops", "cse"].contains(p)
                 }) {
@@ -74,6 +78,7 @@ fn main() -> ExitCode {
             "--print-cycles" => cycles = true,
             "--stats" => stats = true,
             "--verify" => verify = true,
+            "--print-memssa" => memssa = true,
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return ExitCode::SUCCESS;
@@ -114,7 +119,29 @@ fn main() -> ExitCode {
     let t1 = Instant::now();
     let report = pipeline::run(&mut m, &opts);
     let t2 = Instant::now();
-    let text = m.to_string();
+    let text = if memssa {
+        let threads = if opts.threads == 0 { draconian_opt::par::default_threads() } else { opts.threads };
+        let reports = draconian_opt::memssa::analyse_module(&mut m, threads, true);
+        if stats {
+            let (mut d, mut u, mut p, mut q, mut h, mut st, mut g) = (0, 0, 0, 0, 0, 0, 0);
+            let (mut build, mut walk) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
+            for (_, r) in &reports {
+                (d, u, p) = (d + r.defs, u + r.uses, p + r.phis);
+                (q, h, st, g) = (q + r.walks.queries, h + r.walks.cache_hits, st + r.walks.steps, g + r.walks.gave_up);
+                build += r.build;
+                walk += r.walk;
+            }
+            eprintln!(
+                "; memssa: {d} defs, {u} uses, {p} phis; {q} clobber queries ({h} cached), {st} alias checks, {g} gave up; build {:.1} ms, walks {:.1} ms",
+                ms(build),
+                ms(walk)
+            );
+        }
+        let by: std::collections::HashMap<_, _> = reports.into_iter().collect();
+        draconian_ir::printer::print_module_with(&m, &|g, at| by.get(&g).and_then(|r| r.notes.get(&at).cloned()))
+    } else {
+        m.to_string()
+    };
     let t3 = Instant::now();
 
     if cycles {

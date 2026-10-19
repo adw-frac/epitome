@@ -21,6 +21,28 @@ pub fn print_module(m: &Module) -> String {
     p.out
 }
 
+/// A place in a function that an analysis can comment on.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Place {
+    /// The start of a block, after its label.
+    Block(BlockId),
+    /// Just before an instruction.
+    Inst(InstId),
+}
+
+/// Comments for places in functions, as an analysis's printer gives them:
+/// each line becomes a `; ` comment.
+pub type Notes<'a> = &'a dyn Fn(GlobalId, Place) -> Option<String>;
+
+/// The module, with `notes` as comments where they say (for printing an
+/// analysis's results next to the IR they are about).
+pub fn print_module_with(m: &Module, notes: Notes) -> String {
+    let mut p = Printer::new(m);
+    p.notes = Some(notes);
+    p.module();
+    p.out
+}
+
 /// Local value numbers for one function: `None` for named values.
 struct Slots {
     locals: Vec<Option<u32>>,
@@ -64,6 +86,9 @@ struct Printer<'m> {
     md_slots: Vec<Option<u32>>,
     /// Numbered metadata in number order.
     md_order: Vec<MdId>,
+    /// Comments to add, and the function they are for.
+    notes: Option<Notes<'m>>,
+    cur_global: Option<GlobalId>,
 }
 
 impl<'m> Printer<'m> {
@@ -98,6 +123,8 @@ impl<'m> Printer<'m> {
             cur: None,
             md_slots,
             md_order,
+            notes: None,
+            cur_global: None,
         }
     }
 
@@ -691,6 +718,7 @@ impl<'m> Printer<'m> {
         }
         self.out.push_str(" {\n");
         self.cur = Some((f, slots));
+        self.cur_global = Some(g);
         let preds = predecessors(f);
         for (i, &b) in f.layout.iter().enumerate() {
             let block = &f.blocks[b.index()];
@@ -713,13 +741,24 @@ impl<'m> Printer<'m> {
                     writeln!(self.out, "{label:<50}; preds = {}", names.join(", ")).unwrap();
                 }
             }
+            self.note(Place::Block(b));
             for &inst in &block.insts {
+                self.note(Place::Inst(inst));
                 self.inst(&f.insts[inst.index()]);
             }
         }
         self.out.push_str("}\n");
         let (_, slots) = self.cur.take().unwrap();
         self.fn_slots.insert(g, slots);
+    }
+
+    fn note(&mut self, at: Place) {
+        let (Some(notes), Some(g)) = (self.notes, self.cur_global) else { return };
+        if let Some(text) = notes(g, at) {
+            for line in text.lines() {
+                writeln!(self.out, "  ; {line}").unwrap();
+            }
+        }
     }
 
     fn inst(&mut self, inst: &Inst) {
