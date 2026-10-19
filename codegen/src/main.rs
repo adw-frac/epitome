@@ -1,5 +1,5 @@
-//! `draconian-llc`: compiles a `.ll` file to AArch64 assembly, or to an ELF
-//! object file.
+//! `draconian-llc`: compiles a `.ll` file to AArch64 assembly, or to an
+//! object file (Mach-O or ELF, as the convention uses).
 
 use std::process::ExitCode;
 
@@ -10,7 +10,8 @@ const USAGE: &str = "usage: draconian-llc [options] <file.ll>
 
   -o <file>               write the output here instead of stdout; a name
                           ending in .o asks for an object file
-  --filetype=asm|obj      assembly (the default) or an ELF object file
+  --filetype=asm|obj      assembly (the default) or an object file, Mach-O
+                          or ELF as the convention uses
   --target=<file.ll>      read the machine description from this file
                           (default: the built-in AArch64 description)
   --abi=darwin|aapcs64    the calling convention and platform (default:
@@ -138,14 +139,8 @@ fn main() -> ExitCode {
     }
     let object = filetype.unwrap_or_else(|| output.as_deref().is_some_and(|o| o.ends_with(".o")));
     if object {
-        if compiled.abi.syntax != draconian_codegen::abi::Syntax::Elf {
-            eprintln!(
-                "draconian-llc: object files are ELF only so far; use a Linux triple, --abi=aapcs64 or --syntax=elf"
-            );
-            return ExitCode::FAILURE;
-        }
-        let bytes = match compiled.object(&target) {
-            Ok(o) => draconian_codegen::elf::write(&o),
+        let bytes = match compiled.object_file(&target) {
+            Ok(b) => b,
             Err(e) => {
                 eprintln!("draconian-llc: {e}");
                 return ExitCode::FAILURE;

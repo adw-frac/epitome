@@ -144,8 +144,9 @@ same way. The record is attached to the instruction after the call.
 ## The assembler
 
 Found by assembling Draconian's own AArch64 assembly with
-`clang --target=aarch64-linux-gnu -c` and reading the object file (Apple
-clang 21.0.0, 2026-10-19). Draconian's object writer does the same, and
+`clang --target=aarch64-linux-gnu -c` (ELF) and `clang -c` (Mach-O), and
+reading the object files (Apple clang 21.0.0, 2026-10-19). The ELF rules
+first. Draconian's object writer does the same, and
 `codegen/tests/programs.rs` and `codegen/tests/sqlite.rs` check it does.
 
 - **Calls to local functions in the same section are resolved** in place,
@@ -161,3 +162,19 @@ clang 21.0.0, 2026-10-19). Draconian's object writer does the same, and
 - **`mov` with an immediate** is encoded as `movz` when the value is one
   16-bit piece at any shift, before trying `movn`: `mov w0, #-65536` is
   `movz w0, #0xffff, lsl #16`.
+
+In Mach-O:
+
+- **Calls to any function defined in the same section are resolved**,
+  global ones too (without `.subsections_via_symbols`).
+- **Every relocation names its symbol** (`r_extern`), local ones too.
+  Relocations are listed from the highest address down.
+- **A pointer's addend is in its bytes** (`.quad _table+12` stores 12),
+  with an `ARM64_RELOC_UNSIGNED` against `_table`.
+- **Temporary symbols** `ltmp0`, `ltmp1`, ... are added at the start of each
+  section, as non-external symbols.
+- **`LC_BUILD_VERSION`** is always written: from `.build_version` if the
+  assembly has one, else for the version of macOS the assembler runs on.
+  The SDK version is 0, with no tools listed.
+- The symbol table has local symbols first, then defined external ones,
+  then undefined ones, each group as `LC_DYSYMTAB` counts it.

@@ -1,14 +1,17 @@
 # Object files and disassembly
 
-This document covers how Draconian writes object files (ELF, for AArch64
-Linux) instead of assembly, and `draconian-objdump`, which reads object
-files (ELF and Mach-O) and disassembles them with the machine description.
+This document covers how Draconian writes object files (Mach-O for macOS,
+ELF for Linux) instead of assembly, and `draconian-objdump`, which reads
+object files (ELF and Mach-O) and disassembles them with the machine
+description.
 For the description itself and instruction selection, see
 [isel.md](isel.md).
 
-**Status:** ELF relocatable files: **Done**, and checked against clang's
-assembler over SQLite. Mach-O object files: **Planned**. Unwind tables
-(`.eh_frame`) and debug info in objects: **Later**.
+**Status:** ELF relocatable files and Mach-O object files: **Done**, both
+checked against clang's assembler over SQLite. Programs and SQLite built
+from our own Mach-O objects, linked by the system linker, run and answer as
+clang's builds do. Unwind tables (`.eh_frame`, compact unwind) and debug
+info in objects: **Later**.
 
 ## Sources
 
@@ -16,7 +19,7 @@ assembler over SQLite. Mach-O object files: **Planned**. Unwind tables
 | --- | --- |
 | System V Application Binary Interface, *Object Files* (the generic ELF chapters) | File and section headers, symbol tables, `SHT_RELA`, string tables |
 | Arm, *ELF for the Arm 64-bit Architecture* (AAELF64) | `EM_AARCH64`, relocation numbers and what each fills in, mapping symbols `$x` and `$d` |
-| Apple's published `<mach-o/loader.h>`, `<mach-o/nlist.h>`, `<mach-o/reloc.h>`, `<mach-o/arm64/reloc.h>`, `<mach-o/fat.h>` | Reading Mach-O: load commands, sections, symbols, arm64 relocation types, universal files |
+| Apple's published `<mach-o/loader.h>`, `<mach-o/nlist.h>`, `<mach-o/reloc.h>`, `<mach-o/arm64/reloc.h>`, `<mach-o/fat.h>` | Writing and reading Mach-O: load commands, sections, symbols, arm64 relocation types, universal files |
 | Arm Architecture Reference Manual | The `adrp` immediate (`immhi:immlo`, signed, in pages); the shift-by-immediate encodings (`immh:immb`) |
 | clang's assembler on our own assembly | What an assembler does where the documents leave a choice; see below |
 
@@ -26,8 +29,7 @@ assembler over SQLite. Mach-O object files: **Planned**. Unwind tables
 format: sections (`Text`, `Data`, `Bss`, `ReadOnly`, `RelRo`) with their
 bytes and alignment, symbols (function, object or undefined; local or
 global; with section, value and size), and relocations (offset, kind,
-target, addend). `elf.rs` writes it as ELF. A Mach-O writer would take the
-same model.
+target, addend). `elf.rs` writes it as ELF and `macho.rs` as Mach-O.
 
 Globals are described once, as `GlobalData`: their section, alignment and a
 list of items (integers of 1, 2, 4 or 8 bytes, strings, zeros, and
@@ -58,26 +60,26 @@ symbol is added by a separate instruction. Data does (`&table[3]`).
 ### What an assembler does, and so what we do
 
 Where the documents leave a choice, Draconian does what clang's assembler
-does with the same program, so that the two object files can be compared:
+does with the same program, so that the two object files can be compared.
+The two formats differ:
 
-- A call to a **local** function in the same section is resolved in place,
-  with no relocation: the distance is known. A call to a global function
-  keeps its `R_AARCH64_CALL26`, since the linker may bind it to another
-  library's definition.
-- Other references to a local symbol are made against its **section** (a
-  section symbol), with the symbol's offset in the addend: `.data+0x28`, not
-  `counter`. References through the GOT stay against the symbol.
-- References to global and undefined symbols are made against them.
-- The bytes a relocation fills in are zero; the addend is in the
-  relocation (ELF's RELA form).
-- Mapping symbols: `$x` at the start of a code section, `$d` at the start
-  of each data section, `.bss` included.
-- A section symbol only for sections that relocations refer to.
-- An empty `.note.GNU-stack`: the stack need not be executable.
+| | ELF | Mach-O |
+| --- | --- | --- |
+| A call to a function in the same section | resolved in place if the function is local; a global one keeps `R_AARCH64_CALL26`, since the linker may bind it to another library's definition | resolved in place, global or local: symbols are bound to the library that defines them |
+| Other references to a local symbol | against its section, with the symbol's offset in the addend (`.data+0x28`); through the GOT, against the symbol | against the symbol |
+| A pointer's addend | in the relocation (RELA); the bytes are zero | in the pointer's bytes |
+| Relocation order | by address | from the highest address down |
+| Extra symbols | mapping symbols: `$x` at the start of a code section, `$d` at the start of each data section, `.bss` included; a section symbol for each section relocations refer to | none (the assembler adds `ltmp0` temporaries at section starts, which nothing needs) |
+| Other | an empty `.note.GNU-stack`: the stack need not be executable | `LC_BUILD_VERSION` with the least macOS version, from the triple |
+
+References to global and undefined symbols are made against them in both,
+and an instruction's relocated field is zero (code never has an addend).
 
 The assembly gained what the object has, so that the assembler's object
-says the same: `.size` for each function and object, `.bss` for zeros,
-and the `.note.GNU-stack` section.
+says the same: for ELF, `.size` for each function and object, `.bss` for
+zeros, and the `.note.GNU-stack` section; for Mach-O, `.build_version
+macos, 26, 0` from the triple (else 11.0), without which the assembler
+uses the version of the machine it runs on.
 
 One encoding had to change: `mov w0, #0xffff0000` fits both `movn w0,
 #0xffff` and `movz w0, #0xffff, lsl #16`, and an assembler prefers `movz`.
@@ -87,11 +89,25 @@ assembler's are the same.
 
 ## `draconian-llc -o file.o`
 
-A name ending in `.o`, or `--filetype=obj`, writes an ELF object instead of
-assembly. The convention must use ELF (a Linux triple, `--abi=aapcs64`, or
-`--syntax=elf`).
+A name ending in `.o`, or `--filetype=obj`, writes an object file instead
+of assembly: Mach-O under Apple's convention (the default, and a Darwin
+triple), ELF under AAPCS64 (a Linux triple, `--abi=aapcs64`) or with
+`--syntax=elf`.
 
-The file has the null section; the object's sections in order (`.text`,
+```sh
+draconian-llc file.ll -o file.o && clang file.o main.c -o program && ./program
+```
+
+A Mach-O object has one unnamed `LC_SEGMENT_64` holding every section,
+laid out one after another from address 0 (`__TEXT,__text`,
+`__DATA,__data`, `__TEXT,__const`, `__DATA,__const`); then
+`LC_BUILD_VERSION`, `LC_SYMTAB` and `LC_DYSYMTAB`. Its symbol table has the
+local symbols, then the defined external ones by name, then the undefined
+ones by name, as `LC_DYSYMTAB` says. Relocations name their symbols
+(`r_extern`); one with an addend in an instruction would be preceded by an
+`ARM64_RELOC_ADDEND`, though the code generator makes none.
+
+An ELF file has the null section; the object's sections in order (`.text`,
 `.data`, `.bss`, `.rodata`, `.data.rel.ro`); a `.rela` section for each with
 relocations; `.note.GNU-stack`; then `.symtab`, `.strtab` and `.shstrtab`.
 Local symbols come first, as ELF requires: section symbols, mapping
@@ -166,9 +182,16 @@ the description's encodings:
     bindings, types, values and sizes.
   - **6.** Our ELF object, read back by `draconian-objdump`, gives our
     assembly.
-- `codegen/tests/sqlite.rs`: the same as 5 and 6 for SQLite, from clang's
-  `-O2` IR with and without vectorising, compiled to ELF: about 357,000
-  and 375,000 instructions, with every relocation and symbol.
+  - **7.** Our Mach-O object says what clang's assembler makes of our
+    assembly, and linked with the main by the system linker, the program
+    prints what clang's build prints.
+- `codegen/tests/sqlite.rs`: SQLite's three builds (clang `-O2` IR with
+  and without vectorising, and `-O0` IR through `draconian-opt`), each
+  linked from our assembly and from our own Mach-O object, run the SQL
+  workloads and must answer as clang's build does; each Mach-O object must
+  say what the assembler's says. The same as 5 and 6 for ELF, from the
+  `-O2` IR with and without vectorising: about 357,000 and 375,000
+  instructions, with every relocation and symbol.
 - `codegen/tests/objdump.rs`: clang's own `-O2` builds of the test programs
   and of SQLite (237,143 words), disassembled by `draconian-objdump` and by
   the system's objdump. Every word we decode must be, to objdump, the same
@@ -177,17 +200,18 @@ the description's encodings:
   `stp`, and others).
 
 What is not checked here: linking and running the ELF objects, which needs
-Linux. The canonical comparison with clang's assembler covers what a linker
-reads, but an arm64 Linux machine (or a CI runner) linking the objects with
-glibc and running the test programs and SQLite would be the end-to-end
-proof.
+Linux. The Mach-O objects are linked and run, and the ELF writer shares
+the object model with them, but an arm64 Linux machine (or a CI runner)
+linking the ELF objects with glibc would be the end-to-end proof for ELF.
 
 ## Not yet
 
-- Mach-O object files (writing): Mach-O relocations carry addends in a
-  separate `ARM64_RELOC_ADDEND`, and the file is laid out by load commands.
-  With it, object files could be linked and run on this machine.
-- `.eh_frame` unwind tables, and debug info.
+- Unwind information (`.eh_frame` for ELF, compact unwind for Mach-O),
+  and debug info. Without them, exceptions cannot unwind through our code
+  and debuggers cannot backtrace it.
+- `.subsections_via_symbols` (Mach-O): without it the linker keeps each
+  section whole, so it cannot drop unused functions.
+- Zero-filled sections in Mach-O (`__DATA,__bss`): zeros are stored.
 - Weak and `linkonce` definitions (written as global), common symbols,
   thread-local storage, and sections chosen by attribute.
 - Disassembling instructions the description does not have (`ldp`, `stp`,

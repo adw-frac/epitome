@@ -579,14 +579,3 @@ impl ElfFile {
         out
     }
 }
-
-/// Where two canonical forms (see [`ElfFile::canonical`]) differ: up to
-/// `max` lines of each that are not in the other.
-pub fn differences(ours: &str, theirs: &str, max: usize) -> Vec<String> {
-    let a: std::collections::HashSet<&str> = ours.lines().collect();
-    let b: std::collections::HashSet<&str> = theirs.lines().collect();
-    let mut out: Vec<String> =
-        ours.lines().filter(|l| !b.contains(l)).take(max).map(|l| format!("ours:   {l}")).collect();
-    out.extend(theirs.lines().filter(|l| !a.contains(l)).take(max).map(|l| format!("theirs: {l}")));
-    out
-}

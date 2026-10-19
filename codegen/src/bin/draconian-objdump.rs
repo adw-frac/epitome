@@ -16,9 +16,9 @@ const USAGE: &str = "usage: draconian-objdump [options] <file>...
   -h, --section-headers   print the section headers
   -s, --full-contents     print every section's contents in hex
   -x, --all-headers       -h, -t and -r
-  --canonical             print an ELF file as sorted text without file
-                          offsets or order, to diff two that should say
-                          the same
+  --canonical             print an ELF or Mach-O file as sorted text without
+                          file offsets or order, to diff two that should
+                          say the same
   --target=<file.ll>      read the machine description from this file
                           (default: the built-in AArch64 description)
 
@@ -86,8 +86,15 @@ fn main() -> ExitCode {
     let mut status = ExitCode::SUCCESS;
     for f in &files {
         if canonical {
-            match std::fs::read(f).map_err(|e| e.to_string()).and_then(|b| draconian_codegen::elf::read(&b)) {
-                Ok(e) => print!("{}", e.canonical()),
+            let text = std::fs::read(f).map_err(|e| e.to_string()).and_then(|b| {
+                if draconian_codegen::macho::is_macho(&b) {
+                    draconian_codegen::macho::read(&b).map(|m| m.canonical())
+                } else {
+                    draconian_codegen::elf::read(&b).map(|e| e.canonical())
+                }
+            });
+            match text {
+                Ok(t) => print!("{t}"),
                 Err(e) => {
                     eprintln!("draconian-objdump: {f}: {e}");
                     status = ExitCode::FAILURE;

@@ -20,9 +20,9 @@ split into two halves:
 - [Machine descriptions and instruction selection](isel.md): targets
   described in LLVM IR, longest-match selection with a trie, register
   allocation, and assembly, binary and disassembly from one description.
-- [Object files and disassembly](objects.md): writing ELF object files
-  that match clang's assembler, and `draconian-objdump`, which reads ELF
-  and Mach-O and disassembles with the machine description.
+- [Object files and disassembly](objects.md): writing Mach-O and ELF
+  object files that match clang's assembler, and `draconian-objdump`,
+  which reads both and disassembles with the machine description.
 - [Loops](loops.md): finding loops, rotation, induction variables and
   trip counts.
 - [CSE](cse.md): common-subexpression elimination by hashing a canonical

@@ -29,8 +29,8 @@ and run their output with `clang` when it is installed.
   `docs/design/combine.md`.
 - `codegen` (`draconian-codegen`): AArch64 code generation from a machine
   description written in LLVM IR (`codegen/targets/aarch64.ll`):
-  instruction selection, register allocation, frames, and assembly, ELF
-  object files and disassembly; `draconian-objdump` reads ELF and Mach-O.
+  instruction selection, register allocation, frames, and assembly, object
+  files (Mach-O and ELF) and disassembly; `draconian-objdump` reads both.
   See `docs/design/isel.md` and `docs/design/objects.md`.
 
 ## Running
@@ -48,9 +48,10 @@ cargo run --release -p draconian-opt -- -O2 --remarks --print-cycles --stats fil
 cargo run --release -p draconian-codegen --bin draconian-llc -- file.ll -o file.s
 cargo run --release -p draconian-codegen --bin draconian-llc -- file.ll --disasm
 
-# Compile to an ELF object file (the convention must be ELF's), and
-# disassemble it, with its relocations.
-cargo run --release -p draconian-codegen --bin draconian-llc -- --abi=aapcs64 file.ll -o file.o
+# Compile to an object file (Mach-O here; ELF with --abi=aapcs64), link it
+# and run it, and disassemble it with its relocations.
+cargo run --release -p draconian-codegen --bin draconian-llc -- file.ll -o file.o
+clang file.o main.c -o program && ./program
 cargo run --release -p draconian-codegen --bin draconian-objdump -- -dr file.o
 ```
 

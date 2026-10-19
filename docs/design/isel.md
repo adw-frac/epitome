@@ -400,7 +400,7 @@ aggregates and vectors, defining variadic functions under AAPCS64 (whose
   writes them. It can be assembled with clang and linked with C.
 - **Binary**: the encoding of each instruction, with branches within a
   function resolved, and fixups for symbols.
-- **Object files**: ELF relocatable files, whose relocations come from each
+- **Object files**: Mach-O and ELF, whose relocations come from each
   instruction's `"reloc"`, and which say what clang's assembler makes of
   our assembly; see [objects.md](objects.md).
 - **Disassembly**: for each 32-bit word, the entries whose literal bits

@@ -1,25 +1,31 @@
 //! Object files in the abstract: sections of bytes, symbols, and
 //! relocations, built from compiled functions and globals. `elf.rs` writes
-//! one as an ELF relocatable file.
+//! one as an ELF relocatable file, `macho.rs` as a Mach-O object.
 //!
 //! Globals are first described as [`GlobalData`], a list of [`Item`]s,
 //! which both the assembly printer (`asm.rs`) and [`build`] read, so that
 //! the two outputs say the same thing.
 //!
-//! Building does what an assembler does with the same program:
+//! Building does what an assembler for the convention's format does with
+//! the same program:
 //!
-//! - a call to a local function defined in the same section is resolved
-//!   in place (the distance is known), with no relocation;
-//! - other references to a local symbol are made against its section, with
-//!   the symbol's offset in the addend, so that the symbol need not be kept
-//!   for the linker; references through the GOT stay against the symbol;
+//! - a call to a function defined in the same section is resolved in place
+//!   (the distance is known), with no relocation. In ELF only local
+//!   functions: a global one could be replaced by another library's
+//!   definition, so is left to the linker. In Mach-O, whose symbols are
+//!   bound to the library that defines them, global ones too;
+//! - in ELF, other references to a local symbol are made against its
+//!   section, with the symbol's offset in the addend, so that the symbol
+//!   need not be kept for the linker; references through the GOT stay
+//!   against the symbol. Mach-O keeps every reference against its symbol;
 //! - references to global and undefined symbols are made against them;
 //! - the bytes a relocation will fill are zero, the addend being in the
-//!   relocation (ELF's RELA form).
+//!   relocation. (The Mach-O writer moves a pointer's addend into the
+//!   pointer's bytes, where that format keeps it.)
 
 use std::collections::HashMap;
 
-use crate::abi::Abi;
+use crate::abi::{Abi, Syntax};
 use crate::mir::{self, MFunc};
 use crate::target::{Kind, Target};
 
@@ -291,6 +297,7 @@ pub fn build(t: &Target, abi: &Abi, funcs: &[MFunc], globals: &[GlobalData]) -> 
         });
     }
 
+    let macho = abi.syntax == Syntax::MachO;
     let mut by_name: HashMap<String, usize> =
         obj.symbols.iter().enumerate().map(|(k, s)| (s.name.clone(), k)).collect();
     for p in pending {
@@ -310,11 +317,9 @@ pub fn build(t: &Target, abi: &Abi, funcs: &[MFunc], globals: &[GlobalData]) -> 
             }
         };
         let def = obj.symbols[sym].clone();
-        // A call to a local function in the same section: the distance is
-        // known. (A global one could be replaced by another library's, so
-        // is left to the linker.)
+        // A call within the section: the distance is known.
         if p.kind == RelocKind::Call26
-            && !def.global
+            && (macho || !def.global)
             && def.section == Some(p.section)
             && let Some(i) = p.instr
         {
@@ -333,10 +338,23 @@ pub fn build(t: &Target, abi: &Abi, funcs: &[MFunc], globals: &[GlobalData]) -> 
             continue;
         }
         let (target, addend) = match def.section {
-            Some(s) if !def.global && !p.kind.via_got() => (RelocTarget::Section(s), p.addend + def.value as i64),
+            Some(s) if !macho && !def.global && !p.kind.via_got() => {
+                (RelocTarget::Section(s), p.addend + def.value as i64)
+            }
             _ => (RelocTarget::Symbol(sym), p.addend),
         };
         obj.sections[p.section].relocs.push(Reloc { offset: p.offset, kind: p.kind, target, addend });
     }
     Ok(obj)
+}
+
+/// Where two canonical forms (`ElfFile::canonical`, `MachFile::canonical`)
+/// differ: up to `max` lines of each that are not in the other.
+pub fn differences(ours: &str, theirs: &str, max: usize) -> Vec<String> {
+    let a: std::collections::HashSet<&str> = ours.lines().collect();
+    let b: std::collections::HashSet<&str> = theirs.lines().collect();
+    let mut out: Vec<String> =
+        ours.lines().filter(|l| !b.contains(l)).take(max).map(|l| format!("ours:   {l}")).collect();
+    out.extend(theirs.lines().filter(|l| !a.contains(l)).take(max).map(|l| format!("theirs: {l}")));
+    out
 }

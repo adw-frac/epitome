@@ -35,6 +35,9 @@ pub struct Compiled {
     /// The globals with initial values.
     pub globals: Vec<object::GlobalData>,
     pub abi: abi::Abi,
+    /// For Mach-O: the least macOS version the code is for, from the
+    /// module's triple (`arm64-apple-macosx26.0.0`), else 11.0.
+    pub min_os: (u32, u32, u32),
     pub asm: String,
     /// With `keep_going`: the functions that could not be compiled, and why.
     pub errors: Vec<String>,
@@ -124,7 +127,14 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
         }
         funcs.push(mf);
     }
-    let mut out = format!("\t{}\n", abi.section_directive(object::SectionKind::Text));
+    let min_os = min_os_version(&String::from_utf8_lossy(cx.m.triple.as_deref().unwrap_or_default()));
+    let mut out = String::new();
+    if abi.syntax == abi::Syntax::MachO {
+        let (a, b, c) = min_os;
+        let update = if c == 0 { String::new() } else { format!(", {c}") };
+        out.push_str(&format!("\t.build_version macos, {a}, {b}{update}\n"));
+    }
+    out.push_str(&format!("\t{}\n", abi.section_directive(object::SectionKind::Text)));
     for f in &funcs {
         asm::function(t, f, &mut out);
     }
@@ -134,12 +144,32 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
         // The stack need not be executable.
         out.push_str("\t.section .note.GNU-stack,\"\",%progbits\n");
     }
-    Ok(Compiled { funcs, globals, abi, asm: out, errors })
+    Ok(Compiled { funcs, globals, abi, min_os, asm: out, errors })
+}
+
+/// The macOS version a triple names (`macosx26.0.0`, `macos14.2`), or 11.0,
+/// the first for arm64.
+pub fn min_os_version(triple: &str) -> (u32, u32, u32) {
+    let rest = triple.split('-').find_map(|p| p.strip_prefix("macosx").or_else(|| p.strip_prefix("macos")));
+    let mut parts = rest.unwrap_or("").split('.').map(|x| x.parse::<u32>().ok());
+    match (parts.next().flatten(), parts.next().flatten(), parts.next().flatten()) {
+        (Some(a), b, c) if a > 0 => (a, b.unwrap_or(0), c.unwrap_or(0)),
+        _ => (11, 0, 0),
+    }
 }
 
 impl Compiled {
     /// The object file's contents, in the abstract (see `object`).
     pub fn object(&self, t: &Target) -> Result<object::Object, String> {
         object::build(t, &self.abi, &self.funcs, &self.globals)
+    }
+
+    /// The object file, in the convention's format: ELF or Mach-O.
+    pub fn object_file(&self, t: &Target) -> Result<Vec<u8>, String> {
+        let obj = self.object(t)?;
+        Ok(match self.abi.syntax {
+            abi::Syntax::Elf => elf::write(&obj),
+            abi::Syntax::MachO => macho::write(&obj, self.min_os),
+        })
     }
 }

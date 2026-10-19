@@ -31,7 +31,10 @@
 //! 6. disassembles our object with draconian-objdump's code and checks it
 //!    reads back as our assembly: every instruction's mnemonic, and where
 //!    a relocation fills an instruction in, the whole instruction, symbol
-//!    and all.
+//!    and all;
+//! 7. writes our own Mach-O object file for this machine, checks it says
+//!    what the assembler's says (as 5), links it with the main, and checks
+//!    the program's output is clang's build's.
 //!
 //! The test is skipped when `clang` is not installed.
 
@@ -40,7 +43,7 @@ use std::process::Command;
 
 use draconian_codegen::objdump::{self, Image};
 use draconian_codegen::target::Target;
-use draconian_codegen::{Options, compile, elf, mir};
+use draconian_codegen::{Options, compile, elf, macho, mir};
 
 fn have_tools() -> bool {
     let ok = |c: &str, a: &str| Command::new(c).arg(a).output().is_ok_and(|o| o.status.success());
@@ -159,6 +162,17 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         // as our assembly.
         objdump_reads_back(t, &obj, &compiled.asm, &stem)?;
 
+        // 7. Our own Mach-O object says what the assembler's says, and
+        // linked with the main, behaves the same.
+        let mine = tmp.join(format!("{stem}.ours.o"));
+        std::fs::write(&mine, compiled.object_file(t).map_err(|e| format!("{stem}: {e}"))?).unwrap();
+        same_object(&mine, &obj, &stem)?;
+        let exe = tmp.join(format!("{stem}.ours"));
+        run(Command::new("clang").arg(&mine).arg(&main).arg("-o").arg(&exe))?;
+        if run(&mut Command::new(&exe))? != want {
+            return Err(format!("{stem}: built from our object file, the output differs from clang's build"));
+        }
+
         // 4. The same for Linux (AAPCS64, ELF): built from clang's IR for
         // that target, assembled by clang for it, checked word by word.
         // Programs that use what only Apple's convention has so far say so.
@@ -214,8 +228,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
 
         // 5. Our object file is the assembler's.
         let mine = tmp.join(format!("{elf_stem}.ours.o"));
-        let object = compiled.object(t).map_err(|e| format!("{elf_stem}: {e}"))?;
-        std::fs::write(&mine, elf::write(&object)).unwrap();
+        std::fs::write(&mine, compiled.object_file(t).map_err(|e| format!("{elf_stem}: {e}"))?).unwrap();
         same_object(&mine, &obj, &elf_stem)?;
 
         // 6. draconian-objdump reads our object back as our assembly.
@@ -224,14 +237,23 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
     Ok(report)
 }
 
-/// Checks two ELF files say the same (see `ElfFile::canonical`).
+/// Checks two object files, ELF or Mach-O, say the same (see
+/// `ElfFile::canonical` and `MachFile::canonical`).
 fn same_object(ours: &Path, theirs: &Path, stem: &str) -> Result<(), String> {
-    let read = |p: &Path| elf::read(&std::fs::read(p).unwrap()).map_err(|e| format!("{stem}: {}: {e}", p.display()));
-    let (a, b) = (read(ours)?.canonical(), read(theirs)?.canonical());
+    let read = |p: &Path| {
+        let bytes = std::fs::read(p).unwrap();
+        let text = if macho::is_macho(&bytes) {
+            macho::read(&bytes).map(|m| m.canonical())
+        } else {
+            elf::read(&bytes).map(|e| e.canonical())
+        };
+        text.map_err(|e| format!("{stem}: {}: {e}", p.display()))
+    };
+    let (a, b) = (read(ours)?, read(theirs)?);
     if a == b {
         return Ok(());
     }
-    let diff = elf::differences(&a, &b, 8);
+    let diff = draconian_codegen::object::differences(&a, &b, 8);
     Err(format!("{stem}: our object differs from the assembler's ({}):\n{}", ours.display(), diff.join("\n")))
 }
 
