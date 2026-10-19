@@ -14,7 +14,7 @@
 //!
 //! Builds 2 to 4 are made twice, from our assembly and from our own
 //! Mach-O object file, which must also say what clang's assembler makes of
-//! our assembly. Each runs the scripts in `tests/sqlite/`, and must print
+//! our assembly, and be byte for byte what draconian-as makes of it. Each runs the scripts in `tests/sqlite/`, and must print
 //! what the reference prints.
 //!
 //! Builds 2 and 3 are also compiled to ELF (assembly and our own object
@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use draconian_codegen::abi::Syntax;
+use draconian_codegen::assembler::Assembler;
 use draconian_codegen::objdump::{self, Image};
 use draconian_codegen::target::Target;
 use draconian_codegen::{Options, compile, elf, macho};
@@ -122,8 +123,12 @@ fn sqlite_answers_as_clangs_build() {
         run(Command::new("clang").arg("-c").arg(&s).arg("-o").arg(&theirs)).unwrap();
         let a = macho::read(&object).unwrap().canonical();
         let b = macho::read(&std::fs::read(&theirs).unwrap()).unwrap().canonical();
+        let ours_assembled = Assembler::new(&t).assemble(&std::fs::read_to_string(&s).unwrap(), None).unwrap().file();
+        if ours_assembled != object {
+            failures.push(format!("{name}: draconian-as makes another object of our assembly"));
+        }
         if a == b {
-            println!("ok {name} Mach-O object is the assembler's");
+            println!("ok {name} Mach-O object is the assembler's, and draconian-as's");
         } else {
             failures.push(format!(
                 "{name}: our Mach-O object differs:\n{}",
@@ -156,7 +161,10 @@ fn sqlite_answers_as_clangs_build() {
         std::fs::write(&s, &compiled.asm).unwrap();
         let theirs = tmp.join(format!("sqlite3.{name}.elf.o"));
         run(Command::new("clang").args(["--target=aarch64-linux-gnu", "-c"]).arg(&s).arg("-o").arg(&theirs)).unwrap();
-        let bytes = elf::write(&compiled.object(&t).unwrap());
+        let bytes = compiled.object_file(&t).unwrap();
+        if Assembler::new(&t).assemble(&compiled.asm, None).unwrap().file() != bytes {
+            failures.push(format!("{name}: draconian-as makes another ELF object of our assembly"));
+        }
         let mine = tmp.join(format!("sqlite3.{name}.elf.ours.o"));
         std::fs::write(&mine, &bytes).unwrap();
         let a = elf::read(&bytes).unwrap().canonical();

@@ -34,13 +34,18 @@
 //!    and all;
 //! 7. writes our own Mach-O object file for this machine, checks it says
 //!    what the assembler's says (as 5), links it with the main, and checks
-//!    the program's output is clang's build's.
+//!    the program's output is clang's build's;
+//! 8. assembles our assembly with draconian-as, for both formats, and
+//!    checks the object is byte for byte the one written directly in 5 and
+//!    7. So three ways to the object file (clang's assembler, ours, and
+//!    none) agree.
 //!
 //! The test is skipped when `clang` is not installed.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use draconian_codegen::assembler::Assembler;
 use draconian_codegen::objdump::{self, Image};
 use draconian_codegen::target::Target;
 use draconian_codegen::{Options, compile, elf, macho, mir};
@@ -165,8 +170,11 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         // 7. Our own Mach-O object says what the assembler's says, and
         // linked with the main, behaves the same.
         let mine = tmp.join(format!("{stem}.ours.o"));
-        std::fs::write(&mine, compiled.object_file(t).map_err(|e| format!("{stem}: {e}"))?).unwrap();
+        let bytes = compiled.object_file(t).map_err(|e| format!("{stem}: {e}"))?;
+        std::fs::write(&mine, &bytes).unwrap();
         same_object(&mine, &obj, &stem)?;
+        // 8. draconian-as makes the same object of our assembly.
+        same_assembled(t, &compiled.asm, &bytes, &stem)?;
         let exe = tmp.join(format!("{stem}.ours"));
         run(Command::new("clang").arg(&mine).arg(&main).arg("-o").arg(&exe))?;
         if run(&mut Command::new(&exe))? != want {
@@ -228,8 +236,10 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
 
         // 5. Our object file is the assembler's.
         let mine = tmp.join(format!("{elf_stem}.ours.o"));
-        std::fs::write(&mine, compiled.object_file(t).map_err(|e| format!("{elf_stem}: {e}"))?).unwrap();
+        let bytes = compiled.object_file(t).map_err(|e| format!("{elf_stem}: {e}"))?;
+        std::fs::write(&mine, &bytes).unwrap();
         same_object(&mine, &obj, &elf_stem)?;
+        same_assembled(t, &compiled.asm, &bytes, &elf_stem)?;
 
         // 6. draconian-objdump reads our object back as our assembly.
         objdump_reads_back(t, &mine, &compiled.asm, &elf_stem)?;
@@ -255,6 +265,12 @@ fn same_object(ours: &Path, theirs: &Path, stem: &str) -> Result<(), String> {
     }
     let diff = draconian_codegen::object::differences(&a, &b, 8);
     Err(format!("{stem}: our object differs from the assembler's ({}):\n{}", ours.display(), diff.join("\n")))
+}
+
+/// Checks draconian-as makes exactly `object` of `asm`.
+fn same_assembled(t: &Target, asm: &str, object: &[u8], stem: &str) -> Result<(), String> {
+    let assembled = Assembler::new(t).assemble(asm, None).map_err(|e| format!("{stem}: draconian-as: {e}"))?.file();
+    if assembled == object { Ok(()) } else { Err(format!("{stem}: draconian-as makes another object of our assembly")) }
 }
 
 /// Checks draconian-objdump's disassembly of `obj` reads as `asm`.

@@ -286,7 +286,7 @@ pub fn eval(e: &Expr, env: &Env) -> Option<i64> {
 
 /// Solves `e == target` for the one name in `e`, when `e` is made of
 /// steps that can be undone. Returns the name and its value.
-fn invert(e: &Expr, target: i64) -> Option<(String, i64)> {
+pub fn invert(e: &Expr, target: i64) -> Option<(String, i64)> {
     match e {
         Expr::Var(v) => Some((v.clone(), target)),
         Expr::Neg(a) => invert(a, target.wrapping_neg()),

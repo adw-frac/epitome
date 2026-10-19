@@ -13,6 +13,10 @@ name = "draconian-llc"
 path = "src/main.rs"
 
 [[bin]]
+name = "draconian-as"
+path = "src/bin/draconian-as.rs"
+
+[[bin]]
 name = "draconian-objdump"
 path = "src/bin/draconian-objdump.rs"
 

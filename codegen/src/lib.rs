@@ -4,6 +4,7 @@
 
 pub mod abi;
 pub mod asm;
+pub mod assembler;
 pub mod divconst;
 pub mod elf;
 pub mod enc;

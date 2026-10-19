@@ -1,14 +1,16 @@
-# Object files and disassembly
+# Object files, assembly and disassembly
 
 This document covers how Draconian writes object files (Mach-O for macOS,
-ELF for Linux) instead of assembly, and `draconian-objdump`, which reads
-object files (ELF and Mach-O) and disassembles them with the machine
-description.
+ELF for Linux) instead of assembly; `draconian-as`, which assembles
+assembly into them; and `draconian-objdump`, which reads object files (ELF
+and Mach-O) and disassembles them with the machine description.
 For the description itself and instruction selection, see
 [isel.md](isel.md).
 
 **Status:** ELF relocatable files and Mach-O object files: **Done**, both
-checked against clang's assembler over SQLite. Programs and SQLite built
+checked against clang's assembler over SQLite. Assembling Draconian's own
+assembly: **Done**. Assembling other compilers' assembly: **Partial** (see
+below). Programs and SQLite built
 from our own Mach-O objects, linked by the system linker, run and answer as
 clang's builds do. Unwind tables (`.eh_frame`, compact unwind) and debug
 info in objects: **Later**.
@@ -113,6 +115,65 @@ relocations; `.note.GNU-stack`; then `.symtab`, `.strtab` and `.shstrtab`.
 Local symbols come first, as ELF requires: section symbols, mapping
 symbols, then the object's own; then global ones, defined and undefined.
 
+## `draconian-as`
+
+```sh
+draconian-as file.s -o file.o        # Mach-O or ELF, as the assembly is written
+draconian-as --format=elf file.s     # say which
+```
+
+The assembler (`codegen/src/assembler.rs`) reads instructions with the
+machine description, run backwards: each entry's `"asm"` template says how
+it is written. The templates whose first word is a line's mnemonic are
+tried (or whose literal start is, for `b.{c}`). A template is literal text
+and holes; the literal text must be in the line as it is, and each hole
+takes what comes before the next piece of literal text. A hole's text is
+then read loosely, as what its operand is: a register (`w3`, `sp`,
+`v2.4s`), a number, a condition, a symbol (`_x@PAGEOFF`, `:lo12:x`), or a
+label. A hole that is an expression (`#{=0-imm}`) is solved for its operand
+with the same inversion the decoder uses.
+
+A reading is kept only if the template, filled in with the values read,
+gives back the line exactly, and if the values encode and decode back to
+themselves (so an immediate the encoding cannot hold does not fit). What is
+accepted is exactly what the printer writes. Where two entries both fit
+(`mov x0, x1` is `orr` from `xzr`, and `add` to the stack pointer), the one
+using fewer stack-pointer register classes wins, which is what the
+architecture's alias rules choose; then the first in the description.
+
+Assembly takes two passes: the first lays out sections, labels and data,
+an instruction being 4 bytes; the second encodes, now that labels have
+addresses. References to symbols are then resolved by the same code as
+compiled output (`object::resolve`), so the object file follows each
+format's rules. The directives are those the code generator writes:
+sections, `.globl`, `.p2align`, `.type`, `.size`, `.byte`, `.short`,
+`.long`, `.quad` (of numbers or `symbol+offset`), `.ascii`, `.asciz`,
+`.space`, `.zero`, `.build_version`. Every instruction that cannot be read
+is reported, with its line (`--max-errors` says how many).
+
+It is fast: SQLite's 430,000 lines assemble in 2.2 seconds, where clang's
+assembler takes 4.5.
+
+### Other compilers' assembly
+
+clang's own assembly for SQLite assembles about 81% of its instruction
+lines once the things below are set aside. What it uses that ours does not:
+
+- **Directives:** `.cfi_*` (unwind information, which would need unwind
+  tables in the object), `.loh` (linker optimisation hints, which can be
+  ignored), `.zerofill`, literal and C-string sections (`__literal8`,
+  `__cstring`), jump tables of label differences
+  (`.byte (LBB29_26-LBB29_15)>>2`), and `.indirect_symbol` and
+  `.data_region`.
+- **Instructions the description lacks:** `ldp` and `stp` (a third of the
+  rest), `ldur`/`stur`, pre-indexed addressing (`[x1, #16]!`), extended
+  registers (`ldrb w0, [x1, w2, uxtw]`, `add x0, x1, w2, sxtw`), `ccmp`,
+  `smaddl`/`umaddl`, `ld1` to a lane.
+- **Spellings:** `[x1]` for `[x1, #0]`; `mov` for a bitmask `orr`.
+- **Symbols with addends in code** (`_x@PAGEOFF+128`), and page-offset
+  relocations on loads and stores (`ldr x0, [x1, _x@PAGEOFF]`), which need
+  the load and store page-offset relocations.
+
 ## `draconian-objdump`
 
 ```sh
@@ -171,7 +232,7 @@ the description's encodings:
 ## Checks
 
 - `codegen/tests/programs.rs`, for each test program in each of its four
-  builds:
+  builds (step 8 is for both formats):
   - **3b.** clang's assembly of our Mach-O assembly, read back by
     `draconian-objdump`, gives our assembly: every mnemonic (or an alias),
     and every instruction a relocation fills in, whole.
@@ -185,11 +246,15 @@ the description's encodings:
   - **7.** Our Mach-O object says what clang's assembler makes of our
     assembly, and linked with the main by the system linker, the program
     prints what clang's build prints.
+  - **8.** `draconian-as` makes, of our assembly, byte for byte the object
+    `draconian-llc` writes directly. So three ways to the object file
+    agree: clang's assembler, ours, and none.
 - `codegen/tests/sqlite.rs`: SQLite's three builds (clang `-O2` IR with
   and without vectorising, and `-O0` IR through `draconian-opt`), each
   linked from our assembly and from our own Mach-O object, run the SQL
   workloads and must answer as clang's build does; each Mach-O object must
-  say what the assembler's says. The same as 5 and 6 for ELF, from the
+  say what the assembler's says, and be byte for byte what `draconian-as`
+  makes of the assembly (as must the ELF objects). The same as 5 and 6 for ELF, from the
   `-O2` IR with and without vectorising: about 357,000 and 375,000
   instructions, with every relocation and symbol.
 - `codegen/tests/objdump.rs`: clang's own `-O2` builds of the test programs

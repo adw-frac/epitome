@@ -199,14 +199,17 @@ impl GlobalData {
     }
 }
 
-struct Pending {
-    section: usize,
-    offset: u64,
-    kind: RelocKind,
-    symbol: String,
-    addend: i64,
-    /// The instruction holding it, for those resolved in place.
-    instr: Option<usize>,
+/// A reference to a symbol, by name, before the symbols are all known.
+pub struct Pending {
+    pub section: usize,
+    pub offset: u64,
+    pub kind: RelocKind,
+    /// As the platform names it.
+    pub symbol: String,
+    pub addend: i64,
+    /// The instruction holding it (an index into the description), for
+    /// those resolved in place.
+    pub instr: Option<usize>,
 }
 
 /// The object for compiled functions (laid out and allocated) and globals.
@@ -297,7 +300,14 @@ pub fn build(t: &Target, abi: &Abi, funcs: &[MFunc], globals: &[GlobalData]) -> 
         });
     }
 
-    let macho = abi.syntax == Syntax::MachO;
+    resolve(t, &mut obj, pending, abi.syntax == Syntax::MachO)?;
+    Ok(obj)
+}
+
+/// Turns references by name into relocations (or resolves them in place),
+/// by the rules of the format (see the top of this file): Mach-O's if
+/// `macho`, else ELF's. Symbols not defined are added as undefined.
+pub fn resolve(t: &Target, obj: &mut Object, pending: Vec<Pending>, macho: bool) -> Result<(), String> {
     let mut by_name: HashMap<String, usize> =
         obj.symbols.iter().enumerate().map(|(k, s)| (s.name.clone(), k)).collect();
     for p in pending {
@@ -345,7 +355,7 @@ pub fn build(t: &Target, abi: &Abi, funcs: &[MFunc], globals: &[GlobalData]) -> 
         };
         obj.sections[p.section].relocs.push(Reloc { offset: p.offset, kind: p.kind, target, addend });
     }
-    Ok(obj)
+    Ok(())
 }
 
 /// Where two canonical forms (`ElfFile::canonical`, `MachFile::canonical`)
