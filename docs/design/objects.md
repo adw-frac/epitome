@@ -91,10 +91,29 @@ Where a constant's only nonzero 16 bits are above the lowest, the selector
 now writes the shifted `movz` out, so that our encoding and the
 assembler's are the same.
 
+## Assembly as people write it
+
+Inline assembly is written by people, not by our templates, so the
+assembler also reads:
+
+- **Numeric local labels:** `1:`, referred to as `1b` (the last before) and
+  `1f` (the next after). Each definition is renamed to a temporary label of
+  its own.
+- **Comments** in the machine's syntax: the `asm-comment` parameter, `//`
+  or `#`. On Mach-O, `;` also starts a comment; on ELF it separates
+  statements.
+- **Other spellings**, from the description's `!target.asm-aliases`. Each
+  is a pattern and the way the templates write it. A line that does not
+  assemble as written is tried rewritten by them. AArch64's are `42` for
+  `#42` and `[x0]` for `[x0, #0]`; RISC-V's are `beqz`, `bnez`, `bltz`,
+  `bgez`, `not`, and `(a0)` for `0(a0)`.
+
 ## `draconian-llc -o file.o`
 
 A name ending in `.o`, or `--filetype=obj`, writes an object file instead
-of assembly: Mach-O under Apple's convention (the default, and a Darwin
+of assembly. A module with inline assembly, whose text only an assembler
+reads, is written by assembling its assembly with `draconian-as`. Otherwise
+the object is written directly: Mach-O under Apple's convention (the default, and a Darwin
 triple), ELF under AAPCS64 (a Linux triple, `--abi=aapcs64`) or with
 `--syntax=elf`.
 
@@ -171,7 +190,8 @@ lines once the things below are set aside. What it uses that ours does not:
   rest), `ldur`/`stur`, pre-indexed addressing (`[x1, #16]!`), extended
   registers (`ldrb w0, [x1, w2, uxtw]`, `add x0, x1, w2, sxtw`), `ccmp`,
   `smaddl`/`umaddl`, `ld1` to a lane.
-- **Spellings:** `[x1]` for `[x1, #0]`; `mov` for a bitmask `orr`.
+- **Spellings:** `mov` for a bitmask `orr`. (`[x1]` for `[x1, #0]` is now
+  read, through the description's `!target.asm-aliases`.)
 - **Symbols with addends in code** (`_x@PAGEOFF+128`), and page-offset
   relocations on loads and stores (`ldr x0, [x1, _x@PAGEOFF]`), which need
   the load and store page-offset relocations.

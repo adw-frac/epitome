@@ -73,6 +73,28 @@
 //!
 //! Relocations with only a number and a name are for reading other
 //! programs' object files.
+//!
+//! Inline assembly's target-specific parts are two more lists. The codes
+//! of its constraints (`"=r,w,I"`; the generic ones, `=`, `&`, `*`,
+//! digits, `{reg}`, `~{...}`, `i`, `n`, are the code generator's):
+//!
+//! ```llvm
+//! !target.asm-constraints = !{!5, ...}
+//! !5 = !{!"r", !"file", !"r", !"print", !"x"}      ; a register of file r, written as x names it
+//! !6 = !{!"I", !"imm", !"0", !"4095"}               ; an immediate in this range
+//! !7 = !{!"m", !"mem", !"[{r}]"}                    ; memory at a register, written so
+//! !8 = !{!"Z", !"zero"}                             ; the constant zero, as the zero register
+//! ```
+//!
+//! and the template's operand modifiers (`${0:w}`):
+//!
+//! ```llvm
+//! !target.asm-modifiers = !{!9, ...}
+//! !9 = !{!"w", !"class", !"w"}                      ; the register as class w names it
+//! !10 = !{!"i", !"if-imm", !"i"}                    ; this text if the operand is an immediate
+//! ```
+//!
+//! `asm-comment`, a parameter, is how assembly starts a comment (`//`, `#`).
 
 use std::collections::HashMap;
 
@@ -148,6 +170,29 @@ impl RelocDef {
     }
 }
 
+/// A target constraint code of inline assembly.
+#[derive(Clone, Debug, PartialEq)]
+pub enum AsmCode {
+    /// A register of this file, written as this class names it.
+    Reg { file: usize, print: Option<Class> },
+    /// An immediate in this range.
+    Imm(i64, i64),
+    /// Memory at the address in a register, written by this template
+    /// (`{r}` is the register).
+    Mem(String),
+    /// The constant zero, as the zero register.
+    Zero,
+}
+
+/// A template modifier of inline assembly.
+#[derive(Clone, Debug, PartialEq)]
+pub enum AsmModifier {
+    /// The register as this class names it.
+    Class(Class),
+    /// This text if the operand is an immediate, else nothing.
+    IfImm(String),
+}
+
 /// What values a register class holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Holds {
@@ -201,6 +246,14 @@ pub struct Machine {
     /// Branches on a boolean in a register must compare the whole register
     /// (RISC-V), rather than test its lowest bit (AArch64's `tbnz`).
     pub compare_booleans: bool,
+    pub asm_constraints: HashMap<char, AsmCode>,
+    pub asm_modifiers: HashMap<char, AsmModifier>,
+    /// How assembly starts a comment.
+    pub asm_comment: String,
+    /// Other ways of writing operands, and how the templates write them
+    /// (`!target.asm-aliases`: `[{r}]` is `[{r}, #0]`), for assembly that
+    /// other compilers or people write.
+    pub asm_aliases: Vec<(String, String)>,
 }
 
 fn strings(m: &Module, id: MdId) -> Vec<String> {
@@ -286,6 +339,9 @@ impl Machine {
         if classes.is_empty() {
             return Err("the description names no registers (!target.registers)".into());
         }
+        if let Some(c) = props.keys().find(|c| !classes.iter().any(|d| d.name == **c)) {
+            return Err(format!("register class {c} is in !target.classes, but not in !target.registers"));
+        }
         let mut base = 0u32;
         for f in &mut files {
             f.base = base as u8;
@@ -316,6 +372,10 @@ impl Machine {
             cpus: Vec::new(),
             default_cpu: None,
             compare_booleans: false,
+            asm_constraints: HashMap::new(),
+            asm_modifiers: HashMap::new(),
+            asm_comment: String::new(),
+            asm_aliases: Vec::new(),
         };
         let num = |k: &str| -> Result<Option<u64>, String> {
             params
@@ -354,6 +414,57 @@ impl Machine {
         mc.elf_machine = num("elf-machine")?.unwrap_or(0) as u16;
         mc.elf_flags = num("elf-flags")?.unwrap_or(0) as u32;
         mc.elf_format = params.get("elf-format").cloned().unwrap_or_else(|| "elf64-little".into());
+        mc.asm_comment = params.get("asm-comment").cloned().unwrap_or_else(|| "//".into());
+        let one_char = |k: &str| -> Result<char, String> {
+            let mut c = k.chars();
+            match (c.next(), c.next()) {
+                (Some(x), None) => Ok(x),
+                _ => Err(format!("inline assembly: {k:?} is not one letter")),
+            }
+        };
+        for t in tuples(m, "target.asm-constraints") {
+            let Some(code) = t.first() else { continue };
+            let class = |n: &str| mc.class(n).ok_or_else(|| format!("asm constraint {code}: no register class {n}"));
+            let int = |k: usize| -> Result<i64, String> {
+                t.get(k).and_then(|v| v.parse().ok()).ok_or_else(|| format!("asm constraint {code}: bad number"))
+            };
+            let def = match t.get(1).map(String::as_str) {
+                Some("file") => {
+                    let fname = t.get(2).ok_or_else(|| format!("asm constraint {code}: no file"))?;
+                    let file = mc
+                        .files
+                        .iter()
+                        .position(|f| f.name == *fname)
+                        .ok_or_else(|| format!("asm constraint {code}: no register file {fname}"))?;
+                    let print = match (t.get(3).map(String::as_str), t.get(4)) {
+                        (Some("print"), Some(c)) => Some(class(c)?),
+                        _ => None,
+                    };
+                    AsmCode::Reg { file, print }
+                }
+                Some("imm") => AsmCode::Imm(int(2)?, int(3)?),
+                Some("mem") => AsmCode::Mem(t.get(2).cloned().unwrap_or_else(|| "{r}".into())),
+                Some("zero") => AsmCode::Zero,
+                o => return Err(format!("asm constraint {code}: {o:?}")),
+            };
+            mc.asm_constraints.insert(one_char(code)?, def);
+        }
+        for t in tuples(m, "target.asm-aliases") {
+            if let [from, to] = &t[..] {
+                mc.asm_aliases.push((from.clone(), to.clone()));
+            }
+        }
+        for t in tuples(m, "target.asm-modifiers") {
+            let Some(code) = t.first() else { continue };
+            let def = match (t.get(1).map(String::as_str), t.get(2)) {
+                (Some("class"), Some(c)) => AsmModifier::Class(
+                    mc.class(c).ok_or_else(|| format!("asm modifier {code}: no register class {c}"))?,
+                ),
+                (Some("if-imm"), Some(text)) => AsmModifier::IfImm(text.clone()),
+                o => return Err(format!("asm modifier {code}: {o:?}")),
+            };
+            mc.asm_modifiers.insert(one_char(code)?, def);
+        }
         mc.macho_cpu = num("macho-cpu")?.map(|v| v as u32);
         for t in tuples(m, "target.relocs") {
             let p: HashMap<&str, &str> =
@@ -439,6 +550,23 @@ impl Machine {
             }
         }
         best.map(|k| Class(k as u8))
+    }
+
+    /// The class of file `file` a value of this kind and width is put in,
+    /// for inline assembly's register constraints: one that holds the kind,
+    /// else any that is wide enough (an integer in a floating-point
+    /// register is held as a float of its width).
+    pub fn value_class_in(&self, file: usize, holds: Holds, bits: u32) -> Option<Class> {
+        let fits = |c: &ClassDef| c.file == file && !c.sp && c.holds.is_some() && c.bits >= bits;
+        let pick = |want: &dyn Fn(&ClassDef) -> bool| {
+            self.classes
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| fits(c) && want(c))
+                .min_by_key(|(k, c)| (c.bits, *k))
+                .map(|(k, _)| Class(k as u8))
+        };
+        pick(&|c| c.holds == Some(holds)).or_else(|| pick(&|_| true))
     }
 
     /// The class of file `file` holding scalars of `bits` bits, for the

@@ -97,6 +97,75 @@ pub struct Sel<'a, 'b> {
     va_offset: i64,
 }
 
+/// The inline assembly a call calls, if it does.
+fn inline_asm<'m>(m: &'m Module, call: &Call) -> Option<&'m InlineAsm> {
+    let Value::Const(c) = call.callee else { return None };
+    match &m.constant(c).kind {
+        ConstKind::InlineAsm(a) => Some(a),
+        _ => None,
+    }
+}
+
+/// One constraint of inline assembly (LLVM's syntax: `=&r`, `*m`, `0`,
+/// `{x0}`, `~{memory}`).
+#[derive(Debug, Default)]
+struct Constraint {
+    output: bool,
+    early: bool,
+    indirect: bool,
+    clobber: bool,
+    /// The codes of its first alternative: letters, a register, a digit.
+    codes: String,
+}
+
+fn parse_constraints(text: &str) -> Vec<Constraint> {
+    let mut out = Vec::new();
+    for part in text.split(',').filter(|p| !p.is_empty()) {
+        let mut c = Constraint::default();
+        let mut rest = part;
+        if let Some(r) = rest.strip_prefix('~') {
+            c.clobber = true;
+            rest = r;
+        }
+        if let Some(r) = rest.strip_prefix('=') {
+            c.output = true;
+            rest = r;
+        }
+        if let Some(r) = rest.strip_prefix('&') {
+            c.early = true;
+            rest = r;
+        }
+        if let Some(r) = rest.strip_prefix('*') {
+            c.indirect = true;
+            rest = r;
+        }
+        c.codes = rest.split('|').next().unwrap_or("").to_string();
+        out.push(c);
+    }
+    out
+}
+
+/// Roughly how many instructions an inline assembly template is: its
+/// statements that are not labels, directives or comments.
+fn statements(template: &str, comment: &str) -> u32 {
+    template
+        .split(['\n', ';'])
+        .map(|l| {
+            let l = l.split(comment).next().unwrap_or("").trim();
+            // Leading labels.
+            let mut l = l;
+            while let Some((label, rest)) = l.split_once(':')
+                && !label.is_empty()
+                && label.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.' || c == '$')
+            {
+                l = rest.trim();
+            }
+            l.to_string()
+        })
+        .filter(|l| !l.is_empty() && !l.starts_with('.'))
+        .count() as u32
+}
+
 fn side_effects(op: &Op) -> bool {
     matches!(
         op,
@@ -138,6 +207,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             global,
             blocks: Vec::new(),
             vclass: Vec::new(),
+            asms: Vec::new(),
             slots: Vec::new(),
             frame_size: 0,
             out_size: 0,
@@ -1286,6 +1356,192 @@ impl<'a, 'b> Sel<'a, 'b> {
         self.push(MInst::new(self.t.by_role(&role), vec![MOp::Reg(r), MOp::Reg(Reg::P(sp)), MOp::Imm(off)]));
     }
 
+    /// Inline assembly: its operands in registers (of the classes their
+    /// constraints name, or the registers they name), immediates or
+    /// memory, then one `Opcode::Asm` instruction, then its results copied
+    /// out.
+    fn emit_asm(&mut self, i: InstId) -> Result<(), String> {
+        use crate::machine::AsmCode;
+        let f = self.f;
+        let inst = &f.insts[i.index()];
+        let Op::Call(call) = &inst.op else { unreachable!() };
+        let a = inline_asm(self.cx.m, call).unwrap().clone();
+        let template = String::from_utf8_lossy(&a.asm).into_owned();
+        let cons = parse_constraints(&String::from_utf8_lossy(&a.constraints));
+        let m = &self.t.machine;
+        let fname = self.fname.to_string();
+        let bad = |what: String| format!("@{fname}: inline assembly: {what}");
+        // The types of the results: one, or a struct of them.
+        let result_tys: Vec<TypeId> = match inst.result.map(|r| f.locals[r.index()].ty) {
+            None => vec![],
+            Some(ty) => match self.cx.m.types.get(ty) {
+                Type::Struct { fields, .. } => fields.clone(),
+                Type::Void => vec![],
+                _ => vec![ty],
+            },
+        };
+        let mut outs: Vec<MOp> = Vec::new();
+        let mut ins: Vec<MOp> = Vec::new();
+        // For each $N: whether it is an output (and which), or an input.
+        let mut operands: Vec<(bool, usize, AsmPrint)> = Vec::new();
+        // Results: (output's operand, the register to copy it to).
+        let mut results: Vec<(MOp, Class)> = Vec::new();
+        let mut before: Vec<MInst> = Vec::new();
+        let mut clobbers: Vec<u8> = Vec::new();
+        let mut early: Vec<bool> = Vec::new();
+        let mut args = call.args.iter().map(|x| x.value);
+        let mut next_result = 0;
+        let named = |name: &str| -> Option<u8> { name.strip_prefix('{')?.strip_suffix('}').and_then(|n| m.lookup(n)) };
+        for c in &cons {
+            if c.clobber {
+                let name = c.codes.trim_start_matches('{').trim_end_matches('}');
+                match m.lookup(name) {
+                    Some(p) => clobbers.push(p),
+                    None if matches!(name, "memory" | "cc" | "flags" | "dirflag" | "fpsr" | "fpcr" | "nzcv") => {}
+                    None => return Err(bad(format!("no register {name} to clobber"))),
+                }
+                continue;
+            }
+            if c.output && !c.indirect {
+                // A result.
+                let ty = *result_tys.get(next_result).ok_or_else(|| bad("more outputs than results".into()))?;
+                next_result += 1;
+                let (holds, bits) = (self.holds(ty), self.bits(ty).max(1));
+                let (op, print) = if let Some(p) = named(&c.codes) {
+                    let class = m.value_class_in(m.file_of(p), holds, bits).ok_or_else(|| bad(c.codes.clone()))?;
+                    (MOp::Reg(Reg::P(p)), class)
+                } else {
+                    let code = c.codes.chars().find_map(|k| match m.asm_constraints.get(&k) {
+                        Some(AsmCode::Reg { file, print }) => Some((*file, *print)),
+                        _ => None,
+                    });
+                    let (file, print) = code.ok_or_else(|| bad(format!("output constraint {:?}", c.codes)))?;
+                    let class = m
+                        .value_class_in(file, holds, bits)
+                        .ok_or_else(|| bad(format!("no register class of its file holds {:?}", c.codes)))?;
+                    let v = self.mf.new_vreg(class);
+                    (MOp::Reg(Reg::V(v)), print.unwrap_or(class))
+                };
+                let class = match &op {
+                    MOp::Reg(Reg::V(v)) => self.mf.vclass[*v as usize],
+                    _ => print,
+                };
+                operands.push((true, outs.len(), AsmPrint::Reg(print)));
+                early.push(c.early);
+                results.push((op.clone(), class));
+                outs.push(op);
+                continue;
+            }
+            // An input (or the address of an indirect output).
+            let v = args.next().ok_or_else(|| bad("more inputs than arguments".into()))?;
+            // Tied to an output: in its register.
+            if let Ok(n) = c.codes.parse::<usize>() {
+                let (is_out, k, print) = operands.get(n).cloned().ok_or_else(|| bad(format!("no operand {n}")))?;
+                if !is_out {
+                    return Err(bad(format!("operand {n}, which an input is tied to, is not an output")));
+                }
+                let class = results[k].1;
+                let r = self.reg_for(v, class)?;
+                let MOp::Reg(dst) = outs[k] else { unreachable!() };
+                before.push(MInst::copy(dst, r));
+                operands.push((false, ins.len(), print));
+                ins.push(MOp::Reg(dst));
+                continue;
+            }
+            let ty = self.ty_of(v);
+            let (holds, bits) = (self.holds(ty), self.bits(ty).max(1));
+            if let Some(p) = named(&c.codes) {
+                let class = m.value_class_in(m.file_of(p), holds, bits).ok_or_else(|| bad(c.codes.clone()))?;
+                let r = self.reg_for(v, class)?;
+                before.push(MInst::copy(Reg::P(p), r));
+                operands.push((false, ins.len(), AsmPrint::Reg(class)));
+                ins.push(MOp::Reg(Reg::P(p)));
+                continue;
+            }
+            let konst = match v {
+                Value::Const(_) => self.cx.const_int(v),
+                _ => None,
+            };
+            let mut done = false;
+            for k in c.codes.chars() {
+                match (k, m.asm_constraints.get(&k), konst) {
+                    ('i' | 'n', _, Some(x)) => {
+                        operands.push((false, ins.len(), AsmPrint::Imm));
+                        ins.push(MOp::Imm(x));
+                    }
+                    (_, Some(AsmCode::Imm(lo, hi)), Some(x)) if (*lo..=*hi).contains(&x) => {
+                        operands.push((false, ins.len(), AsmPrint::Imm));
+                        ins.push(MOp::Imm(x));
+                    }
+                    (_, Some(AsmCode::Zero), Some(0)) if m.zero.is_some() => {
+                        let class = self.int_class(bits > 32);
+                        operands.push((false, ins.len(), AsmPrint::Reg(class)));
+                        ins.push(MOp::Reg(Reg::P(m.zero.unwrap())));
+                    }
+                    (_, Some(AsmCode::Reg { file, print }), _) => {
+                        let class = m
+                            .value_class_in(*file, holds, bits)
+                            .ok_or_else(|| bad(format!("no register class of its file holds {:?}", c.codes)))?;
+                        let r = self.reg_for(v, class)?;
+                        operands.push((false, ins.len(), AsmPrint::Reg(print.unwrap_or(class))));
+                        ins.push(MOp::Reg(r));
+                    }
+                    (_, Some(AsmCode::Mem(tpl)), _) => {
+                        let class = self.int_class(true);
+                        let r = self.reg_for(v, class)?;
+                        operands.push((false, ins.len(), AsmPrint::Mem(tpl.clone(), class)));
+                        ins.push(MOp::Reg(r));
+                    }
+                    _ => continue,
+                }
+                done = true;
+                break;
+            }
+            if !done {
+                return Err(bad(format!(
+                    "constraint {:?} for {}",
+                    c.codes,
+                    if konst.is_some() { "a constant" } else { "a value" }
+                )));
+            }
+        }
+        for b in before {
+            self.push(b);
+        }
+        let n_outs = outs.len();
+        let ops: Vec<MOp> = outs.into_iter().chain(ins).collect();
+        let operands = operands.into_iter().map(|(is_out, k, p)| (if is_out { k } else { n_outs + k }, p)).collect();
+        let id = self.mf.asms.len();
+        let uid = fname.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3))
+            % 1_000_000
+            * 1000
+            + id as u64;
+        let statements = statements(&template, &m.asm_comment);
+        self.mf.asms.push(AsmBlock { template, operands, uid, statements, early });
+        let mut asm = MInst { op: Opcode::Asm { id: id as u32, outs: n_outs as u16 }, ..MInst::new(0, ops) };
+        asm.imp_defs = clobbers;
+        self.push(asm);
+        // The results, copied out.
+        if let Some(r) = inst.result {
+            let regs: Vec<VReg> = results
+                .iter()
+                .map(|(op, class)| {
+                    let MOp::Reg(src) = op else { unreachable!() };
+                    let d = self.mf.new_vreg(*class);
+                    self.push(MInst::copy(Reg::V(d), *src));
+                    d
+                })
+                .collect();
+            if result_tys.len() == 1 && !matches!(self.cx.m.types.get(f.locals[r.index()].ty), Type::Struct { .. }) {
+                let d = self.vreg_of(r);
+                self.push(MInst::copy(Reg::V(d), Reg::V(regs[0])));
+            } else {
+                self.agg_params.insert(r, regs);
+            }
+        }
+        Ok(())
+    }
+
     fn emit_call(&mut self, i: InstId) -> Result<(), String> {
         let f = self.f;
         let inst = &f.insts[i.index()];
@@ -1463,6 +1719,10 @@ impl<'a, 'b> Sel<'a, 'b> {
             }
             match &inst.op {
                 Op::Phi { .. } => continue,
+                Op::Call(call) if inline_asm(self.cx.m, call).is_some() => {
+                    self.emit_asm(i)?;
+                    continue;
+                }
                 Op::Call(_) if !self.chosen.contains_key(&i) => {
                     self.emit_call(i)?;
                     continue;
@@ -1519,6 +1779,15 @@ impl<'a, 'b> Sel<'a, 'b> {
                 Op::InsertValue { .. } => continue,
                 Op::ExtractValue { aggregate, indices } if indices.len() == 1 => {
                     let Some(r) = inst.result else { continue };
+                    // A part of an inline assembly block's results.
+                    if let Value::Local(x) = aggregate
+                        && let Some(parts) = self.agg_params.get(x)
+                        && let Some(&p) = parts.get(indices[0] as usize)
+                    {
+                        let d = self.vreg_of(r);
+                        self.push(MInst::copy(Reg::V(d), Reg::V(p)));
+                        continue;
+                    }
                     let ty = self.ty_of(*aggregate);
                     let n = self.parts_of(ty).ok_or("extractvalue from an unsupported aggregate")?;
                     let parts = self.parts(*aggregate, n)?;

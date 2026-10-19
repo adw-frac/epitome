@@ -158,3 +158,38 @@ fn programs_run_on_riscv() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Inline assembly (`asm/riscv.ll`, written as clang would write it from
+/// C), compiled with a main built here, linked and run on the RV64
+/// machine: it must print what the same functions in C print.
+#[test]
+fn inline_asm_runs_on_riscv() {
+    let ok = Command::new("clang").arg("--version").output().is_ok_and(|o| o.status.success());
+    if !ok {
+        eprintln!("clang not found; skipping");
+        return;
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let t = Target::load_path(root.join("targets/riscv64").to_str().unwrap()).unwrap();
+    let dir = root.join("tests/asm");
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("riscv-asm");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let reference = tmp.join("ref");
+    run(Command::new("clang")
+        .args(["-O1"])
+        .arg(dir.join("riscv.ref.c"))
+        .arg(dir.join("riscv.main.c"))
+        .arg("-o")
+        .arg(&reference))
+    .unwrap();
+    let want = run(&mut Command::new(&reference)).unwrap();
+    let text = std::fs::read_to_string(dir.join("riscv.ll")).unwrap();
+    let mut m = draconian_ir::parse_module(&text).unwrap();
+    let compiled = compile(&t, &mut m, &Options::default()).unwrap();
+    std::fs::write(tmp.join("riscv.s"), &compiled.asm).unwrap();
+    let a = compiled.object_file(&t).unwrap_or_else(|e| panic!("{e}\n{}", compiled.asm));
+    let (b, _) = object(&t, &dir.join("riscv.main.c"), &["-O2"], &tmp, &[]).unwrap();
+    let mut machine = emu::Machine::link(&[a, b]).unwrap();
+    let status = machine.run(100_000_000).unwrap_or_else(|e| panic!("{e}\nprinted so far:\n{}", machine.out));
+    assert_eq!((machine.out.as_str(), status), (want.as_str(), 0), "\n{}", compiled.asm);
+}

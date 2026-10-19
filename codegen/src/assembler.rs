@@ -342,8 +342,10 @@ impl<'t> Assembler<'t> {
         let lines: Vec<&str> = text.lines().collect();
 
         let err = |n: usize, msg: String| format!("line {}: {msg}: `{}`", n + 1, lines[n].trim());
-        for (n, raw) in lines.iter().enumerate() {
-            let mut line = strip_comment(raw).trim();
+        let stmts = statements(&lines, &self.t.machine.asm_comment, syntax);
+        for (n, stmt) in &stmts {
+            let n = *n;
+            let mut line = stmt.trim();
             // Labels, perhaps followed by more on the line.
             while let Some((name, rest)) = line.split_once(':')
                 && valid_symbol(name)
@@ -506,7 +508,14 @@ impl<'t> Assembler<'t> {
             match l {
                 Later::Instr { section, offset, line, text } => {
                     let find = |name: &str| labels.get(name).filter(|l| l.0 == section).map(|l| l.1);
-                    let (i, word, sym) = match self.encode(&text, offset, syntax, &find) {
+                    // As written, or as the description's aliases write it
+                    // the way its templates do.
+                    let read = self.encode(&text, offset, syntax, &find).or_else(|e| {
+                        let canonical =
+                            self.t.machine.asm_aliases.iter().fold(text.clone(), |l, (a, b)| rewrite(&l, a, b));
+                        if canonical == text { Err(e) } else { self.encode(&canonical, offset, syntax, &find) }
+                    });
+                    let (i, word, sym) = match read {
                         Ok(x) => x,
                         Err(e) => {
                             errors.push(err(line, e));
@@ -602,8 +611,88 @@ fn section_of(
     s
 }
 
-/// The line without a comment (`//` or `;`, outside strings).
-fn strip_comment(line: &str) -> &str {
+/// `line` with each piece written as `from` written as `to` instead.
+/// In the patterns, `{i}` stands for an integer (`12`, `-3`, `0x1f`) and
+/// any other `{x}` for a token (a register: `x0`); `to` may use them.
+pub fn rewrite(line: &str, from: &str, to: &str) -> String {
+    // The pattern as literals and holes.
+    let mut parts: Vec<(bool, &str)> = Vec::new();
+    let mut rest = from;
+    while let Some(open) = rest.find('{') {
+        let close = rest[open..].find('}').map_or(rest.len(), |c| open + c);
+        parts.push((false, &rest[..open]));
+        parts.push((true, &rest[open + 1..close]));
+        rest = &rest[(close + 1).min(rest.len())..];
+    }
+    parts.push((false, rest));
+    let token = |s: &str, int: bool| -> usize {
+        let b = s.as_bytes();
+        let mut k = 0;
+        if int {
+            if b.first() == Some(&b'-') {
+                k = 1;
+            }
+            let start = k;
+            if s[k..].starts_with("0x") {
+                k += 2;
+                while k < b.len() && b[k].is_ascii_hexdigit() {
+                    k += 1;
+                }
+            } else {
+                while k < b.len() && b[k].is_ascii_digit() {
+                    k += 1;
+                }
+            }
+            if k == start { 0 } else { k }
+        } else {
+            while k < b.len() && (b[k].is_ascii_alphanumeric() || b[k] == b'_' || b[k] == b'.') {
+                k += 1;
+            }
+            k
+        }
+    };
+    let matches_at = |at: usize| -> Option<(usize, HashMap<&str, &str>)> {
+        let mut pos = at;
+        let mut env = HashMap::new();
+        for &(hole, p) in &parts {
+            if hole {
+                let n = token(&line[pos..], p == "i");
+                if n == 0 {
+                    return None;
+                }
+                env.insert(p, &line[pos..pos + n]);
+                pos += n;
+            } else {
+                if !line[pos..].starts_with(p) {
+                    return None;
+                }
+                pos += p.len();
+            }
+        }
+        Some((pos, env))
+    };
+    let mut out = String::new();
+    let mut k = 0;
+    while k < line.len() {
+        if let Some((end, env)) = matches_at(k) {
+            let mut filled = to.to_string();
+            for (name, v) in env {
+                filled = filled.replace(&format!("{{{name}}}"), v);
+            }
+            out.push_str(&filled);
+            k = end.max(k + 1);
+            continue;
+        }
+        let c = line[k..].chars().next().unwrap();
+        out.push(c);
+        k += c.len_utf8();
+    }
+    out
+}
+
+/// The line without a comment: from `comment` (`//`, `#`), or for
+/// Mach-O `;`, outside strings.
+fn strip_comment<'l>(line: &'l str, comment: &str, syntax: Syntax) -> &'l str {
     let mut in_str = false;
     let mut escaped = false;
     let b = line.as_bytes();
@@ -619,12 +708,89 @@ fn strip_comment(line: &str) -> &str {
         }
         match c {
             b'"' => in_str = true,
-            b';' => return &line[..k],
-            b'/' if b.get(k + 1) == Some(&b'/') => return &line[..k],
+            b';' if syntax == Syntax::MachO => return &line[..k],
+            _ if line[k..].starts_with(comment) => return &line[..k],
             _ => {}
         }
     }
     line
+}
+
+/// The statements of the text, each with its line's number: lines without
+/// comments, split at `;` (for ELF; outside strings), with numeric local
+/// labels (`1:`, referred to as `1b` and `1f`, as inline assembly writes
+/// them) renamed to temporary labels of their own.
+fn statements(lines: &[&str], comment: &str, syntax: Syntax) -> Vec<(usize, String)> {
+    let mut out: Vec<(usize, String)> = Vec::new();
+    for (n, raw) in lines.iter().enumerate() {
+        let line = strip_comment(raw, comment, syntax);
+        if syntax == Syntax::MachO || !line.contains(';') {
+            out.push((n, line.to_string()));
+            continue;
+        }
+        let (mut in_str, mut escaped) = (false, false);
+        let mut start = 0;
+        for (k, c) in line.char_indices() {
+            match c {
+                _ if escaped => escaped = false,
+                '\\' if in_str => escaped = true,
+                '"' => in_str = !in_str,
+                ';' if !in_str => {
+                    out.push((n, line[start..k].to_string()));
+                    start = k + 1;
+                }
+                _ => {}
+            }
+        }
+        out.push((n, line[start..].to_string()));
+    }
+    // Numeric labels: the k-th definition of `N` is `.Ln.N.k`.
+    let temp = if syntax == Syntax::MachO { "Ln." } else { ".Ln." };
+    let numeric = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
+    if !out.iter().any(|(_, l)| l.trim_start().split_once(':').is_some_and(|(n, _)| numeric(n))) {
+        return out;
+    }
+    let mut defined: HashMap<String, usize> = HashMap::new();
+    for (_, l) in &mut out {
+        let mut text = l.trim_start().to_string();
+        let mut head = String::new();
+        while let Some((name, rest)) = text.split_once(':')
+            && numeric(name)
+        {
+            let k = defined.entry(name.to_string()).or_default();
+            *k += 1;
+            head.push_str(&format!("{temp}{name}.{k}: "));
+            text = rest.trim_start().to_string();
+        }
+        // References: `1b` is the last definition of 1, `1f` the next.
+        let mut body = String::new();
+        let chars: Vec<char> = text.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            let boundary = i == 0 || !(chars[i - 1].is_alphanumeric() || chars[i - 1] == '_' || chars[i - 1] == '.');
+            if boundary && chars[i].is_ascii_digit() {
+                let mut j = i;
+                while j < chars.len() && chars[j].is_ascii_digit() {
+                    j += 1;
+                }
+                let after = chars.get(j + 1).is_none_or(|c| !(c.is_alphanumeric() || *c == '_'));
+                if let Some(&dir) = chars.get(j).filter(|c| matches!(c, 'b' | 'f'))
+                    && after
+                {
+                    let name: String = chars[i..j].iter().collect();
+                    let k = defined.get(&name).copied().unwrap_or(0);
+                    let k = if dir == 'b' { k } else { k + 1 };
+                    body.push_str(&format!("{temp}{name}.{k}"));
+                    i = j + 1;
+                    continue;
+                }
+            }
+            body.push(chars[i]);
+            i += 1;
+        }
+        *l = head + &body;
+    }
+    out
 }
 
 /// An instruction line as the printer writes it: the mnemonic, one space,

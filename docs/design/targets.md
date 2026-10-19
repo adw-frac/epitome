@@ -229,6 +229,70 @@ expanded generically in IR by `prepare`:
   and masks. A population count adds up its bytes with a multiply, or with
   shifts when the machine has no multiply.
 
+## Inline assembly
+
+LLVM's Language Reference documents inline assembly's constraints and
+template modifiers, for each target. The generic parts are the code
+generator's:
+
+- `=` (an output), `&` (early clobber), `*` (indirect: memory through a
+  pointer);
+- a digit (an input tied to that output);
+- `{reg}` (that register, by any name the description gives it:
+  RISC-V's `{x10}` is `a0`);
+- `~{reg}` and `~{memory}` (clobbers);
+- `i` and `n` (immediates);
+- the modifiers `c`, `n` and `z`, and `$$`, `${:uid}`, `${:comment}` and
+  `${:private}`.
+
+The rest is the description's, in three lists:
+
+```llvm
+!target.asm-constraints = !{...}
+!{!"r", !"file", !"r", !"print", !"x"}    ; a register of file r, written as x names it
+!{!"I", !"imm", !"0", !"4095"}             ; an immediate in this range
+!{!"m", !"mem", !"[{r}]"}                  ; memory at a register, written so
+!{!"Z", !"zero"}                           ; the constant zero, as the zero register
+!target.asm-modifiers = !{...}
+!{!"w", !"class", !"w"}                    ; ${0:w}: the register as class w names it
+!{!"i", !"if-imm", !"i"}                   ; ${2:i}: this text if the operand is an immediate
+!target.asm-aliases = !{...}               ; spellings the assembler reads (objects.md)
+```
+
+| | AArch64 | RISC-V |
+| --- | --- | --- |
+| Registers | `r` (written `x3`), `w` (written `v3`) | `r` (written `a0`), `f` (written `fa0`) |
+| Immediates | `I` (0 to 4095), `J` (-4095 to 0) | `I` (12 bits, signed), `K` (5 bits), `J` (zero) |
+| Memory | `m`, `Q`: `[x0]` | `m`: `0(a0)`; `A`: `(a0)` |
+| Zero register | `Z` | `J` with `${n:z}` |
+| Modifiers | `w`, `x`, `b`, `h`, `s`, `d`, `q` | `i`, and the generic `z` |
+
+How each part is compiled:
+
+- **Selection:** a block becomes one instruction of its own, with its
+  outputs first and its inputs after. A value whose constraint names a
+  register is copied in or out. A tied input is copied into its output's
+  register. A clobbered register is written by the instruction.
+- **Register allocation:** an early-clobber output is taken to be written
+  while the inputs are read, so it never shares their registers. The frame
+  saves a saved register the block clobbers.
+- **Output:** the template is written with its operands, between
+  `APP` and `NO_APP` comments, as clang writes them. For branch distances,
+  each statement counts as one instruction.
+
+`tests/inline_asm.rs` builds about 20 functions at `-O0` and `-O2` and
+runs them on this machine. Clang must assemble our assembly to the same
+code. `tests/riscv.rs` runs the same kinds, written as IR, on the RV64
+machine.
+
+Not yet:
+
+- `asm goto` (`callbr`) and `module asm`;
+- constraints for part of a file (AArch64's `x`, `v0`–`v15`), and
+  alternatives (`r|m`) beyond the first;
+- instructions the description lacks: a block using `dmb` or a CSR
+  instruction fails to assemble, with an error naming the line.
+
 ## What the code generator asks of a description
 
 The Rust code refers to no instruction by name. Where it must emit an

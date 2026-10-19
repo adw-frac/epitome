@@ -23,7 +23,8 @@ split into two halves:
 - [Targets, CPUs and features](targets.md): adding a machine or a CPU
   without rebuilding, as description files found at run time; feature
   gates; relocations, registers and object-file identities as data; and
-  RISC-V RV64, the second machine.
+  RISC-V RV64, the second machine; inline assembly's constraints and
+  modifiers as data.
 - [Object files, assembly and disassembly](objects.md): writing Mach-O
   and ELF object files that match clang's assembler; `draconian-as`, which
   assembles with the machine description run backwards; and

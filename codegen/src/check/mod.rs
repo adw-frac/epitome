@@ -221,6 +221,25 @@ fn structure(t: &Target) -> Section {
         s.warnings.push("no relocation has use data8: pointers in data cannot be written".into());
     }
 
+    // Inline assembly: register constraints are written as classes of
+    // their own files.
+    for (code, c) in &m.asm_constraints {
+        if let crate::machine::AsmCode::Reg { file, print: Some(p) } = c {
+            need(
+                m.def(*p).file == *file,
+                format!(
+                    "asm constraint {code} is a register of {}, but is written as {}",
+                    m.files[*file].name,
+                    m.def(*p).name
+                ),
+                &mut s,
+            );
+        }
+    }
+    if m.asm_constraints.is_empty() {
+        s.warnings.push("no !target.asm-constraints: inline assembly with operands cannot be compiled".into());
+    }
+
     // Conventions.
     need(!t.abis.is_empty(), "no calling convention (!abi.<name>)".into(), &mut s);
     for a in &t.abis {

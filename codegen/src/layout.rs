@@ -234,14 +234,27 @@ fn reaches(t: &Target, inst: &MInst, pc: i64, target: i64) -> bool {
 /// Branch relaxation: a conditional branch whose target is out of its
 /// range (19 bits of words for `b.cond` and `cbz`, 14 for `tbz`) becomes
 /// the opposite branch around an unconditional one, which reaches 128MB.
+// The blocks are changed while their positions are read by index.
+#[allow(clippy::needless_range_loop)]
 pub fn relax(t: &Target, f: &mut MFunc) {
     let b_op = t.by_role("jump");
     for _ in 0..16 {
+        // Where each block and instruction starts.
         let mut starts = Vec::new();
+        let mut at: Vec<Vec<i64>> = Vec::new();
         let mut n = 0i64;
         for b in &f.blocks {
-            starts.push(n * 4);
-            n += b.insts.len() as i64;
+            starts.push(n);
+            at.push(
+                b.insts
+                    .iter()
+                    .map(|i| {
+                        let here = n;
+                        n += f.bytes(i);
+                        here
+                    })
+                    .collect(),
+            );
         }
         let mut changed = false;
         for bi in 0..f.blocks.len() {
@@ -256,7 +269,7 @@ pub fn relax(t: &Target, f: &mut MFunc) {
                 else {
                     continue;
                 };
-                let pc = starts[bi] + 4 * k as i64;
+                let pc = at[bi][k];
                 if reaches(t, inst, pc, starts[target]) {
                     continue;
                 }

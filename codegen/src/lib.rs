@@ -174,8 +174,13 @@ impl Compiled {
         object::build(t, &self.abi, &self.funcs, &self.globals)
     }
 
-    /// The object file, in the convention's format: ELF or Mach-O.
+    /// The object file, in the convention's format: ELF or Mach-O. With
+    /// inline assembly, whose text only an assembler reads, by assembling
+    /// the assembly.
     pub fn object_file(&self, t: &Target) -> Result<Vec<u8>, String> {
+        if self.funcs.iter().any(|f| !f.asms.is_empty()) {
+            return assembler::Assembler::new(t).assemble(&self.asm, Some(self.abi.syntax)).and_then(|a| a.file(t));
+        }
         let obj = self.object(t)?;
         match self.abi.syntax {
             abi::Syntax::Elf => elf::write(&obj, &t.machine),

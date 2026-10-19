@@ -38,6 +38,41 @@ pub enum Opcode {
     Instr(usize),
     /// `ops[0] = ops[1]`, both registers of the width of `ops[0]`.
     Copy,
+    /// Inline assembly: block `id` of the function's `asms`. Its first
+    /// `outs` operands are written, the rest read.
+    Asm {
+        id: u32,
+        outs: u16,
+    },
+}
+
+/// How an inline assembly operand is written into its template.
+#[derive(Clone, Debug, PartialEq)]
+pub enum AsmPrint {
+    /// A register, as this class names it (by default).
+    Reg(Class),
+    /// An immediate.
+    Imm,
+    /// Memory at the address in a register: the template, with `{r}` for
+    /// the register as the class names it.
+    Mem(String, Class),
+}
+
+/// One inline assembly statement block: its template (LLVM's, with `$0`
+/// and `${1:w}`), and for each `$N` the operand of the instruction it is
+/// and how it is written.
+#[derive(Clone, Debug)]
+pub struct AsmBlock {
+    pub template: String,
+    pub operands: Vec<(usize, AsmPrint)>,
+    /// For `${:uid}`: a number unique to this block.
+    pub uid: u64,
+    /// How many instructions it is, as far as can be told: for branch
+    /// distances.
+    pub statements: u32,
+    /// The outputs written before every input is read (`=&r`), which must
+    /// not share a register with one.
+    pub early: Vec<bool>,
 }
 
 #[derive(Clone, Debug)]
@@ -74,6 +109,13 @@ impl MInst {
             Opcode::Copy => {
                 defs.push(0);
                 uses.push(1);
+            }
+            Opcode::Asm { outs, .. } => {
+                for (k, op) in self.ops.iter().enumerate() {
+                    if matches!(op, MOp::Reg(_)) {
+                        if k < outs as usize { defs.push(k) } else { uses.push(k) }
+                    }
+                }
             }
             Opcode::Instr(i) => {
                 let ins = &t.instrs[i];
@@ -120,6 +162,8 @@ pub struct MFunc {
     pub blocks: Vec<MBlock>,
     /// Each virtual register's class.
     pub vclass: Vec<Class>,
+    /// The inline assembly blocks its `Opcode::Asm` instructions are.
+    pub asms: Vec<AsmBlock>,
     pub slots: Vec<Slot>,
     pub frame_size: i64,
     /// Bytes at the bottom of the frame for arguments to calls.
@@ -132,6 +176,84 @@ impl MFunc {
         self.vclass.push(class);
         (self.vclass.len() - 1) as VReg
     }
+
+    /// How many bytes an instruction is: 4, or for inline assembly, 4 for
+    /// each of its statements.
+    pub fn bytes(&self, inst: &MInst) -> i64 {
+        match inst.op {
+            Opcode::Asm { id, .. } => 4 * self.asms[id as usize].statements as i64,
+            _ => 4,
+        }
+    }
+}
+
+/// An inline assembly block, with its operands written in.
+pub fn render_asm(t: &Target, f: &MFunc, inst: &MInst, block: &AsmBlock) -> String {
+    let m = &t.machine;
+    let reg = |r: Reg, c: Class| reg_name(t, r, c);
+    let operand = |n: usize, modifier: Option<char>| -> String {
+        let Some((k, print)) = block.operands.get(n) else { return format!("${n}?") };
+        let modifier = modifier.map(|c| (c, m.asm_modifiers.get(&c)));
+        match (&inst.ops[*k], print) {
+            (MOp::Imm(v), _) => match modifier {
+                Some(('n', None)) => format!("{}", -v),
+                Some(('z', None)) if *v == 0 => m.zero.map_or("0".into(), |z| m.lookup_name(z)),
+                Some((_, Some(crate::machine::AsmModifier::IfImm(text)))) => text.clone(),
+                _ => format!("{v}"),
+            },
+            (MOp::Reg(r), AsmPrint::Mem(tpl, c)) => tpl.replace("{r}", &reg(*r, *c)),
+            (MOp::Reg(r), AsmPrint::Reg(c)) => match modifier {
+                Some((_, Some(crate::machine::AsmModifier::Class(mc)))) => reg(*r, *mc),
+                Some((_, Some(crate::machine::AsmModifier::IfImm(_)))) => String::new(),
+                _ => reg(*r, *c),
+            },
+            (other, _) => format!("{other:?}"),
+        }
+    };
+    let private = match f.abi.syntax {
+        crate::abi::Syntax::Elf => ".L",
+        crate::abi::Syntax::MachO => "L",
+    };
+    let src: Vec<char> = block.template.chars().collect();
+    let mut out = String::new();
+    let mut k = 0;
+    while k < src.len() {
+        let c = src[k];
+        k += 1;
+        if c != '$' || k >= src.len() {
+            out.push(c);
+            continue;
+        }
+        match src[k] {
+            '$' => {
+                out.push('$');
+                k += 1;
+            }
+            d if d.is_ascii_digit() => {
+                let start = k;
+                while k < src.len() && src[k].is_ascii_digit() {
+                    k += 1;
+                }
+                let n: usize = src[start..k].iter().collect::<String>().parse().unwrap();
+                out.push_str(&operand(n, None));
+            }
+            '{' => {
+                let close = src[k..].iter().position(|&c| c == '}').map_or(src.len(), |p| k + p);
+                let inner: String = src[k + 1..close].iter().collect();
+                k = (close + 1).min(src.len());
+                match inner.split_once(':') {
+                    Some(("", "uid")) => out.push_str(&block.uid.to_string()),
+                    Some(("", "comment")) => out.push_str(&m.asm_comment),
+                    Some(("", "private")) => out.push_str(private),
+                    Some((n, md)) => out.push_str(&operand(n.parse().unwrap_or(usize::MAX), md.chars().next())),
+                    None => out.push_str(&operand(inner.parse().unwrap_or(usize::MAX), None)),
+                }
+            }
+            _ => out.push('$'),
+        }
+    }
+    let c = &m.asm_comment;
+    format!("{c}APP\n\t{out}\n\t{c}NO_APP")
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +286,7 @@ pub fn format_inst(t: &Target, f: &MFunc, inst: &MInst) -> String {
             };
             format!("COPY {}, {}", r(&inst.ops[0]), r(&inst.ops[1]))
         }
+        Opcode::Asm { id, .. } => render_asm(t, f, inst, &f.asms[id as usize]),
         Opcode::Instr(i) => {
             let value = |k: usize| -> Operand {
                 match &inst.ops[k] {
@@ -306,7 +429,13 @@ pub fn encode_function(t: &Target, f: &MFunc) -> Result<(Vec<u32>, Vec<Fixup>), 
     for (bi, b) in f.blocks.iter().enumerate() {
         for (k, inst) in b.insts.iter().enumerate() {
             let pc = starts[bi] + k * 4;
-            let Opcode::Instr(i) = inst.op else { return Err(format!("{}: a copy left after allocation", f.name)) };
+            let i = match inst.op {
+                Opcode::Instr(i) => i,
+                Opcode::Copy => return Err(format!("{}: a copy left after allocation", f.name)),
+                Opcode::Asm { .. } => {
+                    return Err(format!("{}: inline assembly is encoded by assembling the assembly", f.name));
+                }
+            };
             let ins = &t.instrs[i];
             let mut env = Env::new();
             for (o, op) in ins.operands.iter().zip(&inst.ops) {

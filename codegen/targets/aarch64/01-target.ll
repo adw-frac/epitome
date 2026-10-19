@@ -40,7 +40,7 @@
 ; ===========================================================================
 ; Parameters
 
-!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109}
+!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110}
 !1100 = !{!"sp", !"sp"}
 !1101 = !{!"zero", !"xzr"}
 !1102 = !{!"vector-bits", !"128", !"neon"}
@@ -51,6 +51,36 @@
 !1107 = !{!"macho-cpu", !"0x0100000c"}
 !1108 = !{!"cpu", !"generic"}
 !1109 = !{!"elf-format", !"elf64-littleaarch64"}
+!1110 = !{!"asm-comment", !"//"}
+
+; ===========================================================================
+; Inline assembly: what its constraint codes and template modifiers mean,
+; from the LLVM Language Reference. A register operand without a modifier
+; is written as its whole register: x3, or v3 for w.
+
+!target.asm-constraints = !{!1300, !1301, !1302, !1303, !1304, !1305, !1306}
+!1300 = !{!"r", !"file", !"r", !"print", !"x"}
+!1301 = !{!"w", !"file", !"v", !"print", !"lanes"}
+!1302 = !{!"I", !"imm", !"0", !"4095"}
+!1303 = !{!"J", !"imm", !"-4095", !"0"}
+!1304 = !{!"Z", !"zero"}
+!1305 = !{!"m", !"mem", !"[{r}]"}
+!1306 = !{!"Q", !"mem", !"[{r}]"}
+
+; Operands as people write them, and as the templates do: an immediate
+; without its #, and an address without its offset.
+!target.asm-aliases = !{!1320, !1321}
+!1320 = !{!", {i}", !", #{i}"}
+!1321 = !{!"[{r}]", !"[{r}, #0]"}
+
+!target.asm-modifiers = !{!1310, !1311, !1312, !1313, !1314, !1315, !1316}
+!1310 = !{!"w", !"class", !"w"}
+!1311 = !{!"x", !"class", !"x"}
+!1312 = !{!"b", !"class", !"b"}
+!1313 = !{!"h", !"class", !"h"}
+!1314 = !{!"s", !"class", !"s"}
+!1315 = !{!"d", !"class", !"d"}
+!1316 = !{!"q", !"class", !"q"}
 
 ; ===========================================================================
 ; CPUs and their features, by LLVM's names for them (which clang's IR uses

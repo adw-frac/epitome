@@ -21,28 +21,33 @@
 ; sign-extended to 64 bits ("narrow-results"="sign"); s and d are the
 ; floating-point registers holding floats and doubles.
 
-!target.registers = !{!1000, !1001, !1002, !1003, !1004, !1005}
+!target.registers = !{!1000, !1001, !1002, !1003, !1004, !1005, !1006, !1007}
 !1000 = !{!"x", !"zero", !"ra", !"sp", !"gp", !"tp", !"t{0-2}", !"s{0-1}", !"a{0-7}", !"s{2-11}", !"t{3-6}"}
 !1001 = !{!"w", !"zero", !"ra", !"sp", !"gp", !"tp", !"t{0-2}", !"s{0-1}", !"a{0-7}", !"s{2-11}", !"t{3-6}"}
 !1002 = !{!"xsp", !"zero", !"ra", !"sp", !"gp", !"tp", !"t{0-2}", !"s{0-1}", !"a{0-7}", !"s{2-11}", !"t{3-6}"}
 !1003 = !{!"wsp", !"zero", !"ra", !"sp", !"gp", !"tp", !"t{0-2}", !"s{0-1}", !"a{0-7}", !"s{2-11}", !"t{3-6}"}
 !1004 = !{!"d", !"ft{0-7}", !"fs{0-1}", !"fa{0-7}", !"fs{2-11}", !"ft{8-11}"}
 !1005 = !{!"s", !"ft{0-7}", !"fs{0-1}", !"fa{0-7}", !"fs{2-11}", !"ft{8-11}"}
+; The registers by number too, as assembly may name them (x10, f8).
+!1006 = !{!"xn", !"x{0-31}"}
+!1007 = !{!"fn", !"f{0-31}"}
 
-!target.classes = !{!1010, !1011, !1012, !1013, !1014, !1015}
+!target.classes = !{!1010, !1011, !1012, !1013, !1014, !1015, !1016, !1017}
 !1010 = !{!"x", !"file", !"x", !"bits", !"64", !"holds", !"int"}
 !1011 = !{!"w", !"file", !"x", !"bits", !"32", !"holds", !"int"}
 !1012 = !{!"xsp", !"file", !"x", !"bits", !"64", !"holds", !"int", !"sp", !"yes"}
 !1013 = !{!"wsp", !"file", !"x", !"bits", !"32", !"holds", !"int", !"sp", !"yes"}
 !1014 = !{!"d", !"file", !"f", !"bits", !"64", !"holds", !"float"}
 !1015 = !{!"s", !"file", !"f", !"bits", !"32", !"holds", !"float"}
+!1016 = !{!"xn", !"file", !"x"}
+!1017 = !{!"fn", !"file", !"f"}
 
 ; ===========================================================================
 ; Parameters. No vector registers (V is not described): vectors are done
 ; lane by lane. Globals are reached by their absolute addresses (the medlow
 ; code model), not through a GOT. Branches compare whole registers.
 
-!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109}
+!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110}
 !1100 = !{!"sp", !"sp"}
 !1101 = !{!"zero", !"zero"}
 !1102 = !{!"vector-bits", !"0"}
@@ -54,6 +59,34 @@
 !1107 = !{!"cpu", !"generic-rv64"}
 !1108 = !{!"boolean-branches", !"compare"}
 !1109 = !{!"elf-format", !"elf64-littleriscv"}
+!1110 = !{!"asm-comment", !"#"}
+
+; ===========================================================================
+; Inline assembly: what its constraint codes and template modifiers mean,
+; from the LLVM Language Reference (z, the zero register for a constant 0,
+; is the code generator's own).
+
+!target.asm-constraints = !{!1300, !1301, !1302, !1303, !1304, !1305, !1306}
+!1300 = !{!"r", !"file", !"x", !"print", !"x"}
+!1301 = !{!"f", !"file", !"f", !"print", !"d"}
+!1302 = !{!"I", !"imm", !"-2048", !"2047"}
+!1303 = !{!"J", !"imm", !"0", !"0"}
+!1304 = !{!"K", !"imm", !"0", !"31"}
+!1305 = !{!"m", !"mem", !"0({r})"}
+!1306 = !{!"A", !"mem", !"({r})"}
+
+!target.asm-modifiers = !{!1310}
+!1310 = !{!"i", !"if-imm", !"i"}
+
+; Pseudo-instructions and operands as people write them, and as the
+; templates do.
+!target.asm-aliases = !{!1320, !1321, !1322, !1323, !1324, !1325}
+!1320 = !{!"beqz {r}, {l}", !"beq {r}, zero, {l}"}
+!1321 = !{!"bnez {r}, {l}", !"bne {r}, zero, {l}"}
+!1322 = !{!"bltz {r}, {l}", !"blt {r}, zero, {l}"}
+!1323 = !{!"bgez {r}, {l}", !"bge {r}, zero, {l}"}
+!1324 = !{!", ({r})", !", 0({r})"}
+!1325 = !{!"not {d}, {r}", !"xori {d}, {r}, -1"}
 
 ; ===========================================================================
 ; CPUs, by LLVM's names for them and their features.

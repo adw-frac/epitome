@@ -1,0 +1,147 @@
+	.text
+	.p2align 2
+	.globl r32
+	.type r32,%function
+r32:
+	//APP
+	mov x1, x0
+	//NO_APP
+	mov w0, w1
+	ret
+	.size r32, .-r32
+
+	.p2align 2
+	.globl r64
+	.type r64,%function
+r64:
+	//APP
+	mov x1, x0 // w1 x0
+	//NO_APP
+	mov x0, x1
+	ret
+	.size r64, .-r64
+
+	.p2align 2
+	.globl imm
+	.type imm,%function
+imm:
+	//APP
+	add w1, w0, 42 ; 42 -42
+	//NO_APP
+	mov w0, w1
+	ret
+	.size imm, .-imm
+
+	.p2align 2
+	.globl immI
+	.type immI,%function
+immI:
+	//APP
+	add w1, w0, 4095
+	//NO_APP
+	mov w0, w1
+	ret
+	.size immI, .-immI
+
+	.p2align 2
+	.globl mem
+	.type mem,%function
+mem:
+	//APP
+	ldr w1, [x0]
+	//NO_APP
+	mov w0, w1
+	ret
+	.size mem, .-mem
+
+	.p2align 2
+	.globl memQ
+	.type memQ,%function
+memQ:
+	//APP
+	ldr w1, [x0]
+	//NO_APP
+	mov w0, w1
+	ret
+	.size memQ, .-memQ
+
+	.p2align 2
+	.globl fp
+	.type fp,%function
+fp:
+	//APP
+	fadd d2, d0, d0 // v2 s1 q0 b0 h0
+	//NO_APP
+	fmov d0, d2
+	ret
+	.size fp, .-fp
+
+	.p2align 2
+	.globl tied
+	.type tied,%function
+tied:
+	//APP
+	add w0, w0, #1
+	//NO_APP
+	ret
+	.size tied, .-tied
+
+	.p2align 2
+	.globl fixed
+	.type fixed,%function
+fixed:
+	//APP
+	svc #0
+	//NO_APP
+	ret
+	.size fixed, .-fixed
+
+	.p2align 2
+	.globl early
+	.type early,%function
+early:
+	//APP
+	mov w2, #0
+	add w2, w0, w1
+	//NO_APP
+	mov w0, w2
+	ret
+	.size early, .-early
+
+	.p2align 2
+	.globl zero
+	.type zero,%function
+zero:
+	//APP
+	add w1, w0, wzr
+	//NO_APP
+	mov w0, w1
+	ret
+	.size zero, .-zero
+
+	.p2align 2
+	.globl uid
+	.type uid,%function
+uid:
+	//APP
+	1: cbz w0, 1f
+	sub w0, w0, #1
+	b 1b
+1:
+	//NO_APP
+	ret
+	.size uid, .-uid
+
+	.p2align 2
+	.globl two
+	.type two,%function
+two:
+	//APP
+	ldp x1, x2, [x0]
+	//NO_APP
+	add x1, x1, x2
+	str x1, [x0, #16]
+	ret
+	.size two, .-two
+
+	.section .note.GNU-stack,"",%progbits

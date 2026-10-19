@@ -20,11 +20,12 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     for b in &f.blocks {
         for inst in &b.insts {
             let (defs, _) = inst.defs_uses(t);
-            for k in defs {
-                if let MOp::Reg(Reg::P(r)) = inst.ops[k]
-                    && callee_saved.contains(&r)
-                    && !saved.contains(&r)
-                {
+            let written =
+                defs.iter().filter_map(|&k| if let MOp::Reg(Reg::P(r)) = inst.ops[k] { Some(r) } else { None });
+            // And those inline assembly clobbers.
+            let clobbered = if matches!(inst.op, Opcode::Asm { .. }) { inst.imp_defs.clone() } else { vec![] };
+            for r in written.chain(clobbered) {
+                if callee_saved.contains(&r) && !saved.contains(&r) {
                     saved.push(r);
                 }
             }
@@ -42,7 +43,8 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     off = (off + 7) / 8 * 8;
     let save_at: Vec<(u8, i64)> = saved.iter().enumerate().map(|(k, &r)| (r, off + 8 * k as i64)).collect();
     off += 8 * saved.len() as i64;
-    let calls = f.blocks.iter().any(|b| b.insts.iter().any(|i| !i.imp_defs.is_empty()));
+    let calls =
+        f.blocks.iter().any(|b| b.insts.iter().any(|i| !i.imp_defs.is_empty() && !matches!(i.op, Opcode::Asm { .. })));
     let record = if calls { 16 } else { 0 };
     let size = (off + record + 15) / 16 * 16;
     let fp_at = size - 16;

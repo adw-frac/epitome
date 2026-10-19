@@ -138,6 +138,19 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
         for inst in &b.insts {
             let (defs, uses) = regs_of(t, inst);
             let (up, dp) = (2 * idx, 2 * idx + 1);
+            // Inline assembly's early-clobber results are written while its
+            // operands are still being read.
+            let asm = matches!(inst.op, Opcode::Asm { .. });
+            let early: Vec<Reg> = match inst.op {
+                Opcode::Asm { id, .. } => f.asms[id as usize]
+                    .early
+                    .iter()
+                    .enumerate()
+                    .filter(|e| *e.1)
+                    .filter_map(|(k, _)| if let MOp::Reg(r) = inst.ops[k] { Some(r) } else { None })
+                    .collect(),
+                _ => vec![],
+            };
             for r in &uses {
                 match *r {
                     Reg::V(v) => widen(&mut local, v, up),
@@ -149,6 +162,7 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
                 }
             }
             for r in &defs {
+                let dp = if early.contains(r) { up } else { dp };
                 match *r {
                     Reg::V(v) => widen(&mut local, v, dp),
                     Reg::P(p) if allocatable(p) => {
@@ -159,7 +173,7 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
                     _ => {}
                 }
             }
-            if !inst.imp_defs.is_empty() {
+            if !inst.imp_defs.is_empty() && !asm {
                 calls.push(dp);
             }
             if inst.op == Opcode::Copy
