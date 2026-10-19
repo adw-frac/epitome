@@ -132,6 +132,7 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     crate::legalize::legalize_vectors(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     // Element-wise intrinsics split into scalars expand as scalars do.
     expand_intrinsics(cx, &mut f);
+    sink_addresses(&mut f);
     lower_geps(cx, &mut f)?;
     promote_odd(cx, &mut f)?;
     widen_narrow(cx, &mut f);
@@ -232,6 +233,141 @@ fn split_struct_phis(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         f.blocks[b.index()].insts = list;
     }
     Ok(())
+}
+
+/// Address sinking, the local half of LLVM's `codegenprepare`: a
+/// `getelementptr` used as the address of loads and stores in other blocks
+/// is copied into each of them, so that instruction selection, which looks
+/// within a block, can fold it into the access (`ldr x0, [x1, #24]`, `ldr
+/// x0, [x1, x2, lsl #3]`) instead of computing it into a register first.
+///
+/// Only address operands move, and only into blocks that are not on a
+/// cycle the original's block is not on: an address that does not fold
+/// would otherwise be computed every time round a loop. Each block gets one
+/// copy, before its first use there. Each sink is an elective choice
+/// (autochop).
+fn sink_addresses(f: &mut Function) {
+    let blocks = f.inst_blocks();
+    let on_cycle = cycles(f);
+    // Each GEP's address uses, by block.
+    let mut uses: std::collections::HashMap<InstId, Vec<(BlockId, InstId)>> = Default::default();
+    for &b in &f.layout {
+        for &i in &f.blocks[b.index()].insts {
+            let ptr = match &f.insts[i.index()].op {
+                Op::Load { ptr, .. } | Op::Store { ptr, .. } => *ptr,
+                _ => continue,
+            };
+            if let Value::Local(l) = ptr
+                && let LocalDef::Inst(d) = f.locals[l.index()].def
+                && matches!(f.insts[d.index()].op, Op::Gep { .. })
+                && blocks[d.index()].is_some_and(|db| db != b)
+            {
+                uses.entry(d).or_default().push((b, i));
+            }
+        }
+    }
+    let mut gepped: Vec<InstId> = uses.keys().copied().collect();
+    gepped.sort();
+    for d in gepped {
+        let Some(home) = blocks[d.index()] else { continue };
+        let r = f.insts[d.index()].result.unwrap();
+        let mut list = uses[&d].clone();
+        list.sort_by_key(|&(b, _)| b);
+        let mut k = 0;
+        while k < list.len() {
+            let b = list[k].0;
+            let users: Vec<InstId> = list[k..].iter().take_while(|x| x.0 == b).map(|x| x.1).collect();
+            k += users.len();
+            if on_cycle[b.index()].is_some() && on_cycle[b.index()] != on_cycle[home.index()] {
+                continue;
+            }
+            if !draconian_ir::chop::allow(|| {
+                format!(
+                    "sink the address {} into {}",
+                    draconian_ir::printer::local_name(f, r),
+                    draconian_ir::printer::local_name(f, f.blocks[b.index()].local)
+                )
+            }) {
+                continue;
+            }
+            let ty = f.locals[r.index()].ty;
+            let copy = f.add_inst(f.insts[d.index()].op.clone(), Some((None, ty)));
+            let first =
+                users.iter().filter_map(|u| f.blocks[b.index()].insts.iter().position(|x| x == u)).min().unwrap();
+            f.blocks[b.index()].insts.insert(first, copy);
+            let new = f.result(copy);
+            for u in users {
+                match &mut f.insts[u.index()].op {
+                    Op::Load { ptr, .. } | Op::Store { ptr, .. } => *ptr = new,
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+/// For each block on a cycle, its strongly connected component (Tarjan's
+/// algorithm); `None` for the rest.
+fn cycles(f: &Function) -> Vec<Option<usize>> {
+    let n = f.blocks.len();
+    let succs: Vec<Vec<BlockId>> = (0..n).map(|b| f.successors(BlockId(b as u32))).collect();
+    let (mut index, mut low, mut on_stack) = (vec![usize::MAX; n], vec![0; n], vec![false; n]);
+    let mut stack = Vec::new();
+    let mut comp = vec![None; n];
+    let mut next = 0;
+    let mut count = 0;
+    for &root in &f.layout {
+        if index[root.index()] != usize::MAX {
+            continue;
+        }
+        // An explicit stack of (block, next successor to look at).
+        let mut work = vec![(root.index(), 0usize)];
+        index[root.index()] = next;
+        low[root.index()] = next;
+        next += 1;
+        stack.push(root.index());
+        on_stack[root.index()] = true;
+        while let Some(&mut (v, ref mut k)) = work.last_mut() {
+            if let Some(&w) = succs[v].get(*k) {
+                *k += 1;
+                let w = w.index();
+                if index[w] == usize::MAX {
+                    index[w] = next;
+                    low[w] = next;
+                    next += 1;
+                    stack.push(w);
+                    on_stack[w] = true;
+                    work.push((w, 0));
+                } else if on_stack[w] {
+                    low[v] = low[v].min(index[w]);
+                }
+            } else {
+                work.pop();
+                if let Some(&(u, _)) = work.last() {
+                    low[u] = low[u].min(low[v]);
+                }
+                if low[v] == index[v] {
+                    let mut members = Vec::new();
+                    loop {
+                        let w = stack.pop().unwrap();
+                        on_stack[w] = false;
+                        members.push(w);
+                        if w == v {
+                            break;
+                        }
+                    }
+                    let self_loop = succs[v].iter().any(|s| s.index() == v);
+                    if members.len() > 1 || self_loop {
+                        for w in members {
+                            comp[w] = Some(count);
+                        }
+                        count += 1;
+                    }
+                }
+            }
+        }
+    }
+    comp
 }
 
 /// A dynamic alloca (`alloca T, i32 %n`) becomes one of bytes,

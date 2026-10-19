@@ -11,7 +11,9 @@
 //!   the function (now one at the end), fresh names tried from 1 each time
 //!   (now from where the last search stopped), and split blocks keeping
 //!   all their old room;
-//! - one big block of loads and stores (SROA's per-access block lookup).
+//! - one big block of loads and stores (SROA's per-access block lookup);
+//! - a long chain of adds leaning the wrong way, which reassociation in the
+//!   combiner rebuilds (at most 256 leaves deep from the top).
 
 use std::fmt::Write;
 use std::time::Duration;
@@ -83,6 +85,22 @@ fn block(n: usize) -> String {
     s
 }
 
+/// A long chain of adds written leaning right, each leaf loaded: the
+/// combiner's reassociation rebuilds it.
+fn add_chain(n: usize) -> String {
+    let mut s = String::from("define i64 @f(ptr %p) {\nentry:\n");
+    let mut prev = "0".to_string();
+    for k in 0..n {
+        let _ = writeln!(
+            s,
+            "  %g{k} = getelementptr i64, ptr %p, i64 {k}\n  %l{k} = load i64, ptr %g{k}\n  %v{k} = add i64 %l{k}, {prev}"
+        );
+        prev = format!("%v{k}");
+    }
+    let _ = writeln!(s, "  ret i64 {prev}\n}}");
+    s
+}
+
 /// The pipeline's time on one thread, the best of three.
 fn time(src: &str) -> Duration {
     (0..3)
@@ -98,7 +116,8 @@ fn time(src: &str) -> Duration {
 
 #[test]
 fn big_functions_take_time_in_proportion() {
-    let shapes: [(&str, fn(usize) -> String, usize); 4] = [
+    let shapes: [(&str, fn(usize) -> String, usize); 5] = [
+        ("a long chain of adds", add_chain, 4000),
         ("a chain of diamonds", diamonds, 2000),
         ("a chain of blocks", chain, 4000),
         ("calls in one block", calls, 2000),

@@ -30,7 +30,7 @@ not type-check. So every step counted is a change made.
 
 | Where | One step |
 | --- | --- |
-| Combiner | a rule, a fold, a dead instruction removed, a constant moved to the right, a branch or switch folded |
+| Combiner | a rule, a fold (including a load from a constant global), a chain reassociated, a dead instruction removed, a constant moved to the right, a branch or switch folded |
 | CSE | an instruction merged into an earlier one, a load reusing a value |
 | `mem2reg`, SROA | an alloca promoted, split, or removed (only ever written); an aggregate access split |
 | `simplifycfg` and the CFG clean-ups | an empty block bypassed, a branch to one block made plain, a diamond turned into selects, a block merged into its predecessor, unreachable blocks removed |
@@ -38,7 +38,7 @@ not type-check. So every step counted is a change made.
 | Recursion removal | a function's recursion removed; a cycle collapsed |
 | Loops | a loop rotated; a counter simplified (`indvars`); a counter reduced (`loop-reduce`) |
 | Pipeline | an unused function deleted |
-| Code generation | a pattern covering several instructions chosen where one covering only the root would do (a load folded into an operation, a post-increment); a division by a constant done with a multiply; a tail call (`musttail` is mandatory); a constant or address hoisted out of a loop |
+| Code generation | a pattern covering several instructions chosen where one covering only the root would do (a load folded into an operation, a post-increment); a division by a constant done with a multiply; a tail call (`musttail` is mandatory); a constant or address hoisted out of a loop; an address sunk into a block that loads or stores through it |
 
 ## 2. Limits
 

@@ -104,12 +104,74 @@ instruction in program order. For each it:
 2. moves a constant left operand of a commutative operation or comparison
    to the right (swapping the predicate of a comparison);
 3. folds it: all-constant integer operations, comparisons, casts, selects,
-   float arithmetic without fast-math flags, operations on `poison`, and
-   phis whose entries are all one value;
+   float arithmetic without fast-math flags, operations on `poison`, phis
+   whose entries are all one value, and loads from constant globals (see
+   below);
 4. otherwise tries the matching rules, best first. A rule applies when its
    repeated variables agree, its condition holds, its replacement
    type-checks, and it makes no more new instructions than the match
-   leaves unused.
+   leaves unused;
+5. otherwise reassociates it, if it is the top of a chain (see below).
+
+### Reassociation
+
+This is what LLVM's `reassociate` pass does, as a step of the combiner.
+At the top of a chain of one associative, commutative integer operation
+(`add`, `mul`, `and`, `or`, `xor`), the leaves are collected through
+operands that are the same operation and have no other use. The chain is
+then rebuilt leaning left, with its leaves sorted by rank:
+
+- parameters first, in order;
+- then instructions, in the order they were made;
+- constants last.
+
+Two things follow:
+
+- Constants gather at the outside, where the constant rules fold them:
+  `(x + 3) + y + 5` becomes `(x + y) + 8`.
+- Chains with the same leaves come out the same however they were
+  written, so CSE merges them. In `tests/examples/reassociate.ll`, `(c + a)
+  + b` and `(a + b) + c` merge, their `xor` becomes 0, and the function
+  becomes `a + b + 8`.
+
+A chain already in that shape is left alone, and only its top is rebuilt,
+so the step always ends. It is a built-in step, not a rule. A rule's
+variables can match the chain's inner nodes as well as its leaves, and
+those carry ever newer ranks, so a rule would keep moving them. Flags such
+as `nsw` are dropped, since they were only true of the order written.
+
+**Open:** a chain is taken at most 256 leaves deep from its top. Nodes
+below that are left in the order written: they are part of a longer chain,
+so they leave the work to its top.
+
+### Loads from constant globals
+
+This is the local part of LLVM's `globalopt` (`combine/constload.rs`). A
+load from a constant global, at a constant offset reached through
+`getelementptr`s (as instructions or constant expressions), folds to the
+value in the global's initialiser. The value is read out through arrays,
+vectors, structs, byte strings (an integer may be read from any offset)
+and zero initialisers.
+
+The global must be `constant`, have an initialiser, and not be
+`externally_initialized`. Its definition must be one that cannot be
+replaced at link time: not `weak`, `linkonce`, `common` or `extern_weak`.
+The `_odr` forms are fine, since they promise every definition is the same.
+
+### Larger patterns
+
+These are the expression patterns LLVM's `aggressive-instcombine` looks
+for, as ordinary rules (the section of `combine.rules` named after it):
+
+- factoring out a common operand: `x*y + x*z` becomes `x*(y + z)`, and
+  `x*C + x` becomes `x*(C+1)`;
+- distributing: `(x & y) | (x & z)` becomes `x & (y | z)`, and likewise
+  for `xor` of `and`s and `and` of `or`s;
+- the identities of the `and`, `or` and `xor` of the same two values:
+  `(x & y) + (x | y) = x + y`, `(x ^ y) + (x & y) = x | y`,
+  `(x | y) - (x & y) = x ^ y`, and so on.
+
+All of them pass the brute-force soundness checker.
 
 The pass keeps a use list for every value, so replacing a value costs the
 number of its users, not the size of the function. A replaced

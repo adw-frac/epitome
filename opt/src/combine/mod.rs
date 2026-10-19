@@ -23,6 +23,7 @@
 //! queued to go before the one they replace, and the blocks are rebuilt
 //! once at the end.
 
+pub mod constload;
 pub mod dsl;
 pub mod eval;
 pub mod tree;
@@ -43,6 +44,9 @@ use crate::ctx::Shared;
 use dsl::{Cond, FloatLit, Head, Lit, Repl, Subject as Who};
 use eval::{Env, Folded, IntConst};
 use tree::{Match, Matcher, Shape, Subject};
+
+/// The most leaves a chain is reassociated over.
+const MAX_CHAIN: usize = 256;
 
 /// The standard rules, compiled once.
 pub fn standard() -> &'static Matcher {
@@ -299,6 +303,109 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
         }
     }
 
+    /// Reassociation, as LLVM's `reassociate` pass does it: a chain of one
+    /// associative, commutative integer operation (`add`, `mul`, `and`,
+    /// `or`, `xor`), through operands that are the same operation with no
+    /// other use, is rebuilt as a chain leaning left with its leaves sorted
+    /// by `rank`. Constants then gather at the outside, where the constant
+    /// rules fold them (`(x + 3) + y + 5` becomes `(x + y) + 8`), and chains
+    /// with the same leaves come out the same, so CSE finds them. Only the
+    /// chain's top is rebuilt, once; a chain already in order is left
+    /// alone, so this ends. Flags such as `nsw` are dropped, being true
+    /// only of the order written.
+    fn reassociate(&mut self, i: InstId) -> Option<Value> {
+        let Op::Binary { op, lhs, rhs, .. } = self.f.insts[i.index()].op else { return None };
+        if !matches!(op, BinOp::Add | BinOp::Mul | BinOp::And | BinOp::Or | BinOp::Xor) {
+            return None;
+        }
+        let r = self.f.insts[i.index()].result?;
+        let ty = self.f.locals[r.index()].ty;
+        // Part of a longer chain: its top does the work.
+        let inner = |me: &Self, v: Value| -> Option<(Value, Value)> {
+            let Value::Local(l) = v else { return None };
+            let LocalDef::Inst(d) = me.f.locals[l.index()].def else { return None };
+            if me.erased[d.index()] || me.uses[l.index()].len() != 1 || me.f.locals[l.index()].ty != ty {
+                return None;
+            }
+            match me.f.insts[d.index()].op {
+                Op::Binary { op: o, lhs, rhs, .. } if o == op => Some((lhs, rhs)),
+                _ => None,
+            }
+        };
+        if let [u] = self.uses[r.index()][..]
+            && let Some(ur) = self.f.insts[u.index()].result
+            && inner(self, Value::Local(ur)).is_some_and(|(a, b)| a == Value::Local(r) || b == Value::Local(r))
+        {
+            return None;
+        }
+        // The leaves, left to right, and whether the chain leans left.
+        let mut leaves = Vec::new();
+        let mut leans_left = true;
+        let mut interior = 0;
+        // (value, whether it is a right operand)
+        let mut stack = vec![(rhs, true), (lhs, false)];
+        while let Some((v, right)) = stack.pop() {
+            match inner(self, v) {
+                Some((a, b)) if leaves.len() + stack.len() < MAX_CHAIN => {
+                    // An inner node on the right is not leaning left.
+                    leans_left &= !right;
+                    interior += 1;
+                    stack.push((b, true));
+                    stack.push((a, false));
+                }
+                _ => leaves.push(v),
+            }
+        }
+        if interior == 0 {
+            return None;
+        }
+        let mut sorted = leaves.clone();
+        sorted.sort_by_key(|&v| self.rank(v));
+        if leans_left && sorted == leaves {
+            return None;
+        }
+        if !self.allowed("(reassociated)", i) {
+            return None;
+        }
+        let mut acc = sorted[0];
+        let mut last = None;
+        for &leaf in &sorted[1..] {
+            let new = self.f.add_inst(
+                Op::Binary { op, flags: IntFlags::NONE, fmf: FastMath::default(), lhs: acc, rhs: leaf },
+                Some((None, ty)),
+            );
+            self.grow();
+            self.block_of[new.index()] = self.block_of[i.index()];
+            self.before.entry(i).or_default().push(new);
+            self.add_uses(new);
+            self.push(new);
+            acc = self.f.result(new);
+            last = Some(new);
+        }
+        // The new top takes the old one's name.
+        if let Some(last) = last {
+            let name = self.f.locals[r.index()].name.take();
+            let new = self.f.insts[last.index()].result.unwrap();
+            self.f.locals[new.index()].name = name;
+        }
+        Some(acc)
+    }
+
+    /// A value's place in the canonical order reassociation sorts by:
+    /// parameters first, in order; then instructions, in the order they were
+    /// made; constants last, so that they gather at the outside of a chain,
+    /// where the constant rules fold them together.
+    fn rank(&self, v: Value) -> u64 {
+        match v {
+            Value::Local(l) => match self.f.locals[l.index()].def {
+                LocalDef::Param(k) => k as u64,
+                LocalDef::Inst(i) => self.f.params.len() as u64 + 1 + i.0 as u64,
+                _ => self.f.params.len() as u64,
+            },
+            _ => u64::MAX,
+        }
+    }
+
     /// An instruction, for autochop's descriptions: its result's name, or
     /// its number.
     fn what(&self, i: InstId) -> String {
@@ -335,6 +442,11 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
             && let Some((name, v)) = self.apply_rules(i)
         {
             self.stats.hit(&name);
+            self.replace(i, v);
+            return;
+        }
+        if let Some(v) = self.reassociate(i) {
+            self.stats.hit("(reassociated)");
             self.replace(i, v);
             return;
         }
@@ -563,6 +675,8 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
         let op = inst.op.clone();
         let is_poison = |v: Value| matches!(v, Value::Const(c) if matches!(sh.consts().get(c).kind, ConstKind::Poison));
         match op {
+            // A load from a constant global reads its initialiser.
+            Op::Load { volatile: false, atomic: None, ptr, .. } => constload::load_constant(sh, self.f, ptr, ty),
             Op::Phi { incoming, .. } => {
                 let me = Value::Local(r);
                 let mut same = None;

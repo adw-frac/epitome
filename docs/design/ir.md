@@ -140,13 +140,13 @@ exists.
 | Pass | What it does | Status |
 | --- | --- | --- |
 | `instcombine` | Combines and simplifies instructions into a canonical form. The rule-driven combiner covers arithmetic, comparisons, selects, casts and constant folding; see [combines](combine.md). | Done |
-| `aggressive-instcombine` | Matches larger expression patterns and may change the CFG. | Later |
+| `aggressive-instcombine` | Matches larger expression patterns and may change the CFG. Factoring, distribution and the identities of `and`, `or` and `xor` of two values are combine rules; see [combines](combine.md). Recognising idioms such as popcount and rotates is not done yet. | Partial |
 | `simplifycfg` | Removes unreachable blocks, merges blocks, removes trivial PHIs and branch-only blocks. Branch folding is in the combiner; see [simplifying the CFG](simplifycfg.md). | Done |
 | `dce` | Removes dead instructions, and anything that becomes dead as a result. | Planned |
 | `adce` | Aggressive dead code elimination: everything is dead until proven live. | Planned |
 | `dse` | Removes stores that are overwritten before being read. | Planned |
 | `sccp` | Sparse conditional constant propagation. Finds constants and dead blocks. | Planned |
-| `reassociate` | Reorders commutative expressions to help constant folding, CSE and LICM. | Planned |
+| `reassociate` | Reorders commutative expressions to help constant folding, CSE and LICM. A step of the combiner; see [combines](combine.md). | Done |
 | `early-cse` | Removes instructions and loads that repeat a dominating one, in one walk of the dominator tree. Not on the Passes page; see [CSE](cse.md). | Done |
 | `gvn` | Removes fully and partially redundant instructions and loads. CSE covers the fully redundant ones within a dominator path. | Planned |
 | `jump-threading` | Routes edges past blocks whose branch result is already known. | Planned |
@@ -190,7 +190,7 @@ exists.
 | `argpromotion` | Turns read-only pointer arguments into value arguments. | Later |
 | `deadargelim` | Removes unused arguments of internal functions. | Planned |
 | `ipsccp` | Interprocedural sparse conditional constant propagation. | Later |
-| `globalopt` | Optimises globals whose address is never taken. | Planned |
+| `globalopt` | Optimises globals whose address is never taken. Loads from constant globals fold in the combiner; see [combines](combine.md). The rest is not done yet. | Partial |
 | `globaldce` | Deletes unreachable internal globals, including cycles of them. The inliner deletes internal functions it leaves unused, but not variables or cycles. | Planned |
 | `constmerge` | Merges identical global constants. | Planned |
 | `mergefunc` | Finds identical functions and folds them into one. | Later |
@@ -211,7 +211,7 @@ lack a feature.
 
 | Pass | What it does | Status |
 | --- | --- | --- |
-| `codegenprepare` | Rewrites IR to suit instruction selection. Runs at the start of codegen. | Planned |
+| `codegenprepare` | Rewrites IR to suit instruction selection. Runs at the start of codegen. Address sinking is done; see [instruction selection](isel.md). | Partial |
 | `lower-switch` | Rewrites `switch` as a chain of branches. | Planned |
 | `lower-invoke` | Turns `invoke` into `call` for targets without unwinding. | Planned |
 | `lower-atomic` | Turns atomics into plain operations for single-threaded targets. | Later |

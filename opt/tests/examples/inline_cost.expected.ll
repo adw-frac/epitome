@@ -9,8 +9,8 @@
 ; @main: inlined @big_once: cost 83, bonus 94, threshold 100
 ; @main: not inlined @never: noinline
 ; @main: not inlined @big: cost 83 - bonus 6 > threshold 0
-; @main: combine: (switch folded) x1, add_add_const x1
-; @main: simplifycfg: 2 unreachable blocks removed, 0 empty blocks bypassed, 0 selects made, 2 blocks merged
+; @main: combine: (dead) x2, (folded) x2, (reassociated) x1, (switch folded) x1, add_add_const x1, sub_add_add x2
+; @main: simplifycfg: 2 unreachable blocks removed, 1 empty blocks bypassed, 0 selects made, 2 blocks merged
 ; @main: cse: 1 merged, 0 loads reused, 0 stores forwarded
 ; @tiny: deleted, no longer used
 ; @mode_op: deleted, no longer used
@@ -120,22 +120,18 @@ entry:
   %s.i = add i32 %y.i, %y.i1
   switch i32 %argc, label %other.i1 [
     i32 0, label %add.i1
-    i32 1, label %sub.i1
+    i32 1, label %mode_op.exit1
   ]
 
 add.i1:                                           ; preds = %entry
-  br label %mode_op.exit1
-
-sub.i1:                                           ; preds = %entry
-  %d.i1 = sub i32 %y.i, %y.i1
   br label %mode_op.exit1
 
 other.i1:                                         ; preds = %entry
   %m.i1 = mul i32 %y.i, %y.i1
   br label %mode_op.exit1
 
-mode_op.exit1:                                    ; preds = %other.i1, %sub.i1, %add.i1
-  %d1 = phi i32 [ %s.i, %add.i1 ], [ %d.i1, %sub.i1 ], [ %m.i1, %other.i1 ]
+mode_op.exit1:                                    ; preds = %other.i1, %add.i1, %entry
+  %d1 = phi i32 [ %s.i, %add.i1 ], [ %m.i1, %other.i1 ], [ -1, %entry ]
   %t0.i = add i32 %s.i, 3
   %t1.i = mul i32 %t0.i, 10
   %t2.i = xor i32 %t1.i, 17
@@ -386,9 +382,9 @@ mode_op.exit1:                                    ; preds = %other.i1, %sub.i1, 
   %t108.i2 = add i32 %t106.i2, 7
   %t109.i2 = mul i32 %t108.i2, 766
   %h = call i32 @never(i32 %t109.i1)
-  %sum1 = add i32 %t109.i, %t109.i1
-  %sum2 = add i32 %t109.i2, %h
-  %sum = add i32 %sum1, %sum2
+  %0 = add i32 %h, %t109.i
+  %1 = add i32 %0, %t109.i1
+  %sum = add i32 %1, %t109.i2
   %bad = icmp eq i32 %sum, 12345
   br i1 %bad, label %fail, label %ok
 

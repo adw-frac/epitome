@@ -330,6 +330,23 @@ reshapes first, as LLVM's type legalisation does:
   instruction go lane by lane; ordered floating-point reductions are added
   in order, as written. Vectors of pointers become vectors of `i64`.
 
+### Address sinking
+
+Selection looks at one block at a time, so an address computed in another
+block cannot fold into a load or store: it is computed into a register
+first. `prepare::sink_addresses` (the local half of LLVM's
+`codegenprepare`) copies a `getelementptr` into each block where it is the
+address of a load or store, before its first use there. The original stays
+for any other uses. A load in another block then becomes `ldr x0, [x1, #24]`
+or `ldr x0, [x1, x2, lsl #3]`, not an `add` and a `ldr`.
+
+A copy never goes into a block on a cycle that the original's block is not
+on, so that an address which does not fold is not computed again on every
+pass round a loop. Each sink is an elective choice for
+[autochop](chop.md). On SQLite, together with the optimiser's new combines,
+code generation makes 1.9% fewer machine instructions from clang's `-O2`
+IR, and 1.8% fewer from `-O0`.
+
 ### Patterns and the trie
 
 Each instruction body (after condition forms, flags and recipes are filled

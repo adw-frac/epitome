@@ -90,6 +90,28 @@ ashr_ashr_const:  ashr(ashr(x, C1), C2) -> ashr(x, C1 + C2) if C1 < bw && C2 < b
 ashr_ashr_out:    ashr(ashr(x, C1), C2) -> ashr(x, bw - 1) if C1 < bw && C2 < bw && C1 + C2 >= bw
 
 # ---------------------------------------------------------------------------
+# Larger patterns, as LLVM's aggressive-instcombine looks for. Chains of one
+# operation are put in order by the combiner itself (reassociation, see
+# combine/mod.rs), so these see their operands in a canonical shape.
+
+# Factoring a common operand out.
+factor_add_mul:   add(mul(x, y), mul(x, z)) -> mul(x, add(y, z)) if oneuse
+factor_sub_mul:   sub(mul(x, y), mul(x, z)) -> mul(x, sub(y, z)) if oneuse
+add_mul_self:     add(mul(x, C), x) -> mul(x, C + 1) if oneuse
+sub_mul_self:     sub(mul(x, C), x) -> mul(x, C - 1) if oneuse
+sub_add_add:      sub(add(x, y), add(x, z)) -> sub(y, z)
+factor_or_and:    or(and(x, y), and(x, z)) -> and(x, or(y, z)) if oneuse
+factor_and_or:    and(or(x, y), or(x, z)) -> or(x, and(y, z)) if oneuse
+factor_xor_and:   xor(and(x, y), and(x, z)) -> and(x, xor(y, z)) if oneuse
+
+# Bitwise identities of two values: and, or and xor of the same pair.
+add_and_or:       add(and(x, y), or(x, y)) -> add(x, y)
+add_xor_and:      add(xor(x, y), and(x, y)) -> or(x, y)
+sub_or_and:       sub(or(x, y), and(x, y)) -> xor(x, y)
+xor_and_or:       xor(and(x, y), or(x, y)) -> xor(x, y)
+or_and_xor:       or(and(x, y), xor(x, y)) -> or(x, y)
+
+# ---------------------------------------------------------------------------
 # Strength reduction
 
 # Shifting an i1 by 1 is poison, but x + x on i1 is just 0.
