@@ -77,6 +77,69 @@ pub struct Options {
     pub mcpu: Option<String>,
     /// Features turned on or off: `+neon`, `-lse`, or lists of them.
     pub mattr: Vec<String>,
+    /// Threads to compile functions on; 0 means one per core.
+    pub threads: usize,
+}
+
+/// Time spent in each stage of compiling functions, summed over every
+/// function and thread, in nanoseconds (for `--stats`).
+pub mod timing {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    pub static PREPARE: AtomicU64 = AtomicU64::new(0);
+    pub static SELECT: AtomicU64 = AtomicU64::new(0);
+    pub static ALLOCATE: AtomicU64 = AtomicU64::new(0);
+    pub static FRAME: AtomicU64 = AtomicU64::new(0);
+    pub static LAYOUT: AtomicU64 = AtomicU64::new(0);
+
+    pub fn add(c: &AtomicU64, since: std::time::Instant) {
+        c.fetch_add(since.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    }
+
+    pub fn get(c: &AtomicU64) -> u64 {
+        c.load(Ordering::Relaxed)
+    }
+}
+
+/// `work(i)` for every `i` in `order`, on up to `threads` threads, each
+/// thread starting from its own `init()`; the results come back by index
+/// (`0..n`), whatever order they ran in. `done` runs on each thread when it
+/// has no more work.
+pub(crate) fn par_run<S, R: Send>(
+    n: usize,
+    order: &[usize],
+    threads: usize,
+    init: impl Fn() -> S + Sync,
+    work: impl Fn(&mut S, usize) -> R + Sync,
+    done: impl Fn() + Sync,
+) -> Vec<R> {
+    let results: Vec<std::sync::Mutex<Option<R>>> = (0..n).map(|_| std::sync::Mutex::new(None)).collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let worker = || {
+        let mut state = init();
+        while let Some(&i) = order.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
+            let r = work(&mut state, i);
+            *results[i].lock().unwrap() = Some(r);
+        }
+        done();
+    };
+    if threads <= 1 {
+        worker();
+    } else {
+        std::thread::scope(|s| {
+            for _ in 0..threads {
+                s.spawn(worker);
+            }
+        });
+    }
+    results.into_iter().map(|r| r.into_inner().unwrap().expect("a task did not run")).collect()
+}
+
+/// A function to compile: its body, taken out of the module.
+struct Job {
+    name: String,
+    global: bool,
+    body: Function,
 }
 
 /// The convention `opts` asks for, for module `m`.
@@ -94,39 +157,102 @@ pub fn choose_abi(t: &Target, m: &Module, opts: &Options) -> Result<abi::Abi, St
     Ok(abi)
 }
 
+/// Compiles function `f` of module `m` (as `cx` has it).
+fn compile_function(t: &Target, abi: &abi::Abi, cx: &mut Ctx, job: &Job, opts: &Options) -> Result<MFunc, String> {
+    use std::time::Instant;
+    cx.features = features::of_function(t, cx.m, &job.body.fn_attrs, opts.mcpu.as_deref(), &opts.mattr)?;
+    let now = Instant::now();
+    let prepared = prepare::prepare(cx, &job.body, &job.name)?;
+    timing::add(&timing::PREPARE, now);
+    let now = Instant::now();
+    let mut mf = isel::Sel::new(t, abi, cx, &prepared, &job.name, job.global).run()?;
+    timing::add(&timing::SELECT, now);
+    if opts.stop != Stop::AfterSelection {
+        let now = Instant::now();
+        regalloc::allocate(t, &mut mf)?;
+        timing::add(&timing::ALLOCATE, now);
+        if opts.stop != Stop::AfterAllocation {
+            let now = Instant::now();
+            frame::lower(t, &mut mf)?;
+            timing::add(&timing::FRAME, now);
+            let now = Instant::now();
+            layout::place(t, &mut mf);
+            layout::relax(t, &mut mf);
+            timing::add(&timing::LAYOUT, now);
+        }
+    }
+    Ok(mf)
+}
+
+/// Compiles every function of `m` with a body, on up to `opts.threads`
+/// threads, then the globals.
+///
+/// Functions are compiled independently. Each thread works on its own copy
+/// of the module without the function bodies (its types, constants and
+/// declarations, which compiling a function may add to), taking functions
+/// largest first; the results are put in module order. A function's machine
+/// IR names what it refers to by symbol, not by the module's ids, so the
+/// output is the same for any number of threads.
 pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, String> {
-    let stop = opts.stop;
     let abi = choose_abi(t, m, opts)?;
     let spec = m.data_layout.as_ref().map(|d| String::from_utf8_lossy(d).into_owned());
     let dl = DataLayout::parse(spec.as_deref().unwrap_or(DARWIN_ARM64_LAYOUT))?;
-    let mut cx = Ctx { m, dl: &dl, t, features: Default::default() };
-    let order = cx.m.global_order.clone();
-    let mut funcs = Vec::new();
-    let mut errors = Vec::new();
-    for g in order {
-        let gl = cx.m.global(g);
-        let GlobalKind::Function(f) = &gl.kind else { continue };
+    // The bodies come out of the module (its parameters stay, which other
+    // functions' calls may look at), and go back at the end.
+    let mut jobs: Vec<(GlobalId, Job)> = Vec::new();
+    for &g in &m.global_order {
+        let gl = &mut m.globals[g.index()];
+        let name = gl.name.clone().unwrap_or_else(|| format!("f{}", g.0));
+        let global = !matches!(gl.props.linkage, Linkage::Private | Linkage::Internal);
+        let GlobalKind::Function(f) = &mut gl.kind else { continue };
         if !f.has_body {
             continue;
         }
-        let name = gl.name.clone().unwrap_or_else(|| format!("f{}", g.0));
-        let global = !matches!(gl.props.linkage, Linkage::Private | Linkage::Internal);
-        let f = (**f).clone();
-        cx.features = features::of_function(t, cx.m, &f.fn_attrs, opts.mcpu.as_deref(), &opts.mattr)?;
-        let one = |cx: &mut Ctx| -> Result<MFunc, String> {
-            let prepared = prepare::prepare(cx, &f, &name)?;
-            let mut mf = isel::Sel::new(t, &abi, cx, &prepared, &name, global).run()?;
-            if stop != Stop::AfterSelection {
-                regalloc::allocate(t, &mut mf)?;
-                if stop != Stop::AfterAllocation {
-                    frame::lower(t, &mut mf)?;
-                    layout::place(t, &mut mf);
-                    layout::relax(t, &mut mf);
-                }
-            }
-            Ok(mf)
-        };
-        let mut mf = match one(&mut cx) {
+        let mut body = Function { locals: f.locals[..f.params.len()].to_vec(), ..Default::default() };
+        std::mem::swap(&mut body.locals, &mut f.locals);
+        body.blocks = std::mem::take(&mut f.blocks);
+        body.layout = std::mem::take(&mut f.layout);
+        body.insts = std::mem::take(&mut f.insts);
+        body.ty = f.ty;
+        body.cconv = f.cconv.clone();
+        body.ret_attrs = f.ret_attrs.clone();
+        body.params = f.params.clone();
+        body.fn_attrs = f.fn_attrs.clone();
+        body.personality = f.personality;
+        body.has_body = true;
+        jobs.push((g, Job { name, global, body }));
+    }
+    let threads =
+        if opts.threads == 0 { std::thread::available_parallelism().map_or(1, |n| n.get()) } else { opts.threads };
+    let threads = threads.min(jobs.len()).max(1);
+    // Largest first, so that a big function does not start last.
+    let mut by_size: Vec<usize> = (0..jobs.len()).collect();
+    by_size.sort_by_key(|&k| std::cmp::Reverse(jobs[k].1.body.insts.len()));
+    let skeleton: &Module = m;
+    let results = par_run(
+        jobs.len(),
+        &by_size,
+        threads,
+        || skeleton.clone(),
+        |m, j| {
+            let mut cx = Ctx { m, dl: &dl, t, features: Default::default() };
+            compile_function(t, &abi, &mut cx, &jobs[j].1, opts)
+        },
+        isel::stats::flush,
+    );
+    // The bodies go back.
+    for (g, job) in jobs {
+        if let GlobalKind::Function(f) = &mut m.globals[g.index()].kind {
+            f.locals = job.body.locals;
+            f.blocks = job.body.blocks;
+            f.layout = job.body.layout;
+            f.insts = job.body.insts;
+        }
+    }
+    let mut funcs = Vec::new();
+    let mut errors = Vec::new();
+    for r in results {
+        let mut mf = match r {
             Ok(mf) => mf,
             Err(e) if opts.keep_going => {
                 errors.push(e);
@@ -140,6 +266,7 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
         }
         funcs.push(mf);
     }
+    let cx = Ctx { m, dl: &dl, t, features: Default::default() };
     let min_os = min_os_version(&String::from_utf8_lossy(cx.m.triple.as_deref().unwrap_or_default()));
     let mut out = String::new();
     if abi.syntax == abi::Syntax::MachO {
@@ -148,8 +275,21 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
         out.push_str(&format!("\t.build_version macos, {a}, {b}{update}\n"));
     }
     out.push_str(&format!("\t{}\n", abi.section_directive(object::SectionKind::Text)));
-    for (k, f) in funcs.iter().enumerate() {
-        asm::function(t, f, k, &mut out)?;
+    // Each function's text, in parallel; then in order.
+    let all: Vec<usize> = (0..funcs.len()).collect();
+    let texts = par_run(
+        funcs.len(),
+        &all,
+        threads,
+        || (),
+        |_, k| {
+            let mut s = String::new();
+            asm::function(t, &funcs[k], k, &mut s).map(|()| s)
+        },
+        || (),
+    );
+    for text in texts {
+        out.push_str(&text?);
     }
     let globals = asm::collect_globals(&cx, &abi)?;
     asm::print_globals(&abi, &globals, &mut out);

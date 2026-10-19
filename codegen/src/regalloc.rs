@@ -41,8 +41,28 @@ fn regs_of(t: &Target, inst: &MInst) -> (Vec<Reg>, Vec<Reg>) {
 
 type Interval = (u32, u32);
 
-fn overlaps(a: Interval, b: Interval) -> bool {
-    a.0 <= b.1 && b.0 <= a.1
+/// Where a physical register is taken: closed intervals, kept as their
+/// union, disjoint and by start, so that whether an interval meets any of
+/// them is one lookup (the last one starting at or before its end).
+#[derive(Default)]
+struct Busy(std::collections::BTreeMap<u32, u32>);
+
+impl Busy {
+    fn meets(&self, (a, b): Interval) -> bool {
+        self.0.range(..=b).next_back().is_some_and(|(_, &e)| e >= a)
+    }
+
+    fn add(&mut self, (mut a, mut b): Interval) {
+        while let Some((&s, &e)) = self.0.range(..=b).next_back() {
+            if e < a {
+                break;
+            }
+            self.0.remove(&s);
+            a = a.min(s);
+            b = b.max(e);
+        }
+        self.0.insert(a, b);
+    }
 }
 
 pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
@@ -205,12 +225,22 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
     }
     let mut order: Vec<VReg> = (0..nv as VReg).filter(|&v| !segs[v as usize].is_empty()).collect();
     order.sort_by_key(|&v| (segs[v as usize][0].0, v));
-    let mut taken: HashMap<u8, Vec<Interval>> = fixed;
+    let mut taken: HashMap<u8, Busy> = HashMap::new();
+    for (p, list) in fixed {
+        let busy = taken.entry(p).or_default();
+        for s in list {
+            busy.add(s);
+        }
+    }
     let mut assigned: Vec<Option<u8>> = vec![None; nv];
     let mut spilled: Vec<VReg> = Vec::new();
     for v in order {
         let mine = &segs[v as usize];
-        let across_call = calls.iter().any(|&c| mine.iter().any(|s| s.0 < c && c < s.1));
+        // A call strictly inside one of its segments (calls are in order).
+        let across_call = mine.iter().any(|s| {
+            let k = calls.partition_point(|&c| c <= s.0);
+            k < calls.len() && calls[k] < s.1
+        });
         // Registers of values joined to this one by copies, nearest first.
         let mut cands: Vec<u8> = Vec::new();
         let mut seen: HashSet<VReg> = HashSet::from([v]);
@@ -251,13 +281,14 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
         // Only registers of the value's own file.
         let file = file_of_v(v);
         cands.retain(|&p| m.file_of(p) == file);
-        let free = cands
-            .into_iter()
-            .find(|p| taken.get(p).is_none_or(|list| list.iter().all(|&s| mine.iter().all(|&m| !overlaps(s, m)))));
+        let free = cands.into_iter().find(|p| taken.get(p).is_none_or(|busy| mine.iter().all(|&m| !busy.meets(m))));
         match free {
             Some(p) => {
                 assigned[v as usize] = Some(p);
-                taken.entry(p).or_default().extend(mine.iter().copied());
+                let busy = taken.entry(p).or_default();
+                for &s in mine {
+                    busy.add(s);
+                }
             }
             None => spilled.push(v),
         }

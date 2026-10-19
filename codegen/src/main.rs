@@ -8,6 +8,8 @@ use draconian_codegen::{Options, Stop, compile, mir};
 
 const USAGE: &str = "usage: draconian-llc [options] <file.ll>
 
+  -j <n>                  threads to compile functions on (default: one
+                          per core); the output is the same for any number
   -o <file>               write the output here instead of stdout; a name
                           ending in .o asks for an object file
   --filetype=asm|obj      assembly (the default) or an object file, Mach-O
@@ -56,6 +58,13 @@ fn main() -> ExitCode {
     while let Some(a) = it.next() {
         match a.as_str() {
             "-o" => output = it.next().cloned(),
+            "-j" => match it.next().and_then(|n| n.parse().ok()) {
+                Some(n) => opts.threads = n,
+                None => {
+                    eprintln!("draconian-llc: -j needs a number\n\n{USAGE}");
+                    return ExitCode::FAILURE;
+                }
+            },
             "--hex" => hex = true,
             "--disasm" => disasm = true,
             "--patterns" => patterns = true,
@@ -169,6 +178,16 @@ fn main() -> ExitCode {
             get(&WALK_NANOS) as f64 / roots.max(1) as f64,
             (get(&NANOS) - get(&WALK_NANOS)) as f64 / roots.max(1) as f64,
             total.as_secs_f64() * 1e3
+        );
+        use draconian_codegen::timing;
+        let ms = |c| timing::get(c) as f64 / 1e6;
+        eprintln!(
+            "; stages, summed over functions: prepare {:.1} ms, selection {:.1} ms, allocation {:.1} ms, frames {:.1} ms, layout {:.1} ms",
+            ms(&timing::PREPARE),
+            ms(&timing::SELECT),
+            ms(&timing::ALLOCATE),
+            ms(&timing::FRAME),
+            ms(&timing::LAYOUT)
         );
     }
     let object = filetype.unwrap_or_else(|| output.as_deref().is_some_and(|o| o.ends_with(".o")));

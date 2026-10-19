@@ -26,7 +26,7 @@ pub fn lane_suffix(bits: u32) -> &'static str {
 }
 
 /// A value or block being matched against a pattern.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Term {
     V(Value),
     B(BlockId),
@@ -48,21 +48,45 @@ struct Match {
 
 /// Counters for measuring the matcher: roots matched, trie steps taken,
 /// candidate matches found, and those that passed validation.
+/// Matching counts, for `--stats`: counted per thread (shared counters
+/// would make every match contend for their cache line), and added to the
+/// totals by `flush` when a thread finishes.
 pub mod stats {
+    use std::cell::Cell;
     use std::sync::atomic::{AtomicU64, Ordering};
-    pub static ROOTS: AtomicU64 = AtomicU64::new(0);
-    pub static STEPS: AtomicU64 = AtomicU64::new(0);
-    pub static CANDIDATES: AtomicU64 = AtomicU64::new(0);
-    pub static VALID: AtomicU64 = AtomicU64::new(0);
-    pub static NANOS: AtomicU64 = AtomicU64::new(0);
-    pub static WALK_NANOS: AtomicU64 = AtomicU64::new(0);
 
-    pub fn add(c: &AtomicU64, n: u64) {
-        c.fetch_add(n, Ordering::Relaxed);
+    pub struct Counter {
+        total: AtomicU64,
+        slot: usize,
     }
 
-    pub fn get(c: &AtomicU64) -> u64 {
-        c.load(Ordering::Relaxed)
+    pub static ROOTS: Counter = Counter { total: AtomicU64::new(0), slot: 0 };
+    pub static STEPS: Counter = Counter { total: AtomicU64::new(0), slot: 1 };
+    pub static CANDIDATES: Counter = Counter { total: AtomicU64::new(0), slot: 2 };
+    pub static VALID: Counter = Counter { total: AtomicU64::new(0), slot: 3 };
+    pub static NANOS: Counter = Counter { total: AtomicU64::new(0), slot: 4 };
+    pub static WALK_NANOS: Counter = Counter { total: AtomicU64::new(0), slot: 5 };
+    const ALL: [&Counter; 6] = [&ROOTS, &STEPS, &CANDIDATES, &VALID, &NANOS, &WALK_NANOS];
+
+    thread_local! {
+        static LOCAL: [Cell<u64>; 6] = const { [const { Cell::new(0) }; 6] };
+    }
+
+    pub fn add(c: &Counter, n: u64) {
+        LOCAL.with(|l| l[c.slot].set(l[c.slot].get() + n));
+    }
+
+    /// Adds this thread's counts to the totals.
+    pub fn flush() {
+        LOCAL.with(|l| {
+            for c in ALL {
+                c.total.fetch_add(l[c.slot].replace(0), Ordering::Relaxed);
+            }
+        });
+    }
+
+    pub fn get(c: &Counter) -> u64 {
+        c.total.load(Ordering::Relaxed)
     }
 }
 
@@ -83,6 +107,10 @@ pub struct Sel<'a, 'b> {
     needed: HashSet<InstId>,
     covered: HashSet<InstId>,
     chosen: HashMap<InstId, Match>,
+    /// The instructions of each block by their head and first operand, in
+    /// block order: where `find_extra` looks for a pattern's extra root,
+    /// without scanning the rest of the block for each one.
+    by_head: HashMap<(BlockId, Head, Term), Vec<InstId>>,
     /// The block being emitted, and its place in the layout.
     cur: usize,
     /// Blocks on a cycle.
@@ -257,6 +285,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             needed: HashSet::new(),
             covered: HashSet::new(),
             chosen: HashMap::new(),
+            by_head: HashMap::new(),
             cur: 0,
             in_loop: Vec::new(),
             hoisted: HashMap::new(),
@@ -595,8 +624,22 @@ impl<'a, 'b> Sel<'a, 'b> {
     fn find_extra(&self, t: &crate::target::Tree, root: InstId, params: &mut Vec<Option<Term>>) -> Option<InstId> {
         let crate::target::Tree::Op(h, kids) = t else { return None };
         let b = self.inst_block[root.index()]?;
-        let insts = &self.f.blocks[b.index()].insts;
-        for &x in &insts[self.pos[root.index()] + 1..] {
+        // Those with the same head and, its first leaf being bound (the
+        // base of a post-increment), the same first operand; else all the
+        // rest of the block.
+        let first = match kids.first() {
+            Some(crate::target::Tree::Leaf(p)) => params[*p],
+            _ => None,
+        };
+        let at = self.pos[root.index()];
+        let later: &[InstId] = match first {
+            Some(v) => {
+                let list = self.by_head.get(&(b, *h, v)).map_or(&[][..], Vec::as_slice);
+                &list[list.partition_point(|x| self.pos[x.index()] <= at)..]
+            }
+            None => &self.f.blocks[b.index()].insts[at + 1..],
+        };
+        for &x in later {
             if self.covered.contains(&x) || self.chosen.get(&x).is_some_and(|m| m.covered.len() > 1) {
                 continue;
             }
@@ -2270,6 +2313,17 @@ impl<'a, 'b> Sel<'a, 'b> {
     pub fn run(mut self) -> Result<MFunc, String> {
         let f = self.f;
         let layout = f.layout.clone();
+        if self.t.patterns.iter().any(|p| !p.extra.is_empty()) {
+            for &b in &layout {
+                for &i in &f.blocks[b.index()].insts {
+                    if let Some((h, terms)) = self.head_of(i)
+                        && let Some(&v) = terms.first()
+                    {
+                        self.by_head.entry((b, h, v)).or_default().push(i);
+                    }
+                }
+            }
+        }
         // Values used by phis or in other blocks are wanted in registers.
         for &b in &layout {
             for &i in &f.blocks[b.index()].insts {

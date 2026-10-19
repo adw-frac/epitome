@@ -47,7 +47,7 @@ pub enum Value {
     Metadata(MdId),
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Module {
     pub source_filename: Option<Vec<u8>>,
     pub data_layout: Option<Vec<u8>>,
@@ -98,7 +98,7 @@ impl Module {
 // ---------------------------------------------------------------------------
 // Constants
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Constants {
     list: Vec<Constant>,
     map: HashMap<Constant, ConstId>,
@@ -392,7 +392,7 @@ pub struct GlobalProps {
     pub partition: Option<Vec<u8>>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Global {
     /// `None` for a numbered global such as `@0`.
     pub name: Option<String>,
@@ -401,7 +401,7 @@ pub struct Global {
     pub kind: GlobalKind,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum GlobalKind {
     Variable(GlobalVar),
     Function(Box<Function>),
@@ -417,7 +417,7 @@ pub enum GlobalKind {
     Forward,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct GlobalVar {
     pub constant: bool,
     pub externally_initialized: bool,

@@ -198,10 +198,14 @@ pub fn build(t: &Target, abi: &Abi, funcs: &[MFunc], globals: &[GlobalData]) -> 
     let mut pending = Vec::new();
     let mut frames = Vec::new();
 
-    for f in funcs {
+    // Each function's machine code, in parallel.
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let all: Vec<usize> = (0..funcs.len()).collect();
+    let encoded = crate::par_run(funcs.len(), &all, threads, || (), |_, k| mir::encode_function(t, &funcs[k]), || ());
+    for (f, code) in funcs.iter().zip(encoded) {
         let s = section(&mut obj, SectionKind::Text);
         let at = place(&mut obj, s, 4);
-        let (words, fixups) = mir::encode_function(t, f)?;
+        let (words, fixups) = code?;
         for w in &words {
             obj.sections[s].data.extend_from_slice(&w.to_le_bytes());
         }

@@ -116,6 +116,63 @@ Parsing and printing are still serial and now take longer than the passes
 functions in parallel; each function's text depends only on its own slot
 numbers and the metadata numbering, which can be computed first.
 
+### Code generation
+
+`draconian-llc` compiles functions on every core too (`codegen/src/lib.rs`,
+`-j` to choose how many). Functions are independent once optimised, so
+there is no ordering:
+
+1. The bodies come out of the module. Each function keeps its header and
+   parameters, which other functions' calls look at.
+2. Each thread works on its own copy of what is left: types, constants and
+   globals, which compiling a function adds to (intrinsic declarations,
+   new constants). Copying it takes about 3 ms for a 9,000-function module.
+3. Threads take functions largest first, so a big one does not start last,
+   and the results are put back in module order.
+4. Each function's assembly, and each function's machine code for an object
+   file, are written in parallel too, and joined in order.
+
+A function's machine IR names what it refers to by symbol, not by the
+module's ids, so the output is the same, byte for byte, for any number of
+threads. `tests/parallel.rs` checks this for the C programs and a module of
+generated functions. The selector's statistics for `--stats` are counted per
+thread and added up when a thread finishes.
+
+For the synthetic module above (8,884 functions after optimisation, 1.5
+million machine instructions):
+
+| Threads | Compiling and printing |
+| --- | --- |
+| 1 | 4394 ms |
+| 4 | 1282 ms |
+| 8 | 761 ms |
+
+That is 5.8x on 8 threads. Parsing (serial) is most of what remains of the
+1.4 s the whole run takes.
+
+### Big blocks
+
+Nothing may take time growing faster than a block's size. Two stages did,
+both found with one generated block of 4,000 to 128,000 instructions:
+
+- **Selection.** A post-increment load or store looks for the step of its
+  base later in the block (`find_extra`). It scanned the rest of the block
+  for every load and store. The block's instructions are now indexed by
+  head and first operand, so it reads only the instructions with the same
+  base.
+- **Register allocation.** Whether a register was free for a value was a
+  scan over every interval already given to it, and whether a value lived
+  across a call was a scan over every call. A register's intervals are now
+  kept as their union (disjoint, in a `BTreeMap` by start), so a value's
+  check is one lookup per segment. Calls are found by binary search.
+
+At 32,000 instructions selection went from 5,266 ms to 40 ms and allocation
+from 143 ms to 16 ms. The output is the same as before. The optimiser was
+already linear on the same blocks, and on blocks of unoptimised code (locals
+in allocas) and of loads and stores through pointers that may alias.
+`tests/parallel.rs` checks every stage of code generation: a block four
+times bigger must take less than ten times as long (linear is four).
+
 ## 4. The inliner
 
 The inliner (`inline.rs`) runs on each function after its callees are
