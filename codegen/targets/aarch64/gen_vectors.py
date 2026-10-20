@@ -450,6 +450,34 @@ define i32 @reduce.add.v2i32.expand(<2 x i32> %v) {
   ret i32 %r
 }
 ''')
+o.append('''; Population counts: the bits set in each byte. A scalar's count is the
+; bytes' counts summed (60-recipes.ll).
+declare <8 x i8> @llvm.ctpop.v8i8(<8 x i8>)
+
+define <8 x i8> @CNT8b(<8 x i8> "reg"="v" %n) "enc"="0 0 0 01110 00 10000 00101 10 n:5 d:5" "asm"="cnt {d:8b}, {n:8b}" {
+  %r = call <8 x i8> @llvm.ctpop.v8i8(<8 x i8> %n)
+  ret <8 x i8> %r
+}
+
+; A general register's bits into the low half of a vector register (the
+; rest zero), as fmov d, x and fmov s, w do.
+define <8 x i8> @FMOVvX(i64 "reg"="x" %n) "enc"="1 00 11110 01 1 00 111 000000 n:5 d:5" "asm"="fmov {d:d}, {n}" "nodecode" {
+  %r = bitcast i64 %n to <8 x i8>
+  ret <8 x i8> %r
+}
+
+define <8 x i8> @FMOVvW(i32 "reg"="w" %n) "enc"="0 00 11110 00 1 00 111 000000 n:5 d:5" "asm"="fmov {d:s}, {n}" "nodecode" {
+  %z = zext i32 %n to i64
+  %r = bitcast i64 %z to <8 x i8>
+  ret <8 x i8> %r
+}
+
+; And back: a 64-bit vector's bits into a general register.
+define i64 @FMOVXv(<8 x i8> "reg"="v" %n) "enc"="1 00 11110 01 1 00 110 000000 n:5 d:5" "asm"="fmov {d}, {n:d}" "nodecode" {
+  %r = bitcast <8 x i8> %n to i64
+  ret i64 %r
+}
+''')
 for arr, n, e, size in [('8b',8,8,'00'),('4h',4,16,'01')]:
   T = vt(n, it(e)); s = suffix(e)
   for name, U, op, red in [('ADDV',0,'11011','add'),('SMAXV',0,'01010','smax'),('SMINV',0,'11010','smin'),('UMAXV',1,'01010','umax'),('UMINV',1,'11010','umin')]:
@@ -572,6 +600,53 @@ for n in [16, 8, 4, 2]:
         o.append(f'''define {M} @{name}{n}({M} "reg"="q" %n, {M} "reg"="q" %m) "enc"="0 1 {opc} 1 m:5 00011 1 n:5 d:5" "asm"="{name[:3].lower()} {{d:16b}}, {{n:16b}}, {{m:16b}}" "dclass"="q" "nodecode" {{
   %r = {ir} {M} %n, %m
   ret {M} %r
+}}
+''')
+out.append("\n".join(o))
+
+# --- appended: intrinsics of Advanced SIMD's own (from Rust's and C's
+# NEON intrinsics): pairwise maximum, minimum and sum, doubling multiplies
+# returning the high half, and table lookup
+o = []
+for arr, n, e, Q, size in INT:
+    T = vt(n, it(e)); c = cls(Q)
+    # (ADDPv2s is above, for reductions.)
+    ops = [] if arr == '2s' else [('addp', 'ADDP', 0, '10111')]
+    if e <= 32:
+        ops += [('umaxp', 'UMAXP', 1, '10100'), ('uminp', 'UMINP', 1, '10101'),
+                ('smaxp', 'SMAXP', 0, '10100'), ('sminp', 'SMINP', 0, '10101')]
+    if e in (16, 32):
+        ops += [('sqdmulh', 'SQDMULH', 0, '10110'), ('sqrdmulh', 'SQRDMULH', 1, '10110')]
+    for intr, name, U, opc in ops:
+        f = f'llvm.aarch64.neon.{intr}.v{n}i{e}'
+        o.append(f'''declare {T} @{f}({T}, {T})
+
+define {T} @{name}v{arr}({T} "reg"="{c}" %n, {T} "reg"="{c}" %m) "enc"="0 {Q} {U} 01110 {size} 1 m:5 {opc} 1 n:5 d:5" "asm"="{intr} {{d:{arr}}}, {{n:{arr}}}, {{m:{arr}}}" {{
+  %r = call {T} @{f}({T} %n, {T} %m)
+  ret {T} %r
+}}
+''')
+# dup of lane 0: the first lane in every lane. (Other lanes are taken out
+# and splatted from a general register, see legalize.rs.)
+for arr, n, ty, Q, imm5, s_ in [(a, n, it(e), Q, {8: '00001', 16: '00010', 32: '00100', 64: '01000'}[e], suffix(e))
+                                for a, n, e, Q, _ in INT] + \
+        [(a, n, ty, Q, '00100' if ty == 'float' else '01000', 's' if ty == 'float' else 'd') for a, n, ty, Q, _ in FLT]:
+    T = vt(n, ty); c = cls(Q)
+    o.append(f'''define {T} @DUP0v{arr}{'f' if ty in ('float', 'double') else ''}({T} "reg"="{c}" %n) "enc"="0 {Q} 0 01110000 {imm5} 0 0000 1 n:5 d:5" "asm"="dup {{d:{arr}}}, {{n:.{s_}}}[0]" {{
+  %r = shufflevector {T} %n, {T} poison, <{n} x i32> zeroinitializer
+  ret {T} %r
+}}
+''')
+# tbl: each lane of the indices picks a byte of the 16-byte table (one
+# register), or zero past it.
+for arr, n, Q in [('16b', 16, 1), ('8b', 8, 0)]:
+    T = vt(n, 'i8'); c = cls(Q)
+    f = f'llvm.aarch64.neon.tbl1.v{n}i8'
+    o.append(f'''declare {T} @{f}(<16 x i8>, {T})
+
+define {T} @TBL1v{arr}(<16 x i8> "reg"="q" %n, {T} "reg"="{c}" %m) "enc"="0 {Q} 001110 000 m:5 0 00 0 00 n:5 d:5" "asm"="tbl {{d:{arr}}}, {{lb}}{{n:16b}}{{rb}}, {{m:{arr}}}" {{
+  %r = call {T} @{f}(<16 x i8> %n, {T} %m)
+  ret {T} %r
 }}
 ''')
 out.append("\n".join(o))

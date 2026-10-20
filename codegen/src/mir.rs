@@ -368,6 +368,15 @@ pub enum Operand {
     Sym(String),
 }
 
+/// The brace a template's `{lb}` or `{rb}` writes.
+pub fn literal_brace(hole: &str) -> Option<char> {
+    match hole {
+        "lb" => Some('{'),
+        "rb" => Some('}'),
+        _ => None,
+    }
+}
+
 /// Fills in instruction `i`'s template, with `value(k)` for operand `k`.
 /// `abi` says how to write symbols (`{s:page}` and `{s:pageoff}` are the
 /// page holding a symbol and its offset in it).
@@ -381,6 +390,11 @@ pub fn fill_template(t: &Target, abi: Option<&crate::abi::Abi>, i: usize, value:
         let close = rest[open..].find('}').map(|c| open + c).unwrap_or(rest.len());
         let inner = &rest[open + 1..close];
         rest = &rest[(close + 1).min(rest.len())..];
+        // Braces themselves (`tbl`'s register list): `{lb}` and `{rb}`.
+        if let Some(b) = literal_brace(inner) {
+            out.push(b);
+            continue;
+        }
         if let Some(expr) = inner.strip_prefix('=') {
             let mut env = Env::new();
             for (k, o) in ins.operands.iter().enumerate() {

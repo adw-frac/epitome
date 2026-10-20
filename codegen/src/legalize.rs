@@ -470,8 +470,14 @@ fn pointer_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
 /// Is there an instruction for this shuffle of legal vectors: a pattern in
 /// the description whose root is a shuffle by this mask? Others are done
 /// lane by lane.
-fn native_shuffle(cx: &Ctx, mask: ConstId) -> bool {
-    crate::target::mask_lanes(cx.m, mask).is_some_and(|lanes| cx.t.has_shuffle(&lanes))
+fn native_shuffle(cx: &Ctx, f: &Function, i: InstId) -> bool {
+    let Op::ShuffleVector { a, mask, .. } = &f.insts[i.index()].op else { return false };
+    let Some(r) = f.insts[i.index()].result else { return false };
+    let hb = crate::target::head_bits(cx.m, f.locals[r.index()].ty);
+    let of_insert = matches!(a, Value::Local(x) if matches!(f.locals[x.index()].def,
+        LocalDef::Inst(d) if matches!(f.insts[d.index()].op, Op::InsertElement { .. })));
+    let src_bits = crate::target::type_bits(cx.m, cx.value_ty(f, *a));
+    crate::target::mask_lanes(cx.m, *mask).is_some_and(|lanes| cx.t.has_shuffle(&lanes, hb, src_bits, of_insert))
 }
 
 /// Vector operations rewritten into a form instructions more often have:
@@ -861,7 +867,7 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
             });
             let res_split = res_ty.and_then(|t| split_count(cx, t));
             let odd_shuffle = match &f.insts[i.index()].op {
-                Op::ShuffleVector { mask, .. } => !native_shuffle(cx, *mask),
+                Op::ShuffleVector { .. } => !native_shuffle(cx, f, i),
                 _ => false,
             };
             if !uses_split && res_split.is_none() && !odd_shuffle {

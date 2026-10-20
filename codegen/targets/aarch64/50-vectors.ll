@@ -2580,10 +2580,6 @@ define i32 @reduce.add.v2i32.expand(<2 x i32> %v) {
   ret i32 %r
 }
 
-define <8 x i8> @ADDV8b(<8 x i8> "reg"="v" %n) "feature"="neon" "enc"="0 0 0 01110 00 11000 11011 10 n:5 d:5" "asm"="addv {d:b}, {n:8b}" "nomatch" {
-  ret <8 x i8> %n
-}
-
 ; Population counts: the bits set in each byte. A scalar's count is the
 ; bytes' counts summed (60-recipes.ll).
 declare <8 x i8> @llvm.ctpop.v8i8(<8 x i8>)
@@ -2604,6 +2600,16 @@ define <8 x i8> @FMOVvW(i32 "reg"="w" %n) "feature"="neon" "enc"="0 00 11110 00 
   %z = zext i32 %n to i64
   %r = bitcast i64 %z to <8 x i8>
   ret <8 x i8> %r
+}
+
+; And back: a 64-bit vector's bits into a general register.
+define i64 @FMOVXv(<8 x i8> "reg"="v" %n) "feature"="neon" "enc"="1 00 11110 01 1 00 110 000000 n:5 d:5" "asm"="fmov {d}, {n:d}" "nodecode" {
+  %r = bitcast <8 x i8> %n to i64
+  ret i64 %r
+}
+
+define <8 x i8> @ADDV8b(<8 x i8> "reg"="v" %n) "feature"="neon" "enc"="0 0 0 01110 00 11000 11011 10 n:5 d:5" "asm"="addv {d:b}, {n:8b}" "nomatch" {
+  ret <8 x i8> %n
 }
 
 declare i8 @llvm.vector.reduce.add.v8i8(<8 x i8>)
@@ -3305,5 +3311,334 @@ define <2 x i1> @ORRm2(<2 x i1> "reg"="q" %n, <2 x i1> "reg"="q" %m) "feature"="
 define <2 x i1> @EORm2(<2 x i1> "reg"="q" %n, <2 x i1> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 00 1 m:5 00011 1 n:5 d:5" "asm"="eor {d:16b}, {n:16b}, {m:16b}" "dclass"="q" "nodecode" {
   %r = xor <2 x i1> %n, %m
   ret <2 x i1> %r
+}
+declare <16 x i8> @llvm.aarch64.neon.addp.v16i8(<16 x i8>, <16 x i8>)
+
+define <16 x i8> @ADDPv16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 00 1 m:5 10111 1 n:5 d:5" "asm"="addp {d:16b}, {n:16b}, {m:16b}" {
+  %r = call <16 x i8> @llvm.aarch64.neon.addp.v16i8(<16 x i8> %n, <16 x i8> %m)
+  ret <16 x i8> %r
+}
+
+declare <16 x i8> @llvm.aarch64.neon.umaxp.v16i8(<16 x i8>, <16 x i8>)
+
+define <16 x i8> @UMAXPv16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 00 1 m:5 10100 1 n:5 d:5" "asm"="umaxp {d:16b}, {n:16b}, {m:16b}" {
+  %r = call <16 x i8> @llvm.aarch64.neon.umaxp.v16i8(<16 x i8> %n, <16 x i8> %m)
+  ret <16 x i8> %r
+}
+
+declare <16 x i8> @llvm.aarch64.neon.uminp.v16i8(<16 x i8>, <16 x i8>)
+
+define <16 x i8> @UMINPv16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 00 1 m:5 10101 1 n:5 d:5" "asm"="uminp {d:16b}, {n:16b}, {m:16b}" {
+  %r = call <16 x i8> @llvm.aarch64.neon.uminp.v16i8(<16 x i8> %n, <16 x i8> %m)
+  ret <16 x i8> %r
+}
+
+declare <16 x i8> @llvm.aarch64.neon.smaxp.v16i8(<16 x i8>, <16 x i8>)
+
+define <16 x i8> @SMAXPv16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 00 1 m:5 10100 1 n:5 d:5" "asm"="smaxp {d:16b}, {n:16b}, {m:16b}" {
+  %r = call <16 x i8> @llvm.aarch64.neon.smaxp.v16i8(<16 x i8> %n, <16 x i8> %m)
+  ret <16 x i8> %r
+}
+
+declare <16 x i8> @llvm.aarch64.neon.sminp.v16i8(<16 x i8>, <16 x i8>)
+
+define <16 x i8> @SMINPv16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 00 1 m:5 10101 1 n:5 d:5" "asm"="sminp {d:16b}, {n:16b}, {m:16b}" {
+  %r = call <16 x i8> @llvm.aarch64.neon.sminp.v16i8(<16 x i8> %n, <16 x i8> %m)
+  ret <16 x i8> %r
+}
+
+declare <8 x i16> @llvm.aarch64.neon.addp.v8i16(<8 x i16>, <8 x i16>)
+
+define <8 x i16> @ADDPv8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 01 1 m:5 10111 1 n:5 d:5" "asm"="addp {d:8h}, {n:8h}, {m:8h}" {
+  %r = call <8 x i16> @llvm.aarch64.neon.addp.v8i16(<8 x i16> %n, <8 x i16> %m)
+  ret <8 x i16> %r
+}
+
+declare <8 x i16> @llvm.aarch64.neon.umaxp.v8i16(<8 x i16>, <8 x i16>)
+
+define <8 x i16> @UMAXPv8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 01 1 m:5 10100 1 n:5 d:5" "asm"="umaxp {d:8h}, {n:8h}, {m:8h}" {
+  %r = call <8 x i16> @llvm.aarch64.neon.umaxp.v8i16(<8 x i16> %n, <8 x i16> %m)
+  ret <8 x i16> %r
+}
+
+declare <8 x i16> @llvm.aarch64.neon.uminp.v8i16(<8 x i16>, <8 x i16>)
+
+define <8 x i16> @UMINPv8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 01 1 m:5 10101 1 n:5 d:5" "asm"="uminp {d:8h}, {n:8h}, {m:8h}" {
+  %r = call <8 x i16> @llvm.aarch64.neon.uminp.v8i16(<8 x i16> %n, <8 x i16> %m)
+  ret <8 x i16> %r
+}
+
+declare <8 x i16> @llvm.aarch64.neon.smaxp.v8i16(<8 x i16>, <8 x i16>)
+
+define <8 x i16> @SMAXPv8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 01 1 m:5 10100 1 n:5 d:5" "asm"="smaxp {d:8h}, {n:8h}, {m:8h}" {
+  %r = call <8 x i16> @llvm.aarch64.neon.smaxp.v8i16(<8 x i16> %n, <8 x i16> %m)
+  ret <8 x i16> %r
+}
+
+declare <8 x i16> @llvm.aarch64.neon.sminp.v8i16(<8 x i16>, <8 x i16>)
+
+define <8 x i16> @SMINPv8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 01 1 m:5 10101 1 n:5 d:5" "asm"="sminp {d:8h}, {n:8h}, {m:8h}" {
+  %r = call <8 x i16> @llvm.aarch64.neon.sminp.v8i16(<8 x i16> %n, <8 x i16> %m)
+  ret <8 x i16> %r
+}
+
+declare <8 x i16> @llvm.aarch64.neon.sqdmulh.v8i16(<8 x i16>, <8 x i16>)
+
+define <8 x i16> @SQDMULHv8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 01 1 m:5 10110 1 n:5 d:5" "asm"="sqdmulh {d:8h}, {n:8h}, {m:8h}" {
+  %r = call <8 x i16> @llvm.aarch64.neon.sqdmulh.v8i16(<8 x i16> %n, <8 x i16> %m)
+  ret <8 x i16> %r
+}
+
+declare <8 x i16> @llvm.aarch64.neon.sqrdmulh.v8i16(<8 x i16>, <8 x i16>)
+
+define <8 x i16> @SQRDMULHv8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 01 1 m:5 10110 1 n:5 d:5" "asm"="sqrdmulh {d:8h}, {n:8h}, {m:8h}" {
+  %r = call <8 x i16> @llvm.aarch64.neon.sqrdmulh.v8i16(<8 x i16> %n, <8 x i16> %m)
+  ret <8 x i16> %r
+}
+
+declare <4 x i32> @llvm.aarch64.neon.addp.v4i32(<4 x i32>, <4 x i32>)
+
+define <4 x i32> @ADDPv4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 10 1 m:5 10111 1 n:5 d:5" "asm"="addp {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x i32> @llvm.aarch64.neon.addp.v4i32(<4 x i32> %n, <4 x i32> %m)
+  ret <4 x i32> %r
+}
+
+declare <4 x i32> @llvm.aarch64.neon.umaxp.v4i32(<4 x i32>, <4 x i32>)
+
+define <4 x i32> @UMAXPv4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 10 1 m:5 10100 1 n:5 d:5" "asm"="umaxp {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x i32> @llvm.aarch64.neon.umaxp.v4i32(<4 x i32> %n, <4 x i32> %m)
+  ret <4 x i32> %r
+}
+
+declare <4 x i32> @llvm.aarch64.neon.uminp.v4i32(<4 x i32>, <4 x i32>)
+
+define <4 x i32> @UMINPv4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 10 1 m:5 10101 1 n:5 d:5" "asm"="uminp {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x i32> @llvm.aarch64.neon.uminp.v4i32(<4 x i32> %n, <4 x i32> %m)
+  ret <4 x i32> %r
+}
+
+declare <4 x i32> @llvm.aarch64.neon.smaxp.v4i32(<4 x i32>, <4 x i32>)
+
+define <4 x i32> @SMAXPv4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 10 1 m:5 10100 1 n:5 d:5" "asm"="smaxp {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x i32> @llvm.aarch64.neon.smaxp.v4i32(<4 x i32> %n, <4 x i32> %m)
+  ret <4 x i32> %r
+}
+
+declare <4 x i32> @llvm.aarch64.neon.sminp.v4i32(<4 x i32>, <4 x i32>)
+
+define <4 x i32> @SMINPv4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 10 1 m:5 10101 1 n:5 d:5" "asm"="sminp {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x i32> @llvm.aarch64.neon.sminp.v4i32(<4 x i32> %n, <4 x i32> %m)
+  ret <4 x i32> %r
+}
+
+declare <4 x i32> @llvm.aarch64.neon.sqdmulh.v4i32(<4 x i32>, <4 x i32>)
+
+define <4 x i32> @SQDMULHv4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 10 1 m:5 10110 1 n:5 d:5" "asm"="sqdmulh {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x i32> @llvm.aarch64.neon.sqdmulh.v4i32(<4 x i32> %n, <4 x i32> %m)
+  ret <4 x i32> %r
+}
+
+declare <4 x i32> @llvm.aarch64.neon.sqrdmulh.v4i32(<4 x i32>, <4 x i32>)
+
+define <4 x i32> @SQRDMULHv4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 10 1 m:5 10110 1 n:5 d:5" "asm"="sqrdmulh {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x i32> @llvm.aarch64.neon.sqrdmulh.v4i32(<4 x i32> %n, <4 x i32> %m)
+  ret <4 x i32> %r
+}
+
+declare <2 x i64> @llvm.aarch64.neon.addp.v2i64(<2 x i64>, <2 x i64>)
+
+define <2 x i64> @ADDPv2d(<2 x i64> "reg"="q" %n, <2 x i64> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 11 1 m:5 10111 1 n:5 d:5" "asm"="addp {d:2d}, {n:2d}, {m:2d}" {
+  %r = call <2 x i64> @llvm.aarch64.neon.addp.v2i64(<2 x i64> %n, <2 x i64> %m)
+  ret <2 x i64> %r
+}
+
+declare <8 x i8> @llvm.aarch64.neon.addp.v8i8(<8 x i8>, <8 x i8>)
+
+define <8 x i8> @ADDPv8b(<8 x i8> "reg"="v" %n, <8 x i8> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 00 1 m:5 10111 1 n:5 d:5" "asm"="addp {d:8b}, {n:8b}, {m:8b}" {
+  %r = call <8 x i8> @llvm.aarch64.neon.addp.v8i8(<8 x i8> %n, <8 x i8> %m)
+  ret <8 x i8> %r
+}
+
+declare <8 x i8> @llvm.aarch64.neon.umaxp.v8i8(<8 x i8>, <8 x i8>)
+
+define <8 x i8> @UMAXPv8b(<8 x i8> "reg"="v" %n, <8 x i8> "reg"="v" %m) "feature"="neon" "enc"="0 0 1 01110 00 1 m:5 10100 1 n:5 d:5" "asm"="umaxp {d:8b}, {n:8b}, {m:8b}" {
+  %r = call <8 x i8> @llvm.aarch64.neon.umaxp.v8i8(<8 x i8> %n, <8 x i8> %m)
+  ret <8 x i8> %r
+}
+
+declare <8 x i8> @llvm.aarch64.neon.uminp.v8i8(<8 x i8>, <8 x i8>)
+
+define <8 x i8> @UMINPv8b(<8 x i8> "reg"="v" %n, <8 x i8> "reg"="v" %m) "feature"="neon" "enc"="0 0 1 01110 00 1 m:5 10101 1 n:5 d:5" "asm"="uminp {d:8b}, {n:8b}, {m:8b}" {
+  %r = call <8 x i8> @llvm.aarch64.neon.uminp.v8i8(<8 x i8> %n, <8 x i8> %m)
+  ret <8 x i8> %r
+}
+
+declare <8 x i8> @llvm.aarch64.neon.smaxp.v8i8(<8 x i8>, <8 x i8>)
+
+define <8 x i8> @SMAXPv8b(<8 x i8> "reg"="v" %n, <8 x i8> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 00 1 m:5 10100 1 n:5 d:5" "asm"="smaxp {d:8b}, {n:8b}, {m:8b}" {
+  %r = call <8 x i8> @llvm.aarch64.neon.smaxp.v8i8(<8 x i8> %n, <8 x i8> %m)
+  ret <8 x i8> %r
+}
+
+declare <8 x i8> @llvm.aarch64.neon.sminp.v8i8(<8 x i8>, <8 x i8>)
+
+define <8 x i8> @SMINPv8b(<8 x i8> "reg"="v" %n, <8 x i8> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 00 1 m:5 10101 1 n:5 d:5" "asm"="sminp {d:8b}, {n:8b}, {m:8b}" {
+  %r = call <8 x i8> @llvm.aarch64.neon.sminp.v8i8(<8 x i8> %n, <8 x i8> %m)
+  ret <8 x i8> %r
+}
+
+declare <4 x i16> @llvm.aarch64.neon.addp.v4i16(<4 x i16>, <4 x i16>)
+
+define <4 x i16> @ADDPv4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 01 1 m:5 10111 1 n:5 d:5" "asm"="addp {d:4h}, {n:4h}, {m:4h}" {
+  %r = call <4 x i16> @llvm.aarch64.neon.addp.v4i16(<4 x i16> %n, <4 x i16> %m)
+  ret <4 x i16> %r
+}
+
+declare <4 x i16> @llvm.aarch64.neon.umaxp.v4i16(<4 x i16>, <4 x i16>)
+
+define <4 x i16> @UMAXPv4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "feature"="neon" "enc"="0 0 1 01110 01 1 m:5 10100 1 n:5 d:5" "asm"="umaxp {d:4h}, {n:4h}, {m:4h}" {
+  %r = call <4 x i16> @llvm.aarch64.neon.umaxp.v4i16(<4 x i16> %n, <4 x i16> %m)
+  ret <4 x i16> %r
+}
+
+declare <4 x i16> @llvm.aarch64.neon.uminp.v4i16(<4 x i16>, <4 x i16>)
+
+define <4 x i16> @UMINPv4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "feature"="neon" "enc"="0 0 1 01110 01 1 m:5 10101 1 n:5 d:5" "asm"="uminp {d:4h}, {n:4h}, {m:4h}" {
+  %r = call <4 x i16> @llvm.aarch64.neon.uminp.v4i16(<4 x i16> %n, <4 x i16> %m)
+  ret <4 x i16> %r
+}
+
+declare <4 x i16> @llvm.aarch64.neon.smaxp.v4i16(<4 x i16>, <4 x i16>)
+
+define <4 x i16> @SMAXPv4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 01 1 m:5 10100 1 n:5 d:5" "asm"="smaxp {d:4h}, {n:4h}, {m:4h}" {
+  %r = call <4 x i16> @llvm.aarch64.neon.smaxp.v4i16(<4 x i16> %n, <4 x i16> %m)
+  ret <4 x i16> %r
+}
+
+declare <4 x i16> @llvm.aarch64.neon.sminp.v4i16(<4 x i16>, <4 x i16>)
+
+define <4 x i16> @SMINPv4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 01 1 m:5 10101 1 n:5 d:5" "asm"="sminp {d:4h}, {n:4h}, {m:4h}" {
+  %r = call <4 x i16> @llvm.aarch64.neon.sminp.v4i16(<4 x i16> %n, <4 x i16> %m)
+  ret <4 x i16> %r
+}
+
+declare <4 x i16> @llvm.aarch64.neon.sqdmulh.v4i16(<4 x i16>, <4 x i16>)
+
+define <4 x i16> @SQDMULHv4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 01 1 m:5 10110 1 n:5 d:5" "asm"="sqdmulh {d:4h}, {n:4h}, {m:4h}" {
+  %r = call <4 x i16> @llvm.aarch64.neon.sqdmulh.v4i16(<4 x i16> %n, <4 x i16> %m)
+  ret <4 x i16> %r
+}
+
+declare <4 x i16> @llvm.aarch64.neon.sqrdmulh.v4i16(<4 x i16>, <4 x i16>)
+
+define <4 x i16> @SQRDMULHv4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "feature"="neon" "enc"="0 0 1 01110 01 1 m:5 10110 1 n:5 d:5" "asm"="sqrdmulh {d:4h}, {n:4h}, {m:4h}" {
+  %r = call <4 x i16> @llvm.aarch64.neon.sqrdmulh.v4i16(<4 x i16> %n, <4 x i16> %m)
+  ret <4 x i16> %r
+}
+
+declare <2 x i32> @llvm.aarch64.neon.umaxp.v2i32(<2 x i32>, <2 x i32>)
+
+define <2 x i32> @UMAXPv2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "feature"="neon" "enc"="0 0 1 01110 10 1 m:5 10100 1 n:5 d:5" "asm"="umaxp {d:2s}, {n:2s}, {m:2s}" {
+  %r = call <2 x i32> @llvm.aarch64.neon.umaxp.v2i32(<2 x i32> %n, <2 x i32> %m)
+  ret <2 x i32> %r
+}
+
+declare <2 x i32> @llvm.aarch64.neon.uminp.v2i32(<2 x i32>, <2 x i32>)
+
+define <2 x i32> @UMINPv2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "feature"="neon" "enc"="0 0 1 01110 10 1 m:5 10101 1 n:5 d:5" "asm"="uminp {d:2s}, {n:2s}, {m:2s}" {
+  %r = call <2 x i32> @llvm.aarch64.neon.uminp.v2i32(<2 x i32> %n, <2 x i32> %m)
+  ret <2 x i32> %r
+}
+
+declare <2 x i32> @llvm.aarch64.neon.smaxp.v2i32(<2 x i32>, <2 x i32>)
+
+define <2 x i32> @SMAXPv2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 10 1 m:5 10100 1 n:5 d:5" "asm"="smaxp {d:2s}, {n:2s}, {m:2s}" {
+  %r = call <2 x i32> @llvm.aarch64.neon.smaxp.v2i32(<2 x i32> %n, <2 x i32> %m)
+  ret <2 x i32> %r
+}
+
+declare <2 x i32> @llvm.aarch64.neon.sminp.v2i32(<2 x i32>, <2 x i32>)
+
+define <2 x i32> @SMINPv2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 10 1 m:5 10101 1 n:5 d:5" "asm"="sminp {d:2s}, {n:2s}, {m:2s}" {
+  %r = call <2 x i32> @llvm.aarch64.neon.sminp.v2i32(<2 x i32> %n, <2 x i32> %m)
+  ret <2 x i32> %r
+}
+
+declare <2 x i32> @llvm.aarch64.neon.sqdmulh.v2i32(<2 x i32>, <2 x i32>)
+
+define <2 x i32> @SQDMULHv2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 10 1 m:5 10110 1 n:5 d:5" "asm"="sqdmulh {d:2s}, {n:2s}, {m:2s}" {
+  %r = call <2 x i32> @llvm.aarch64.neon.sqdmulh.v2i32(<2 x i32> %n, <2 x i32> %m)
+  ret <2 x i32> %r
+}
+
+declare <2 x i32> @llvm.aarch64.neon.sqrdmulh.v2i32(<2 x i32>, <2 x i32>)
+
+define <2 x i32> @SQRDMULHv2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "feature"="neon" "enc"="0 0 1 01110 10 1 m:5 10110 1 n:5 d:5" "asm"="sqrdmulh {d:2s}, {n:2s}, {m:2s}" {
+  %r = call <2 x i32> @llvm.aarch64.neon.sqrdmulh.v2i32(<2 x i32> %n, <2 x i32> %m)
+  ret <2 x i32> %r
+}
+
+define <16 x i8> @DUP0v16b(<16 x i8> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110000 00001 0 0000 1 n:5 d:5" "asm"="dup {d:16b}, {n:.b}[0]" {
+  %r = shufflevector <16 x i8> %n, <16 x i8> poison, <16 x i32> zeroinitializer
+  ret <16 x i8> %r
+}
+
+define <8 x i16> @DUP0v8h(<8 x i16> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110000 00010 0 0000 1 n:5 d:5" "asm"="dup {d:8h}, {n:.h}[0]" {
+  %r = shufflevector <8 x i16> %n, <8 x i16> poison, <8 x i32> zeroinitializer
+  ret <8 x i16> %r
+}
+
+define <4 x i32> @DUP0v4s(<4 x i32> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110000 00100 0 0000 1 n:5 d:5" "asm"="dup {d:4s}, {n:.s}[0]" {
+  %r = shufflevector <4 x i32> %n, <4 x i32> poison, <4 x i32> zeroinitializer
+  ret <4 x i32> %r
+}
+
+define <2 x i64> @DUP0v2d(<2 x i64> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110000 01000 0 0000 1 n:5 d:5" "asm"="dup {d:2d}, {n:.d}[0]" {
+  %r = shufflevector <2 x i64> %n, <2 x i64> poison, <2 x i32> zeroinitializer
+  ret <2 x i64> %r
+}
+
+define <8 x i8> @DUP0v8b(<8 x i8> "reg"="v" %n) "feature"="neon" "enc"="0 0 0 01110000 00001 0 0000 1 n:5 d:5" "asm"="dup {d:8b}, {n:.b}[0]" {
+  %r = shufflevector <8 x i8> %n, <8 x i8> poison, <8 x i32> zeroinitializer
+  ret <8 x i8> %r
+}
+
+define <4 x i16> @DUP0v4h(<4 x i16> "reg"="v" %n) "feature"="neon" "enc"="0 0 0 01110000 00010 0 0000 1 n:5 d:5" "asm"="dup {d:4h}, {n:.h}[0]" {
+  %r = shufflevector <4 x i16> %n, <4 x i16> poison, <4 x i32> zeroinitializer
+  ret <4 x i16> %r
+}
+
+define <2 x i32> @DUP0v2s(<2 x i32> "reg"="v" %n) "feature"="neon" "enc"="0 0 0 01110000 00100 0 0000 1 n:5 d:5" "asm"="dup {d:2s}, {n:.s}[0]" {
+  %r = shufflevector <2 x i32> %n, <2 x i32> poison, <2 x i32> zeroinitializer
+  ret <2 x i32> %r
+}
+
+define <4 x float> @DUP0v4sf(<4 x float> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110000 00100 0 0000 1 n:5 d:5" "asm"="dup {d:4s}, {n:.s}[0]" {
+  %r = shufflevector <4 x float> %n, <4 x float> poison, <4 x i32> zeroinitializer
+  ret <4 x float> %r
+}
+
+define <2 x double> @DUP0v2df(<2 x double> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110000 01000 0 0000 1 n:5 d:5" "asm"="dup {d:2d}, {n:.d}[0]" {
+  %r = shufflevector <2 x double> %n, <2 x double> poison, <2 x i32> zeroinitializer
+  ret <2 x double> %r
+}
+
+define <2 x float> @DUP0v2sf(<2 x float> "reg"="v" %n) "feature"="neon" "enc"="0 0 0 01110000 00100 0 0000 1 n:5 d:5" "asm"="dup {d:2s}, {n:.s}[0]" {
+  %r = shufflevector <2 x float> %n, <2 x float> poison, <2 x i32> zeroinitializer
+  ret <2 x float> %r
+}
+
+declare <16 x i8> @llvm.aarch64.neon.tbl1.v16i8(<16 x i8>, <16 x i8>)
+
+define <16 x i8> @TBL1v16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "feature"="neon" "enc"="0 1 001110 000 m:5 0 00 0 00 n:5 d:5" "asm"="tbl {d:16b}, {lb}{n:16b}{rb}, {m:16b}" {
+  %r = call <16 x i8> @llvm.aarch64.neon.tbl1.v16i8(<16 x i8> %n, <16 x i8> %m)
+  ret <16 x i8> %r
+}
+
+declare <8 x i8> @llvm.aarch64.neon.tbl1.v8i8(<16 x i8>, <8 x i8>)
+
+define <8 x i8> @TBL1v8b(<16 x i8> "reg"="q" %n, <8 x i8> "reg"="v" %m) "feature"="neon" "enc"="0 0 001110 000 m:5 0 00 0 00 n:5 d:5" "asm"="tbl {d:8b}, {lb}{n:16b}{rb}, {m:8b}" {
+  %r = call <8 x i8> @llvm.aarch64.neon.tbl1.v8i8(<16 x i8> %n, <8 x i8> %m)
+  ret <8 x i8> %r
 }
 

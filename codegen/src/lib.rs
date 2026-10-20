@@ -43,6 +43,7 @@ pub struct Compiled {
     pub funcs: Vec<MFunc>,
     /// The globals with initial values.
     pub globals: Vec<object::GlobalData>,
+    pub aliases: Vec<object::Alias>,
     pub abi: abi::Abi,
     /// For Mach-O: the least macOS version the code is for, from the
     /// module's triple (`arm64-apple-macosx26.0.0`), else 11.0.
@@ -325,6 +326,8 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
     }
     let globals = asm::collect_globals(&cx, &abi)?;
     asm::print_globals(&abi, &globals, &mut out);
+    let aliases = asm::collect_aliases(&cx, &abi)?;
+    asm::print_aliases(&aliases, &mut out);
     if abi.syntax == abi::Syntax::Elf {
         // The stack need not be executable.
         out.push_str("\t.section .note.GNU-stack,\"\",%progbits\n");
@@ -332,6 +335,7 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
     Ok(Compiled {
         funcs,
         globals,
+        aliases,
         abi,
         min_os,
         asm: out,
@@ -356,7 +360,7 @@ pub fn min_os_version(triple: &str) -> (u32, u32, u32) {
 impl Compiled {
     /// The object file's contents, in the abstract (see `object`).
     pub fn object(&self, t: &Target) -> Result<object::Object, String> {
-        object::build(t, &self.abi, &self.funcs, &self.globals)
+        object::build(t, &self.abi, &self.funcs, &self.globals, &self.aliases)
     }
 
     /// The object file, in the convention's format: ELF or Mach-O. With

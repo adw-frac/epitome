@@ -675,11 +675,20 @@ impl Target {
         }
     }
 
-    /// The number of a shuffle mask the description uses, if it does.
-    /// Is there a pattern whose root is a shuffle by this mask?
-    pub fn has_shuffle(&self, lanes: &[i32]) -> bool {
+    /// Is there a pattern whose root is a shuffle by this mask, to a
+    /// result of head bits `hb` (lanes and their type), of a first operand
+    /// of `src_bits` bits, or (if `of_insert`) one an `insertelement` makes
+    /// (a splat of a scalar)?
+    pub fn has_shuffle(&self, lanes: &[i32], hb: u32, src_bits: u32, of_insert: bool) -> bool {
         let Some(id) = self.find_mask(lanes) else { return false };
-        self.patterns.iter().any(|p| matches!(&p.tree, Tree::Op(Head::Shuffle(k, _), _) if *k == id))
+        self.patterns.iter().any(|p| match &p.tree {
+            Tree::Op(Head::Shuffle(k, b), kids) if *k == id && *b == hb => match kids.first() {
+                Some(Tree::Op(Head::InsertElement(_), _)) => of_insert,
+                Some(Tree::Leaf(q)) => p.params.get(*q).is_some_and(|x| x.bits == src_bits),
+                _ => true,
+            },
+            _ => false,
+        })
     }
 
     pub fn find_mask(&self, lanes: &[i32]) -> Option<u16> {

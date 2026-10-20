@@ -10,7 +10,7 @@ use epitome_ir::types::{Type, TypeId};
 
 use crate::abi::{Abi, Syntax};
 use crate::mir::*;
-use crate::object::{GlobalData, Item, SectionKind};
+use crate::object::{self, GlobalData, Item, SectionKind};
 use crate::prepare::{self, Ctx};
 use crate::target::{Target, sext};
 
@@ -141,6 +141,43 @@ pub fn collect_globals(cx: &Ctx, abi: &Abi) -> Result<Vec<GlobalData>, String> {
         out.push(GlobalData { symbol: abi.symbol(&name), global, section, align, items });
     }
     Ok(out)
+}
+
+/// The module's aliases, of a global plus a constant offset.
+pub fn collect_aliases(cx: &Ctx, abi: &Abi) -> Result<Vec<object::Alias>, String> {
+    let m = &*cx.m;
+    let mut out = Vec::new();
+    for &g in &m.global_order {
+        let gl = m.global(g);
+        let GlobalKind::Alias { aliasee, .. } = &gl.kind else { continue };
+        let name = gl.name.clone().unwrap_or_else(|| format!("g{}", g.0));
+        let (t, offset) = crate::prepare::const_address(cx, *aliasee)
+            .ok_or_else(|| format!("@{name}: an alias of something not a global plus an offset"))?;
+        let target = m.global(t).name.clone().unwrap_or_else(|| format!("g{}", t.0));
+        out.push(object::Alias {
+            symbol: abi.symbol(&name),
+            target: abi.symbol(&target),
+            offset,
+            global: !matches!(gl.props.linkage, Linkage::Private | Linkage::Internal),
+        });
+    }
+    Ok(out)
+}
+
+pub fn print_aliases(aliases: &[object::Alias], out: &mut String) {
+    for a in aliases {
+        if a.global {
+            let _ = writeln!(out, "\t.globl {}", a.symbol);
+        }
+        match a.offset {
+            0 => {
+                let _ = writeln!(out, "\t.set {}, {}", a.symbol, a.target);
+            }
+            o => {
+                let _ = writeln!(out, "\t.set {}, {}{o:+}", a.symbol, a.target);
+            }
+        }
+    }
 }
 
 pub fn print_globals(abi: &Abi, globals: &[GlobalData], out: &mut String) {

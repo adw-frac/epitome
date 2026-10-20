@@ -214,6 +214,106 @@ each of five masks, on every value the mask lets through. Weakening
 a condition of any of these steps (the `and` in demanded bits, the
 widths of a funnel shift, the mask in known bits) makes it fail.
 
+### Bit maps (planned)
+
+The steps above each know one shape. Most code that moves bits around,
+rather than computing with them, can be handled by one analysis instead:
+say, for each bit of a value, where it comes from, and then find the
+cheapest operation that puts the bits there.
+
+**The map.** A value of any width, scalar or vector (up to 512 bits), gets
+a *bit map*: for each of its bits, one of
+
+- `0` or `1`, a known constant bit;
+- `s[i]`, bit `i` of a source value `s`, with up to four sources;
+- `?`, a bit that is poison or undefined, which matches anything.
+
+A vector's bits are numbered lane by lane, low lane first, as the data
+layout lays them out in memory (little-endian), so that a `bitcast`
+between a vector and an integer of the same width leaves the map as it is.
+
+The map is built by walking down from a root, at most eight levels, through
+instructions whose output bits are each a copy of one input bit or a
+constant:
+
+- `trunc`, `zext` and `sext` (whose top bits are copies of the sign bit);
+- `shl`, `lshr` and `ashr` by a constant, and rotates (`llvm.fshl` and
+  `llvm.fshr` by a constant);
+- `and` and `or` with a constant (each bit is the input's, or `0` or `1`),
+  and `or` of two maps that never both have a source bit in the same place
+  (a `disjoint` or, or one the maps show is);
+- `bitcast`, `llvm.bswap` and `llvm.bitreverse`;
+- `shufflevector`, and `extractelement` and `insertelement` at constant
+  indices;
+- a load, from the store that reaches it (its clobber in memory SSA), when
+  the two addresses differ by a known constant: the load reads bits
+  `[8o, 8o + w)` of the stored value, at offset `o` bytes into it. A load
+  that several narrower stores cover, together, gets a map with a source
+  for each.
+
+Anything else is a leaf: a source whose bits are taken as they are.
+
+**Matching.** The map then goes down a table of operations, cheapest first,
+each a test of the map's shape:
+
+| Shape of the map | Operation |
+| --- | --- |
+| `s[0..w)` in place | `s` itself, through a `bitcast` if the type differs |
+| the low bits of one source | `trunc` |
+| a source's bits, then zeros, or copies of its top bit | `zext`, `sext` |
+| a source's bits moved up or down by `k`, zeros or sign copies in the rest | `shl`, `lshr`, `ashr` |
+| moved round modulo the width | a rotate |
+| a contiguous field of a source, moved to bit 0 | `lshr` and `and`, which selection makes `ubfx` |
+| a field of one source written into another, in place | `and`/`or` with masks (`bfi`) |
+| bytes reversed, or bits | `llvm.bswap`, `llvm.bitreverse` |
+| whole lanes of one or two sources, rearranged | `shufflevector`, its mask looked up in the description's shuffles |
+
+For the last line the map is cut into lanes, trying the widest lane width
+first: a byte permute that moves whole 32-bit lanes is a `<4 x i32>`
+shuffle. The mask is then looked up in the shuffles the description has
+patterns for, at that lane width (`rev16`, `rev32`, `rev64`, `zip`,
+`uzp`, `trn`, `ext`, `dup`, `ins` on AArch64). It is the same table
+`legalize.rs` asks with `has_shuffle`, so the result is one instruction.
+Where no single shuffle fits, two that do may later be tried, before the
+fallback of building the vector lane by lane.
+
+The rewrite is made only when the operation found takes fewer instructions
+than the instructions it replaces with no other use. It is an elective
+change (autochop).
+
+**What it covers.** Examples, each now written as several instructions or
+as memory traffic:
+
+- A 64-bit store followed by an 8-bit load of its byte 3 is
+  `trunc (lshr v, 24)`, with no load. Four 16-bit stores followed by one
+  64-bit load is the four values zero-extended, shifted and or-ed together,
+  which the map then may find to be a single source (a store of a value
+  taken apart).
+- A stack slot used as a bitcast, `store <16 x i8>` then `load i128` (what
+  code generation now does for bitcasts it has no instruction for), is
+  the `bitcast` again, where the description has one.
+- `(x >> 8 & 0xff) | (x << 8 & 0xff00)` on an `i16` is `llvm.bswap`;
+  shifting bytes into place one by one, as a hand-written byte reversal
+  does, is too.
+- A shuffle written out lane by lane through `extractelement` and
+  `insertelement` is one `shufflevector`, and if its mask is in the table,
+  one instruction.
+- SROA's packing (see [sroa](sroa.md)) and the known-bits and
+  demanded-bits steps above become special cases. They can stay as cheap
+  first tries.
+
+This is the *store-to-load bridge*: forwarding a stored value to a load of
+another width or type, which `forward_store` cannot do since it requires
+the same type.
+
+**Checking.** As `tests/linear.rs` does for the steps above: random trees of
+the instructions the map walks through, on scalars and vectors of every
+width up to 128 bits, are evaluated on random inputs before and after the
+rewrite, and must agree on every bit that is not `?` in the map. Memory
+cases are checked against the model of memory in `tests/combine_rules.rs`,
+widened to bytes, so that a load sees the bytes the last stores to them
+wrote.
+
 ### Loads from constant globals
 
 This is the local part of LLVM's `globalopt` (`combine/constload.rs`). A

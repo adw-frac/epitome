@@ -141,9 +141,12 @@ impl Ctx<'_> {
 pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, String> {
     let mut f = f.clone();
     thread_locals(cx, &mut f);
+    vector_int_bitcasts(cx, &mut f);
+    memset_patterns(cx, &mut f);
     crate::atomics::expand_atomics(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     expand_overflow(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     crate::wide::split_wide(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
+    split_struct_selects(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     split_struct_phis(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     check(cx, &f, fname)?;
     lower_dynamic_allocas(cx, &mut f)?;
@@ -168,6 +171,120 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     }
     split_phi_edges(&mut f);
     Ok(f)
+}
+
+/// Field `k` of struct value `v` (of field type `fty`): a constant's, or
+/// an `extractvalue` made in `s`.
+fn struct_field(cx: &mut Ctx, s: &mut Seq, v: Value, k: usize, fty: TypeId) -> Result<Value, String> {
+    Ok(match v {
+        Value::Const(c) => {
+            let kind = match &cx.m.constant(c).kind {
+                ConstKind::Struct(e) => cx.m.constant(e[k]).kind.clone(),
+                k @ (ConstKind::Poison | ConstKind::Undef | ConstKind::Zero) => k.clone(),
+                _ => return Err("a struct constant not supported".into()),
+            };
+            Value::Const(cx.m.consts.intern(Constant { ty: fty, kind }))
+        }
+        _ => s.op(Op::ExtractValue { aggregate: v, indices: vec![k as u32] }, fty),
+    })
+}
+
+/// A select of a struct of scalars (`{ ptr, i64 }`, a slice) is a select
+/// of each field, and the struct made again of them.
+fn split_struct_selects(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::Select { fmf, cond, then_value, else_value } = f.insts[i.index()].op.clone() else {
+                k += 1;
+                continue;
+            };
+            let r = f.insts[i.index()].result.unwrap();
+            let ty = f.locals[r.index()].ty;
+            let Type::Struct { fields, .. } = cx.m.types.get(ty).clone() else {
+                k += 1;
+                continue;
+            };
+            if fields.iter().any(|t| matches!(cx.m.types.get(*t), Type::Struct { .. } | Type::Array { .. })) {
+                k += 1;
+                continue;
+            }
+            let mut s = Seq { f, new: Vec::new() };
+            let mut agg = Value::Const(cx.m.consts.intern(Constant { ty, kind: ConstKind::Poison }));
+            for (n, &fty) in fields.iter().enumerate() {
+                let a = struct_field(cx, &mut s, then_value, n, fty)?;
+                let c = struct_field(cx, &mut s, else_value, n, fty)?;
+                let v = s.op(Op::Select { fmf, cond, then_value: a, else_value: c }, fty);
+                agg = s.op(Op::InsertValue { aggregate: agg, element: v, indices: vec![n as u32] }, ty);
+            }
+            s.f.replace_uses(Value::Local(r), agg);
+            let new = std::mem::take(&mut s.new);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
+    Ok(())
+}
+
+/// `llvm.experimental.memset.pattern(dst, pattern, count, volatile)`:
+/// `count` stores of `pattern`, one after another from `dst`, as a loop.
+fn memset_patterns(cx: &mut Ctx, f: &mut Function) {
+    let (i1, i8t, i64t, ptr) = (cx.m.types.int(1), cx.m.types.int(8), cx.m.types.int(64), cx.m.types.ptr(0));
+    let mut b = 0;
+    'blocks: while b < f.layout.len() {
+        let blk = f.layout[b];
+        for (k, &i) in f.blocks[blk.index()].insts.iter().enumerate() {
+            let Op::Call(call) = &f.insts[i.index()].op else { continue };
+            if !callee_name(cx.m, call).is_some_and(|n| n.starts_with("llvm.experimental.memset.pattern.")) {
+                continue;
+            }
+            let (dst, pat, count) = (call.args[0].value, call.args[1].value, call.args[2].value);
+            let volatile = cx.const_int(call.args[3].value).is_some_and(|v| v != 0);
+            let pty = cx.value_ty(f, pat);
+            let size = cx.size_of(pty).unwrap_or(1) as i64;
+            let count_ty = cx.value_ty(f, count);
+            // blk: count == 0 ? done : lp
+            // lp:  n = phi [0, blk], [n + 1, lp]; store pat at dst + n*size
+            let lp = f.split_block(blk, k, None);
+            let done = f.split_block(lp, 1, None);
+            f.blocks[lp.index()].insts.clear();
+            let mut s = Seq { f, new: Vec::new() };
+            let count = if count_ty == i64t { count } else { s.cast(CastOp::ZExt, count, i64t) };
+            let zero = cx.int(i64t, 0);
+            let none = s.op(Op::ICmp { pred: ICmpPred::Eq, samesign: false, lhs: count, rhs: zero }, i1);
+            let pre = std::mem::take(&mut s.new);
+            let phi = s.f.add_inst(Op::Phi { fmf: FastMath::default(), incoming: vec![] }, Some((None, i64t)));
+            let n = s.f.result(phi);
+            let off = if size > 0 && size & (size - 1) == 0 {
+                let sh = cx.int(i64t, i64::from(size.trailing_zeros()));
+                s.bin(BinOp::Shl, n, sh, i64t)
+            } else {
+                let sz = cx.int(i64t, size);
+                s.bin(BinOp::Mul, n, sz, i64t)
+            };
+            let at = s.op(
+                Op::Gep { flags: GepFlags::default(), inrange: None, source_ty: i8t, ptr: dst, indices: vec![off] },
+                ptr,
+            );
+            s.op_void(Op::Store { volatile, atomic: None, value: pat, ptr: at, align: None });
+            let one = cx.int(i64t, 1);
+            let next = s.bin(BinOp::Add, n, one, i64t);
+            let more = s.op(Op::ICmp { pred: ICmpPred::Ult, samesign: false, lhs: next, rhs: count }, i1);
+            let body = std::mem::take(&mut s.new);
+            f.insts[phi.index()].op = Op::Phi { fmf: FastMath::default(), incoming: vec![(zero, blk), (next, lp)] };
+            f.blocks[blk.index()].insts.extend(pre);
+            f.push_inst(blk, Op::CondBr { cond: none, then_dest: done, else_dest: lp }, None);
+            f.blocks[lp.index()].insts.push(phi);
+            f.blocks[lp.index()].insts.extend(body);
+            f.push_inst(lp, Op::CondBr { cond: more, then_dest: lp, else_dest: done }, None);
+            b = f.layout.iter().position(|&x| x == done).unwrap();
+            continue 'blocks;
+        }
+        b += 1;
+    }
 }
 
 /// A phi of a struct of scalars (a landing pad's `{ ptr, i32 }`, carried
@@ -315,6 +432,72 @@ fn thread_locals(cx: &mut Ctx, f: &mut Function) {
             k += n;
         }
     }
+}
+
+/// Bitcasts between integers and vectors of their width, in forms the
+/// description has: a 64-bit vector and `i64` through `<8 x i8>` (`fmov`);
+/// a 128-bit one and `i128` through memory, stored as one type to a stack
+/// slot and loaded back as the other. (Not vectors of `i1`, whose bits
+/// memory packs, nor 32-bit ones, which are widened later.)
+fn vector_int_bitcasts(cx: &mut Ctx, f: &mut Function) {
+    let i8t = cx.m.types.int(8);
+    let v8i8 = cx.m.types.intern(Type::Vector { len: 8, elem: i8t, scalable: false });
+    let ptr = cx.m.types.ptr(0);
+    let vector = |cx: &Ctx, ty: TypeId| match cx.m.types.get(ty) {
+        Type::Vector { scalable: false, elem, .. } => !matches!(cx.m.types.get(*elem), Type::Int(1)),
+        _ => false,
+    };
+    let int = |cx: &Ctx, ty: TypeId| matches!(cx.m.types.get(ty), Type::Int(_));
+    let Some(&entry) = f.layout.first() else { return };
+    let mut slots = Vec::new();
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::Cast { op: CastOp::BitCast, value, .. } = f.insts[i.index()].op else {
+                k += 1;
+                continue;
+            };
+            let r = f.insts[i.index()].result.unwrap();
+            let (from, to) = (cx.value_ty(f, value), f.locals[r.index()].ty);
+            if !(vector(cx, from) && int(cx, to) || int(cx, from) && vector(cx, to)) {
+                k += 1;
+                continue;
+            }
+            let size = cx.size_of(to).unwrap_or(0);
+            if size != 8 && size != 16 {
+                k += 1;
+                continue;
+            }
+            let mut s = Seq { f, new: Vec::new() };
+            let v = if size == 8 {
+                if from == v8i8 || to == v8i8 {
+                    k += 1;
+                    continue;
+                }
+                let x = s.cast(CastOp::BitCast, value, v8i8);
+                s.cast(CastOp::BitCast, x, to)
+            } else {
+                let align = Some(size.next_power_of_two().clamp(1, 16));
+                let slot = s.f.add_inst(
+                    Op::Alloca { inalloca: false, ty: from, count: None, align, addrspace: None },
+                    Some((None, ptr)),
+                );
+                slots.push(slot);
+                let at = s.f.result(slot);
+                s.op_void(Op::Store { volatile: false, atomic: None, value, ptr: at, align });
+                s.op(Op::Load { volatile: false, atomic: None, ptr: at, align }, to)
+            };
+            s.f.replace_uses(Value::Local(r), v);
+            let new = std::mem::take(&mut s.new);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
+    // The slots, first in the entry block, as fixed allocas are.
+    f.blocks[entry.index()].insts.splice(0..0, slots);
 }
 
 /// An `i1` in memory is a byte, 0 or 1: its stores store it zero-extended,
@@ -1174,10 +1357,14 @@ fn promote_odd(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         if from_odd && matches!(cop, CastOp::ZExt | CastOp::SExt) {
                             *value = fix(cx, f, *value, from, *cop == CastOp::SExt);
                         }
-                        // Between equal register widths, the cast is free.
+                        // Between equal register widths, the cast is free; from
+                        // a wider container (an i3 held in 32 bits, made right
+                        // above, extended to i8) it takes the low bits.
                         let from_w = container(from).unwrap_or(from);
                         if from_w == to {
                             *cop = CastOp::BitCast;
+                        } else if from_w > to && matches!(cop, CastOp::ZExt | CastOp::SExt) {
+                            *cop = CastOp::Trunc;
                         }
                     }
                 }
@@ -1185,7 +1372,13 @@ fn promote_odd(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
             }
             // A bitcast between integers is the identity; use freeze, which
             // is a plain copy, as the selector treats bitcasts of pointers.
-            if let Op::Cast { op: CastOp::BitCast, value, .. } = op {
+            // (Not one to or from a float or a vector: those move bits
+            // between register files.)
+            if let Op::Cast { op: CastOp::BitCast, value, .. } = op
+                && let Some(r) = res
+                && matches!(cx.m.types.get(f.locals[r.index()].ty), Type::Int(_))
+                && matches!(cx.m.types.get(cx.value_ty(f, value)), Type::Int(_))
+            {
                 op = Op::Freeze(value);
             }
             f.insts[i.index()].op = op;
@@ -1616,6 +1809,31 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                     c.args[1].value = no;
                 }
             }
+            // Bit counts and byte swaps of vectors without an instruction
+            // (NEON counts only bytes' bits): lane by lane.
+            if !scalar
+                && matches!(base.as_str(), "llvm.ctpop" | "llvm.ctlz" | "llvm.cttz" | "llvm.bswap")
+                && !cx.selects_intrinsic(&name)
+                && let Type::Vector { len, elem, scalable: false } = *cx.m.types.get(ty)
+                && let Type::Int(eb) = *cx.m.types.get(elem)
+            {
+                let i64t = cx.m.types.int(64);
+                let mut v = Value::Const(cx.m.consts.intern(Constant { ty, kind: ConstKind::Poison }));
+                for lane in 0..len {
+                    let idx = cx.int(i64t, lane as i64);
+                    let x = s.op(Op::ExtractElement { vector: args[0], index: idx }, elem);
+                    let mut a = vec![x];
+                    a.extend(args.iter().skip(1).copied());
+                    let y = call_intrinsic(cx, &mut s, &format!("{base}.i{eb}"), a, elem);
+                    v = s.op(Op::InsertElement { vector: v, element: y, index: idx }, ty);
+                }
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), v);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
             // Bit counts and byte swaps without an instruction: widened to
             // a width that has one, or done with shifts and masks.
             if scalar
@@ -1634,6 +1852,17 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 // Narrow minimum and maximum: compare and select.
                 (Some(pred), _) if scalar && bits < 32 => {
                     let c = s.op(Op::ICmp { pred, samesign: false, lhs: args[0], rhs: args[1] }, i1);
+                    Some(s.op(
+                        Op::Select { fmf: FastMath::default(), cond: c, then_value: args[0], else_value: args[1] },
+                        ty,
+                    ))
+                }
+                // Vector minimum and maximum without an instruction (NEON's
+                // of 64-bit lanes): compare and select, lane by lane.
+                (Some(pred), _) if !scalar && !cx.selects_intrinsic(&name) => {
+                    let Type::Vector { len, scalable: false, .. } = *cx.m.types.get(ty) else { unreachable!() };
+                    let mask = cx.m.types.intern(Type::Vector { len, elem: i1, scalable: false });
+                    let c = s.op(Op::ICmp { pred, samesign: false, lhs: args[0], rhs: args[1] }, mask);
                     Some(s.op(
                         Op::Select { fmf: FastMath::default(), cond: c, then_value: args[0], else_value: args[1] },
                         ty,

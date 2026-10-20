@@ -166,6 +166,38 @@ impl GlobalData {
     }
 }
 
+/// A global alias: another name for an address in this file, `target`
+/// (as the platform names it) plus `offset`.
+#[derive(Clone, Debug)]
+pub struct Alias {
+    pub symbol: String,
+    pub target: String,
+    pub offset: i64,
+    pub global: bool,
+}
+
+/// Defines each alias as a symbol at its target's place. (The target must
+/// be defined here: an alias is of a definition.)
+pub fn add_aliases(obj: &mut Object, aliases: &[Alias]) -> Result<(), String> {
+    for a in aliases {
+        let t = obj
+            .symbols
+            .iter()
+            .find(|s| s.name == a.target && s.section.is_some())
+            .ok_or_else(|| format!("{}: an alias of {}, which is not defined here", a.symbol, a.target))?
+            .clone();
+        obj.symbols.push(Symbol {
+            name: a.symbol.clone(),
+            section: t.section,
+            value: (t.value as i64 + a.offset) as u64,
+            size: if a.offset == 0 { t.size } else { 0 },
+            global: a.global,
+            kind: t.kind,
+        });
+    }
+    Ok(())
+}
+
 /// A reference to a symbol, by name, before the symbols are all known.
 pub struct Pending {
     pub section: usize,
@@ -180,7 +212,13 @@ pub struct Pending {
 }
 
 /// The object for compiled functions (laid out and allocated) and globals.
-pub fn build(t: &Target, abi: &Abi, funcs: &[MFunc], globals: &[GlobalData]) -> Result<Object, String> {
+pub fn build(
+    t: &Target,
+    abi: &Abi,
+    funcs: &[MFunc],
+    globals: &[GlobalData],
+    aliases: &[Alias],
+) -> Result<Object, String> {
     let mut obj = Object::default();
     let mut by_kind: HashMap<SectionKind, usize> = HashMap::new();
     let mut section = |obj: &mut Object, kind: SectionKind| -> usize {
@@ -316,6 +354,7 @@ pub fn build(t: &Target, abi: &Abi, funcs: &[MFunc], globals: &[GlobalData]) -> 
         });
     }
 
+    add_aliases(&mut obj, aliases)?;
     resolve(t, &mut obj, pending, abi.syntax == Syntax::MachO)?;
     let p = crate::unwind::Params { syntax: abi.syntax, data_align: t.machine.data_align(abi.syntax), ra: abi.lr };
     crate::unwind::add_eh_frame(&mut obj, &t.machine, &p, &frames)?;

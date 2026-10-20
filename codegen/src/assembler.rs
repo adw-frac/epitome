@@ -97,13 +97,25 @@ fn split_template(tpl: &str) -> Vec<Part> {
             parts.push(Part::Lit(rest[..open].to_string()));
         }
         let close = rest[open..].find('}').map_or(rest.len(), |c| open + c);
-        parts.push(Part::Hole(rest[open + 1..close].to_string()));
+        let hole = &rest[open + 1..close];
+        match crate::mir::literal_brace(hole) {
+            Some(b) => parts.push(Part::Lit(b.to_string())),
+            None => parts.push(Part::Hole(hole.to_string())),
+        }
         rest = &rest[(close + 1).min(rest.len())..];
     }
     if !rest.is_empty() {
         parts.push(Part::Lit(rest.to_string()));
     }
-    parts
+    // Literal text side by side (a brace beside the text) is one piece.
+    let mut merged: Vec<Part> = Vec::new();
+    for p in parts {
+        match (merged.last_mut(), p) {
+            (Some(Part::Lit(a)), Part::Lit(b)) => a.push_str(&b),
+            (_, p) => merged.push(p),
+        }
+    }
+    merged
 }
 
 fn mnemonic(s: &str) -> &str {
@@ -366,6 +378,7 @@ impl<'t> Assembler<'t> {
         let mut discard = false;
         let mut labels: HashMap<String, (usize, u64)> = HashMap::new();
         let mut defined: Vec<String> = Vec::new();
+        let mut sets: Vec<(String, String, i64)> = Vec::new();
         let mut globals: HashSet<String> = HashSet::new();
         let mut types: HashMap<String, SymbolKind> = HashMap::new();
         let mut sizes: HashMap<String, u64> = HashMap::new();
@@ -445,6 +458,14 @@ impl<'t> Assembler<'t> {
                     }
                     "globl" | "global" => {
                         globals.insert(args.to_string());
+                    }
+                    // Another name for a label (plus an offset): an alias.
+                    "set" | "equ" => {
+                        let (name, value) =
+                            args.split_once(',').ok_or_else(|| err(n, "a .set without a value".into()))?;
+                        let (target, offset) =
+                            parse_sym_offset(value).ok_or_else(|| err(n, "a .set of other than a label".into()))?;
+                        sets.push((name.trim().to_string(), target, offset));
                     }
                     "p2align" | "align" | "balign" => {
                         let v = list()
@@ -714,6 +735,11 @@ impl<'t> Assembler<'t> {
                 name,
             });
         }
+        let aliases: Vec<object::Alias> = sets
+            .into_iter()
+            .map(|(symbol, target, offset)| object::Alias { global: globals.contains(&symbol), symbol, target, offset })
+            .collect();
+        object::add_aliases(&mut obj, &aliases)?;
         object::resolve(self.t, &mut obj, pending, syntax == Syntax::MachO)?;
         // The unwind tables, as the convention of this dialect has them.
         if !frames.is_empty() {
@@ -897,14 +923,71 @@ fn strip_comment<'l>(line: &'l str, comment: &str, syntax: Syntax) -> &'l str {
     line
 }
 
+/// `line` without its `/* ... */` comments (which inline assembly writes:
+/// `/*${0}*/`, an empty template naming its operand), each a space;
+/// `in_block` carries one that goes on past the line's end.
+fn strip_block_comments(line: &str, in_block: &mut bool) -> String {
+    if !*in_block && !line.contains("/*") {
+        return line.to_string();
+    }
+    let mut out = String::new();
+    let mut rest = line;
+    let mut in_str = false;
+    loop {
+        if *in_block {
+            match rest.find("*/") {
+                Some(k) => {
+                    rest = &rest[k + 2..];
+                    *in_block = false;
+                    out.push(' ');
+                }
+                None => return out,
+            }
+        }
+        // The next opening outside a string.
+        let mut open = None;
+        let mut escaped = false;
+        for (k, c) in rest.char_indices() {
+            if in_str {
+                match c {
+                    _ if escaped => escaped = false,
+                    '\\' => escaped = true,
+                    '"' => in_str = false,
+                    _ => {}
+                }
+                continue;
+            }
+            if c == '"' {
+                in_str = true;
+            } else if rest[k..].starts_with("/*") {
+                open = Some(k);
+                break;
+            }
+        }
+        match open {
+            Some(k) => {
+                out.push_str(&rest[..k]);
+                rest = &rest[k + 2..];
+                *in_block = true;
+            }
+            None => {
+                out.push_str(rest);
+                return out;
+            }
+        }
+    }
+}
+
 /// The statements of the text, each with its line's number: lines without
 /// comments, split at `;` (for ELF; outside strings), with numeric local
 /// labels (`1:`, referred to as `1b` and `1f`, as inline assembly writes
 /// them) renamed to temporary labels of their own.
 fn statements(lines: &[&str], comment: &str, syntax: Syntax) -> Vec<(usize, String)> {
     let mut out: Vec<(usize, String)> = Vec::new();
+    let mut in_block = false;
     for (n, raw) in lines.iter().enumerate() {
-        let line = strip_comment(raw, comment, syntax);
+        let unblocked = strip_block_comments(raw, &mut in_block);
+        let line = strip_comment(&unblocked, comment, syntax);
         if syntax == Syntax::MachO || !line.contains(';') {
             out.push((n, line.to_string()));
             continue;

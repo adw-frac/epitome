@@ -296,10 +296,12 @@ Advanced SIMD instructions are described like the rest, with vector types
 in their bodies: `add <4 x i32>` is `add v0.4s, v1.4s, v2.4s`. 128-bit
 vectors live in q registers and 64-bit ones in d registers; templates print
 a register with an arrangement (`{n:4s}`), a lane (`{n:.s}[{idx}]`) or a
-scalar view (`{d:s}`). A vector of `i1` is a *mask*: lanes of all ones or
+scalar view (`{d:s}`), and braces as `{lb}` and `{rb}` (`tbl`'s register
+list, `{lb}{n:16b}{rb}`). A vector of `i1` is a *mask*: lanes of all ones or
 all zeros, as `cmeq` and its kin make them, in a q register. Shuffles match
-by their constant masks (`rev64` is `shufflevector` with `<1, 0, 3, 2>`),
-and reductions with no single instruction are recipes (`addv` then `umov`).
+by their constant masks (`rev64` is `shufflevector` with `<1, 0, 3, 2>`)
+and the type of their result and operand (the same mask at another lane
+width is another shuffle), and reductions with no single instruction are recipes (`addv` then `umov`).
 The vector part of the description (`50-vectors.ll`, 482 instructions) is
 written by `codegen/targets/aarch64/gen_vectors.py`, one entry per
 arrangement; the output is checked in and is data like the rest.
@@ -329,6 +331,13 @@ reshapes first, as LLVM's type legalisation does:
   64-bit multiplications and reductions without an across-lanes
   instruction go lane by lane; ordered floating-point reductions are added
   in order, as written. Vectors of pointers become vectors of `i64`.
+  Minimum and maximum of 64-bit lanes are a compare and a select (`cmhi`,
+  `bsl`); bit counts of lanes wider than a byte go lane by lane.
+- A bitcast between a 64-bit vector and `i64` is `fmov`; one between a
+  128-bit vector and `i128`, through memory: stored as one type to a stack
+  slot and loaded back as the other. (The planned bit maps of
+  [the combiner](combine.md#bit-maps-planned) would make such pairs
+  moves where an instruction exists.)
 
 ### Small memsets and copies
 
