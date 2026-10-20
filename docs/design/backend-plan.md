@@ -190,7 +190,9 @@ call on constants is worked out through its callee (`constcall.rs`):
 With the scratch registers allocated where nothing spills: ours 3,365
 (1.09x), backend only 3,465 (1.12x). With comparisons decided by known
 bits, and constants of one instruction no longer hoisted out of loops
-(`isel.md`): ours 3,322 (1.08x), backend only 3,428 (1.11x).
+(`isel.md`): ours 3,322 (1.08x), backend only 3,428 (1.11x). With matches
+scored by what they cost, constants included: ours 3,323, backend only
+3,412 (1.11x).
 
 What is left, largest first: `inlining`'s `main`, `i128` additions (`adds`
 and `adc`, which the flags model cannot express yet: it models the flags

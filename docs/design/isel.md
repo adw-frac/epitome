@@ -416,9 +416,16 @@ with no store or call between it and the root.
 Blocks are covered from the bottom up. An instruction is a *root* if it has
 side effects, is a terminator, or its value is used outside what has been
 folded. For each root the trie gives every pattern that matches; the
-selector takes the one that covers the most IR operations, then the one
-that needs no extra branch, then the one with fewer instructions. Operands
-of the chosen match that are instructions become roots in turn.
+selector scores each by the IR operations it covers, less the instructions
+it emits and the constants it needs made in registers. It takes the best
+score, then the match covering more, then the one that needs no extra
+branch. So `x * 5 + 20` is `add w0, w0, w0, lsl #2` and `add w0, w0, #20`
+rather than `madd` with both constants made first, while `madd` on three
+registers, or a load folded into an add, still wins. (Counting a match's
+own constants and not those of what it leaves uncovered was worse: a
+remainder's `msub` needs the divisor in a register, but so does the `mul`
+it would otherwise leave.) Operands of the chosen match that are
+instructions become roots in turn.
 
 Constants that end up in registers are made by the patterns whose body is
 just `ret %imm` (`movz`, `movn`, `orr` with a logical immediate), or failing

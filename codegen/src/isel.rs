@@ -40,7 +40,10 @@ struct Match {
     params: Vec<Option<Term>>,
     next: Option<BlockId>,
     covered: Vec<InstId>,
-    cost: (usize, bool, i64),
+    /// Higher is better: the IR instructions it covers less the machine
+    /// instructions it emits and the constants it must make in registers;
+    /// then more covered; then no branch added.
+    cost: (i64, usize, bool),
     /// Instructions whose values are further results, and the operand of
     /// the first emitted instruction that receives each.
     extras: Vec<(InstId, usize)>,
@@ -754,7 +757,14 @@ impl<'a, 'b> Sel<'a, 'b> {
             }
         }
         let extra_branch = next.is_some() && next != layout_next;
-        let cost = (covered.len(), !extra_branch, -(p.emit.len() as i64) - materialize - i64::from(extra_branch));
+        // A pattern covering more is better only if what it saves is not
+        // spent again on instructions and on making constants in
+        // registers: `mul x, 5` then `add 20` is `add w, w0, w0, lsl #2`
+        // and an add, not `madd` with both constants made. Ties go to the
+        // pattern covering more, since what another leaves uncovered still
+        // costs an instruction.
+        let spent = p.emit.len() as i64 + materialize;
+        let cost = (covered.len() as i64 - spent, covered.len(), !extra_branch);
         Some(Match { pat, params, next, covered, cost, extras })
     }
 
