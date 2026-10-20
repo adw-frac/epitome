@@ -75,6 +75,53 @@ cargo run --release -p epitome-codegen --bin epitome-objdump -- -d file.o
 `epitome-opt --help` lists the options. `opt/tests/examples` has small
 inputs with their expected output.
 
+## Building IR in code
+
+`epitome_ir::build` has constructors for the main structures
+(`Types::function`, `Constant::int`, `Call::new`, `Global::function`,
+`Module::declare`, ...) and a `FunctionBuilder` that adds instructions at
+the end of the current block, working out result types and checking
+operands:
+
+```rust
+let mut m = epitome_ir::Module::default();
+let i64t = m.types.int(64);
+let mut b = m.function("max", i64t, &[("a", i64t), ("b", i64t)]);
+let (x, y) = (b.param(0), b.param(1));
+b.block("entry");
+let gt = b.icmp(epitome_ir::module::ICmpPred::Sgt, x, y);
+let r = b.select(gt, x, y);
+b.ret(r);
+b.finish()?; // every block must end in a terminator
+```
+
+The module can then go to `epitome_opt::pipeline::run` and
+`epitome_codegen::compile` like a parsed one.
+
+## Building Rust crates with Epitome
+
+`epitome-rustc` (in this package) is a `RUSTC_WRAPPER`: Cargo runs it with
+each rustc command line. It runs rustc as asked, also writing the crate's
+LLVM IR in one codegen unit, compiles that IR with Epitome, and puts our
+object in place of rustc's: in the `.rlib` for a library, and at the link
+(it is given as rustc's linker) for a binary or test harness.
+
+```sh
+cargo build --release --bin epitome-rustc
+cd some-crate
+RUSTC_WRAPPER=/path/to/epitome/target/release/epitome-rustc cargo test
+cat target/debug/epitome-rustc.log   # which crates are ours, and why not
+```
+
+Rust's standard library comes built and stays LLVM's, and so do
+proc-macro crates and build scripts (`EPITOME_RUSTC_BUILD_SCRIPTS=1` takes
+build scripts too). A crate whose IR Epitome cannot compile yet keeps
+rustc's object, and the log says why. `EPITOME_RUSTC_OPT=1` runs Epitome's
+optimiser on rustc's unoptimised IR as well; `EPITOME_RUSTC_SKIP` and
+`EPITOME_RUSTC_ONLY` take comma-separated crate names. This is a wrapper,
+not a rustc codegen backend (`-Zcodegen-backend`), which would have to be
+built against rustc's internals and turn its MIR into our IR.
+
 ## License
 
 Copyright (c) 2026 Amy Thomason. No license has been chosen yet; see

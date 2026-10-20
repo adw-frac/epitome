@@ -214,7 +214,9 @@ impl Function {
         id
     }
 
-    /// A new, empty block. It is not placed in `layout`.
+    /// A new, empty block. It is not placed in `layout`. The function must
+    /// have a block already, whose label type it takes; make the first with
+    /// `add_entry_block` (or build with `build::FunctionBuilder`).
     pub fn add_block(&mut self, name: Option<String>) -> BlockId {
         let label = self.label_type();
         let id = BlockId(self.blocks.len() as u32);
