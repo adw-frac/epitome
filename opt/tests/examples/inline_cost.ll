@@ -1,4 +1,4 @@
-; draconian-opt: -O2
+; epitome-opt: -O2
 ; How the cost model weighs calls. See the remarks at the top of the
 ; expected output.
 ;

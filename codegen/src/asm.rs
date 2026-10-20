@@ -5,8 +5,8 @@
 
 use std::fmt::Write;
 
-use draconian_ir::module::*;
-use draconian_ir::types::{Type, TypeId};
+use epitome_ir::module::*;
+use epitome_ir::types::{Type, TypeId};
 
 use crate::abi::{Abi, Syntax};
 use crate::mir::*;

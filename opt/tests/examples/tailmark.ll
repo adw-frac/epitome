@@ -1,4 +1,4 @@
-; draconian-opt: --passes=tailmark
+; epitome-opt: --passes=tailmark
 ; Calls marked tail where nothing in the caller's frame can be reached.
 define i32 @g(i32 %x) {
   %r = add i32 %x, 1

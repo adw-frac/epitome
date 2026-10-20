@@ -1,9 +1,9 @@
-// A whole Rust program compiled by draconian (from rustc's IR), linked
+// A whole Rust program compiled by epitome (from rustc's IR), linked
 // against rustc's std: panics unwind through drops and are caught by
 // `catch_unwind`, resumed, and nested.
 use std::panic;
 
-// (Not an atomic or a thread local: draconian has neither yet.)
+// (Not an atomic or a thread local: epitome has neither yet.)
 static mut DROPS: u32 = 0;
 
 struct Guard(&'static str);

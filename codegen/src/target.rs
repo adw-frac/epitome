@@ -9,8 +9,8 @@
 
 use std::collections::HashMap;
 
-use draconian_ir::module::*;
-use draconian_ir::types::{Type, TypeId};
+use epitome_ir::module::*;
+use epitome_ir::types::{Type, TypeId};
 
 use crate::enc::{self, Encoding, Env};
 use crate::machine::Holds;
@@ -327,14 +327,14 @@ fn attr<'a>(attrs: &'a [Attr], key: &str) -> Option<Option<&'a str>> {
     })
 }
 
-/// The directories of `DRACONIAN_TARGET_PATH`.
+/// The directories of `EPITOME_TARGET_PATH`.
 fn target_dirs() -> Vec<String> {
-    std::env::var("DRACONIAN_TARGET_PATH")
+    std::env::var("EPITOME_TARGET_PATH")
         .map(|p| p.split(':').filter(|d| !d.is_empty()).map(str::to_string).collect())
         .unwrap_or_default()
 }
 
-/// The directory of target `name` in `DRACONIAN_TARGET_PATH`.
+/// The directory of target `name` in `EPITOME_TARGET_PATH`.
 fn search_path(name: &str) -> Option<String> {
     target_dirs().into_iter().map(|d| format!("{d}/{name}")).find(|p| std::path::Path::new(p).is_dir())
 }
@@ -486,7 +486,7 @@ impl Target {
     /// parse error is reported by the file and line it is in.
     pub fn load_files(files: &[(&str, &str)]) -> Result<Target, String> {
         let text: String = files.iter().map(|(_, t)| *t).collect();
-        match draconian_ir::parse_module(&text) {
+        match epitome_ir::parse_module(&text) {
             Ok(m) => Target::from_module(m),
             Err(e) => {
                 let mut line = e.line;
@@ -504,7 +504,7 @@ impl Target {
 
     /// A target: by `spec`, a path (a `.ll` file, or a directory of them) or
     /// a name (`aarch64` is built in; others are directories of that name
-    /// in `DRACONIAN_TARGET_PATH`, a list separated by colons); or with no
+    /// in `EPITOME_TARGET_PATH`, a list separated by colons); or with no
     /// `spec`, the one a module's `triple` names by its architecture
     /// (`riscv64-unknown-linux-gnu` is `riscv64`), else the built-in one.
     /// The files of `adds` (files, or directories of them) are read after
@@ -520,7 +520,7 @@ impl Target {
             Some("aarch64" | "arm64") => built_in(&mut files),
             Some(name) => {
                 let dir = search_path(name).ok_or_else(|| {
-                    format!("no target {name}: not a path, not built in, and not in DRACONIAN_TARGET_PATH")
+                    format!("no target {name}: not a path, not built in, and not in EPITOME_TARGET_PATH")
                 })?;
                 files.extend(read_path(&dir)?);
             }
@@ -529,7 +529,7 @@ impl Target {
                 Some(dir) => files.extend(read_path(&dir)?),
                 None => {
                     return Err(format!(
-                        "no target for {arch}: name one with --target, or put it in DRACONIAN_TARGET_PATH"
+                        "no target for {arch}: name one with --target, or put it in EPITOME_TARGET_PATH"
                     ));
                 }
             },
@@ -542,7 +542,7 @@ impl Target {
     }
 
     /// The target whose ELF machine number is `machine`: the built-in one,
-    /// or one in `DRACONIAN_TARGET_PATH`.
+    /// or one in `EPITOME_TARGET_PATH`.
     pub fn for_elf_machine(machine: u16) -> Option<Target> {
         let t = Target::aarch64();
         if t.machine.elf_machine == machine {
@@ -574,7 +574,7 @@ impl Target {
         Target::load_files(&[("<description>", src)])
     }
 
-    fn from_module(module: draconian_ir::Module) -> Result<Target, String> {
+    fn from_module(module: epitome_ir::Module) -> Result<Target, String> {
         let machine = crate::machine::Machine::read(&module)?;
         let mut t = Target {
             module,

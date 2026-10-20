@@ -1,4 +1,4 @@
-//! Draconian's optimisation passes, and the machinery that runs them on many
+//! Epitome's optimisation passes, and the machinery that runs them on many
 //! functions at once.
 //!
 //! - `ctx` and `par`: splitting a module so threads can work on different

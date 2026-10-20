@@ -14,8 +14,8 @@
 //! the run's bytes. The memset goes where the run's first store was, with
 //! that store's alignment.
 
-use draconian_ir::module::*;
-use draconian_ir::types::Type;
+use epitome_ir::module::*;
+use epitome_ir::types::Type;
 
 use crate::aa::{AliasResult, BasicAa, Location};
 use crate::ctx::Shared;
@@ -69,11 +69,11 @@ pub fn run(sh: &Shared, f: &mut Function) -> Stats {
     }
     drop(aa);
     for (b, run) in runs {
-        if !draconian_ir::chop::allow(|| {
+        if !epitome_ir::chop::allow(|| {
             format!(
                 "memcpyopt: {} stores to {} as a memset",
                 run.len(),
-                draconian_ir::printer::inst_name(f, run[0].inst)
+                epitome_ir::printer::inst_name(f, run[0].inst)
             )
         }) {
             continue;
@@ -224,7 +224,7 @@ fn make_memset(sh: &Shared, f: &mut Function, b: BlockId, run: &[Piece]) {
         vec![address, sh.int(8, start.byte as i64), sh.int(64, bytes as i64), {
             let i1 = sh.intern_type(Type::Int(1));
             Value::Const(
-                sh.intern_const(Constant { ty: i1, kind: ConstKind::Int(draconian_ir::apint::ApInt::from_u64(1, 0)) }),
+                sh.intern_const(Constant { ty: i1, kind: ConstKind::Int(epitome_ir::apint::ApInt::from_u64(1, 0)) }),
             )
         }],
     );

@@ -176,10 +176,10 @@ pub fn limit_from(option: Option<&str>, var: &str) -> Result<Option<Limit>, Stri
 }
 
 /// Appends each function's count to the file the environment variable
-/// `DRACONIAN_CHOP_COUNTS` names, if any, as lines `tool index steps name`,
+/// `EPITOME_CHOP_COUNTS` names, if any, as lines `tool index steps name`,
 /// for a search to read.
 pub fn report_counts(tool: &str, names: &[String], steps: &[u64]) -> std::io::Result<()> {
-    let Ok(path) = std::env::var("DRACONIAN_CHOP_COUNTS") else { return Ok(()) };
+    let Ok(path) = std::env::var("EPITOME_CHOP_COUNTS") else { return Ok(()) };
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
     for (k, n) in steps.iter().enumerate() {

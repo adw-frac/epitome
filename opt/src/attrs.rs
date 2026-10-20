@@ -1,6 +1,6 @@
 //! Looking up attributes, including those reached through attribute groups.
 
-use draconian_ir::module::{Attr, Linkage, Module};
+use epitome_ir::module::{Attr, Linkage, Module};
 
 /// Every attribute in `list`, with `#N` groups expanded.
 fn expanded<'a>(m: &'a Module, list: &'a [Attr]) -> impl Iterator<Item = &'a Attr> {

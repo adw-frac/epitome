@@ -4,10 +4,10 @@
 //! constants, values used once or many times, must compute the same before
 //! and after the combiner, on sample inputs.
 
-use draconian_ir::module::*;
-use draconian_ir::types::Type;
-use draconian_opt::pipeline::{self, Options};
-use draconian_opt::recursion::RecursionMode;
+use epitome_ir::module::*;
+use epitome_ir::types::Type;
+use epitome_opt::pipeline::{self, Options};
+use epitome_opt::recursion::RecursionMode;
 
 struct Rng(u64);
 
@@ -161,8 +161,8 @@ fn arithmetic_steps_keep_values() {
         let w = [8, 32, 64][case % 3];
         let n = 2 + rng.below(14) as usize;
         let src = generate(&mut rng, w, n);
-        let original = draconian_ir::parse_module(&src).unwrap();
-        let mut m = draconian_ir::parse_module(&src).unwrap();
+        let original = epitome_ir::parse_module(&src).unwrap();
+        let mut m = epitome_ir::parse_module(&src).unwrap();
         pipeline::run(&mut m, &opts);
         let count = |m: &Module| m.functions().map(|(_, f)| f.layout.iter().map(|b| f.blocks[b.index()].insts.len()).sum::<usize>()).sum::<usize>();
         before += count(&original);
@@ -246,8 +246,8 @@ fn bit_steps_keep_values() {
     for _ in 0..500 {
         let n = 2 + rng.below(12) as usize;
         let src = generate_bits(&mut rng, n);
-        let original = draconian_ir::parse_module(&src).unwrap();
-        let mut m = draconian_ir::parse_module(&src).unwrap();
+        let original = epitome_ir::parse_module(&src).unwrap();
+        let mut m = epitome_ir::parse_module(&src).unwrap();
         let report = pipeline::run(&mut m, &opts);
         steps += ["(demanded bits)", "(known bits)", "(funnel shift)"].iter().map(|k| report.combines.fired.get(*k).copied().unwrap_or(0)).sum::<usize>();
         let count = |m: &Module| {
@@ -295,8 +295,8 @@ fn comparisons_of_masked_values() {
                 let src = format!(
                     "define i64 @f(i64 %a, i64 %b) {{\n  %x = and i64 %a, {mask}\n  %c = icmp {p} i64 %x, {k}\n  %v0 = select i1 %c, i64 1, i64 0\n  ret i64 %v0\n}}\n"
                 );
-                let original = draconian_ir::parse_module(&src).unwrap();
-                let mut m = draconian_ir::parse_module(&src).unwrap();
+                let original = epitome_ir::parse_module(&src).unwrap();
+                let mut m = epitome_ir::parse_module(&src).unwrap();
                 let report = pipeline::run(&mut m, &opts);
                 decided += report.combines.fired.get("(known bits)").copied().unwrap_or(0);
                 let values: Vec<u64> = if mask < 256 {

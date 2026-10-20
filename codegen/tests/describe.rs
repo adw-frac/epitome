@@ -1,9 +1,9 @@
 //! Checks of the descriptions themselves, and of the checks.
 
-use draconian_codegen::check;
-use draconian_codegen::target::Target;
+use epitome_codegen::check;
+use epitome_codegen::target::Target;
 
-/// The descriptions pass `draconian-llc --check-target`'s checks: every
+/// The descriptions pass `epitome-llc --check-target`'s checks: every
 /// instruction encodes, decodes, disassembles and assembles back to itself;
 /// each recipe's instructions, by their bodies, compute what the IR it
 /// replaces computes; and the smoke program compiles and reads back.
@@ -106,7 +106,7 @@ fn built_in_files_are_the_directory() {
         .filter(|n| n.ends_with(".ll"))
         .collect();
     names.sort();
-    let built_in: Vec<&str> = draconian_codegen::target::AARCH64_FILES.iter().map(|f| f.0).collect();
+    let built_in: Vec<&str> = epitome_codegen::target::AARCH64_FILES.iter().map(|f| f.0).collect();
     assert_eq!(names, built_in);
     let from_dir = Target::load_path(dir.to_str().unwrap()).unwrap();
     let t = Target::aarch64();

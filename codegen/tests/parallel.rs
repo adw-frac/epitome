@@ -13,15 +13,15 @@ use std::process::Command;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use draconian_codegen::target::Target;
-use draconian_codegen::{Options, compile, timing};
+use epitome_codegen::target::Target;
+use epitome_codegen::{Options, compile, timing};
 
 /// The stages' timings are counted for the whole process, so the tests
 /// take turns.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
 fn compiled(t: &Target, ll: &str, threads: usize) -> (String, Vec<u8>) {
-    let mut m = draconian_ir::parse_module(ll).unwrap();
+    let mut m = epitome_ir::parse_module(ll).unwrap();
     let c = compile(t, &mut m, &Options { threads, ..Options::default() }).unwrap();
     let obj = c.object_file(t).unwrap();
     (c.asm, obj)
@@ -152,7 +152,7 @@ fn stage_times(t: &Target, ll: &str) -> [Duration; 5] {
     let mut best = [Duration::MAX; 5];
     for _ in 0..3 {
         let before: Vec<u64> = counters.iter().map(|c| timing::get(c)).collect();
-        let mut m = draconian_ir::parse_module(ll).unwrap();
+        let mut m = epitome_ir::parse_module(ll).unwrap();
         compile(t, &mut m, &Options { threads: 1, ..Options::default() }).unwrap();
         for (k, c) in counters.iter().enumerate() {
             best[k] = best[k].min(Duration::from_nanos(timing::get(c) - before[k]));

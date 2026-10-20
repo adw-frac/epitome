@@ -35,7 +35,7 @@ use std::cell::{Cell, RefCell};
 
 use crate::fx::{FxHashMap as HashMap, FxHashSet as HashSet};
 
-use draconian_ir::module::*;
+use epitome_ir::module::*;
 
 use crate::aa::{BasicAa, Location};
 use crate::cfg;
@@ -582,7 +582,7 @@ pub struct FunctionReport {
     pub build: std::time::Duration,
     pub walk: std::time::Duration,
     /// Comments for the printer, by place.
-    pub notes: HashMap<draconian_ir::printer::Place, String>,
+    pub notes: HashMap<epitome_ir::printer::Place, String>,
 }
 
 /// Names of a function's blocks as the printer writes them: `%name`, or
@@ -606,7 +606,7 @@ fn block_names(f: &Function) -> Vec<String> {
         names[b.index()] = match number(block.local) {
             Some(n) => format!("%{n}"),
             None => {
-                format!("%{}", draconian_ir::printer::ident(f.locals[block.local.index()].name.as_deref().unwrap()))
+                format!("%{}", epitome_ir::printer::ident(f.locals[block.local.index()].name.as_deref().unwrap()))
             }
         };
         for &i in &block.insts {
@@ -621,7 +621,7 @@ fn block_names(f: &Function) -> Vec<String> {
 /// Memory SSA for one function, with every load's and store's clobber
 /// asked for (as a printer, or a pass that looks at them all, would).
 pub fn analyse(aa: &BasicAa, f: &Function, notes: bool) -> FunctionReport {
-    use draconian_ir::printer::Place;
+    use epitome_ir::printer::Place;
     let t0 = std::time::Instant::now();
     let ssa = MemorySsa::build(aa, f);
     let t1 = std::time::Instant::now();

@@ -1,4 +1,4 @@
-//! Whole Rust programs (`tests/rust/*.rs`) compiled by draconian: rustc
+//! Whole Rust programs (`tests/rust/*.rs`) compiled by epitome: rustc
 //! writes a program's IR and links it, with our object for its crate in
 //! place of its own, against its standard library; the program must print
 //! what rustc's own build of it does. At `-C opt-level=0` and `2`; the
@@ -9,9 +9,9 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use draconian_codegen::assembler::Assembler;
-use draconian_codegen::target::Target;
-use draconian_codegen::{Options, compile};
+use epitome_codegen::assembler::Assembler;
+use epitome_codegen::target::Target;
+use epitome_codegen::{Options, compile};
 
 fn run(cmd: &mut Command) -> Result<String, String> {
     let out = cmd.output().map_err(|e| format!("{cmd:?}: {e}"))?;
@@ -43,7 +43,7 @@ fn outputs(name: &str, opt: u32) -> Result<(String, String), String> {
     let want = run(&mut Command::new(tmp.join("theirs")))?;
 
     let ll = std::fs::read_to_string(tmp.join("theirs.ll")).unwrap();
-    let mut m = draconian_ir::parse_module(&ll).map_err(|e| format!("{e:?}"))?;
+    let mut m = epitome_ir::parse_module(&ll).map_err(|e| format!("{e:?}"))?;
     let t = Target::aarch64();
     let compiled = compile(&t, &mut m, &Options::default())?;
     let bytes = compiled.object_file(&t)?;

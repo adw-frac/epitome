@@ -14,9 +14,9 @@
 //! this checker cannot evaluate them; they are listed in `UNCHECKED` and
 //! covered by the example and program tests instead.
 
-use draconian_ir::module::{BinOp, IntFlags};
-use draconian_opt::combine::dsl::{FloatLit, Head, Lit, Pat, Repl, Rule, Subject, parse_rules};
-use draconian_opt::combine::eval::{self, Env, Folded, IntConst, mask};
+use epitome_ir::module::{BinOp, IntFlags};
+use epitome_opt::combine::dsl::{FloatLit, Head, Lit, Pat, Repl, Rule, Subject, parse_rules};
+use epitome_opt::combine::eval::{self, Env, Folded, IntConst, mask};
 
 const UNCHECKED: &[&str] = &[
     "zext_zext",
@@ -376,7 +376,7 @@ fn every_rule_is_checked_or_listed() {
 /// gives something else). So the rule must require `mustalias(p, q)` and
 /// `sametype(v, @)`, and its replacement must be `v` on every input.
 fn check_memory(r: &Rule) -> Result<(), String> {
-    use draconian_opt::combine::dsl::Cond;
+    use epitome_opt::combine::dsl::Cond;
     let Some(Pat::Op(Head::Store, args)) = &r.clobber else { return Err("not a memory rule".into()) };
     let Pat::Op(Head::Load, load_args) = &r.pat else { return Err(format!("{}: the root must be a load", r.name)) };
     let (Pat::Var(p), [Pat::Var(v), Pat::Var(q)]) = (&load_args[0], &args[..]) else {

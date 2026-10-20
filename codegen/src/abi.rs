@@ -5,7 +5,7 @@
 //! the registers are laid out on the stack, where variadic arguments go,
 //! and the assembler's dialect.
 
-use draconian_ir::module::{MdId, Metadata, Module};
+use epitome_ir::module::{MdId, Metadata, Module};
 
 use crate::object::SectionKind;
 

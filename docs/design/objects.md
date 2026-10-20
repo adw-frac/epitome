@@ -1,14 +1,14 @@
 # Object files, assembly and disassembly
 
-This document covers how Draconian writes object files (Mach-O for macOS,
-ELF for Linux) instead of assembly; `draconian-as`, which assembles
-assembly into them; and `draconian-objdump`, which reads object files (ELF
+This document covers how Epitome writes object files (Mach-O for macOS,
+ELF for Linux) instead of assembly; `epitome-as`, which assembles
+assembly into them; and `epitome-objdump`, which reads object files (ELF
 and Mach-O) and disassembles them with the machine description.
 For the description itself and instruction selection, see
 [isel.md](isel.md).
 
 **Status:** ELF relocatable files and Mach-O object files: **Done**, both
-checked against clang's assembler over SQLite. Assembling Draconian's own
+checked against clang's assembler over SQLite. Assembling Epitome's own
 assembly: **Done**. Assembling other compilers' assembly: **Partial** (see
 below). Programs and SQLite built
 from our own Mach-O objects, linked by the system linker, run and answer as
@@ -64,7 +64,7 @@ symbol is added by a separate instruction. Data does (`&table[3]`).
 
 ### What an assembler does, and so what we do
 
-Where the documents leave a choice, Draconian does what clang's assembler
+Where the documents leave a choice, Epitome does what clang's assembler
 does with the same program, so that the two object files can be compared.
 The two formats differ:
 
@@ -131,9 +131,9 @@ extensions. SVE and SME are not covered. Not yet: register lists
 system registers beyond the first 48 per instruction (the
 `s3_0_c1_c2_3` form covers the rest).
 
-`draconian-llc --sample-asm` writes sample lines of every instruction:
+`epitome-llc --sample-asm` writes sample lines of every instruction:
 13,959 lines, with several operands per instruction. `tests/assemblers.rs`
-assembles them with `draconian-as` and with clang, and the code must be
+assembles them with `epitome-as` and with clang, and the code must be
 the same word for word. On clang's own builds of the test programs,
 `tests/objdump.rs` now decodes about 99% of the words, up from about 90%,
 and all as objdump reads them.
@@ -155,17 +155,17 @@ assembler also reads:
   `#42` and `[x0]` for `[x0, #0]`; RISC-V's are `beqz`, `bnez`, `bltz`,
   `bgez`, `not`, and `(a0)` for `0(a0)`.
 
-## `draconian-llc -o file.o`
+## `epitome-llc -o file.o`
 
 A name ending in `.o`, or `--filetype=obj`, writes an object file instead
 of assembly. A module with inline assembly, whose text only an assembler
-reads, is written by assembling its assembly with `draconian-as`. Otherwise
+reads, is written by assembling its assembly with `epitome-as`. Otherwise
 the object is written directly: Mach-O under Apple's convention (the default, and a Darwin
 triple), ELF under AAPCS64 (a Linux triple, `--abi=aapcs64`) or with
 `--syntax=elf`.
 
 ```sh
-draconian-llc file.ll -o file.o && clang file.o main.c -o program && ./program
+epitome-llc file.ll -o file.o && clang file.o main.c -o program && ./program
 ```
 
 A Mach-O object has one unnamed `LC_SEGMENT_64` holding every section,
@@ -183,11 +183,11 @@ relocations; `.note.GNU-stack`; then `.symtab`, `.strtab` and `.shstrtab`.
 Local symbols come first, as ELF requires: section symbols, mapping
 symbols, then the object's own; then global ones, defined and undefined.
 
-## `draconian-as`
+## `epitome-as`
 
 ```sh
-draconian-as file.s -o file.o        # Mach-O or ELF, as the assembly is written
-draconian-as --format=elf file.s     # say which
+epitome-as file.s -o file.o        # Mach-O or ELF, as the assembly is written
+epitome-as --format=elf file.s     # say which
 ```
 
 The assembler (`codegen/src/assembler.rs`) reads instructions with the
@@ -243,14 +243,14 @@ lines once the things below are set aside. What it uses that ours does not:
   relocations on loads and stores (`ldr x0, [x1, _x@PAGEOFF]`), which need
   the load and store page-offset relocations.
 
-## `draconian-objdump`
+## `epitome-objdump`
 
 ```sh
-draconian-objdump -d file.o        # disassemble (the default)
-draconian-objdump -dr file.o       # with each instruction's relocation
-draconian-objdump -h -t file.o     # section headers, symbols
-draconian-objdump -s file.o        # contents in hex
-draconian-objdump --canonical a.o  # sorted text, for diffing two objects
+epitome-objdump -d file.o        # disassemble (the default)
+epitome-objdump -dr file.o       # with each instruction's relocation
+epitome-objdump -h -t file.o     # section headers, symbols
+epitome-objdump -s file.o        # contents in hex
+epitome-objdump --canonical a.o  # sorted text, for diffing two objects
 ```
 
 It reads ELF (relocatable or linked) and 64-bit Mach-O (objects and linked
@@ -303,31 +303,31 @@ the description's encodings:
 - `codegen/tests/programs.rs`, for each test program in each of its four
   builds (step 8 is for both formats):
   - **3b.** clang's assembly of our Mach-O assembly, read back by
-    `draconian-objdump`, gives our assembly: every mnemonic (or an alias),
+    `epitome-objdump`, gives our assembly: every mnemonic (or an alias),
     and every instruction a relocation fills in, whole.
   - **5.** Our ELF object for the Linux build says what clang's assembler
     makes of our Linux assembly, compared in canonical form: the same
     sections with the same bytes, the same relocations against the same
     targets with the same addends, and the same symbols with the same
     bindings, types, values and sizes.
-  - **6.** Our ELF object, read back by `draconian-objdump`, gives our
+  - **6.** Our ELF object, read back by `epitome-objdump`, gives our
     assembly.
   - **7.** Our Mach-O object says what clang's assembler makes of our
     assembly, and linked with the main by the system linker, the program
     prints what clang's build prints.
-  - **8.** `draconian-as` makes, of our assembly, byte for byte the object
-    `draconian-llc` writes directly. So three ways to the object file
+  - **8.** `epitome-as` makes, of our assembly, byte for byte the object
+    `epitome-llc` writes directly. So three ways to the object file
     agree: clang's assembler, ours, and none.
 - `codegen/tests/sqlite.rs`: SQLite's three builds (clang `-O2` IR with
-  and without vectorising, and `-O0` IR through `draconian-opt`), each
+  and without vectorising, and `-O0` IR through `epitome-opt`), each
   linked from our assembly and from our own Mach-O object, run the SQL
   workloads and must answer as clang's build does; each Mach-O object must
-  say what the assembler's says, and be byte for byte what `draconian-as`
+  say what the assembler's says, and be byte for byte what `epitome-as`
   makes of the assembly (as must the ELF objects). The same as 5 and 6 for ELF, from the
   `-O2` IR with and without vectorising: about 357,000 and 375,000
   instructions, with every relocation and symbol.
 - `codegen/tests/objdump.rs`: clang's own `-O2` builds of the test programs
-  and of SQLite (237,143 words), disassembled by `draconian-objdump` and by
+  and of SQLite (237,143 words), disassembled by `epitome-objdump` and by
   the system's objdump. Every word we decode must be, to objdump, the same
   instruction (mnemonic, or an alias). About 89% of SQLite's words decode;
   the rest are instructions the description does not have yet (`ldp`,
@@ -348,7 +348,7 @@ pseudo-instructions, which take no space (`unwind.rs`):
 - where `sp` moves, the CFA as the base register plus the frame size.
 
 Assembly writes them as `.cfi_startproc`, `.cfi_def_cfa_offset`,
-`.cfi_def_cfa`, `.cfi_offset` and `.cfi_endproc`, and `draconian-as`
+`.cfi_def_cfa`, `.cfi_offset` and `.cfi_endproc`, and `epitome-as`
 reads those back.
 
 The object writer and the assembler both make the same tables of them:
@@ -416,7 +416,7 @@ of relocations as its own address is.
 
 Assembly writes `.cfi_personality 155, sym` and `.cfi_lsda 16, label`,
 and the table as `.byte` lists, with `.long sym@GOT-label` for the types.
-`draconian-as` reads all of these. Two things were found by running
+`epitome-as` reads all of these. Two things were found by running
 programs, not by comparing bytes:
 
 - **Mach-O's 4-byte GOT reference** holds `0xc0000000` less its own offset

@@ -3,8 +3,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use draconian_ir::module::*;
-use draconian_ir::types::{Type, TypeId};
+use epitome_ir::module::*;
+use epitome_ir::types::{Type, TypeId};
 
 use crate::machine::{Holds, Narrow};
 use crate::mir::*;
@@ -812,8 +812,8 @@ impl<'a, 'b> Sel<'a, 'b> {
         match best {
             Some(b) if b.covered.len() > 1 && best_single.is_some() => {
                 let name = &self.t.patterns[b.pat].name;
-                if draconian_ir::chop::allow(|| {
-                    format!("select {name} at {}", draconian_ir::printer::inst_name(self.f, root))
+                if epitome_ir::chop::allow(|| {
+                    format!("select {name} at {}", epitome_ir::printer::inst_name(self.f, root))
                 }) {
                     Some(b)
                 } else {
@@ -1118,7 +1118,7 @@ impl<'a, 'b> Sel<'a, 'b> {
                     return Ok(Reg::V(r));
                 }
                 if self.hoisting()
-                    && draconian_ir::chop::allow(|| {
+                    && epitome_ir::chop::allow(|| {
                         format!(
                             "hoist the address of @{} out of the loop",
                             self.cx.m.global(g).name.as_deref().unwrap_or("?")
@@ -1207,7 +1207,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             return self.err("a vector constant of a scalar type");
         };
         let ebits = self.bits(elem).max(8);
-        let lane = |m: &draconian_ir::Module, e: ConstId| -> i64 {
+        let lane = |m: &epitome_ir::Module, e: ConstId| -> i64 {
             match &m.constant(e).kind {
                 ConstKind::Int(a) => a.low_u64() as i64,
                 ConstKind::Float(raw) => *raw as i64,
@@ -1261,7 +1261,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         // the loop's own values.
         if self.hoisting()
             && !self.one_instruction(v, wide)
-            && draconian_ir::chop::allow(|| format!("hoist the constant {v} out of the loop"))
+            && epitome_ir::chop::allow(|| format!("hoist the constant {v} out of the loop"))
         {
             let r = self.in_entry(|s| s.make_int(v, wide))?;
             if let Reg::V(x) = r {
@@ -2094,11 +2094,11 @@ impl<'a, 'b> Sel<'a, 'b> {
         // Elective (autochop) unless the call must be a tail call.
         let tail = tail.filter(|_| {
             call.tail == TailKind::MustTail
-                || draconian_ir::chop::allow(|| {
+                || epitome_ir::chop::allow(|| {
                     format!(
                         "tail call @{} at {}",
                         name.as_deref().unwrap_or("?"),
-                        draconian_ir::printer::inst_name(f, i)
+                        epitome_ir::printer::inst_name(f, i)
                     )
                 })
         });

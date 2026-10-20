@@ -1,4 +1,4 @@
-// Integer functions compiled by draconian-llc and called from basic.main.c,
+// Integer functions compiled by epitome-llc and called from basic.main.c,
 // which clang builds. See tests/programs.rs.
 
 int add3(int a, int b, int c) { return a + b * c + 7; }

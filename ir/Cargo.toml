@@ -1,8 +1,8 @@
 [package]
-name = "draconian-ir"
+name = "epitome-ir"
 version = "0.1.0"
 edition = "2024"
-repository = "https://github.com/andy-thomason/draconian-measurement"
+repository = "https://github.com/andy-thomason/epitome"
 description = "LLVM IR data structures with a text (.ll) parser and printer"
 
 [dependencies]

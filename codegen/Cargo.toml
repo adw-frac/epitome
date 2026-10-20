@@ -1,24 +1,24 @@
 [package]
-name = "draconian-codegen"
+name = "epitome-codegen"
 version = "0.1.0"
 edition = "2024"
-repository = "https://github.com/andy-thomason/draconian-measurement"
+repository = "https://github.com/andy-thomason/epitome"
 description = "Instruction selection from machine descriptions written in LLVM IR, register allocation, and assembly, binary and disassembly output"
 
 [dependencies]
-draconian-ir = { path = "../ir" }
+epitome-ir = { path = "../ir" }
 
 [[bin]]
-name = "draconian-llc"
+name = "epitome-llc"
 path = "src/main.rs"
 
 [[bin]]
-name = "draconian-as"
-path = "src/bin/draconian-as.rs"
+name = "epitome-as"
+path = "src/bin/epitome-as.rs"
 
 [[bin]]
-name = "draconian-objdump"
-path = "src/bin/draconian-objdump.rs"
+name = "epitome-objdump"
+path = "src/bin/epitome-objdump.rs"
 
 [dev-dependencies]
-draconian-opt = { path = "../opt" }
+epitome-opt = { path = "../opt" }

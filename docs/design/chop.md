@@ -3,8 +3,8 @@
 Autochop counts every elective change the compiler makes to the code, so
 that a miscompilation can be found by binary search to the one change that
 causes it. The idea, and the name, come from a compiler for the PS3. The
-counter is in `ir/src/chop.rs`; both `draconian-opt` and `draconian-llc`
-use it, and `draconian-chop` runs the search. For sources and status
+counter is in `ir/src/chop.rs`; both `epitome-opt` and `epitome-llc`
+use it, and `epitome-chop` runs the search. For sources and status
 labels, see the [index](README.md).
 
 **Status:** counting, limits, the search and its driver, every optimiser
@@ -60,7 +60,7 @@ number of threads. The tests check this: counts, and the code under every
 limit tried, are the same on 1 thread and 8.
 
 Both tools take `--chop=F[:T]` or an environment variable,
-`DRACONIAN_OPT_CHOP` or `DRACONIAN_LLC_CHOP`, so that a limit reaches a
+`EPITOME_OPT_CHOP` or `EPITOME_LLC_CHOP`, so that a limit reaches a
 tool run deep inside a build. Each reports where it stopped and what the
 last step allowed was:
 
@@ -68,8 +68,8 @@ last step allowed was:
 ; chop: stopped in @seven (function 3) after step 1: combine bad_mul7 at %3
 ```
 
-`--chop-counts` prints each function's count. With `DRACONIAN_CHOP_COUNTS`
-set to a file, the counts are appended to it; with `DRACONIAN_CHOP_DUMP`,
+`--chop-counts` prints each function's count. With `EPITOME_CHOP_COUNTS`
+set to a file, the counts are appended to it; with `EPITOME_CHOP_DUMP`,
 the output (IR, or assembly) is written to that file.
 
 ## 3. The search
@@ -91,7 +91,7 @@ That holds when steps are independent. When they are not, the answer is
 still a limit that fails while the one before it passes, and the driver
 checks that again.
 
-`draconian-chop [--tool=opt|llc] -- <test command>` runs it. Exit status 0
+`epitome-chop [--tool=opt|llc] -- <test command>` runs it. Exit status 0
 from the test is a pass. The driver gets the counts from one full run,
 searches, and then prints the step, the limit, and what the step changed
 in the output:
@@ -99,7 +99,7 @@ in the output:
 ```text
 The first failing change: function 0 (@main), change 36 (30 in all with no limit)
   @main (function 0) after step 36: combine bad_mul7 at %29
-  limit: DRACONIAN_OPT_CHOP=0:36 fails, 0:35 passes (14 runs of the test)
+  limit: EPITOME_OPT_CHOP=0:36 fails, 0:35 passes (14 runs of the test)
 
 What it changed in the output:
     %28 = mul nsw i32 %4, 5
@@ -110,7 +110,7 @@ What it changed in the output:
 
 There, a wrong rule was planted (`--rules=` adds rules before the standard
 ones). `@seven` uses it, but `@main` inlines `@seven`, so the change was
-found in `@main`'s copy. The same search on `draconian-llc`, with a bug
+found in `@main`'s copy. The same search on `epitome-llc`, with a bug
 planted in division by 7, found it at `@c`'s first choice, `divide by 7
 with a multiply`, in 9 runs.
 

@@ -36,8 +36,8 @@
 use crate::fx::FxHashMap as HashMap;
 use std::hash::Hash;
 
-use draconian_ir::module::*;
-use draconian_ir::types::TypeId;
+use epitome_ir::module::*;
+use epitome_ir::types::TypeId;
 
 use crate::aa::{BasicAa, Location};
 use crate::cfg::DomTree;
@@ -352,8 +352,8 @@ pub fn run(sh: &Shared, f: &mut Function) -> Outcome {
                 match memory.get(&(ptr, ty)) {
                     Some(&(v, since))
                         if still_there(&aa, f, &writes[since..], loc)
-                            && draconian_ir::chop::allow(|| {
-                                format!("cse: the load {} reuses a value", draconian_ir::printer::inst_name(f, i))
+                            && epitome_ir::chop::allow(|| {
+                                format!("cse: the load {} reuses a value", epitome_ir::printer::inst_name(f, i))
                             }) =>
                     {
                         let from_store = !matches!(v, Value::Local(l) if matches!(f.locals[l.index()].def, LocalDef::Inst(d) if matches!(f.insts[d.index()].op, Op::Load { .. })));
@@ -372,8 +372,8 @@ pub fn run(sh: &Shared, f: &mut Function) -> Outcome {
             let Some(key) = key(&inst.op, ty, b) else { continue };
             match table.get(&key) {
                 Some(&leader)
-                    if draconian_ir::chop::allow(|| {
-                        let n = |x: InstId| draconian_ir::printer::inst_name(f, x);
+                    if epitome_ir::chop::allow(|| {
+                        let n = |x: InstId| epitome_ir::printer::inst_name(f, x);
                         format!("cse: {} merged into {}", n(i), n(leader))
                     }) =>
                 {

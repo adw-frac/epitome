@@ -23,7 +23,7 @@
 //! These repeat until nothing changes. Functions whose blocks have their
 //! address taken are left alone, since a `blockaddress` may name any block.
 
-use draconian_ir::module::*;
+use epitome_ir::module::*;
 
 use crate::cleanup;
 use crate::ctx::Shared;
@@ -138,10 +138,10 @@ fn fold_same_targets(f: &mut Function, out: &mut Outcome) {
         let Some(t) = f.terminator(b) else { continue };
         let Op::CondBr { cond, then_dest, else_dest } = f.insts[t.index()].op else { continue };
         if then_dest != else_dest
-            || !draconian_ir::chop::allow(|| {
+            || !epitome_ir::chop::allow(|| {
                 format!(
                     "simplifycfg: a branch to the same block from {}",
-                    draconian_ir::printer::local_name(f, f.blocks[b.index()].local)
+                    epitome_ir::printer::local_name(f, f.blocks[b.index()].local)
                 )
             })
         {
@@ -201,10 +201,10 @@ fn bypass_all(f: &mut Function, out: &mut Outcome) -> bool {
         if clash {
             continue;
         }
-        if !draconian_ir::chop::allow(|| {
+        if !epitome_ir::chop::allow(|| {
             format!(
                 "simplifycfg: bypass the empty block {}",
-                draconian_ir::printer::local_name(f, f.blocks[b.index()].local)
+                epitome_ir::printer::local_name(f, f.blocks[b.index()].local)
             )
         }) {
             continue;
@@ -293,10 +293,10 @@ fn select_all(sh: &Shared, f: &mut Function, out: &mut Outcome) {
         if join_phis.len() > MAX_SELECTS || !complete {
             continue;
         }
-        if !draconian_ir::chop::allow(|| {
+        if !epitome_ir::chop::allow(|| {
             format!(
                 "simplifycfg: selects for the branch in {}",
-                draconian_ir::printer::local_name(f, f.blocks[a.index()].local)
+                epitome_ir::printer::local_name(f, f.blocks[a.index()].local)
             )
         }) {
             continue;

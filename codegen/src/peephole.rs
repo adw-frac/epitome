@@ -24,7 +24,7 @@ pub fn redundant_compares(t: &Target, mf: &mut MFunc) -> usize {
             let sets = matches!(inst.op, Opcode::Instr(i) if t.instrs[i].sets.is_some());
             if sets {
                 if last.as_ref().is_some_and(|l| l.op == inst.op && l.ops == inst.ops)
-                    && draconian_ir::chop::allow(|| format!("{name}: remove a compare the same as the last"))
+                    && epitome_ir::chop::allow(|| format!("{name}: remove a compare the same as the last"))
                 {
                     removed += 1;
                     continue;

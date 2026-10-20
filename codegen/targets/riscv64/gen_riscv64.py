@@ -1,9 +1,9 @@
 """Writes the RISC-V RV64 description: the .ll files of this directory.
 
-The description is data, read by draconian-llc at start-up like the
+The description is data, read by epitome-llc at start-up like the
 built-in AArch64 one, but not built in: point at it with
 --target=codegen/targets/riscv64, or put codegen/targets on
-DRACONIAN_TARGET_PATH and say --target=riscv64. This script only writes it;
+EPITOME_TARGET_PATH and say --target=riscv64. This script only writes it;
 run it from anywhere:
 
     python3 codegen/targets/riscv64/gen_riscv64.py

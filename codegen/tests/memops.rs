@@ -3,8 +3,8 @@
 //! allows, since AArch64's need no alignment (`unaligned-access`); long or
 //! volatile ones stay calls.
 
-use draconian_codegen::target::Target;
-use draconian_codegen::{Options, compile};
+use epitome_codegen::target::Target;
+use epitome_codegen::{Options, compile};
 
 fn asm(body: &str) -> String {
     let src = format!(
@@ -13,7 +13,7 @@ fn asm(body: &str) -> String {
          declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1)\n{body}"
     );
     let t = Target::aarch64();
-    let mut m = draconian_ir::parse_module(&src).unwrap();
+    let mut m = epitome_ir::parse_module(&src).unwrap();
     compile(&t, &mut m, &Options::default()).unwrap().asm
 }
 

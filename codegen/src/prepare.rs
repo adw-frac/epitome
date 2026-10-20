@@ -27,10 +27,10 @@
 //!   register width, with the same rule: masked or sign-extended in place
 //!   before an operation that reads their top bits.
 
-use draconian_ir::apint::ApInt;
-use draconian_ir::layout::DataLayout;
-use draconian_ir::module::*;
-use draconian_ir::types::{Type, TypeId};
+use epitome_ir::apint::ApInt;
+use epitome_ir::layout::DataLayout;
+use epitome_ir::module::*;
+use epitome_ir::types::{Type, TypeId};
 
 use crate::target::{Head, Tree, sext};
 
@@ -297,10 +297,10 @@ fn expand_small_mem_ops(cx: &mut Ctx, f: &mut Function) {
                 at += w;
             }
             if pieces.len() as u64 > MAX_MEM_PIECES
-                || !draconian_ir::chop::allow(|| {
+                || !epitome_ir::chop::allow(|| {
                     format!(
                         "write the {name} at {} as {} accesses",
-                        draconian_ir::printer::inst_name(f, i),
+                        epitome_ir::printer::inst_name(f, i),
                         pieces.len()
                     )
                 })
@@ -396,11 +396,11 @@ fn sink_addresses(f: &mut Function) {
             if on_cycle[b.index()].is_some() && on_cycle[b.index()] != on_cycle[home.index()] {
                 continue;
             }
-            if !draconian_ir::chop::allow(|| {
+            if !epitome_ir::chop::allow(|| {
                 format!(
                     "sink the address {} into {}",
-                    draconian_ir::printer::local_name(f, r),
-                    draconian_ir::printer::local_name(f, f.blocks[b.index()].local)
+                    epitome_ir::printer::local_name(f, r),
+                    epitome_ir::printer::local_name(f, f.blocks[b.index()].local)
                 )
             }) {
                 continue;
@@ -1748,8 +1748,8 @@ fn lower_const_divs(cx: &mut Ctx, f: &mut Function) {
                 continue;
             }
             // Elective (autochop): the division instruction does it too.
-            if !draconian_ir::chop::allow(|| {
-                format!("divide by {d} with a multiply at {}", draconian_ir::printer::inst_name(f, i))
+            if !epitome_ir::chop::allow(|| {
+                format!("divide by {d} with a multiply at {}", epitome_ir::printer::inst_name(f, i))
             }) {
                 k += 1;
                 continue;

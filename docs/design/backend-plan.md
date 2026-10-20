@@ -2,7 +2,7 @@
 
 This is a plan for the parts of code generation after selection that are
 still simple: register allocation, scheduling, and passes over machine IR.
-It comes from measuring Draconian against clang. For sources and status
+It comes from measuring Epitome against clang. For sources and status
 labels, see the [index](README.md).
 
 ## 1. Where we stand
@@ -12,8 +12,8 @@ test programs of the optimiser and the code generator:
 
 - **clang:** clang `-O2` all the way;
 - **ours:** clang's unoptimised IR (`-O1 -Xclang -disable-llvm-passes`), then
-  `draconian-opt`, then `draconian-llc`;
-- **backend:** clang `-O2` IR, then `draconian-llc`.
+  `epitome-opt`, then `epitome-llc`;
+- **backend:** clang `-O2` IR, then `epitome-llc`.
 
 | | Instructions | Against clang |
 | --- | --- | --- |

@@ -31,8 +31,8 @@
 
 use std::collections::HashMap;
 
-use draconian_ir::module::*;
-use draconian_ir::types::{Type, TypeId};
+use epitome_ir::module::*;
+use epitome_ir::types::{Type, TypeId};
 
 use crate::prepare::{Ctx, callee_name};
 
@@ -142,7 +142,7 @@ fn shuffle(b: &mut Builder, cx: &mut Ctx, a: Value, bv: Value, lanes: &[i32], ty
         .iter()
         .map(|&l| {
             cx.m.consts
-                .intern(Constant { ty: i32t, kind: ConstKind::Int(draconian_ir::apint::ApInt::from_i64(32, l as i64)) })
+                .intern(Constant { ty: i32t, kind: ConstKind::Int(epitome_ir::apint::ApInt::from_i64(32, l as i64)) })
         })
         .collect();
     let mty = vec_ty(cx, lanes.len() as u32, i32t);
@@ -987,7 +987,7 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         } else {
                             let off = Value::Const(cx.m.consts.intern(Constant {
                                 ty: i64t,
-                                kind: ConstKind::Int(draconian_ir::apint::ApInt::from_i64(64, step * p as i64)),
+                                kind: ConstKind::Int(epitome_ir::apint::ApInt::from_i64(64, step * p as i64)),
                             }));
                             bld.op(
                                 Op::Gep {
@@ -1023,7 +1023,7 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         } else {
                             let off = Value::Const(cx.m.consts.intern(Constant {
                                 ty: i64t,
-                                kind: ConstKind::Int(draconian_ir::apint::ApInt::from_i64(64, step * p as i64)),
+                                kind: ConstKind::Int(epitome_ir::apint::ApInt::from_i64(64, step * p as i64)),
                             }));
                             bld.op(
                                 Op::Gep {

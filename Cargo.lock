@@ -3,27 +3,27 @@
 version = 4
 
 [[package]]
-name = "draconian"
+name = "epitome"
 version = "0.1.0"
 dependencies = [
- "draconian-ir",
+ "epitome-ir",
 ]
 
 [[package]]
-name = "draconian-codegen"
+name = "epitome-codegen"
 version = "0.1.0"
 dependencies = [
- "draconian-ir",
- "draconian-opt",
+ "epitome-ir",
+ "epitome-opt",
 ]
 
 [[package]]
-name = "draconian-ir"
+name = "epitome-ir"
 version = "0.1.0"
 
 [[package]]
-name = "draconian-opt"
+name = "epitome-opt"
 version = "0.1.0"
 dependencies = [
- "draconian-ir",
+ "epitome-ir",
 ]

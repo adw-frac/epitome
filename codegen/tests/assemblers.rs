@@ -1,5 +1,5 @@
-//! draconian-as and clang's assembler agree on every instruction the
-//! AArch64 description has: sample lines of each (`draconian-llc
+//! epitome-as and clang's assembler agree on every instruction the
+//! AArch64 description has: sample lines of each (`epitome-llc
 //! --sample-asm`, several per instruction, over a spread of operands) are
 //! assembled by both, and the code must be the same word for word. Most of
 //! the description's entries (80-asm.ll) were fitted to clang's encodings,
@@ -12,10 +12,10 @@
 
 use std::process::Command;
 
-use draconian_codegen::abi::Syntax;
-use draconian_codegen::assembler::Assembler;
-use draconian_codegen::objdump::Image;
-use draconian_codegen::target::Target;
+use epitome_codegen::abi::Syntax;
+use epitome_codegen::assembler::Assembler;
+use epitome_codegen::objdump::Image;
+use epitome_codegen::target::Target;
 
 /// What clang must be told the machine has, for every extension the
 /// description's instructions need.
@@ -48,14 +48,14 @@ fn code(bytes: &[u8], t: &Target) -> Vec<u32> {
 }
 
 #[test]
-fn draconian_as_and_clang_agree() {
+fn epitome_as_and_clang_agree() {
     let ok = Command::new("clang").arg("--version").output().is_ok_and(|o| o.status.success());
     if !ok {
         eprintln!("clang not found; skipping");
         return;
     }
     let t = Target::aarch64();
-    let text = draconian_codegen::check::sample_assembly(&t, Syntax::Elf, 3);
+    let text = epitome_codegen::check::sample_assembly(&t, Syntax::Elf, 3);
     let tmp = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("assemblers");
     std::fs::create_dir_all(&tmp).unwrap();
     let s = tmp.join("aarch64.s");
@@ -75,10 +75,10 @@ fn draconian_as_and_clang_agree() {
 }
 
 #[test]
-fn draconian_as_and_llvm_agree_on_riscv() {
+fn epitome_as_and_llvm_agree_on_riscv() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let t = Target::load_path(root.join("targets/riscv64").to_str().unwrap()).unwrap();
-    let text = draconian_codegen::check::sample_assembly(&t, Syntax::Elf, 3);
+    let text = epitome_codegen::check::sample_assembly(&t, Syntax::Elf, 3);
     let tmp = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("assemblers");
     std::fs::create_dir_all(&tmp).unwrap();
     // rustc assembles it as a crate's global assembly, without compressing

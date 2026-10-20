@@ -1,13 +1,13 @@
-//! `draconian-objdump`: prints an object file's sections, symbols,
+//! `epitome-objdump`: prints an object file's sections, symbols,
 //! relocations and contents, and disassembles its code with the machine
 //! description. See `objdump.rs`.
 
 use std::process::ExitCode;
 
-use draconian_codegen::objdump::{self, Image};
-use draconian_codegen::target::Target;
+use epitome_codegen::objdump::{self, Image};
+use epitome_codegen::target::Target;
 
-const USAGE: &str = "usage: draconian-objdump [options] <file>...
+const USAGE: &str = "usage: epitome-objdump [options] <file>...
 
   -d, --disassemble       disassemble the code sections (the default)
   -r, --reloc             print the relocations (with -d, after each
@@ -22,7 +22,7 @@ const USAGE: &str = "usage: draconian-objdump [options] <file>...
   --target=<name|path>    the machine description: a .ll file, a directory
                           of them (read in name order), or a name: aarch64
                           is built in, others are directories of that name
-                          in DRACONIAN_TARGET_PATH (a list separated by
+                          in EPITOME_TARGET_PATH (a list separated by
                           colons); by default, for an ELF file, the one with its
                           machine number, else aarch64
   --target-add=<path>     read these .ll files too (may be given again)
@@ -60,14 +60,14 @@ fn main() -> ExitCode {
                         's' => s = true,
                         'x' => (h, t, r) = (true, true, true),
                         _ => {
-                            eprintln!("draconian-objdump: unknown option -{c}\n\n{USAGE}");
+                            eprintln!("epitome-objdump: unknown option -{c}\n\n{USAGE}");
                             return ExitCode::FAILURE;
                         }
                     }
                 }
             }
             x if x.starts_with('-') => {
-                eprintln!("draconian-objdump: unknown option {x}\n\n{USAGE}");
+                eprintln!("epitome-objdump: unknown option {x}\n\n{USAGE}");
                 return ExitCode::FAILURE;
             }
             x => files.push(x.to_string()),
@@ -86,14 +86,14 @@ fn main() -> ExitCode {
         Some(_) => match Target::resolve(target_file.as_deref(), "", &adds) {
             Ok(t) => Some(t),
             Err(e) => {
-                eprintln!("draconian-objdump: {e}");
+                eprintln!("epitome-objdump: {e}");
                 return ExitCode::FAILURE;
             }
         },
         None => None,
     };
     let for_file = |bytes: &[u8]| -> Option<Target> {
-        let machine = draconian_codegen::elf::read(bytes).ok()?.machine;
+        let machine = epitome_codegen::elf::read(bytes).ok()?.machine;
         Target::for_elf_machine(machine)
     };
     let mut status = ExitCode::SUCCESS;
@@ -101,7 +101,7 @@ fn main() -> ExitCode {
         let bytes = match std::fs::read(f) {
             Ok(b) => b,
             Err(e) => {
-                eprintln!("draconian-objdump: {f}: {e}");
+                eprintln!("epitome-objdump: {f}: {e}");
                 status = ExitCode::FAILURE;
                 continue;
             }
@@ -115,15 +115,15 @@ fn main() -> ExitCode {
             }
         };
         if canonical {
-            let text = if draconian_codegen::macho::is_macho(&bytes) {
-                draconian_codegen::macho::read(&bytes).map(|m| m.canonical(&target.machine))
+            let text = if epitome_codegen::macho::is_macho(&bytes) {
+                epitome_codegen::macho::read(&bytes).map(|m| m.canonical(&target.machine))
             } else {
-                draconian_codegen::elf::read(&bytes).map(|e| e.canonical(&target.machine))
+                epitome_codegen::elf::read(&bytes).map(|e| e.canonical(&target.machine))
             };
             match text {
                 Ok(t) => print!("{t}"),
                 Err(e) => {
-                    eprintln!("draconian-objdump: {f}: {e}");
+                    eprintln!("epitome-objdump: {f}: {e}");
                     status = ExitCode::FAILURE;
                 }
             }
@@ -132,7 +132,7 @@ fn main() -> ExitCode {
         let img = match Image::read(&bytes, &target.machine) {
             Ok(i) => i,
             Err(e) => {
-                eprintln!("draconian-objdump: {f}: {e}");
+                eprintln!("epitome-objdump: {f}: {e}");
                 status = ExitCode::FAILURE;
                 continue;
             }

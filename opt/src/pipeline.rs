@@ -20,9 +20,9 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use draconian_ir::metadata;
-use draconian_ir::module::*;
-use draconian_ir::types::Type;
+use epitome_ir::metadata;
+use epitome_ir::module::*;
+use epitome_ir::types::Type;
 
 use crate::callgraph::CallGraph;
 use crate::ctx::{Intrinsics, parallel_phase};
@@ -49,8 +49,8 @@ pub struct Options {
     /// Loop rotation, then induction variables and trip counts.
     pub loops: bool,
     pub recursion: RecursionMode,
-    /// Autochop: how far elective changes may go (`draconian_ir::chop`).
-    pub chop: Option<draconian_ir::chop::Limit>,
+    /// Autochop: how far elective changes may go (`epitome_ir::chop`).
+    pub chop: Option<epitome_ir::chop::Limit>,
     /// Combine rules to try before the standard ones.
     pub extra_rules: Option<String>,
 }
@@ -110,7 +110,7 @@ pub struct Report {
     /// Autochop: the functions counted, in their order, each one's count,
     /// and where the limit stopped (function, steps made, the last step).
     pub chop_names: Vec<String>,
-    pub chop_counts: Vec<draconian_ir::chop::Counter>,
+    pub chop_counts: Vec<epitome_ir::chop::Counter>,
     pub chop_stopped: Option<(usize, u64, Option<String>)>,
     /// Functions deleted because nothing used them any more.
     pub deleted: Vec<String>,
@@ -180,7 +180,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
     for (k, g) in chop_order.iter().enumerate() {
         chop_index[g.index()] = k;
     }
-    let chop = draconian_ir::chop::Session::new(chop_order.len(), opts.chop);
+    let chop = epitome_ir::chop::Session::new(chop_order.len(), opts.chop);
     let counted = |g: GlobalId| chop.enter(chop_index[g.index()]);
 
     let ((), remarks) = parallel_phase(m, intrinsics, |sh| {
@@ -246,7 +246,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                         return;
                     }
                     let mode = if attrs::has(m, &f.fn_attrs, "minsize") { RecursionMode::Tail } else { opts.recursion };
-                    if !draconian_ir::chop::allow(|| format!("recursion: remove @{}'s recursion", sh.name(g))) {
+                    if !epitome_ir::chop::allow(|| format!("recursion: remove @{}'s recursion", sh.name(g))) {
                         return;
                     }
                     let block_addresses = cg.node(g).is_some_and(|n| cg.has_blockaddress[n]);
@@ -298,7 +298,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                 // Collapsing the cycle is one step, of its first function.
                 let collapse = bodies.len() > 1 && {
                     let _counted = counted(bodies[0].0);
-                    draconian_ir::chop::allow(|| format!("recursion: collapse the cycle of @{}", sh.name(bodies[0].0)))
+                    epitome_ir::chop::allow(|| format!("recursion: collapse the cycle of @{}", sh.name(bodies[0].0)))
                 };
                 if collapse {
                     for (e, result) in recursion::collapse_scc(sh, &cg, &mut bodies, 64) {
@@ -537,7 +537,7 @@ fn declare_intrinsics(m: &mut Module) -> Intrinsics {
         let t = m.types.int(w);
         (w, t, m.types.intern(Type::Function { ret: t, params: vec![t, t, t], varargs: false }))
     });
-    let mut declare = |name: &str, ty, params: &[draconian_ir::types::TypeId]| -> GlobalId {
+    let mut declare = |name: &str, ty, params: &[epitome_ir::types::TypeId]| -> GlobalId {
         if let Some(i) = m.globals.iter().position(|g| g.name.as_deref() == Some(name)) {
             return GlobalId(i as u32);
         }
@@ -574,7 +574,7 @@ fn declare_intrinsics(m: &mut Module) -> Intrinsics {
 fn delete_dead_functions(
     m: &mut Module,
     threads: usize,
-    chop: &draconian_ir::chop::Session,
+    chop: &epitome_ir::chop::Session,
     chop_index: &[usize],
 ) -> Vec<String> {
     let cg = CallGraph::build(m, threads);
@@ -599,7 +599,7 @@ fn delete_dead_functions(
         {
             let _counted = chop.enter(chop_index[g.index()]);
             let name = m.global(g).name.clone().unwrap_or_default();
-            if !draconian_ir::chop::allow(|| format!("delete @{name}, no longer used")) {
+            if !epitome_ir::chop::allow(|| format!("delete @{name}, no longer used")) {
                 continue;
             }
         }

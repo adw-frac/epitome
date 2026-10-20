@@ -1,12 +1,12 @@
-//! Compiles C programs with draconian-llc and checks they behave as clang's
+//! Compiles C programs with epitome-llc and checks they behave as clang's
 //! build does, and that the machine code is right.
 //!
 //! For each `tests/programs/NAME.c` (functions) and `NAME.main.c` (a main
 //! that calls them and prints the results), in four configurations of the
-//! IR given to draconian-llc:
+//! IR given to epitome-llc:
 //!
 //! - `O0`: clang without optimisation, so every variable is in memory;
-//! - `opt`: that, through draconian-opt's pipeline;
+//! - `opt`: that, through epitome-opt's pipeline;
 //! - `O2`: clang `-O2`, without vectorising or unrolling;
 //! - `vec`: clang `-O2` as it is, vectorised and unrolled;
 //!
@@ -19,7 +19,7 @@
 //! 3. disassembles each word with the description and checks it encodes
 //!    back to the same word, and that the mnemonic is objdump's, or an
 //!    alias of it; and reads the assembler's Mach-O object with
-//!    draconian-objdump's code, which must give back our assembly (see 6);
+//!    epitome-objdump's code, which must give back our assembly (see 6);
 //! 4. does the same for Linux: IR from clang for `aarch64-linux-gnu`,
 //!    compiled with the AAPCS64 convention to ELF assembly, assembled by
 //!    clang for Linux and checked word by word. (It is not run: there is
@@ -28,14 +28,14 @@
 //!    assembler's says: the same sections with the same bytes, the same
 //!    relocations against the same symbols, and the same symbols (see
 //!    `ElfFile::canonical`);
-//! 6. disassembles our object with draconian-objdump's code and checks it
+//! 6. disassembles our object with epitome-objdump's code and checks it
 //!    reads back as our assembly: every instruction's mnemonic, and where
 //!    a relocation fills an instruction in, the whole instruction, symbol
 //!    and all;
 //! 7. writes our own Mach-O object file for this machine, checks it says
 //!    what the assembler's says (as 5), links it with the main, and checks
 //!    the program's output is clang's build's;
-//! 8. assembles our assembly with draconian-as, for both formats, and
+//! 8. assembles our assembly with epitome-as, for both formats, and
 //!    checks the object is byte for byte the one written directly in 5 and
 //!    7. So three ways to the object file (clang's assembler, ours, and
 //!    none) agree.
@@ -45,10 +45,10 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use draconian_codegen::assembler::Assembler;
-use draconian_codegen::objdump::{self, Image};
-use draconian_codegen::target::Target;
-use draconian_codegen::{Options, compile, elf, macho, mir};
+use epitome_codegen::assembler::Assembler;
+use epitome_codegen::objdump::{self, Image};
+use epitome_codegen::target::Target;
+use epitome_codegen::{Options, compile, elf, macho, mir};
 
 fn have_tools() -> bool {
     let ok = |c: &str, a: &str| Command::new(c).arg(a).output().is_ok_and(|o| o.status.success());
@@ -110,14 +110,14 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         let ll = tmp.join(format!("{stem}.ll"));
         run(Command::new("clang").args(wrap).args(*flags).args(["-S", "-emit-llvm"]).arg(&src).arg("-o").arg(&ll))?;
         let text = std::fs::read_to_string(&ll).unwrap();
-        let mut m = draconian_ir::parse_module(&text).map_err(|e| format!("{stem}: {e:?}"))?;
+        let mut m = epitome_ir::parse_module(&text).map_err(|e| format!("{stem}: {e:?}"))?;
         if *config == "opt" {
-            draconian_opt::pipeline::run(
+            epitome_opt::pipeline::run(
                 &mut m,
-                &draconian_opt::pipeline::Options { threads: 1, ..Default::default() },
+                &epitome_opt::pipeline::Options { threads: 1, ..Default::default() },
             );
             let text = m.to_string();
-            m = draconian_ir::parse_module(&text).map_err(|e| format!("{stem}: reparse: {e:?}"))?;
+            m = epitome_ir::parse_module(&text).map_err(|e| format!("{stem}: reparse: {e:?}"))?;
         }
         let compiled = compile(t, &mut m, &Options::default()).map_err(|e| format!("{stem}: {e}"))?;
         let s = tmp.join(format!("{stem}.s"));
@@ -170,7 +170,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         }
         report.push(format!("{stem}: {} instructions", ours.len()));
 
-        // 3b. draconian-objdump reads the assembler's Mach-O object back
+        // 3b. epitome-objdump reads the assembler's Mach-O object back
         // as our assembly.
         objdump_reads_back(t, &obj, &compiled.asm, &stem)?;
 
@@ -180,7 +180,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         let bytes = compiled.object_file(t).map_err(|e| format!("{stem}: {e}"))?;
         std::fs::write(&mine, &bytes).unwrap();
         same_object(t, &mine, &obj, &stem)?;
-        // 8. draconian-as makes the same object of our assembly.
+        // 8. epitome-as makes the same object of our assembly.
         same_assembled(t, &compiled.asm, &bytes, &stem)?;
         let exe = tmp.join(format!("{stem}.ours"));
         run(Command::new("clang").args(opt).arg(&mine).arg(&main).arg("-o").arg(&exe))?;
@@ -205,14 +205,14 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
             .arg("-o")
             .arg(&ll))?;
         let text = std::fs::read_to_string(&ll).unwrap();
-        let mut m = draconian_ir::parse_module(&text).map_err(|e| format!("{elf_stem}: {e:?}"))?;
+        let mut m = epitome_ir::parse_module(&text).map_err(|e| format!("{elf_stem}: {e:?}"))?;
         if *config == "opt" {
-            draconian_opt::pipeline::run(
+            epitome_opt::pipeline::run(
                 &mut m,
-                &draconian_opt::pipeline::Options { threads: 1, ..Default::default() },
+                &epitome_opt::pipeline::Options { threads: 1, ..Default::default() },
             );
             let text = m.to_string();
-            m = draconian_ir::parse_module(&text).map_err(|e| format!("{elf_stem}: reparse: {e:?}"))?;
+            m = epitome_ir::parse_module(&text).map_err(|e| format!("{elf_stem}: reparse: {e:?}"))?;
         }
         let compiled = compile(t, &mut m, &Options::default()).map_err(|e| format!("{elf_stem}: {e}"))?;
         if compiled.funcs.first().is_some_and(|f| f.abi.name != "aapcs64") {
@@ -248,7 +248,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         same_object(t, &mine, &obj, &elf_stem)?;
         same_assembled(t, &compiled.asm, &bytes, &elf_stem)?;
 
-        // 6. draconian-objdump reads our object back as our assembly.
+        // 6. epitome-objdump reads our object back as our assembly.
         objdump_reads_back(t, &mine, &compiled.asm, &elf_stem)?;
     }
     Ok(report)
@@ -270,17 +270,17 @@ fn same_object(t: &Target, ours: &Path, theirs: &Path, stem: &str) -> Result<(),
     if a == b {
         return Ok(());
     }
-    let diff = draconian_codegen::object::differences(&a, &b, 8);
+    let diff = epitome_codegen::object::differences(&a, &b, 8);
     Err(format!("{stem}: our object differs from the assembler's ({}):\n{}", ours.display(), diff.join("\n")))
 }
 
-/// Checks draconian-as makes exactly `object` of `asm`.
+/// Checks epitome-as makes exactly `object` of `asm`.
 fn same_assembled(t: &Target, asm: &str, object: &[u8], stem: &str) -> Result<(), String> {
-    let assembled = Assembler::new(t).assemble(asm, None).map_err(|e| format!("{stem}: draconian-as: {e}"))?.file(t)?;
-    if assembled == object { Ok(()) } else { Err(format!("{stem}: draconian-as makes another object of our assembly")) }
+    let assembled = Assembler::new(t).assemble(asm, None).map_err(|e| format!("{stem}: epitome-as: {e}"))?.file(t)?;
+    if assembled == object { Ok(()) } else { Err(format!("{stem}: epitome-as makes another object of our assembly")) }
 }
 
-/// Checks draconian-objdump's disassembly of `obj` reads as `asm`.
+/// Checks epitome-objdump's disassembly of `obj` reads as `asm`.
 fn objdump_reads_back(t: &Target, obj: &Path, asm: &str, stem: &str) -> Result<(), String> {
     let img = Image::read(&std::fs::read(obj).unwrap(), &t.machine).map_err(|e| format!("{stem}: {e}"))?;
     objdump::reads_back(t, &img, asm, ALIASES).map(|_| ()).map_err(|e| format!("{stem}: {e}"))

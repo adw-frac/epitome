@@ -12,8 +12,8 @@
 //!
 //! 1. compiles both files to RISC-V ELF objects, links them on the RV64
 //!    machine, runs `main`, and checks it prints what the reference does;
-//! 2. checks draconian-as makes the same object of our assembly;
-//! 3. checks draconian-objdump reads each object back as our assembly;
+//! 2. checks epitome-as makes the same object of our assembly;
+//! 3. checks epitome-objdump reads each object back as our assembly;
 //! 4. does 1 again with Zbb on (`--mattr=+zbb`), whose instructions replace
 //!    recipes for minimum, maximum and more, and `bits.c` with M off
 //!    (`--mattr=-m`).
@@ -27,10 +27,10 @@ mod emu;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use draconian_codegen::assembler::Assembler;
-use draconian_codegen::objdump::{self, Image};
-use draconian_codegen::target::Target;
-use draconian_codegen::{Options, compile};
+use epitome_codegen::assembler::Assembler;
+use epitome_codegen::objdump::{self, Image};
+use epitome_codegen::target::Target;
+use epitome_codegen::{Options, compile};
 
 /// RISC-V's aliases: mnemonics the disassembler may read back for an
 /// instruction we wrote another way, or the other way round.
@@ -67,7 +67,7 @@ fn object(t: &Target, src: &Path, flags: &[&str], tmp: &Path, mattr: &[String]) 
         .arg("-o")
         .arg(&ll))?;
     let text = std::fs::read_to_string(&ll).unwrap();
-    let mut m = draconian_ir::parse_module(&text).map_err(|e| format!("{stem}: {e:?}"))?;
+    let mut m = epitome_ir::parse_module(&text).map_err(|e| format!("{stem}: {e:?}"))?;
     let opts = Options { mattr: mattr.to_vec(), ..Options::default() };
     let compiled = compile(t, &mut m, &opts).map_err(|e| format!("{stem}: {e}"))?;
     let bytes = compiled.object_file(t).map_err(|e| format!("{stem}: {e}"))?;
@@ -112,12 +112,12 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
                 let assembled = Assembler::new(t)
                     .assemble(asm, None)
                     .and_then(|x| x.file(t))
-                    .map_err(|e| format!("{stem}: draconian-as: {e}"))?;
+                    .map_err(|e| format!("{stem}: epitome-as: {e}"))?;
                 if &assembled != bytes {
-                    return Err(format!("{stem}: draconian-as makes another object of our assembly"));
+                    return Err(format!("{stem}: epitome-as makes another object of our assembly"));
                 }
                 let img = Image::read(bytes, &t.machine).map_err(|e| format!("{stem}: {e}"))?;
-                objdump::reads_back(t, &img, asm, ALIASES).map_err(|e| format!("{stem}: draconian-objdump: {e}"))?;
+                objdump::reads_back(t, &img, asm, ALIASES).map_err(|e| format!("{stem}: epitome-objdump: {e}"))?;
             }
             // 1. It runs, and prints what the reference prints.
             let mut m = emu::Machine::link(&[a, b]).map_err(|e| format!("{stem}: linking: {e}"))?;
@@ -184,7 +184,7 @@ fn inline_asm_runs_on_riscv() {
     .unwrap();
     let want = run(&mut Command::new(&reference)).unwrap();
     let text = std::fs::read_to_string(dir.join("riscv.ll")).unwrap();
-    let mut m = draconian_ir::parse_module(&text).unwrap();
+    let mut m = epitome_ir::parse_module(&text).unwrap();
     let compiled = compile(&t, &mut m, &Options::default()).unwrap();
     std::fs::write(tmp.join("riscv.s"), &compiled.asm).unwrap();
     let a = compiled.object_file(&t).unwrap_or_else(|e| panic!("{e}\n{}", compiled.asm));

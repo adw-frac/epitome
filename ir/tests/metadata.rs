@@ -4,7 +4,7 @@
 //! `clang -S -emit-llvm -x ir NAME.ll` printed for it (less the `ModuleID`,
 //! `source_filename` and `target` lines clang adds).
 
-use draconian_ir::parse_module;
+use epitome_ir::parse_module;
 
 /// Lines without comments, blank lines or `source_filename`.
 fn significant_lines(text: &str) -> Vec<&str> {

@@ -98,7 +98,7 @@
 
 use std::collections::HashMap;
 
-use draconian_ir::module::{MdId, Metadata, Module};
+use epitome_ir::module::{MdId, Metadata, Module};
 
 use crate::abi::Syntax;
 use crate::enc::{self, Env, Expr};
@@ -769,7 +769,7 @@ mod tests {
 !20 = !{!"sp", !"sp"}
 !21 = !{!"zero", !"r15"}
 "#;
-        let m = Machine::read(&draconian_ir::parse_module(src).unwrap()).unwrap();
+        let m = Machine::read(&epitome_ir::parse_module(src).unwrap()).unwrap();
         let bases: Vec<(&str, u8, u8)> = m.files.iter().map(|f| (f.name.as_str(), f.base, f.size)).collect();
         assert_eq!(bases, [("gpr", 0, 16), ("fpr", 16, 8), ("vec", 24, 32), ("pred", 56, 8)]);
         assert_eq!(m.lookup("f3"), Some(19));

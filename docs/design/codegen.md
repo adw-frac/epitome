@@ -1,10 +1,10 @@
 # Code generation
 
-This document covers how Draconian turns IR into machine code. For sources and
+This document covers how Epitome turns IR into machine code. For sources and
 status labels, see the [index](README.md).
 
 The code generator documentation marks several parts as "To Be Written". Those
-parts are marked **Open** here, and Draconian designs them itself.
+parts are marked **Open** here, and Epitome designs them itself.
 
 ## 1. Phases
 
@@ -51,17 +51,17 @@ required.
 | Instruction info | Instructions, plus helpers such as copying, spilling and analysing branches. |
 | Frame lowering | Stack layout, prologue and epilogue. |
 | Subtarget | CPU and feature flags, from `-mcpu=` and `-mattr=`. |
-| Calling convention | Where arguments and return values go. Draconian describes conventions as named metadata in the target description; see [isel](isel.md#calling-conventions). |
+| Calling convention | Where arguments and return values go. Epitome describes conventions as named metadata in the target description; see [isel](isel.md#calling-conventions). |
 | Assembly printer | Turns machine instructions into text or MC instructions. |
 
-LLVM describes most of this in TableGen files. Draconian describes targets in
+LLVM describes most of this in TableGen files. Epitome describes targets in
 LLVM IR instead: each instruction is a function whose body says what it does,
 with its encoding and assembly in attributes, read as data at start-up. See
 [machine descriptions and instruction selection](isel.md).
 
 ## 3. Instruction selection
 
-Draconian will have both selectors, as LLVM does. SelectionDAG comes first
+Epitome will have both selectors, as LLVM does. SelectionDAG comes first
 because it is the most fully documented.
 
 ### SelectionDAG
@@ -111,7 +111,7 @@ analysis are on GlobalISel subpages we have not read yet.
 | Live variables | Finds where each register is killed or dead. Uses SSA for virtual registers and tracks physical registers within a block. | Planned |
 | PHI elimination | Replaces PHI instructions with copies. Copies go at the end of each predecessor, through temporaries; see [isel](isel.md). | Done |
 | Two-address | Rewrites three-address instructions into two-address form where the target needs it. | Planned |
-| Live intervals | Numbers instructions and builds a live range for each virtual register. The documentation is incomplete here. Draconian keeps one segment per block; see [isel](isel.md). | Done |
+| Live intervals | Numbers instructions and builds a live range for each virtual register. The documentation is incomplete here. Epitome keeps one segment per block; see [isel](isel.md). | Done |
 
 ### Allocators
 
@@ -121,7 +121,7 @@ Chosen with `-regalloc=`.
 | --- | --- | --- |
 | `fast` | Works one block at a time. The default for debug builds. | Planned |
 | `basic` | Allocates live ranges one by one in a heuristic order. Useful for finding bugs. | Planned |
-| linear scan | Draconian's first allocator: live ranges in order of start, copy hints, callee-saved registers for values live across calls, spills through scratch registers. See [isel](isel.md). | Done |
+| linear scan | Epitome's first allocator: live ranges in order of start, copy hints, callee-saved registers for values live across calls, spills through scratch registers. See [isel](isel.md). | Done |
 | `greedy` | The default. Like `basic`, plus splitting live ranges across the function. | Later |
 | `pbqp` | Solves allocation as a partitioned boolean quadratic problem. | Later |
 
@@ -142,7 +142,7 @@ pipeline is ours to design.
 
 | Pass | Source | What it does | Status |
 | --- | --- | --- | --- |
-| Branch folder | Writing an LLVM Backend | Merges and simplifies branches using the target's branch analysis. Draconian skips blocks that only branch and drops branches to the next block. | Partial |
+| Branch folder | Writing an LLVM Backend | Merges and simplifies branches using the target's branch analysis. Epitome skips blocks that only branch and drops branches to the next block. | Partial |
 | If-converter | Writing an LLVM Backend | Turns branches into predicated instructions using branch analysis. | Later |
 | VLIW packetiser | Code generator | Groups instructions into packets using a resource state machine. | Later |
 | Tail call optimisation | Code generator | Guaranteed tail calls for `fastcc`, `tailcc`, or with `-tailcallopt`. | Later |
@@ -173,10 +173,10 @@ To emit code, a target needs:
 
 The assembler matches mnemonic aliases first, then instruction aliases.
 
-Draconian has no streamer: assembly and object files are both written from
+Epitome has no streamer: assembly and object files are both written from
 the allocated machine IR and one description of each global's data. See
 [objects.md](objects.md) for object files (Mach-O and ELF: **Done**) and
-`draconian-objdump`.
+`epitome-objdump`.
 
 ### Optional sections
 
@@ -197,7 +197,7 @@ documents when we reach those targets.
 
 ## 8. Debugging options
 
-These options show the DAG at each step. Draconian should support them as text
+These options show the DAG at each step. Epitome should support them as text
 or `.dot` output: `-view-dag-combine1-dags`, `-view-legalize-dags`,
 `-view-dag-combine2-dags`, `-view-isel-dags`, `-view-sched-dags`,
 `-view-sunit-dags` and `-filter-view-dags`. `-debug-only=isel` and

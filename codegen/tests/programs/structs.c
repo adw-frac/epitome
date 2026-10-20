@@ -28,7 +28,7 @@ struct big twice(struct big b) {
 }
 
 struct mixed mix(int i, double x) {
-    struct mixed m = {i, x, "draconian"};
+    struct mixed m = {i, x, "epitome"};
     m.s[i % 9] = 'X';
     return m;
 }

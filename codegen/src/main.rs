@@ -1,18 +1,18 @@
-//! `draconian-llc`: compiles a `.ll` file to AArch64 assembly, or to an
+//! `epitome-llc`: compiles a `.ll` file to AArch64 assembly, or to an
 //! object file (Mach-O or ELF, as the convention uses).
 
 use std::process::ExitCode;
 
-use draconian_codegen::target::Target;
-use draconian_codegen::{Options, Stop, compile, mir};
+use epitome_codegen::target::Target;
+use epitome_codegen::{Options, Stop, compile, mir};
 
-const USAGE: &str = "usage: draconian-llc [options] <file.ll>
+const USAGE: &str = "usage: epitome-llc [options] <file.ll>
 
   -j <n>                  threads to compile functions on (default: one
                           per core); the output is the same for any number
   --chop=F[:T]            autochop: functions before F (in module order,
                           from 0) get every elective choice, F its first T,
-                          the rest none; also DRACONIAN_LLC_CHOP
+                          the rest none; also EPITOME_LLC_CHOP
   --chop-counts           print each function's count of elective choices
   -o <file>               write the output here instead of stdout; a name
                           ending in .o asks for an object file
@@ -21,7 +21,7 @@ const USAGE: &str = "usage: draconian-llc [options] <file.ll>
   --target=<name|path>    the machine description: a .ll file, a directory
                           of them (read in name order), or a name: aarch64
                           is built in, others are directories of that name
-                          in DRACONIAN_TARGET_PATH (a list separated by
+                          in EPITOME_TARGET_PATH (a list separated by
                           colons); by default, the one the module's triple names
                           (riscv64-... is riscv64), else aarch64
   --target-add=<path>     read these .ll files too, as more of the
@@ -66,7 +66,7 @@ fn main() -> ExitCode {
             "-j" => match it.next().and_then(|n| n.parse().ok()) {
                 Some(n) => opts.threads = n,
                 None => {
-                    eprintln!("draconian-llc: -j needs a number\n\n{USAGE}");
+                    eprintln!("epitome-llc: -j needs a number\n\n{USAGE}");
                     return ExitCode::FAILURE;
                 }
             },
@@ -89,11 +89,11 @@ fn main() -> ExitCode {
             s if s.starts_with("--abi=") => opts.abi = Some(s["--abi=".len()..].to_string()),
             s if s.starts_with("--mcpu=") => opts.mcpu = Some(s["--mcpu=".len()..].to_string()),
             s if s.starts_with("--mattr=") => opts.mattr.push(s["--mattr=".len()..].to_string()),
-            "--syntax=macho" => opts.syntax = Some(draconian_codegen::abi::Syntax::MachO),
-            "--syntax=elf" => opts.syntax = Some(draconian_codegen::abi::Syntax::Elf),
+            "--syntax=macho" => opts.syntax = Some(epitome_codegen::abi::Syntax::MachO),
+            "--syntax=elf" => opts.syntax = Some(epitome_codegen::abi::Syntax::Elf),
             s if s.starts_with("--reserve=") => reserve.extend(s["--reserve=".len()..].split(',').map(str::to_string)),
             s if s.starts_with('-') => {
-                eprintln!("draconian-llc: unknown option {s}\n\n{USAGE}");
+                eprintln!("epitome-llc: unknown option {s}\n\n{USAGE}");
                 return ExitCode::FAILURE;
             }
             s => input = Some(s.to_string()),
@@ -102,19 +102,19 @@ fn main() -> ExitCode {
     let load = |triple: &str| match Target::resolve(target_file.as_deref(), triple, &adds) {
         Ok(t) => Some(t),
         Err(e) => {
-            eprintln!("draconian-llc: {e}");
+            eprintln!("epitome-llc: {e}");
             None
         }
     };
     if sample {
         let Some(target) = load("") else { return ExitCode::FAILURE };
-        let syntax = opts.syntax.unwrap_or(draconian_codegen::abi::Syntax::Elf);
-        print!("{}", draconian_codegen::check::sample_assembly(&target, syntax, 3));
+        let syntax = opts.syntax.unwrap_or(epitome_codegen::abi::Syntax::Elf);
+        print!("{}", epitome_codegen::check::sample_assembly(&target, syntax, 3));
         return ExitCode::SUCCESS;
     }
     if check {
         let Some(target) = load("") else { return ExitCode::FAILURE };
-        let report = draconian_codegen::check::check(&target);
+        let report = epitome_codegen::check::check(&target);
         print!("{}", report.render(verbose));
         return if report.errors() == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE };
     }
@@ -134,14 +134,14 @@ fn main() -> ExitCode {
     let src = match std::fs::read_to_string(&input) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("draconian-llc: {input}: {e}");
+            eprintln!("epitome-llc: {input}: {e}");
             return ExitCode::FAILURE;
         }
     };
-    let mut module = match draconian_ir::parse_module(&src) {
+    let mut module = match epitome_ir::parse_module(&src) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("draconian-llc: {input}: {e:?}");
+            eprintln!("epitome-llc: {input}: {e:?}");
             return ExitCode::FAILURE;
         }
     };
@@ -150,30 +150,30 @@ fn main() -> ExitCode {
     match target.machine.regs(&reserve) {
         Ok(r) => opts.reserve.extend(r),
         Err(e) => {
-            eprintln!("draconian-llc: --reserve: {e}");
+            eprintln!("epitome-llc: --reserve: {e}");
             return ExitCode::FAILURE;
         }
     }
     let started = std::time::Instant::now();
     opts.stop = stop;
-    opts.chop = match draconian_ir::chop::limit_from(chop.as_deref(), "DRACONIAN_LLC_CHOP") {
+    opts.chop = match epitome_ir::chop::limit_from(chop.as_deref(), "EPITOME_LLC_CHOP") {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("draconian-llc: {e}");
+            eprintln!("epitome-llc: {e}");
             return ExitCode::FAILURE;
         }
     };
     let compiled = match compile(&target, &mut module, &opts) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("draconian-llc: {e}");
+            eprintln!("epitome-llc: {e}");
             return ExitCode::FAILURE;
         }
     };
     for e in &compiled.errors {
-        eprintln!("draconian-llc: {e}");
+        eprintln!("epitome-llc: {e}");
     }
-    // Autochop's reports, as draconian-opt's.
+    // Autochop's reports, as epitome-opt's.
     if let Some((k, steps, last)) = &compiled.chop_stopped {
         let name = compiled.chop_names.get(*k).map_or("?", String::as_str);
         match last {
@@ -188,17 +188,17 @@ fn main() -> ExitCode {
     }
     {
         let counts: Vec<u64> = compiled.chop_counts.iter().map(|c| c.steps).collect();
-        if let Err(e) = draconian_ir::chop::report_counts("llc", &compiled.chop_names, &counts) {
-            eprintln!("DRACONIAN_CHOP_COUNTS: {e}");
+        if let Err(e) = epitome_ir::chop::report_counts("llc", &compiled.chop_names, &counts) {
+            eprintln!("EPITOME_CHOP_COUNTS: {e}");
         }
-        if let Ok(dump) = std::env::var("DRACONIAN_CHOP_DUMP")
+        if let Ok(dump) = std::env::var("EPITOME_CHOP_DUMP")
             && let Err(e) = std::fs::write(&dump, &compiled.asm)
         {
             eprintln!("{dump}: {e}");
         }
     }
     if stats {
-        use draconian_codegen::isel::stats::*;
+        use epitome_codegen::isel::stats::*;
         let total = started.elapsed();
         let (roots, steps, cands, valid) = (get(&ROOTS), get(&STEPS), get(&CANDIDATES), get(&VALID));
         let insts: usize = compiled.funcs.iter().map(|f| f.blocks.iter().map(|b| b.insts.len()).sum::<usize>()).sum();
@@ -217,7 +217,7 @@ fn main() -> ExitCode {
             (get(&NANOS) - get(&WALK_NANOS)) as f64 / roots.max(1) as f64,
             total.as_secs_f64() * 1e3
         );
-        use draconian_codegen::timing;
+        use epitome_codegen::timing;
         let ms = |c| timing::get(c) as f64 / 1e6;
         eprintln!(
             "; stages, summed over functions: prepare {:.1} ms, selection {:.1} ms, allocation {:.1} ms, frames {:.1} ms, layout {:.1} ms",
@@ -233,16 +233,16 @@ fn main() -> ExitCode {
         let bytes = match compiled.object_file(&target) {
             Ok(b) => b,
             Err(e) => {
-                eprintln!("draconian-llc: {e}");
+                eprintln!("epitome-llc: {e}");
                 return ExitCode::FAILURE;
             }
         };
         let Some(path) = output else {
-            eprintln!("draconian-llc: an object file needs -o");
+            eprintln!("epitome-llc: an object file needs -o");
             return ExitCode::FAILURE;
         };
         if let Err(e) = std::fs::write(&path, bytes) {
-            eprintln!("draconian-llc: {path}: {e}");
+            eprintln!("epitome-llc: {path}: {e}");
             return ExitCode::FAILURE;
         }
         return if compiled.errors.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE };
@@ -254,7 +254,7 @@ fn main() -> ExitCode {
             let (words, fixups) = match mir::encode_function(&target, f) {
                 Ok(w) => w,
                 Err(e) => {
-                    eprintln!("draconian-llc: {e}");
+                    eprintln!("epitome-llc: {e}");
                     return ExitCode::FAILURE;
                 }
             };
@@ -277,7 +277,7 @@ fn main() -> ExitCode {
     match output {
         Some(path) => {
             if let Err(e) = std::fs::write(&path, text) {
-                eprintln!("draconian-llc: {path}: {e}");
+                eprintln!("epitome-llc: {path}: {e}");
                 return ExitCode::FAILURE;
             }
         }

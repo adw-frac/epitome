@@ -27,7 +27,7 @@ values the Language Reference lists (summarised in `docs/llvm-ir`, section
 
 An integer width with no entry of its own uses the smallest wider entry,
 or else the widest, as the reference says. Where the reference is silent,
-for vector and float widths with no entry, Draconian aligns to the size
+for vector and float widths with no entry, Epitome aligns to the size
 rounded up to a power of two.
 
 ## Alias rules

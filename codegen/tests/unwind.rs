@@ -17,10 +17,10 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use draconian_codegen::assembler::Assembler;
-use draconian_codegen::elf;
-use draconian_codegen::target::Target;
-use draconian_codegen::{Options, compile};
+use epitome_codegen::assembler::Assembler;
+use epitome_codegen::elf;
+use epitome_codegen::target::Target;
+use epitome_codegen::{Options, compile};
 
 fn run(cmd: &mut Command) -> Result<String, String> {
     let out = cmd.output().map_err(|e| format!("{cmd:?}: {e}"))?;
@@ -51,7 +51,7 @@ fn exceptions_unwind_through_our_frames() {
         let ll = tmp.join(format!("through{opt}.ll"));
         run(Command::new("clang").args(["-S", "-emit-llvm", opt]).arg(dir.join("through.c")).arg("-o").arg(&ll))
             .unwrap();
-        let mut m = draconian_ir::parse_module(&std::fs::read_to_string(&ll).unwrap()).unwrap();
+        let mut m = epitome_ir::parse_module(&std::fs::read_to_string(&ll).unwrap()).unwrap();
         let t = Target::aarch64();
         let compiled = compile(&t, &mut m, &Options::default()).unwrap();
         let o = tmp.join(format!("through{opt}.o"));
@@ -88,7 +88,7 @@ fn landing_pads_catch_and_clean_up() {
         let ll = tmp.join(format!("catch{opt}.ll"));
         run(Command::new("clang++").args(["-S", "-emit-llvm", opt]).arg(dir.join("catch.cpp")).arg("-o").arg(&ll))
             .unwrap();
-        let mut m = draconian_ir::parse_module(&std::fs::read_to_string(&ll).unwrap()).unwrap();
+        let mut m = epitome_ir::parse_module(&std::fs::read_to_string(&ll).unwrap()).unwrap();
         let compiled = compile(&t, &mut m, &Options::default()).unwrap();
         let bytes = compiled.object_file(&t).unwrap();
         let assembled = Assembler::new(&t).assemble(&compiled.asm, None).and_then(|a| a.file(&t)).unwrap();
@@ -118,7 +118,7 @@ fn riscv_object(t: &Target, src: &Path, tmp: &Path) -> Result<(), String> {
         .arg(src)
         .arg("-o")
         .arg(&ll))?;
-    let mut m = draconian_ir::parse_module(&std::fs::read_to_string(&ll).unwrap()).map_err(|e| format!("{e:?}"))?;
+    let mut m = epitome_ir::parse_module(&std::fs::read_to_string(&ll).unwrap()).map_err(|e| format!("{e:?}"))?;
     let compiled = compile(t, &mut m, &Options::default())?;
     let ours = compiled.object_file(t)?;
     // LLVM's, of our assembly: as a crate's global assembly, not

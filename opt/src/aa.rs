@@ -26,8 +26,8 @@
 
 use crate::fx::{FxHashMap as HashMap, FxHashSet as HashSet};
 
-use draconian_ir::module::*;
-use draconian_ir::types::{Type, TypeId};
+use epitome_ir::module::*;
+use epitome_ir::types::{Type, TypeId};
 
 use crate::combine::eval;
 use crate::ctx::Shared;

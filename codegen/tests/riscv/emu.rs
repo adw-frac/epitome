@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use draconian_codegen::elf::{self, ElfFile};
+use epitome_codegen::elf::{self, ElfFile};
 
 const BASE: u64 = 0x10000;
 const MEM: usize = 64 << 20;

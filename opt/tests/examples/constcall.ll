@@ -1,4 +1,4 @@
-; draconian-opt: --passes=combine --no-inline
+; epitome-opt: --passes=combine --no-inline
 ; Calls on constants worked out by following the callee: a recursive call
 ; that returns at once, and a loop that only computes. A path that stores
 ; keeps its call, and so does one with an argument not known.

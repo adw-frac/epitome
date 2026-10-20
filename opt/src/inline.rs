@@ -42,9 +42,9 @@
 use crate::fx::FxHashMap as HashMap;
 use std::sync::OnceLock;
 
-use draconian_ir::edit::Names;
-use draconian_ir::module::*;
-use draconian_ir::types::Type;
+use epitome_ir::edit::Names;
+use epitome_ir::module::*;
+use epitome_ir::types::Type;
 
 use crate::attrs;
 use crate::callgraph::CallGraph;
@@ -216,8 +216,8 @@ impl<'a> Inliner<'a> {
                 sh.remark(g, format!("not inlined @{callee_name}: caller would grow past {limit} instructions"));
                 continue;
             }
-            if !draconian_ir::chop::allow(|| {
-                format!("inline @{callee_name} at {}", draconian_ir::printer::inst_name(f, site))
+            if !epitome_ir::chop::allow(|| {
+                format!("inline @{callee_name} at {}", epitome_ir::printer::inst_name(f, site))
             }) {
                 continue;
             }
@@ -852,7 +852,7 @@ fn s_has_eh(f: &Function) -> bool {
 }
 
 /// A plain `call` with no attributes.
-pub fn plain_call(fn_ty: draconian_ir::types::TypeId, callee: Value, args: Vec<Value>) -> Call {
+pub fn plain_call(fn_ty: epitome_ir::types::TypeId, callee: Value, args: Vec<Value>) -> Call {
     Call {
         tail: TailKind::None,
         fmf: FastMath::default(),

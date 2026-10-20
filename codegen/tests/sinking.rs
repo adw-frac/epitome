@@ -2,12 +2,12 @@
 //! block and used by loads in another is folded into the loads there, but
 //! is not moved into a loop that its own block is not in.
 
-use draconian_codegen::target::Target;
-use draconian_codegen::{Options, compile};
+use epitome_codegen::target::Target;
+use epitome_codegen::{Options, compile};
 
 fn asm(src: &str) -> String {
     let t = Target::aarch64();
-    let mut m = draconian_ir::parse_module(src).unwrap();
+    let mut m = epitome_ir::parse_module(src).unwrap();
     compile(&t, &mut m, &Options::default()).unwrap().asm
 }
 

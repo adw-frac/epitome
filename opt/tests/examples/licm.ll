@@ -1,4 +1,4 @@
-; draconian-opt: --passes=loops
+; epitome-opt: --passes=loops
 ; licm: a load of a global nothing in the loop writes, and arithmetic on
 ; it, move to a new preheader; the load that changes each time stays.
 target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"

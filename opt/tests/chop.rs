@@ -1,4 +1,4 @@
-//! Autochop (`draconian_ir::chop`) in the optimiser.
+//! Autochop (`epitome_ir::chop`) in the optimiser.
 //!
 //! 1. Counts are the same on 1 thread and on 8, and so is the output under
 //!    any limit, so a limit means one thing.
@@ -11,8 +11,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use draconian_ir::chop::{self, Found, Limit};
-use draconian_opt::pipeline::{self, Options};
+use epitome_ir::chop::{self, Found, Limit};
+use epitome_opt::pipeline::{self, Options};
 
 fn have_clang() -> bool {
     Command::new("clang").arg("--version").output().is_ok_and(|o| o.status.success())
@@ -43,7 +43,7 @@ fn program_ir() -> String {
 }
 
 fn optimise(src: &str, threads: usize, chop: Option<Limit>, rules: Option<&str>) -> (String, pipeline::Report) {
-    let mut m = draconian_ir::parse_module(src).unwrap();
+    let mut m = epitome_ir::parse_module(src).unwrap();
     let opts = Options { threads, chop, extra_rules: rules.map(str::to_string), ..Options::default() };
     let report = pipeline::run(&mut m, &opts);
     (m.to_string(), report)
@@ -94,7 +94,7 @@ fn no_steps_is_no_change() {
         return;
     }
     let src = program_ir();
-    let printed = draconian_ir::parse_module(&src).unwrap().to_string();
+    let printed = epitome_ir::parse_module(&src).unwrap().to_string();
     let (out, _) = optimise(&src, 4, Some(Limit { func: 0, steps: 0 }), None);
     assert!(out == printed, "a limit of 0:0 changed the module");
 }
@@ -108,7 +108,7 @@ fn search_finds_a_planted_wrong_rule() {
     let src = program_ir();
     // Wrong: x * 7 is not x << 3.
     let bad = "bad_mul7: mul(x, 7) -> shl(x, 3)\n";
-    let want = run_ir(&draconian_ir::parse_module(&src).unwrap().to_string(), "want").expect("the program runs");
+    let want = run_ir(&epitome_ir::parse_module(&src).unwrap().to_string(), "want").expect("the program runs");
     let (_, full) = optimise(&src, 4, None, Some(bad));
     let steps: Vec<u64> = full.chop_counts.iter().map(|c| c.steps).collect();
     let mut runs = 0;

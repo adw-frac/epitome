@@ -1,13 +1,13 @@
 [package]
-name = "draconian-opt"
+name = "epitome-opt"
 version = "0.1.0"
 edition = "2024"
-repository = "https://github.com/andy-thomason/draconian-measurement"
-description = "Draconian's optimisation passes and the machinery that runs them on many functions at once"
+repository = "https://github.com/andy-thomason/epitome"
+description = "Epitome's optimisation passes and the machinery that runs them on many functions at once"
 
 [dependencies]
-draconian-ir = { path = "../ir" }
+epitome-ir = { path = "../ir" }
 
 [[bin]]
-name = "draconian-opt"
+name = "epitome-opt"
 path = "src/main.rs"

@@ -39,10 +39,10 @@
 
 use crate::fx::{FxHashMap as HashMap, FxHashSet as HashSet};
 
-use draconian_ir::apint::ApInt;
-use draconian_ir::edit::Names;
-use draconian_ir::module::*;
-use draconian_ir::types::{Type, TypeId};
+use epitome_ir::apint::ApInt;
+use epitome_ir::edit::Names;
+use epitome_ir::module::*;
+use epitome_ir::types::{Type, TypeId};
 
 use crate::ctx::Shared;
 
@@ -345,8 +345,8 @@ fn split_round(sh: &Shared, f: &mut Function, entry: BlockId, stats: &mut Stats)
             // Only ever written: the alloca and everything writing it go.
             if !uses.copies.is_empty()
                 && uses.copies.iter().all(|c| !matches!(c.role, Role::OutOf(_)))
-                && draconian_ir::chop::allow(|| {
-                    format!("sroa: remove {}, only ever written", draconian_ir::printer::local_name(f, a))
+                && epitome_ir::chop::allow(|| {
+                    format!("sroa: remove {}, only ever written", epitome_ir::printer::local_name(f, a))
                 })
             {
                 erased.push(i);
@@ -401,8 +401,8 @@ fn split_round(sh: &Shared, f: &mut Function, entry: BlockId, stats: &mut Stats)
         if parts.len() == 1 && matches!(kinds[0], Kind::Uniform(t) if t == ty) && parts[0].start == 0 {
             continue;
         }
-        if !draconian_ir::chop::allow(|| {
-            format!("sroa: split {} into {} pieces", draconian_ir::printer::local_name(f, a), parts.len())
+        if !epitome_ir::chop::allow(|| {
+            format!("sroa: split {} into {} pieces", epitome_ir::printer::local_name(f, a), parts.len())
         }) {
             continue;
         }
@@ -696,8 +696,8 @@ fn split_aggregate_accesses(sh: &Shared, f: &mut Function) {
             if elems.is_empty() || elems.len() as u64 > MAX_ELEMENTS || !based_on_alloca(f, ptr) {
                 continue;
             }
-            if !draconian_ir::chop::allow(|| {
-                format!("sroa: split the aggregate access {}", draconian_ir::printer::inst_name(f, i))
+            if !epitome_ir::chop::allow(|| {
+                format!("sroa: split the aggregate access {}", epitome_ir::printer::inst_name(f, i))
             }) {
                 continue;
             }

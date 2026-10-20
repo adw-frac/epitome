@@ -1,4 +1,4 @@
-//! Checks of a machine description, for `draconian-llc --check-target`:
+//! Checks of a machine description, for `epitome-llc --check-target`:
 //! what someone writing a description needs to know before trusting it.
 //!
 //! - **structure**: the roles, copies, relocations, conventions and CPUs
@@ -696,7 +696,7 @@ fn smoke(t: &Target) -> Section {
     for (label, opts) in runs {
         s.checked += 1;
         let opts = Options { keep_going: true, ..opts };
-        let mut m = match draconian_ir::parse_module(SMOKE) {
+        let mut m = match epitome_ir::parse_module(SMOKE) {
             Ok(m) => m,
             Err(e) => {
                 s.errors.push(format!("the smoke program does not parse: {e:?}"));
@@ -753,7 +753,7 @@ fn smoke(t: &Target) -> Section {
         .collect();
     for f in &known {
         let opts = Options { abi: first.clone(), mattr: vec![format!("-{f}")], keep_going: true, ..Options::default() };
-        let Ok(mut m) = draconian_ir::parse_module(SMOKE) else { break };
+        let Ok(mut m) = epitome_ir::parse_module(SMOKE) else { break };
         s.checked += 1;
         match guarded(|| compile(t, &mut m, &opts)) {
             Ok(c) if c.errors.is_empty() => {}

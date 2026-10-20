@@ -1,4 +1,4 @@
-//! Code generation for Draconian: instruction selection from machine
+//! Code generation for Epitome: instruction selection from machine
 //! descriptions written in LLVM IR, register allocation, frames, and
 //! assembly, binary and disassembly output. See `docs/design/isel.md`.
 
@@ -27,9 +27,9 @@ pub mod target;
 pub mod unwind;
 pub mod wide;
 
-use draconian_ir::Module;
-use draconian_ir::layout::DataLayout;
-use draconian_ir::module::*;
+use epitome_ir::Module;
+use epitome_ir::layout::DataLayout;
+use epitome_ir::module::*;
 
 use crate::mir::MFunc;
 use crate::prepare::Ctx;
@@ -52,7 +52,7 @@ pub struct Compiled {
     /// Autochop: the functions counted (in module order), each one's count
     /// of elective choices, and where a limit stopped.
     pub chop_names: Vec<String>,
-    pub chop_counts: Vec<draconian_ir::chop::Counter>,
+    pub chop_counts: Vec<epitome_ir::chop::Counter>,
     pub chop_stopped: Option<(usize, u64, Option<String>)>,
 }
 
@@ -85,8 +85,8 @@ pub struct Options {
     pub mattr: Vec<String>,
     /// Threads to compile functions on; 0 means one per core.
     pub threads: usize,
-    /// Autochop: how far elective choices may go (`draconian_ir::chop`).
-    pub chop: Option<draconian_ir::chop::Limit>,
+    /// Autochop: how far elective choices may go (`epitome_ir::chop`).
+    pub chop: Option<epitome_ir::chop::Limit>,
 }
 
 /// Time spent in each stage of compiling functions, summed over every
@@ -239,7 +239,7 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
     by_size.sort_by_key(|&k| std::cmp::Reverse(jobs[k].1.body.insts.len()));
     let skeleton: &Module = m;
     // Autochop: function `j` (in module order) counts its own choices.
-    let chop = draconian_ir::chop::Session::new(jobs.len(), opts.chop);
+    let chop = epitome_ir::chop::Session::new(jobs.len(), opts.chop);
     let results = par_run(
         jobs.len(),
         &by_size,

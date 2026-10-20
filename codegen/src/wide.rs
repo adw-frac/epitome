@@ -12,20 +12,20 @@
 //!
 //! At a call, a wide argument or result is a `[2 x i64]`, which the
 //! conventions pass in two registers as they do a small struct, marked
-//! `draconian.wide` so that a convention can align the pair (AAPCS64 puts
+//! `epitome.wide` so that a convention can align the pair (AAPCS64 puts
 //! one in an even register and the next). Divisions and remainders call the
 //! runtime's `__udivti3`, `__divti3`, `__umodti3` and `__modti3`.
 
 use std::collections::HashMap;
 
-use draconian_ir::apint::ApInt;
-use draconian_ir::module::*;
-use draconian_ir::types::{Type, TypeId};
+use epitome_ir::apint::ApInt;
+use epitome_ir::module::*;
+use epitome_ir::types::{Type, TypeId};
 
 use crate::prepare::Ctx;
 
 /// The attribute that marks a wide value passed as `[2 x i64]`.
-pub const WIDE: &str = "draconian.wide";
+pub const WIDE: &str = "epitome.wide";
 
 fn wide_bits(cx: &Ctx, ty: TypeId) -> Option<u32> {
     match cx.m.types.get(ty) {

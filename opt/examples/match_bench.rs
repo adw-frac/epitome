@@ -10,9 +10,9 @@
 
 use std::time::Instant;
 
-use draconian_ir::module::{BinOp, ConstId, LocalId, Value};
-use draconian_opt::combine::dsl::{Head, Lit, Pat, parse_rules};
-use draconian_opt::combine::tree::{Matcher, Shape, Subject};
+use epitome_ir::module::{BinOp, ConstId, LocalId, Value};
+use epitome_opt::combine::dsl::{Head, Lit, Pat, parse_rules};
+use epitome_opt::combine::tree::{Matcher, Shape, Subject};
 
 struct Lcg(u64);
 impl Lcg {

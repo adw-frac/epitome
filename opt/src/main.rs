@@ -1,14 +1,14 @@
-//! `draconian-opt`: reads a `.ll` file, runs the interprocedural pipeline
+//! `epitome-opt`: reads a `.ll` file, runs the interprocedural pipeline
 //! (inlining and recursion removal) and prints the result.
 
 use std::process::ExitCode;
 use std::time::Instant;
 
-use draconian_opt::inline::OptLevel;
-use draconian_opt::pipeline::{self, Options};
-use draconian_opt::recursion::RecursionMode;
+use epitome_opt::inline::OptLevel;
+use epitome_opt::pipeline::{self, Options};
+use epitome_opt::recursion::RecursionMode;
 
-const USAGE: &str = "usage: draconian-opt [options] <file.ll>
+const USAGE: &str = "usage: epitome-opt [options] <file.ll>
 
   -O1 -O2 -O3 -Os -Oz     optimisation level (default -O2)
   -j <n>                  threads (default: one per core)
@@ -36,7 +36,7 @@ const USAGE: &str = "usage: draconian-opt [options] <file.ll>
   --verify                check the output is well-formed SSA
   --chop=F[:T]            autochop: functions before F (in module order,
                           from 0) get every elective change, F its first T,
-                          the rest none; also DRACONIAN_OPT_CHOP. Reports
+                          the rest none; also EPITOME_OPT_CHOP. Reports
                           where it stopped, and the last change made
   --chop-counts           print each function's count of elective changes
   --rules=<file>          combine rules to try before the standard ones
@@ -100,7 +100,7 @@ fn main() -> ExitCode {
                 let path = &s["--rules=".len()..];
                 match std::fs::read_to_string(path) {
                     Ok(text) => {
-                        if let Err(e) = draconian_opt::combine::with_extra(&text) {
+                        if let Err(e) = epitome_opt::combine::with_extra(&text) {
                             return usage(&format!("{path}: {e}"));
                         }
                         opts.extra_rules = Some(text);
@@ -129,7 +129,7 @@ fn main() -> ExitCode {
         }
     }
     let Some(path) = input else { return usage("no input file") };
-    opts.chop = match draconian_ir::chop::limit_from(chop.as_deref(), "DRACONIAN_OPT_CHOP") {
+    opts.chop = match epitome_ir::chop::limit_from(chop.as_deref(), "EPITOME_OPT_CHOP") {
         Ok(l) => l,
         Err(e) => return usage(&e),
     };
@@ -142,7 +142,7 @@ fn main() -> ExitCode {
         }
     };
     let t0 = Instant::now();
-    let mut m = match draconian_ir::parse_module(&src) {
+    let mut m = match epitome_ir::parse_module(&src) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("{path}:{e}");
@@ -153,8 +153,8 @@ fn main() -> ExitCode {
     let report = pipeline::run(&mut m, &opts);
     let t2 = Instant::now();
     let text = if memssa {
-        let threads = if opts.threads == 0 { draconian_opt::par::default_threads() } else { opts.threads };
-        let reports = draconian_opt::memssa::analyse_module(&mut m, threads, true);
+        let threads = if opts.threads == 0 { epitome_opt::par::default_threads() } else { opts.threads };
+        let reports = epitome_opt::memssa::analyse_module(&mut m, threads, true);
         if stats {
             let (mut d, mut u, mut p, mut q, mut h, mut st, mut g) = (0, 0, 0, 0, 0, 0, 0);
             let (mut build, mut walk) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
@@ -171,7 +171,7 @@ fn main() -> ExitCode {
             );
         }
         let by: std::collections::HashMap<_, _> = reports.into_iter().collect();
-        draconian_ir::printer::print_module_with(&m, &|g, at| by.get(&g).and_then(|r| r.notes.get(&at).cloned()))
+        epitome_ir::printer::print_module_with(&m, &|g, at| by.get(&g).and_then(|r| r.notes.get(&at).cloned()))
     } else {
         m.to_string()
     };
@@ -193,10 +193,10 @@ fn main() -> ExitCode {
     }
     {
         let counts: Vec<u64> = report.chop_counts.iter().map(|c| c.steps).collect();
-        if let Err(e) = draconian_ir::chop::report_counts("opt", &report.chop_names, &counts) {
-            eprintln!("DRACONIAN_CHOP_COUNTS: {e}");
+        if let Err(e) = epitome_ir::chop::report_counts("opt", &report.chop_names, &counts) {
+            eprintln!("EPITOME_CHOP_COUNTS: {e}");
         }
-        if let Ok(dump) = std::env::var("DRACONIAN_CHOP_DUMP")
+        if let Ok(dump) = std::env::var("EPITOME_CHOP_DUMP")
             && let Err(e) = std::fs::write(&dump, &text)
         {
             eprintln!("{dump}: {e}");
@@ -301,7 +301,7 @@ fn main() -> ExitCode {
         let mut bad = false;
         for (g, f) in m.functions() {
             let name = m.global(g).name.clone().unwrap_or_default();
-            for e in draconian_opt::cfg::verify(f, &name) {
+            for e in epitome_opt::cfg::verify(f, &name) {
                 eprintln!("verify: {e}");
                 bad = true;
             }
@@ -327,6 +327,6 @@ fn ms(d: std::time::Duration) -> f64 {
 }
 
 fn usage(msg: &str) -> ExitCode {
-    eprintln!("draconian-opt: {msg}\n\n{USAGE}");
+    eprintln!("epitome-opt: {msg}\n\n{USAGE}");
     ExitCode::FAILURE
 }

@@ -26,7 +26,7 @@
 //! data, an instruction being 4 bytes; the second encodes the
 //! instructions, now that labels have addresses. References to symbols
 //! are resolved as `object::resolve` does for compiled code, by the
-//! format's rules, so the object file is the one `draconian-llc` writes
+//! format's rules, so the object file is the one `epitome-llc` writes
 //! directly for the same program.
 //!
 //! The directives are those the code generator writes: `.text`, `.data`,

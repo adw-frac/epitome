@@ -21,7 +21,7 @@
 use std::fmt::Write;
 use std::time::Duration;
 
-use draconian_opt::pipeline::{self, Options};
+use epitome_opt::pipeline::{self, Options};
 
 fn diamonds(n: usize) -> String {
     let mut s = String::from("define i64 @f(i64 %a, i64 %b) {\nentry:\n  br label %d0\n");
@@ -144,7 +144,7 @@ fn invariant_loop(n: usize) -> String {
 fn time(src: &str) -> Duration {
     (0..3)
         .map(|_| {
-            let mut m = draconian_ir::parse_module(src).unwrap();
+            let mut m = epitome_ir::parse_module(src).unwrap();
             let t = std::time::Instant::now();
             pipeline::run(&mut m, &Options { threads: 1, ..Options::default() });
             t.elapsed()

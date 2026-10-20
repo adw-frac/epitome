@@ -1,4 +1,4 @@
-; draconian-opt: --no-inline
+; epitome-opt: --no-inline
 ; One non-tail call. The value loaded before the call is needed after it,
 ; so it is saved in the frame. The parameter `%depth` is passed through
 ; unchanged by every recursive call, so it is never saved.

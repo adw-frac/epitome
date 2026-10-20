@@ -17,9 +17,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use draconian_codegen::abi::Syntax;
-use draconian_codegen::target::Target;
-use draconian_codegen::{Options, compile};
+use epitome_codegen::abi::Syntax;
+use epitome_codegen::target::Target;
+use epitome_codegen::{Options, compile};
 
 fn run(cmd: &mut Command) -> Result<String, String> {
     let out = cmd.output().map_err(|e| format!("{cmd:?}: {e}"))?;
@@ -114,7 +114,7 @@ fn build(t: &Target, dir: &Path, tmp: &Path, name: &str, by: By) -> Result<PathB
                 .arg(&ll)
                 .arg(&src))?;
             let mut m =
-                draconian_ir::parse_module(&std::fs::read_to_string(&ll).unwrap()).map_err(|e| format!("{e:?}"))?;
+                epitome_ir::parse_module(&std::fs::read_to_string(&ll).unwrap()).map_err(|e| format!("{e:?}"))?;
             let opts = Options {
                 abi: Some("aapcs64".into()),
                 reserve: vec![18],

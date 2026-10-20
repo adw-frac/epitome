@@ -1,7 +1,7 @@
 //! Small CFG clean-ups run after a function has been restructured. They
 //! keep the output readable; the full `simplifycfg` is planned separately.
 
-use draconian_ir::module::*;
+use epitome_ir::module::*;
 
 use crate::cfg;
 
@@ -35,8 +35,8 @@ pub fn merge_blocks(f: &mut Function) {
                 break;
             }
             // (Names number the whole function: only for the step reported.)
-            if !draconian_ir::chop::allow(|| {
-                let name = |x: BlockId| draconian_ir::printer::local_name(f, f.blocks[x.index()].local);
+            if !epitome_ir::chop::allow(|| {
+                let name = |x: BlockId| epitome_ir::printer::local_name(f, f.blocks[x.index()].local);
                 format!("merge block {} into {}", name(s), name(b))
             }) {
                 break;
@@ -98,7 +98,7 @@ pub fn remove_unreachable(f: &mut Function) {
     let mut reachable = vec![false; f.blocks.len()];
     rpo.iter().for_each(|b| reachable[b.index()] = true);
     let dead: Vec<BlockId> = f.layout.iter().copied().filter(|b| !reachable[b.index()]).collect();
-    if dead.is_empty() || !draconian_ir::chop::allow(|| format!("remove {} unreachable blocks", dead.len())) {
+    if dead.is_empty() || !epitome_ir::chop::allow(|| format!("remove {} unreachable blocks", dead.len())) {
         return;
     }
     for &b in &dead {

@@ -1,4 +1,4 @@
-; draconian-opt: --passes=combine
+; epitome-opt: --passes=combine
 ; The examples from the request, and their neighbours.
 define i32 @add_zero(i32 %x) {
   %r = add i32 %x, 0

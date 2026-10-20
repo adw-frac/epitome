@@ -34,8 +34,8 @@
 //! ending in a conditional branch with one target in the loop and one out,
 //! and an in-loop target reached only from the header.
 
-use draconian_ir::edit::Names;
-use draconian_ir::module::*;
+use epitome_ir::edit::Names;
+use epitome_ir::module::*;
 
 use crate::ctx::Shared;
 use crate::fx::FxHashMap as HashMap;
@@ -61,8 +61,8 @@ pub fn run(sh: &Shared, f: &mut Function) -> Stats {
         let found = loops::find(f);
         let Some(l) = found.iter().find(|l| can_rotate(sh, f, l)) else { break };
         let l = l.clone();
-        if !draconian_ir::chop::allow(|| {
-            format!("rotate the loop at {}", draconian_ir::printer::local_name(f, f.blocks[l.header.index()].local))
+        if !epitome_ir::chop::allow(|| {
+            format!("rotate the loop at {}", epitome_ir::printer::local_name(f, f.blocks[l.header.index()].local))
         }) {
             break;
         }

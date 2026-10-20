@@ -8,9 +8,9 @@
 //! undefined behaviour and is never folded, and `nuw`, `nsw`, `exact` and
 //! `disjoint` give poison when their promise is broken.
 
-use draconian_ir::float::{self, FloatKind};
-use draconian_ir::module::*;
-use draconian_ir::types::{Type, TypeId};
+use epitome_ir::float::{self, FloatKind};
+use epitome_ir::module::*;
+use epitome_ir::types::{Type, TypeId};
 
 use crate::table::{ConstTable as Constants, TypeTable as Types};
 

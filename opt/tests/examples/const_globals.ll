@@ -1,4 +1,4 @@
-; draconian-opt: --passes=combine
+; epitome-opt: --passes=combine
 ; Loads from constant globals fold to the initialiser's value; a global
 ; that is not constant, or whose definition may be replaced (weak), stays.
 target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"

@@ -1,4 +1,4 @@
-; draconian-opt: --passes=combine,simplifycfg
+; epitome-opt: --passes=combine,simplifycfg
 ; Control-flow simplification: branches fold in the combiner, and the
 ; graph is tidied after.
 

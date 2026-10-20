@@ -25,10 +25,10 @@
 //! The guard is the conditional branch rotation puts in front of the loop.
 //! When start and bound are constants, the comparison is checked directly.
 
-use draconian_ir::apint::ApInt;
-use draconian_ir::edit::Names;
-use draconian_ir::module::*;
-use draconian_ir::types::{Type, TypeId};
+use epitome_ir::apint::ApInt;
+use epitome_ir::edit::Names;
+use epitome_ir::module::*;
+use epitome_ir::types::{Type, TypeId};
 
 use crate::combine::eval::{self, IntConst};
 use crate::ctx::Shared;
@@ -203,7 +203,7 @@ fn simplify_loop(
         if let Some(count) = trip_count(sh, f, iv, &e) {
             stats.trip_counts.push((header_name.clone(), count));
         }
-        if !draconian_ir::chop::allow(|| format!("indvars: the counter of the loop at {header_name}")) {
+        if !epitome_ir::chop::allow(|| format!("indvars: the counter of the loop at {header_name}")) {
             return;
         }
         // The guard: the block before the loop, or before its preheader

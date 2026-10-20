@@ -9,8 +9,8 @@
 //! Loops whose header does not dominate them (irreducible control flow) are
 //! not natural loops and are not found; passes leave them alone.
 
-use draconian_ir::edit::Names;
-use draconian_ir::module::*;
+use epitome_ir::edit::Names;
+use epitome_ir::module::*;
 
 use crate::cfg::DomTree;
 

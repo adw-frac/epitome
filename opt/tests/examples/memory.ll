@@ -1,4 +1,4 @@
-; draconian-opt: --passes=combine,memory
+; epitome-opt: --passes=combine,memory
 ; The combiner's memory rules and steps: a stored value forwarded across a
 ; join, a load reused across a diamond, stores overwritten on every path or
 ; to a local never read again deleted, and stores that must stay.

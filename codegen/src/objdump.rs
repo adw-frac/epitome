@@ -1,4 +1,4 @@
-//! What `draconian-objdump` prints: an object file's sections, symbols,
+//! What `epitome-objdump` prints: an object file's sections, symbols,
 //! relocations and contents, and its code disassembled with the machine
 //! description.
 //!
@@ -95,7 +95,7 @@ impl Image {
         if macho::is_macho(bytes) {
             return Ok(Image::from_macho(&macho::read(bytes)?, m));
         }
-        Err("not a file format draconian-objdump reads (ELF, Mach-O)".into())
+        Err("not a file format epitome-objdump reads (ELF, Mach-O)".into())
     }
 
     pub fn from_macho(f: &macho::MachFile, m: &Machine) -> Image {

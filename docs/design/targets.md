@@ -2,7 +2,7 @@
 
 A machine is its description: `.ll` files read at run time. Adding a
 machine, a CPU or a relocation means writing a description file. You don't
-change Draconian's Rust or rebuild `draconian-llc`. AArch64 is built in for
+change Epitome's Rust or rebuild `epitome-llc`. AArch64 is built in for
 convenience. RISC-V RV64 (`codegen/targets/riscv64/`) is not: it is read
 from disk like any description someone else might write.
 
@@ -18,25 +18,25 @@ This document covers:
 
 ## Finding a description
 
-`draconian-llc`, `draconian-as` and `draconian-objdump` take `--target`
-and `--target-add`, and `draconian-llc` takes `--mcpu` and `--mattr` too:
+`epitome-llc`, `epitome-as` and `epitome-objdump` take `--target`
+and `--target-add`, and `epitome-llc` takes `--mcpu` and `--mattr` too:
 
 | Option | Meaning |
 | --- | --- |
 | `--target=<path>` | a `.ll` file, or a directory whose `.ll` files are read in name order as one module |
-| `--target=<name>` | `aarch64` (built in), or directory `<name>` in one of the directories of `DRACONIAN_TARGET_PATH` (colon-separated) |
+| `--target=<name>` | `aarch64` (built in), or directory `<name>` in one of the directories of `EPITOME_TARGET_PATH` (colon-separated) |
 | `--target-add=<path>` | more files (or directories) read after the description, as part of it; may be repeated |
 | `--mcpu=<name>` | the CPU, as the description names it |
 | `--mattr=+f,-g` | features turned on or off; may be repeated |
 
-Without `--target`, `draconian-llc` looks at the module's target triple:
+Without `--target`, `epitome-llc` looks at the module's target triple:
 
 - `aarch64` and `arm64` use the built-in description;
-- any other architecture name is looked up in `DRACONIAN_TARGET_PATH`, so
+- any other architecture name is looked up in `EPITOME_TARGET_PATH`, so
   `riscv64-unknown-linux-gnu` finds `<dir>/riscv64/`.
 
-`draconian-objdump` finds the description for an ELF object by its
-`e_machine`, among the built-in one and those in `DRACONIAN_TARGET_PATH`.
+`epitome-objdump` finds the description for an ELF object by its
+`e_machine`, among the built-in one and those in `EPITOME_TARGET_PATH`.
 
 ### Overlays
 
@@ -60,7 +60,7 @@ Advanced SIMD to the built-in AArch64:
 ```
 
 ```sh
-draconian-llc --target-add=my-core.ll --mcpu=my-core sum.ll -o sum.s
+epitome-llc --target-add=my-core.ll --mcpu=my-core sum.ll -o sum.s
 ```
 
 The loop that is vectorised for `generic` (`v0.4s` and so on) is then
@@ -355,12 +355,12 @@ still assumes about a machine:
 
 ## Checking a description
 
-`draconian-llc --check-target` checks a description, with the same
+`epitome-llc --check-target` checks a description, with the same
 `--target` and `--target-add` options, and exits with failure if it finds
 errors (`--verbose` lists every message):
 
 ```
-$ draconian-llc --check-target --target=codegen/targets/riscv64
+$ epitome-llc --check-target --target=codegen/targets/riscv64
 208 instructions, 0 condition forms, 300 patterns, 1 convention (lp64d), 1 CPU, 13 relocations
 warn structure  33 requirements
        warning: feature zbb is needed by entries, but no CPU has it (only --mattr=+zbb turns it on)
@@ -418,7 +418,7 @@ F, D, Zicsr, Zifencei, the Zb* and Zk* extensions, Zfh, Zfa, Zacas, Zabha,
 Zicbo and others. The rest: Zfa's `fli` (a table of constants), Zalasr
 (which this LLVM rejects), Zimop's numbered operations, and a few
 privileged ones. `tests/assemblers.rs` assembles RISC-V's 2,900 sample
-lines with `draconian-as` and with rustc, and they must agree word for
+lines with `epitome-as` and with rustc, and they must agree word for
 word. That check found that our own `fcvt.d.w`, `fcvt.d.wu` and `fcvt.d.s`
 wrote a rounding mode other than LLVM's (they are exact, so it never
 mattered).
@@ -471,8 +471,8 @@ general, or is driven by a parameter:
   `vectors` from `tests/programs/` are built from clang's IR (LP64,
   unsigned `char`). There are four configurations: `-O2` and vectorised
   `-O2`, each with and without `+zbb`. `bits` is also built with `-m`.
-- **Round trip.** `draconian-as` must make the same bytes from our
-  assembly, and `draconian-objdump` must read it back.
+- **Round trip.** `epitome-as` must make the same bytes from our
+  assembly, and `epitome-objdump` must read it back.
 - **Running.** The objects are linked and run on a small RV64IMFD+Zbb
   emulator (`tests/riscv/emu.rs`). Its static linker resolves the four
   relocations, and its C library provides a `printf` that prints as

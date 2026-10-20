@@ -12,8 +12,8 @@
 //! constant propagation that needs no analysis of the whole module. Each
 //! replacement is an elective change (autochop).
 
-use draconian_ir::module::*;
-use draconian_ir::types::Type;
+use epitome_ir::module::*;
+use epitome_ir::types::Type;
 
 use crate::attrs;
 use crate::combine::eval::{self, Folded};
@@ -67,8 +67,8 @@ pub fn run(sh: &Shared, g: GlobalId, f: &mut Function) -> usize {
     }
     let mut done = 0;
     for (b, i, result) in found {
-        if !draconian_ir::chop::allow(|| {
-            format!("constcall: {} worked out", draconian_ir::printer::inst_name(f, i))
+        if !epitome_ir::chop::allow(|| {
+            format!("constcall: {} worked out", epitome_ir::printer::inst_name(f, i))
         }) {
             continue;
         }

@@ -1,4 +1,4 @@
-; draconian-opt: --passes=memory,combine
+; epitome-opt: --passes=memory,combine
 ; memcpyopt: six stores of zero to a struct's fields become one memset.
 target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
 %s = type { i32, i32, i64, i16, i16, i32 }

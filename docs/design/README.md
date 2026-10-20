@@ -1,7 +1,7 @@
-# Draconian design documents
+# Epitome design documents
 
-These documents describe what Draconian has to do to work like LLVM. They are
-split into two halves:
+These documents describe what Epitome of synaptic excellence (Epitome for
+short) has to do to work like LLVM. They are split into two halves:
 
 - [IR and middle end](ir.md): the intermediate representation, the pass
   manager, and the analysis and transform passes that run on IR.
@@ -30,9 +30,9 @@ split into two halves:
   RISC-V RV64, the second machine; inline assembly's constraints and
   modifiers as data.
 - [Object files, assembly and disassembly](objects.md): writing Mach-O
-  and ELF object files that match clang's assembler; `draconian-as`, which
+  and ELF object files that match clang's assembler; `epitome-as`, which
   assembles with the machine description run backwards; and
-  `draconian-objdump`, which disassembles with it.
+  `epitome-objdump`, which disassembles with it.
 - [Loops](loops.md): finding loops, rotation, induction variables and
   trip counts.
 - [CSE](cse.md): common-subexpression elimination by hashing a canonical
@@ -49,7 +49,7 @@ source code was read to write these documents, and none may be read when
 implementing them.
 
 When the documentation leaves something out, the gap is marked **Open** and
-Draconian decides for itself. We do not fill a gap by looking at LLVM's source.
+Epitome decides for itself. We do not fill a gap by looking at LLVM's source.
 
 We may also run LLVM's tools, such as `clang -S -emit-llvm -x ir`, on our
 own inputs and record what they print. Rules found this way are listed with

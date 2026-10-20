@@ -1,14 +1,14 @@
-//! `draconian-as`: assembles AArch64 assembly into an object file (Mach-O
+//! `epitome-as`: assembles AArch64 assembly into an object file (Mach-O
 //! or ELF), reading instructions with the machine description. See
 //! `assembler.rs`.
 
 use std::process::ExitCode;
 
-use draconian_codegen::abi::Syntax;
-use draconian_codegen::assembler::Assembler;
-use draconian_codegen::target::Target;
+use epitome_codegen::abi::Syntax;
+use epitome_codegen::assembler::Assembler;
+use epitome_codegen::target::Target;
 
-const USAGE: &str = "usage: draconian-as [options] <file.s>
+const USAGE: &str = "usage: epitome-as [options] <file.s>
 
   -o <file>               write the object here (default: the input's name
                           with .o)
@@ -20,7 +20,7 @@ const USAGE: &str = "usage: draconian-as [options] <file.s>
   --target=<name|path>    the machine description: a .ll file, a directory
                           of them (read in name order), or a name: aarch64
                           is built in, others are directories of that name
-                          in DRACONIAN_TARGET_PATH (a list separated by
+                          in EPITOME_TARGET_PATH (a list separated by
                           colons); aarch64 by default
   --target-add=<path>     read these .ll files too (may be given again)";
 
@@ -44,12 +44,12 @@ fn main() -> ExitCode {
             s if s.starts_with("--max-errors=") => match s["--max-errors=".len()..].parse() {
                 Ok(n) => max_errors = n,
                 Err(_) => {
-                    eprintln!("draconian-as: bad {s}");
+                    eprintln!("epitome-as: bad {s}");
                     return ExitCode::FAILURE;
                 }
             },
             s if s.starts_with('-') => {
-                eprintln!("draconian-as: unknown option {s}\n\n{USAGE}");
+                eprintln!("epitome-as: unknown option {s}\n\n{USAGE}");
                 return ExitCode::FAILURE;
             }
             s => input = Some(s.to_string()),
@@ -63,14 +63,14 @@ fn main() -> ExitCode {
     let target = match Target::resolve(target_file.as_deref(), "", &adds) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("draconian-as: {e}");
+            eprintln!("epitome-as: {e}");
             return ExitCode::FAILURE;
         }
     };
     let text = match std::fs::read_to_string(&input) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("draconian-as: {input}: {e}");
+            eprintln!("epitome-as: {input}: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -79,19 +79,19 @@ fn main() -> ExitCode {
     let assembled = match assembler.assemble(&text, syntax) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("draconian-as: {input}: {e}");
+            eprintln!("epitome-as: {input}: {e}");
             return ExitCode::FAILURE;
         }
     };
     let bytes = match assembled.file(&target) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("draconian-as: {input}: {e}");
+            eprintln!("epitome-as: {input}: {e}");
             return ExitCode::FAILURE;
         }
     };
     if let Err(e) = std::fs::write(&output, bytes) {
-        eprintln!("draconian-as: {output}: {e}");
+        eprintln!("epitome-as: {output}: {e}");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS

@@ -25,9 +25,9 @@
 
 use crate::fx::FxHashMap as HashMap;
 
-use draconian_ir::edit::Names;
-use draconian_ir::module::*;
-use draconian_ir::types::TypeId;
+use epitome_ir::edit::Names;
+use epitome_ir::module::*;
+use epitome_ir::types::TypeId;
 
 use crate::ctx::Shared;
 use crate::ssa::{self, SsaUpdater};
@@ -99,7 +99,7 @@ pub fn run(sh: &Shared, f: &mut Function) -> Stats {
                 _ => false,
             }
         });
-        if ok && draconian_ir::chop::allow(|| format!("mem2reg: promote {}", draconian_ir::printer::local_name(f, a))) {
+        if ok && epitome_ir::chop::allow(|| format!("mem2reg: promote {}", epitome_ir::printer::local_name(f, a))) {
             var_of.insert(a, allocas.len());
             allocas.push((i, a, ty));
         }

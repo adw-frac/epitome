@@ -5,7 +5,7 @@
 //! section 12.2). Sizes and alignments are in bytes unless a name says
 //! bits.
 //!
-//! Draconian's choices where the reference is silent:
+//! Epitome's choices where the reference is silent:
 //!
 //! - a vector width with no `v` entry is aligned to its size rounded up to
 //!   a power of two;

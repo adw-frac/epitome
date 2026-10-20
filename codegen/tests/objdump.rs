@@ -1,6 +1,6 @@
-//! Checks draconian-objdump's disassembler on code we did not generate:
+//! Checks epitome-objdump's disassembler on code we did not generate:
 //! clang's own builds of the C programs in `tests/programs/` (and of
-//! SQLite, when `DRACONIAN_SQLITE` names the amalgamation, as in
+//! SQLite, when `EPITOME_SQLITE` names the amalgamation, as in
 //! `tests/sqlite.rs`), at `-O2` with vectorising. Every word the
 //! description decodes must be, to the system's objdump, the same
 //! instruction: the same mnemonic, or an alias of it. Words the
@@ -17,8 +17,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use draconian_codegen::objdump::{self, Image};
-use draconian_codegen::target::Target;
+use epitome_codegen::objdump::{self, Image};
+use epitome_codegen::target::Target;
 
 /// Mnemonics objdump prints for instructions the description writes
 /// another way (an alias, or the instruction the alias stands for).
@@ -94,7 +94,7 @@ fn compare(t: &Target, obj: &Path) -> Result<(usize, usize), String> {
             .find(|s| s.code && addr >= s.addr && addr + 4 <= s.addr + s.data.len() as u64)
             .map(|s| u32::from_le_bytes(s.data[(addr - s.addr) as usize..][..4].try_into().unwrap()));
         let arm_alias = word
-            .and_then(|w| draconian_codegen::mir::decode(t, w))
+            .and_then(|w| epitome_codegen::mir::decode(t, w))
             .is_some_and(|(i, _)| t.instrs[i].aliases.iter().any(|a| a == other));
         if mine != other && !arm_alias && !ALIASES.contains(&(mine, other)) && !ALIASES.contains(&(other, mine)) {
             wrong.push(format!("{addr:#x}: we read `{text}`, objdump `{sys_mn}`"));
@@ -125,7 +125,7 @@ fn disassembly_agrees_with_objdump() {
         .filter(|p| p.extension().is_some_and(|x| x == "c"))
         .collect();
     sources.sort();
-    if let Ok(src) = std::env::var("DRACONIAN_SQLITE") {
+    if let Ok(src) = std::env::var("EPITOME_SQLITE") {
         sources.push(PathBuf::from(src).join("sqlite3.c"));
     }
     let mut failures = Vec::new();

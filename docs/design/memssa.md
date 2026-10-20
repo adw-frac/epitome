@@ -103,7 +103,7 @@ long and about 6% of questions run out of budget. The pipeline runs
 
 ## 3. Printing
 
-`draconian-opt --print-memssa` prints the module with each access as a
+`epitome-opt --print-memssa` prints the module with each access as a
 comment before its instruction, and phis after the block's label. For each
 load and store it adds the clobber, found by the walker:
 

@@ -1,5 +1,5 @@
 //! ELF relocatable files: writing an [`Object`], and reading
-//! any ELF file back (for `draconian-objdump` and the tests).
+//! any ELF file back (for `epitome-objdump` and the tests).
 //!
 //! From the System V ABI's ELF chapters. The machine number, flags and
 //! relocation numbers are the description's (`machine.rs`). Mapping

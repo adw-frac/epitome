@@ -16,11 +16,11 @@ use std::fmt::Write;
 use std::path::PathBuf;
 use std::process::Command;
 
-use draconian_ir::module::*;
-use draconian_opt::aa::BasicAa;
-use draconian_opt::cfg::DomTree;
-use draconian_opt::ctx::parallel_phase;
-use draconian_opt::memssa::{Access, AccessId, MemorySsa, Walker};
+use epitome_ir::module::*;
+use epitome_opt::aa::BasicAa;
+use epitome_opt::cfg::DomTree;
+use epitome_opt::ctx::parallel_phase;
+use epitome_opt::memssa::{Access, AccessId, MemorySsa, Walker};
 
 fn examples() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/memssa")
@@ -28,7 +28,7 @@ fn examples() -> PathBuf {
 
 /// Runs `check` on every function with a body, as the analysis sees it.
 fn each_function(src: &str, mut check: impl FnMut(&str, &BasicAa, &Function)) {
-    let mut m = draconian_ir::parse_module(src).unwrap();
+    let mut m = epitome_ir::parse_module(src).unwrap();
     let funcs: Vec<(GlobalId, String)> = m
         .functions()
         .filter(|(_, f)| f.has_body)
@@ -151,11 +151,11 @@ fn demo_is_sound_and_prints_as_expected() {
     each_function(&src, |name, aa, f| n += check_function(name, aa, f));
     assert!(n > 20, "only {n} accesses checked");
     // The printed form.
-    let mut m = draconian_ir::parse_module(&src).unwrap();
-    let reports = draconian_opt::memssa::analyse_module(&mut m, 1, true);
+    let mut m = epitome_ir::parse_module(&src).unwrap();
+    let reports = epitome_opt::memssa::analyse_module(&mut m, 1, true);
     let by: std::collections::HashMap<_, _> = reports.into_iter().collect();
     let text =
-        draconian_ir::printer::print_module_with(&m, &|g, at| by.get(&g).and_then(|r| r.notes.get(&at).cloned()));
+        epitome_ir::printer::print_module_with(&m, &|g, at| by.get(&g).and_then(|r| r.notes.get(&at).cloned()));
     let expected_path = examples().join("demo.expected.ll");
     if std::env::var("BLESS").is_ok() {
         std::fs::write(&expected_path, &text).unwrap();
@@ -266,9 +266,9 @@ fn c_programs_are_sound() {
 
 /// The walker's costs for a module: time, and alias queries per question.
 fn cost(src: &str) -> (std::time::Duration, u64, u64) {
-    let mut m = draconian_ir::parse_module(src).unwrap();
+    let mut m = epitome_ir::parse_module(src).unwrap();
     let t = std::time::Instant::now();
-    let reports = draconian_opt::memssa::analyse_module(&mut m, 1, false);
+    let reports = epitome_opt::memssa::analyse_module(&mut m, 1, false);
     let elapsed = t.elapsed();
     let steps: u64 = reports.iter().map(|(_, r)| r.walks.steps).sum();
     let queries: u64 = reports.iter().map(|(_, r)| r.walks.queries).sum();

@@ -1,4 +1,4 @@
-; draconian-opt: --passes=simplifycfg,combine
+; epitome-opt: --passes=simplifycfg,combine
 ; Arms that compute a little, safely, run before the branch, so the joins
 ; become selects: a clamp has no branch left. An arm that may trap keeps
 ; its branch.

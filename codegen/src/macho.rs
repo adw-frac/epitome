@@ -1,6 +1,6 @@
 //! 64-bit Mach-O files for arm64: writing an [`Object`] as an object file
 //! (`MH_OBJECT`), and reading any Mach-O file (objects and linked images,
-//! and the arm64 slice of universal files) for `draconian-objdump` and the
+//! and the arm64 slice of universal files) for `epitome-objdump` and the
 //! tests.
 //!
 //! From Apple's published `<mach-o/loader.h>`, `<mach-o/nlist.h>`,

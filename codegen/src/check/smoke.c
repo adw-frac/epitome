@@ -1,4 +1,4 @@
-// The smoke program draconian-llc --check-target compiles for each calling
+// The smoke program epitome-llc --check-target compiles for each calling
 // convention of a description: a little of everything the code generator
 // asks of a machine. smoke.ll is this, made by gen_smoke.sh. (Not
 // variadic functions defined here: the IR's va_list is the machine's.)

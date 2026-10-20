@@ -1,4 +1,4 @@
-; draconian-opt: --passes=combine
+; epitome-opt: --passes=combine
 ; Larger patterns: factoring a common operand out, and identities of the
 ; and, or and xor of the same two values.
 define i32 @factor(i32 %x, i32 %y, i32 %z) {

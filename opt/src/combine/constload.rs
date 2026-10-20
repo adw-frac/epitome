@@ -12,9 +12,9 @@
 //! at any offset. Anything else, such as a value straddling two fields,
 //! is left as a load.
 
-use draconian_ir::apint::ApInt;
-use draconian_ir::module::*;
-use draconian_ir::types::{Type, TypeId};
+use epitome_ir::apint::ApInt;
+use epitome_ir::module::*;
+use epitome_ir::types::{Type, TypeId};
 
 use crate::ctx::Shared;
 

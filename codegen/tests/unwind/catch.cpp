@@ -1,4 +1,4 @@
-// Compiled by draconian: functions with landing pads, which catch C++
+// Compiled by epitome: functions with landing pads, which catch C++
 // exceptions thrown by `thrower` (main_catch.cpp), clean up, and rethrow.
 #include <stdexcept>
 

@@ -18,8 +18,8 @@
 //! the loop is defined earlier in that order, so it has already moved if
 //! it could. Each move is an elective change (autochop).
 
-use draconian_ir::edit::Names;
-use draconian_ir::module::*;
+use epitome_ir::edit::Names;
+use epitome_ir::module::*;
 
 use crate::aa::BasicAa;
 use crate::cfg::{self, DomTree};
@@ -101,11 +101,11 @@ pub fn run(sh: &Shared, f: &mut Function) -> Stats {
                     safe_to_speculate(sh, op)
                 };
                 if !movable
-                    || !draconian_ir::chop::allow(|| {
+                    || !epitome_ir::chop::allow(|| {
                         format!(
                             "licm: move {} out of the loop at {}",
-                            draconian_ir::printer::inst_name(f, i),
-                            draconian_ir::printer::local_name(f, f.blocks[l.header.index()].local)
+                            epitome_ir::printer::inst_name(f, i),
+                            epitome_ir::printer::local_name(f, f.blocks[l.header.index()].local)
                         )
                     })
                 {

@@ -15,8 +15,8 @@
 //! calls marked `notail` or `musttail`. Each marker is an elective change
 //! (autochop).
 
-use draconian_ir::module::*;
-use draconian_ir::types::Type;
+use epitome_ir::module::*;
+use epitome_ir::types::Type;
 
 use crate::attrs;
 use crate::ctx::Shared;
@@ -59,7 +59,7 @@ pub fn run(sh: &Shared, f: &mut Function) -> usize {
     }
     let mut marked = 0;
     for i in calls {
-        if !draconian_ir::chop::allow(|| format!("tailmark: {} may be a tail call", draconian_ir::printer::inst_name(f, i)))
+        if !epitome_ir::chop::allow(|| format!("tailmark: {} may be a tail call", epitome_ir::printer::inst_name(f, i)))
         {
             continue;
         }

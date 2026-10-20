@@ -1,11 +1,11 @@
 [package]
-name = "draconian"
+name = "epitome"
 version = "0.1.0"
 edition = "2024"
-repository = "https://github.com/andy-thomason/draconian-measurement"
+repository = "https://github.com/andy-thomason/epitome"
 
 [dependencies]
-draconian-ir = { path = "ir" }
+epitome-ir = { path = "ir" }
 
 [workspace]
 members = ["ir", "opt", "codegen"]

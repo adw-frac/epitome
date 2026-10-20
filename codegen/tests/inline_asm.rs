@@ -10,9 +10,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use draconian_codegen::objdump::Image;
-use draconian_codegen::target::Target;
-use draconian_codegen::{Options, compile};
+use epitome_codegen::objdump::Image;
+use epitome_codegen::target::Target;
+use epitome_codegen::{Options, compile};
 
 fn run(cmd: &mut Command) -> Result<String, String> {
     let out = cmd.output().map_err(|e| format!("{cmd:?}: {e}"))?;
@@ -31,7 +31,7 @@ fn code(bytes: &[u8], t: &Target) -> Vec<u8> {
 fn check(t: &Target, dir: &Path, tmp: &Path, opt: &str, want: &str) -> Result<(), String> {
     let ll = tmp.join(format!("aarch64{opt}.ll"));
     run(Command::new("clang").args(["-S", "-emit-llvm", opt]).arg(dir.join("aarch64.c")).arg("-o").arg(&ll))?;
-    let mut m = draconian_ir::parse_module(&std::fs::read_to_string(&ll).unwrap()).map_err(|e| format!("{e:?}"))?;
+    let mut m = epitome_ir::parse_module(&std::fs::read_to_string(&ll).unwrap()).map_err(|e| format!("{e:?}"))?;
     let compiled = compile(t, &mut m, &Options::default())?;
     let s = tmp.join(format!("aarch64{opt}.s"));
     std::fs::write(&s, &compiled.asm).unwrap();

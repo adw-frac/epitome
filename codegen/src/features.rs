@@ -15,7 +15,7 @@
 
 use std::collections::BTreeSet;
 
-use draconian_ir::module::{Attr, Module};
+use epitome_ir::module::{Attr, Module};
 
 use crate::target::Target;
 

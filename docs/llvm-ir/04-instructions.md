@@ -255,7 +255,7 @@ or another exception mechanism, control goes to the dynamically nearest
 the current block to the normal label, so it may only be used where that edge
 dominates. If the callee unwinds, there is no result value.
 
-**Draconian note:** the dominance check for an `invoke` result must treat the
+**Epitome note:** the dominance check for an `invoke` result must treat the
 definition as living on the normal edge, not in the invoke's own block. A use
 in the unwind block is invalid.
 
@@ -591,7 +591,7 @@ Semantics: unsigned quotient.
   element is zero.
 - `exact`: poison if `op1` is not a multiple of `op2`.
 
-**Draconian note:** division by zero is UB, not poison. So `udiv`, `sdiv`,
+**Epitome note:** division by zero is UB, not poison. So `udiv`, `sdiv`,
 `urem` and `srem` cannot be speculated (hoisted past a check) unless the
 divisor is known non-zero (and, for signed ops, the overflow case is ruled
 out).
@@ -688,7 +688,7 @@ Syntax:
 Semantics: floating-point remainder. It gives the same result as C `fmod`,
 but never sets `errno`. The result has the sign of the dividend.
 
-**Draconian note:** on some targets `frem` is lowered to a call to `fmod`, so
+**Epitome note:** on some targets `frem` is lowered to a call to `fmod`, so
 programs using it may need to link the maths library.
 
 Example:
@@ -1048,7 +1048,7 @@ undefined value) and is freed when the function returns via `ret` or
 `align` is optional only in textual IR. In memory it is always present. If
 omitted, the target may pick any alignment compatible with the type.
 
-**Draconian note:** the parser must fill in an alignment when `align` is
+**Epitome note:** the parser must fill in an alignment when `align` is
 missing, because the in-memory form always has one.
 
 **Not documented:** what `inalloca` means here; see the `inalloca` parameter
@@ -1229,7 +1229,7 @@ Alignment: optional only in text. If omitted, it defaults to the size of the
 type. This is different from `load` and `store`, where the default is the ABI
 alignment.
 
-**Draconian note:** the parser's default alignment differs between
+**Epitome note:** the parser's default alignment differs between
 `cmpxchg`/`atomicrmw` (type size) and `load`/`store` (ABI alignment).
 
 Semantics: atomically reads the value at `pointer` and compares it with
@@ -1398,7 +1398,7 @@ poison. For vector GEPs, the rules apply per lane.
   `ptrtoint` on it, gives an undefined result, except that comparisons are
   fine when both pointers are in the closed range `[S, E]`.
 
-**Draconian note:** `inbounds` implies `nusw`. The in-memory form should set
+**Epitome note:** `inbounds` implies `nusw`. The in-memory form should set
 both, and the printer must not print `nusw` when `inbounds` is present.
 
 Example:
@@ -1885,7 +1885,7 @@ Semantics: the phi takes the value paired with the predecessor block that ran
 just before this block. For SSA dominance, each incoming value is used on the
 edge from its predecessor (after any `invoke` result defined on that edge).
 
-**Draconian note:** for the verifier, an incoming value must dominate the end of
+**Epitome note:** for the verifier, an incoming value must dominate the end of
 its predecessor block, not the phi itself.
 
 **Not documented:** in this section, how a predecessor that reaches the block
@@ -2039,7 +2039,7 @@ the result is bound.
   signatures as those library functions. UB in those functions is UB in the
   IR.
 
-**Draconian note:** signature mismatch is not a verifier error for ordinary
+**Epitome note:** signature mismatch is not a verifier error for ordinary
 functions (only for intrinsics), so the verifier must accept it.
 
 Example:
@@ -2188,7 +2188,7 @@ They replace the older debug intrinsics (`llvm.dbg.*`). They are turned off
 if LLVM is run with `--experimental-debuginfo-iterators=false`. A module may
 not contain both debug records and debug intrinsics.
 
-**Draconian note:** the parser must reject a module that mixes `#dbg_*` records
+**Epitome note:** the parser must reject a module that mixes `#dbg_*` records
 with `llvm.dbg.*` intrinsic calls.
 
 **Not documented:** this section does not list the record kinds or their

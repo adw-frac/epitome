@@ -3,7 +3,7 @@
 //! `tests/examples/<name>.expected.ll`.
 //!
 //! The first line of an example may give options, as
-//! `; draconian-opt: --no-inline -O3`. Run with `UPDATE_EXPECTED=1` to
+//! `; epitome-opt: --no-inline -O3`. Run with `UPDATE_EXPECTED=1` to
 //! rewrite the expected files after a deliberate change.
 //!
 //! Each example is also checked to be the same with 1 and 4 threads and to
@@ -13,14 +13,14 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use draconian_opt::inline::OptLevel;
-use draconian_opt::pipeline::{self, Options};
-use draconian_opt::recursion::RecursionMode;
+use epitome_opt::inline::OptLevel;
+use epitome_opt::pipeline::{self, Options};
+use epitome_opt::recursion::RecursionMode;
 
 fn options(src: &str) -> (Options, bool) {
     let mut opts = Options::default();
     let mut cycles = false;
-    let Some(args) = src.lines().next().and_then(|l| l.strip_prefix("; draconian-opt:")) else {
+    let Some(args) = src.lines().next().and_then(|l| l.strip_prefix("; epitome-opt:")) else {
         return (opts, cycles);
     };
     for a in args.split_whitespace() {
@@ -61,10 +61,10 @@ fn options(src: &str) -> (Options, bool) {
 fn optimise(src: &str, threads: usize) -> String {
     let (mut opts, cycles) = options(src);
     opts.threads = threads;
-    let mut m = draconian_ir::parse_module(src).unwrap();
+    let mut m = epitome_ir::parse_module(src).unwrap();
     let report = pipeline::run(&mut m, &opts);
     for (g, f) in m.functions() {
-        let errors = draconian_opt::cfg::verify(f, m.global(g).name.as_deref().unwrap_or(""));
+        let errors = epitome_opt::cfg::verify(f, m.global(g).name.as_deref().unwrap_or(""));
         assert!(errors.is_empty(), "{}", errors.join("\n"));
     }
     let mut out = String::new();

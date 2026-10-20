@@ -24,7 +24,7 @@
 
 use crate::fx::FxHashMap as HashMap;
 
-use draconian_ir::module::{ConstId, Value};
+use epitome_ir::module::{ConstId, Value};
 
 use super::dsl::{Head, Lit, Pat, Rule};
 
@@ -281,7 +281,7 @@ fn commuted(p: &Pat) -> Vec<Pat> {
 
 #[cfg(test)]
 mod tests {
-    use draconian_ir::module::{BinOp, LocalId};
+    use epitome_ir::module::{BinOp, LocalId};
 
     use super::super::dsl::parse_rules;
     use super::*;

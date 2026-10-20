@@ -16,8 +16,8 @@ use std::hash::Hash;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use draconian_ir::module::{ConstId, Constant, Constants};
-use draconian_ir::types::{NamedStruct, Type, TypeId, Types};
+use epitome_ir::module::{ConstId, Constant, Constants};
+use epitome_ir::types::{NamedStruct, Type, TypeId, Types};
 
 /// Chunk `k` holds `FIRST << k` entries, so 40 chunks are more than enough.
 const FIRST: usize = 256;
@@ -174,7 +174,7 @@ impl TypeTable {
     }
 }
 
-impl draconian_ir::layout::TypeAccess for TypeTable {
+impl epitome_ir::layout::TypeAccess for TypeTable {
     fn ty(&self, id: TypeId) -> &Type {
         self.get(id)
     }

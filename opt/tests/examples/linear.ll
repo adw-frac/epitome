@@ -1,4 +1,4 @@
-; draconian-opt: --passes=combine
+; epitome-opt: --passes=combine
 ; Linear combinations: sums and differences of a value, scaled by constants,
 ; collected into one coefficient per value and a constant.
 define i32 @many(i32 %x) {

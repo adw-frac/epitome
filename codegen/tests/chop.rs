@@ -1,4 +1,4 @@
-//! Autochop (`draconian_ir::chop`) in code generation.
+//! Autochop (`epitome_ir::chop`) in code generation.
 //!
 //! 1. With no elective choices at all (`0:0`), every program of
 //!    `tests/programs` still compiles and runs as clang's build does: every
@@ -13,9 +13,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use draconian_codegen::target::Target;
-use draconian_codegen::{Options, compile};
-use draconian_ir::chop::Limit;
+use epitome_codegen::target::Target;
+use epitome_codegen::{Options, compile};
+use epitome_ir::chop::Limit;
 
 fn run(cmd: &mut Command) -> Result<String, String> {
     let out = cmd.output().map_err(|e| format!("{cmd:?}: {e}"))?;
@@ -34,7 +34,7 @@ fn have_tools() -> bool {
 /// Our object for `ll` under `limit`, linked with the program's main, and
 /// what it prints.
 fn output(t: &Target, ll: &str, main: &Path, tmp: &Path, tag: &str, limit: Option<Limit>) -> Result<String, String> {
-    let mut m = draconian_ir::parse_module(ll).map_err(|e| format!("{e:?}"))?;
+    let mut m = epitome_ir::parse_module(ll).map_err(|e| format!("{e:?}"))?;
     let c = compile(t, &mut m, &Options { chop: limit, ..Options::default() })?;
     let obj = tmp.join(format!("{tag}.o"));
     std::fs::write(&obj, c.object_file(t)?).unwrap();
@@ -86,12 +86,12 @@ fn programs_run_without_elective_choices() {
                 continue;
             }
             let text = std::fs::read_to_string(&ll).unwrap();
-            let mut m = draconian_ir::parse_module(&text).unwrap();
+            let mut m = epitome_ir::parse_module(&text).unwrap();
             let Ok(full) = compile(&t, &mut m, &Options::default()) else { continue };
             let counts: Vec<u64> = full.chop_counts.iter().map(|c| c.steps).collect();
             choices += counts.iter().sum::<u64>();
             // The same counts and code on 8 threads, under a limit too.
-            let mut m8 = draconian_ir::parse_module(&text).unwrap();
+            let mut m8 = epitome_ir::parse_module(&text).unwrap();
             let full8 = compile(&t, &mut m8, &Options { threads: 8, ..Options::default() }).unwrap();
             assert_eq!(counts, full8.chop_counts.iter().map(|c| c.steps).collect::<Vec<_>>(), "{name}{opt}");
             // No choices, half of each function's, and all of every function
@@ -110,7 +110,7 @@ fn programs_run_without_elective_choices() {
                     Err(e) => failures.push(format!("{name}{opt} at {l}: {e}")),
                 }
                 let (mut a, mut b) =
-                    (draconian_ir::parse_module(&text).unwrap(), draconian_ir::parse_module(&text).unwrap());
+                    (epitome_ir::parse_module(&text).unwrap(), epitome_ir::parse_module(&text).unwrap());
                 let one = compile(&t, &mut a, &Options { chop: Some(l), threads: 1, ..Options::default() }).unwrap();
                 let eight = compile(&t, &mut b, &Options { chop: Some(l), threads: 8, ..Options::default() }).unwrap();
                 assert!(one.asm == eight.asm, "{name}{opt} at {l}: the code differs between 1 and 8 threads");

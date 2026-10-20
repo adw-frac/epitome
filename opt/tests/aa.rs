@@ -1,8 +1,8 @@
 //! Alias analysis answers on hand-written functions.
 
-use draconian_ir::module::*;
-use draconian_opt::aa::{AliasResult, BasicAa, Location};
-use draconian_opt::ctx::{Intrinsics, parallel_phase};
+use epitome_ir::module::*;
+use epitome_opt::aa::{AliasResult, BasicAa, Location};
+use epitome_opt::ctx::{Intrinsics, parallel_phase};
 
 use AliasResult::*;
 
@@ -50,16 +50,16 @@ fn local(f: &Function, name: &str) -> Value {
     Value::Local(LocalId(i as u32))
 }
 
-fn global(m: &Module, name: &str, sh: &draconian_opt::ctx::Shared) -> Value {
+fn global(m: &Module, name: &str, sh: &epitome_opt::ctx::Shared) -> Value {
     let g = m.globals.iter().position(|x| x.name.as_deref() == Some(name)).unwrap();
     sh.global_ref(GlobalId(g as u32))
 }
 
 #[test]
 fn alias_answers() {
-    let mut m = draconian_ir::parse_module(SRC).unwrap();
+    let mut m = epitome_ir::parse_module(SRC).unwrap();
     let fid = GlobalId(m.globals.iter().position(|g| g.name.as_deref() == Some("f")).unwrap() as u32);
-    let snapshot = draconian_ir::parse_module(SRC).unwrap();
+    let snapshot = epitome_ir::parse_module(SRC).unwrap();
     parallel_phase(&mut m, Intrinsics::default(), |sh| {
         let f = sh.take(fid);
         let aa = BasicAa::new(sh, &f);

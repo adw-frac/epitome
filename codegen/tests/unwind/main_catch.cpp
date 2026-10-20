@@ -1,4 +1,4 @@
-// Built by clang++: drives catch.cpp's functions (compiled by draconian).
+// Built by clang++: drives catch.cpp's functions (compiled by epitome).
 #include <cstdio>
 #include <stdexcept>
 

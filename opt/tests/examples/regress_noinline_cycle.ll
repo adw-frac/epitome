@@ -1,4 +1,4 @@
-; draconian-opt: -O2 --recursion=stack
+; epitome-opt: -O2 --recursion=stack
 ; Regression: the cycle's members are noinline, so it is not collapsed;
 ; each member's own self-call is still removed.
 declare i32 @printf(ptr, ...)

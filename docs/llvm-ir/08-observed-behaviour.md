@@ -135,18 +135,18 @@ same way. The record is attached to the instruction after the call.
   and printed with a `; Unknown intrinsic` comment.
 - **Debug-info fields are printed in a fixed order**, with some defaults
   always written. `!DICompileUnit` always shows `isOptimized:` and
-  `runtimeVersion:`. Draconian keeps fields as written; see
+  `runtimeVersion:`. Epitome keeps fields as written; see
   `docs/design/debug-info.md`.
 - **`zeroinitializer` for target types.** It is rejected for
-  `target("spirv.Image", void, 1)`: `invalid type for null constant`. Draconian
+  `target("spirv.Image", void, 1)`: `invalid type for null constant`. Epitome
   accepts it today.
 
 ## The assembler
 
-Found by assembling Draconian's own AArch64 assembly with
+Found by assembling Epitome's own AArch64 assembly with
 `clang --target=aarch64-linux-gnu -c` (ELF) and `clang -c` (Mach-O), and
 reading the object files (Apple clang 21.0.0, 2026-10-19). The ELF rules
-first. Draconian's object writer does the same, and
+first. Epitome's object writer does the same, and
 `codegen/tests/programs.rs` and `codegen/tests/sqlite.rs` check it does.
 
 - **Calls to local functions in the same section are resolved** in place,

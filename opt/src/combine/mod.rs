@@ -33,10 +33,10 @@ use std::collections::BTreeMap;
 use crate::fx::FxHashMap as HashMap;
 use std::sync::OnceLock;
 
-use draconian_ir::apint::ApInt;
-use draconian_ir::float::FloatKind;
-use draconian_ir::module::*;
-use draconian_ir::types::{Type, TypeId};
+use epitome_ir::apint::ApInt;
+use epitome_ir::float::FloatKind;
+use epitome_ir::module::*;
+use epitome_ir::types::{Type, TypeId};
 
 use crate::table::{ConstTable as Constants, TypeTable as Types};
 
@@ -1086,12 +1086,12 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
     /// An instruction, for autochop's descriptions: its result's name, or
     /// its number.
     fn what(&self, i: InstId) -> String {
-        draconian_ir::printer::inst_name(self.f, i)
+        epitome_ir::printer::inst_name(self.f, i)
     }
 
-    /// Asks autochop whether this step may be made (`draconian_ir::chop`).
+    /// Asks autochop whether this step may be made (`epitome_ir::chop`).
     fn allowed(&self, what: &str, i: InstId) -> bool {
-        draconian_ir::chop::allow(|| format!("combine {what} at {}", self.what(i)))
+        epitome_ir::chop::allow(|| format!("combine {what} at {}", self.what(i)))
     }
 
     fn visit(&mut self, i: InstId) {
@@ -1533,7 +1533,7 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
             FloatLit::NegZero => -0.0,
             FloatLit::One => 1.0,
         };
-        let bits = draconian_ir::float::from_f64(kind, v)?;
+        let bits = epitome_ir::float::from_f64(kind, v)?;
         let k = sh.intern_const(Constant { ty: elem, kind: ConstKind::Float(bits) });
         Some(Value::Const(if vector { sh.intern_const(Constant { ty, kind: ConstKind::Splat(k) }) } else { k }))
     }
@@ -1656,7 +1656,7 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
         // that every step counted is a change made; if refused, it is
         // undone as one that does not type-check is.
         let allowed = matches!(result, Some(v) if self.value_type(v) == Some(root_ty))
-            && draconian_ir::chop::allow(|| format!("combine {} at {}", rule.name, self.what(i)));
+            && epitome_ir::chop::allow(|| format!("combine {} at {}", rule.name, self.what(i)));
         match result {
             Some(v) if allowed => {
                 // The new instruction in the root's place takes its name.

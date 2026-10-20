@@ -1,7 +1,7 @@
 //! Control-flow analyses: reverse postorder, dominator tree, and a check
 //! that a function is well-formed SSA.
 
-use draconian_ir::module::*;
+use epitome_ir::module::*;
 
 /// Blocks reachable from the entry, in reverse postorder.
 pub fn reverse_postorder(f: &Function) -> Vec<BlockId> {

@@ -21,9 +21,9 @@
 //! most `MAX_POINTERS` arrays are indexed: each becomes a register live
 //! across the loop.
 
-use draconian_ir::edit::Names;
-use draconian_ir::module::*;
-use draconian_ir::types::{Type, TypeId};
+use epitome_ir::edit::Names;
+use epitome_ir::module::*;
+use epitome_ir::types::{Type, TypeId};
 
 use crate::ctx::Shared;
 use crate::loops::{self, Loop};
@@ -181,10 +181,10 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[V
         if bases.len() > MAX_POINTERS {
             continue;
         }
-        if !draconian_ir::chop::allow(|| {
-            format!("lsr: the counter {} of the loop at {}", draconian_ir::printer::local_name(f, r), {
+        if !epitome_ir::chop::allow(|| {
+            format!("lsr: the counter {} of the loop at {}", epitome_ir::printer::local_name(f, r), {
                 let l = f.blocks[h.index()].local;
-                draconian_ir::printer::local_name(f, l)
+                epitome_ir::printer::local_name(f, l)
             })
         }) {
             continue;
