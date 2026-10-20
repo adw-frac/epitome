@@ -51,6 +51,8 @@ pub fn section_name(kind: SectionKind) -> &'static str {
         SectionKind::RelRo => ".data.rel.ro",
         SectionKind::EhFrame => ".eh_frame",
         SectionKind::ExceptTable => ".gcc_except_table",
+        // (Not made yet: thread-local variables are Mach-O's only.)
+        SectionKind::ThreadVars | SectionKind::ThreadData => ".tdata",
     }
 }
 
@@ -59,6 +61,8 @@ fn section_flags(kind: SectionKind) -> u64 {
         SectionKind::Text => SHF_ALLOC | SHF_EXECINSTR,
         SectionKind::Data | SectionKind::Bss | SectionKind::RelRo => SHF_ALLOC | SHF_WRITE,
         SectionKind::ReadOnly | SectionKind::EhFrame | SectionKind::ExceptTable => SHF_ALLOC,
+        // SHF_TLS
+        SectionKind::ThreadVars | SectionKind::ThreadData => SHF_ALLOC | SHF_WRITE | 0x400,
     }
 }
 

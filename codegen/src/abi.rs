@@ -251,6 +251,9 @@ impl Abi {
             (Syntax::Elf, SectionKind::EhFrame) => ".section .eh_frame,\"a\"",
             (Syntax::MachO, SectionKind::ExceptTable) => ".section __TEXT,__gcc_except_tab",
             (Syntax::Elf, SectionKind::ExceptTable) => ".section .gcc_except_table,\"a\"",
+            (Syntax::MachO, SectionKind::ThreadVars) => ".section __DATA,__thread_vars,thread_local_variables",
+            (Syntax::MachO, SectionKind::ThreadData) => ".section __DATA,__thread_data,thread_local_regular",
+            (Syntax::Elf, SectionKind::ThreadVars | SectionKind::ThreadData) => ".section .tdata,\"awT\",@progbits",
         }
     }
 }

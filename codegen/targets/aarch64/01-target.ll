@@ -40,7 +40,7 @@
 ; ===========================================================================
 ; Parameters
 
-!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110, !1111, !1112, !1113}
+!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110, !1111, !1112, !1113, !1114}
 !1100 = !{!"sp", !"sp"}
 !1101 = !{!"zero", !"xzr"}
 !1102 = !{!"vector-bits", !"128", !"neon"}
@@ -60,6 +60,8 @@
 ; The flags a comparison sets and a condition reads, unless an entry says
 ; otherwise ("sets", "reads").
 !1113 = !{!"flags", !"nzcv"}
+; Atomics without FEAT_LSE: libgcc's and compiler-rt's outline helpers.
+!1114 = !{!"atomic-helpers", !"__aarch64_{op}{bytes}_{order}"}
 
 ; ===========================================================================
 ; Inline assembly: what its constraint codes and template modifiers mean,
@@ -106,7 +108,7 @@
 ; From Arm's ELF for the Arm 64-bit Architecture, and Apple's
 ; <mach-o/arm64/reloc.h>.
 
-!target.relocs = !{!1200, !1201, !1202, !1203, !1204, !1205, !1210, !1211, !1212, !1213, !1214, !1215, !1216, !1217, !1218, !1219, !1220, !1221, !1222, !1223, !1224, !1225, !1226, !1227, !1228, !1229}
+!target.relocs = !{!1200, !1201, !1202, !1203, !1204, !1205, !1210, !1211, !1212, !1213, !1214, !1215, !1216, !1217, !1218, !1219, !1220, !1221, !1222, !1223, !1224, !1225, !1226, !1227, !1228, !1229, !1230, !1231}
 !1200 = !{!"name", !"call26", !"elf", !"283", !"elf-name", !"R_AARCH64_CALL26", !"macho", !"2", !"macho-name", !"ARM64_RELOC_BRANCH26", !"macho-pcrel", !"yes", !"macho-length", !"2", !"use", !"call", !"target", !"pc + v"}
 !1201 = !{!"name", !"adrp", !"elf", !"275", !"elf-name", !"R_AARCH64_ADR_PREL_PG_HI21", !"macho", !"3", !"macho-name", !"ARM64_RELOC_PAGE21", !"macho-pcrel", !"yes", !"macho-length", !"2", !"elf-syntax", !"{s}", !"macho-syntax", !"{s}@PAGE", !"target", !"(pc & -4096) + (v << 12)"}
 !1202 = !{!"name", !"add_lo12", !"elf", !"277", !"elf-name", !"R_AARCH64_ADD_ABS_LO12_NC", !"macho", !"4", !"macho-name", !"ARM64_RELOC_PAGEOFF12", !"macho-length", !"2", !"elf-syntax", !":lo12:{s}", !"macho-syntax", !"{s}@PAGEOFF"}
@@ -135,6 +137,9 @@
 ; With macho_subtractor before it, the distance from one symbol to another:
 ; how __eh_frame says where a function is.
 !1229 = !{!"name", !"macho_unsigned64", !"macho", !"0", !"macho-name", !"ARM64_RELOC_UNSIGNED", !"macho-length", !"3", !"use", !"eh-unsigned"}
+; A thread-local variable's descriptor (Mach-O).
+!1230 = !{!"name", !"adrp_tlv", !"macho", !"8", !"macho-name", !"ARM64_RELOC_TLVP_LOAD_PAGE21", !"macho-pcrel", !"yes", !"macho-length", !"2", !"macho-syntax", !"{s}@TLVPPAGE", !"use", !"got", !"target", !"(pc & -4096) + (v << 12)"}
+!1231 = !{!"name", !"ld64_tlv_lo12", !"macho", !"9", !"macho-name", !"ARM64_RELOC_TLVP_LOAD_PAGEOFF12", !"macho-length", !"2", !"macho-syntax", !"{s}@TLVPPAGEOFF", !"use", !"got"}
 
 ; ===========================================================================
 ; DWARF's numbers for the registers, in unwind tables: each file's from

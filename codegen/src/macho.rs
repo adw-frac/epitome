@@ -282,6 +282,8 @@ pub fn section_names(kind: SectionKind) -> (&'static str, &'static str) {
         SectionKind::RelRo => ("__DATA", "__const"),
         SectionKind::EhFrame => ("__TEXT", "__eh_frame"),
         SectionKind::ExceptTable => ("__TEXT", "__gcc_except_tab"),
+        SectionKind::ThreadVars => ("__DATA", "__thread_vars"),
+        SectionKind::ThreadData => ("__DATA", "__thread_data"),
     }
 }
 
@@ -292,6 +294,9 @@ fn section_flags(kind: SectionKind) -> u32 {
         // S_COALESCED, with no table of contents, its static symbols
         // stripped, and live where what it describes is.
         SectionKind::EhFrame => 0x6800_000b,
+        // S_THREAD_LOCAL_VARIABLES, S_THREAD_LOCAL_REGULAR.
+        SectionKind::ThreadVars => 0x13,
+        SectionKind::ThreadData => 0x11,
         _ => 0,
     }
 }

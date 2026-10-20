@@ -483,7 +483,8 @@ All 30 runs pass. The test was also what found the bugs listed above.
 
 Not yet:
 
-- compressed instructions (C), atomics (A) and vectors (V);
+- compressed instructions (C) and vectors (V);
+- thread-local variables;
 - position-independent code and the GOT;
 - `varargs.c`, whose IR's `va_list` is AArch64's because clang here has
   no RISC-V target.

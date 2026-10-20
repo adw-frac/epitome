@@ -52,6 +52,12 @@ pub enum SectionKind {
     EhFrame,
     /// Exception tables: personality routines' data (`eh.rs`).
     ExceptTable,
+    /// Thread-local variables' descriptors (Mach-O's `__thread_vars`):
+    /// for each, the function giving its address, and where its initial
+    /// value is.
+    ThreadVars,
+    /// Thread-local variables' initial values, copied for each thread.
+    ThreadData,
 }
 
 #[derive(Clone, Debug)]

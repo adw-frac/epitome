@@ -5,6 +5,7 @@
 pub mod abi;
 pub mod asm;
 pub mod assembler;
+pub mod atomics;
 pub mod check;
 pub mod divconst;
 pub mod eh;

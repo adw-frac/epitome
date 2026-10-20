@@ -113,3 +113,8 @@ fn wide_multiplication_overflow() {
 fn three_way_comparisons() {
     check("compare");
 }
+
+#[test]
+fn threads_and_atomics() {
+    check("threads");
+}

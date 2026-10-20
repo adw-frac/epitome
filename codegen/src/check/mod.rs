@@ -202,6 +202,10 @@ fn structure(t: &Target) -> Section {
         if let Some(k) = ins.reloc {
             let r = &m.relocs[k.0 as usize];
             for f in &syntaxes {
+                let only = ins.format.map(|x| if x == Syntax::Elf { "elf" } else { "macho" });
+                if only.is_some_and(|o| o != *f) {
+                    continue;
+                }
                 let has = if *f == "elf" { r.elf.is_some() } else { r.macho.is_some() };
                 need(
                     has,
@@ -482,6 +486,9 @@ fn assembly(t: &Target) -> Section {
             Syntax::MachO => "Lhere",
         };
         for (i, ins) in t.instrs.iter().enumerate() {
+            if ins.format.is_some_and(|f| f != abi.syntax) {
+                continue;
+            }
             if ins.enc.mask == 0 || ins.asm.is_empty() {
                 continue;
             }

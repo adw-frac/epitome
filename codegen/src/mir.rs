@@ -118,7 +118,15 @@ pub struct MInst {
 
 impl MInst {
     pub fn new(op: usize, ops: Vec<MOp>) -> MInst {
-        MInst { op: Opcode::Instr(op), ops, imp_uses: Vec::new(), imp_defs: Vec::new(), class: None, noreturn: false, barrier: false }
+        MInst {
+            op: Opcode::Instr(op),
+            ops,
+            imp_uses: Vec::new(),
+            imp_defs: Vec::new(),
+            class: None,
+            noreturn: false,
+            barrier: false,
+        }
     }
 
     pub fn copy(dst: Reg, src: Reg) -> MInst {

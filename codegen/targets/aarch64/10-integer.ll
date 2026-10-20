@@ -588,6 +588,18 @@ define ptr @LDRgot(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="11 111 0 01 01 imm12
   ret ptr %v
 }
 
+; The address of a Mach-O thread-local variable's descriptor (its first
+; word, a function to call with the descriptor, gives its address in
+; the calling thread): the same, through the linker's table of them.
+define ptr @ADRPtlv(ptr "sym" %s) "enc"="1 immlo:2=s&3 10000 immhi:s19=s>>2 d:5" "asm"="adrp {d}, {s}" "reloc"="adrp_tlv" "format"="macho" "role"="tlv.hi" "nomatch" "nodecode" {
+  ret ptr %s
+}
+
+define ptr @LDRtlv(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="11 111 0 01 01 imm12:12=s/8 n:5 d:5" "asm"="ldr {d}, [{n}, {s}]" "reloc"="ld64_tlv_lo12" "format"="macho" "role"="tlv.lo" "nomatch" "nodecode" {
+  %v = load ptr, ptr %n
+  ret ptr %v
+}
+
 ; ===========================================================================
 ; Address arithmetic: getelementptr i8 is adding to a pointer.
 

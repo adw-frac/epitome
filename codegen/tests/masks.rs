@@ -69,7 +69,8 @@ int main(void) {
 "#;
     std::fs::write(tmp.join("main.c"), main).unwrap();
     let exe = tmp.join("masks");
-    let built = Command::new("clang").arg(tmp.join("main.c")).arg(tmp.join("masks.o")).arg("-o").arg(&exe).output().unwrap();
+    let built =
+        Command::new("clang").arg(tmp.join("main.c")).arg(tmp.join("masks.o")).arg("-o").arg(&exe).output().unwrap();
     assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
     let out = Command::new(&exe).output().unwrap();
     let got = String::from_utf8_lossy(&out.stdout).trim().to_string();

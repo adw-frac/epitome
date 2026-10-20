@@ -68,7 +68,8 @@ fn build() -> Module {
     let factorial = b.finish().expect("every block ends in a terminator");
 
     // int printf(ptr, ...), and the format string.
-    let printf = Function::builder("printf").returns(i32t).param("", ptr).param_attr("noundef").varargs().declare(&mut m);
+    let printf =
+        Function::builder("printf").returns(i32t).param("", ptr).param_attr("noundef").varargs().declare(&mut m);
     let text = m.const_bytes(b"%llu! = %llu\n\0");
     let format = Global::builder("format").init(text).constant().linkage(Linkage::Private).align(1).build(&mut m);
 

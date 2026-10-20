@@ -75,13 +75,11 @@ fn main() -> ExitCode {
 /// The value of an option given as `--name value` or `--name=value`.
 fn option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
     let eq = format!("{name}=");
-    args.iter().enumerate().find_map(|(k, a)| {
-        if a == name {
-            args.get(k + 1).map(String::as_str)
-        } else {
-            a.strip_prefix(&eq)
-        }
-    })
+    args.iter().enumerate().find_map(
+        |(k, a)| {
+            if a == name { args.get(k + 1).map(String::as_str) } else { a.strip_prefix(&eq) }
+        },
+    )
 }
 
 /// The value of a codegen option, `-C key=value` or `-Ckey=value`.
@@ -267,8 +265,7 @@ fn replace_in_rlib(rlib: &Path, ll: &Path, prefix: &str, ours_opt: bool) -> Resu
     let ms = started.elapsed().as_millis();
     let listing = Command::new("ar").arg("t").arg(rlib).output().map_err(|e| format!("ar: {e}"))?;
     let members = String::from_utf8_lossy(&listing.stdout).into_owned();
-    let mine: Vec<&str> =
-        members.lines().filter(|m| m.starts_with(prefix) && m.ends_with("-cgu.0.rcgu.o")).collect();
+    let mine: Vec<&str> = members.lines().filter(|m| m.starts_with(prefix) && m.ends_with("-cgu.0.rcgu.o")).collect();
     let [member] = mine[..] else {
         return Err(format!("{} objects for the crate in the archive, not one", mine.len()));
     };

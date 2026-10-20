@@ -407,6 +407,46 @@ is `log2` of the mask, and a 64-bit bit at 32 or above sets the encoding's
 top bit). A sign test, `x > -1` or `x < 0`, is a test of the top bit
 (`TBZXpos`, `TBNZXneg`).
 
+### Atomics
+
+Atomics are memory barriers: the optimiser treats each as reading and
+writing all memory, and what selection emits for one is never paired with
+or moved past another access (`MInst::barrier`). Before selection,
+`atomics.rs` puts them in the forms the description has:
+
+- an `atomicrmw` with an instruction stays (AArch64's `ldadd` and the rest
+  with FEAT_LSE, in `22-atomics.ll`; RISC-V's `amoadd` and the rest, in
+  `25-a.ll`); `sub` is an `add` of the negation, and `and` is `ldclr` of
+  the complement (a recipe);
+- `cmpxchg` becomes `llvm.epitome.cmpxchg.iN(ptr, expected, new, rank)`,
+  AArch64's `cas`, with success the old value equal to the one expected;
+- without LSE, AArch64 calls the outline helpers libgcc and compiler-rt
+  have (the target parameter `atomic-helpers`, `__aarch64_ldadd4_acq`);
+- RISC-V's other operations, compare-and-swap among them, are loops of
+  `lr` and `sc` (`llvm.epitome.lr.iN`, `llvm.epitome.sc.iN`), and 8 and
+  16-bit ones work on the aligned word holding them. A floating-point
+  operation is made outside the loop, which holds base instructions only,
+  as one is sure to finish only then;
+- the rest (`nand`, floating point, `uinc_wrap`, `usub_sat`) are loops of
+  compare-and-swap;
+- pointers and floats go through integers of their width; ordered loads
+  and stores the machine has no instruction for are plain ones between
+  fences (RISC-V's mapping: `fence rw, rw` before a sequentially
+  consistent load, `fence r, rw` after an acquiring one, a fence before a
+  releasing store).
+
+Misaligned atomics and 128-bit ones are errors.
+
+### Thread-local variables
+
+In Mach-O a thread-local variable's symbol names a descriptor in
+`__thread_vars` (the function giving its address, a word the loader
+keeps, and its initial value, in `__thread_data`). Its address in the
+running thread is a call of the descriptor's first word with the
+descriptor, whose address the roles `tlv.hi` and `tlv.lo` load
+(`@TLVPPAGE`, `@TLVPPAGEOFF`); the call is taken as an ordinary one. ELF's
+thread-local variables are not supported yet.
+
 ### Redundant compares
 
 A pattern covers a compare together with what reads the flags, so each
@@ -703,8 +743,9 @@ multiply-add, division and remainder (by constants, without dividing),
 conversions, loads and stores of every scalar width with immediate,
 register and post-increment addressing, integer and floating-point
 comparisons, conditional branches (relaxed when out of range), selects,
-minimum and maximum, byte swaps, bit counts, funnel shifts, atomic loads,
-stores and fences, switches, calls (with arguments on the stack, small
+minimum and maximum, byte swaps, bit counts, funnel shifts, atomics
+(read-modify-write, compare-and-swap, loads, stores and fences, at every
+width to 64 bits and ordering), Mach-O thread-local variables, switches, calls (with arguments on the stack, small
 structs, and to and from variadic functions) under Apple's convention and
 AAPCS64, locals, frames of any size up to 32KB, globals, and odd widths
 such as `i33`. The description has 786 instructions, 22 condition forms

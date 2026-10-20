@@ -161,9 +161,12 @@ impl RelocDef {
     /// The symbol in an operand written `text`, if this is how it is
     /// written in `syntax`.
     pub fn unspell<'a>(&self, syntax: Syntax, text: &'a str) -> Option<&'a str> {
+        // Not one the format has (Mach-O's thread-local variables' in
+        // ELF): nothing reads as it.
         let tpl = match syntax {
-            Syntax::Elf => &self.elf_syntax,
-            Syntax::MachO => &self.macho_syntax,
+            Syntax::Elf if self.elf.is_some() => &self.elf_syntax,
+            Syntax::MachO if self.macho.is_some() => &self.macho_syntax,
+            _ => return None,
         };
         let (pre, post) = tpl.split_once("{s}")?;
         text.strip_prefix(pre)?.strip_suffix(post)
@@ -258,6 +261,10 @@ pub struct Machine {
     /// Loads and stores need no alignment and cost no more without it
     /// (`unaligned-access` = `fast`), so small copies may use wide ones.
     pub unaligned_fast: bool,
+    /// The names of outline atomic helpers, for atomics the machine has no
+    /// instruction for (`atomic-helpers`: `__aarch64_{op}{bytes}_{order}`,
+    /// `{order}` one of `relax`, `acq`, `rel` and `acq_rel`).
+    pub atomic_helpers: Option<String>,
     /// The flags a comparison sets and a condition reads where an entry
     /// does not say (`flags`: AArch64's `nzcv`).
     pub flags: Option<String>,
@@ -393,6 +400,7 @@ impl Machine {
             default_cpu: None,
             compare_booleans: false,
             unaligned_fast: false,
+            atomic_helpers: None,
             flags: None,
             asm_constraints: HashMap::new(),
             asm_modifiers: HashMap::new(),
@@ -425,6 +433,7 @@ impl Machine {
             Some(o) => return Err(format!("target parameter boolean-branches: {o}")),
         };
         mc.flags = params.get("flags").cloned();
+        mc.atomic_helpers = params.get("atomic-helpers").cloned();
         mc.unaligned_fast = match params.get("unaligned-access").map(String::as_str) {
             None | Some("no") => false,
             Some("fast") => true,

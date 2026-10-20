@@ -450,7 +450,8 @@ impl GlobalSpec {
             Value::Const(c) => c,
             _ => unreachable!(),
         });
-        let ty = self.ty.or_else(|| init.map(|c| m.consts.get(c).ty)).expect("a global needs a type or an initial value");
+        let ty =
+            self.ty.or_else(|| init.map(|c| m.consts.get(c).ty)).expect("a global needs a type or an initial value");
         let mut g = Global::variable(&self.name, ty, init, self.constant);
         g.props = self.props;
         if let GlobalKind::Variable(v) = &mut g.kind {
@@ -666,10 +667,7 @@ impl<'m> FunctionBuilder<'m> {
     pub fn icmp(&mut self, pred: ICmpPred, a: Value, b: Value) -> Value {
         let ty = self.same("icmp", a, b);
         let s = self.m.types.scalar(ty);
-        assert!(
-            matches!(self.m.types.get(s), Type::Int(_) | Type::Ptr(_)),
-            "icmp: needs integer or pointer operands"
-        );
+        assert!(matches!(self.m.types.get(s), Type::Int(_) | Type::Ptr(_)), "icmp: needs integer or pointer operands");
         let r = self.bool_like(ty);
         self.value(Op::ICmp { pred, samesign: false, lhs: a, rhs: b }, r)
     }
@@ -839,7 +837,12 @@ impl<'m> FunctionBuilder<'m> {
             _ => unreachable!(),
         };
         let got = self.type_of(v);
-        assert!(got == want, "ret: a {:?} from a function returning {:?}", self.m.types.get(got), self.m.types.get(want));
+        assert!(
+            got == want,
+            "ret: a {:?} from a function returning {:?}",
+            self.m.types.get(got),
+            self.m.types.get(want)
+        );
         self.push(Op::Ret(Some(v)), None);
     }
 
@@ -952,11 +955,7 @@ impl BinarySpec<'_, '_> {
         self
     }
     pub fn build(self) -> Value {
-        assert!(
-            self.op.allowed_flags().contains(self.flags),
-            "{}: flags it does not take",
-            self.op.keyword()
-        );
+        assert!(self.op.allowed_flags().contains(self.flags), "{}: flags it does not take", self.op.keyword());
         self.b.binary_with(self.op, self.flags, self.lhs, self.rhs)
     }
 }
@@ -1051,7 +1050,8 @@ impl StoreSpec<'_, '_> {
         self
     }
     pub fn build(self) {
-        let op = Op::Store { volatile: self.volatile, atomic: None, value: self.value, ptr: self.ptr, align: self.align };
+        let op =
+            Op::Store { volatile: self.volatile, atomic: None, value: self.value, ptr: self.ptr, align: self.align };
         self.b.push(op, None);
     }
 }

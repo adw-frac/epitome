@@ -450,3 +450,11 @@ define void @DMBISHLD() "enc"="11010101000000110011 1001 1 01 11111" "asm"="dmb 
   ret void
 }
 
+; An instruction barrier: what core::hint::spin_loop waits with.
+declare void @llvm.aarch64.isb(i32)
+
+define void @ISBSY() "enc"="11010101000000110011 1111 1 10 11111" "asm"="isb" {
+  call void @llvm.aarch64.isb(i32 15)
+  ret void
+}
+

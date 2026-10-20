@@ -70,12 +70,13 @@ out("00-base.ll", HEADER.format(what="the files, and the machine as a whole") + 
 ;   10-integer.ll   RV64I: arithmetic, logic, shifts, comparisons, moves,
 ;                   constants, loads and stores, branches, calls
 ;   20-m.ll         the M extension: multiplication and division
+;   25-a.ll         the A extension (atomics), and fences
 ;   30-zbb.ll       Zbb (basic bit manipulation), used when it is on
 ;   40-float.ll     the F and D extensions
 ;   60-recipes.ll   recipes: IR with no single instruction
 ;   70-abi.ll       the LP64D calling convention
 ;
-; Not yet: compressed instructions (C), atomics (A), vectors (V), PIC.
+; Not yet: compressed instructions (C), vectors (V), PIC.
 
 ; ===========================================================================
 ; Registers, by their ABI names, in two files: the integer registers
@@ -157,7 +158,7 @@ out("00-base.ll", HEADER.format(what="the files, and the machine as a whole") + 
 ; CPUs, by LLVM's names for them and their features.
 
 !target.cpus = !{!1150}
-!1150 = !{!"generic-rv64", !"m", !"f", !"d"}
+!1150 = !{!"generic-rv64", !"m", !"a", !"f", !"d"}
 
 ; ===========================================================================
 ; Relocations, from the RISC-V ELF psABI.
@@ -379,6 +380,53 @@ for name, ext, f3 in [("MULH", "sext", "001"), ("MULHU", "zext", "011")]:
                     f"  %a = {ext} i64 %n to i128\n  %b = {ext} i64 %m to i128\n  %p = mul i128 %a, %b\n  %h = lshr i128 %p, 64\n  %r = trunc i128 %h to i64\n  ret i64 %r",
                     ' "feature"="m"'))
 out("20-m.ll", "\n".join(M))
+
+# ---------------------------------------------------------------------------
+# 25-a.ll
+
+A = [HEADER.format(what="the A extension, atomics, and fences") + """
+; Each read-modify-write (amoadd and the rest) loads the old value into its
+; result and writes the new one; .aq acquires, .rl releases, .aqrl does
+; both and is sequentially consistent (as the psABI's mapping has it). The
+; others (8 and 16 bits, compare-and-swap, nand and the rest) are loops of
+; lr and sc (prepare.rs, atomics.rs), through
+;
+;   llvm.epitome.lr.iN(ptr, rank)        lr: the value, reserved
+;   llvm.epitome.sc.iN(ptr, value, rank) sc: 0 if it was stored
+;
+; with rank 1 for .aq, 2 for .rl and 3 for .aqrl. Ordered loads and stores
+; are plain ones with fences around them.
+""" + declare("""
+declare i32 @llvm.epitome.lr.i32(ptr, i32)
+declare i64 @llvm.epitome.lr.i64(ptr, i32)
+declare i32 @llvm.epitome.sc.i32(ptr, i32, i32)
+declare i32 @llvm.epitome.sc.i64(ptr, i64, i32)
+""")]
+ORDERS = [("", "00", "monotonic"), (".aq", "10", "acquire"), (".rl", "01", "release"), (".aqrl", "11", "seq_cst")]
+for name, f5, op in [("SWAP", "00001", "xchg"), ("ADD", "00000", "add"), ("XOR", "00100", "xor"), ("AND", "01100", "and"),
+                     ("OR", "01000", "or"), ("MIN", "10000", "min"), ("MAX", "10100", "max"), ("MINU", "11000", "umin"),
+                     ("MAXU", "11100", "umax")]:
+    for c, ty, f3 in [("W", "i32", "010"), ("D", "i64", "011")]:
+        cls = "w" if ty == "i32" else "x"
+        for suffix, aqrl, order in ORDERS:
+            A.append(define(ty, f"AMO{name}{c}{suffix.replace('.', '').upper()}", f'{ty} "reg"="{cls}" %m, ptr "reg"="x" %n',
+                            f"{f5} {aqrl} m:5 n:5 {f3} d:5 0101111", f"amo{name.lower()}.{c.lower()}{suffix} {{d}}, {{m}}, ({{n}})",
+                            f"  %r = atomicrmw {op} ptr %n, {ty} %m {order}\n  ret {ty} %r", ' "feature"="a"'))
+for c, ty, f3 in [("W", "i32", "010"), ("D", "i64", "011")]:
+    cls = "w" if ty == "i32" else "x"
+    for suffix, aqrl, rank in [("", "00", 0), (".aq", "10", 1), (".aqrl", "11", 3)]:
+        A.append(define(ty, f"LR{c}{suffix.replace('.', '').upper()}", 'ptr "reg"="x" %n',
+                        f"00010 {aqrl} 00000 n:5 {f3} d:5 0101111", f"lr.{c.lower()}{suffix} {{d}}, ({{n}})",
+                        f"  %r = call {ty} @llvm.epitome.lr.{ty}(ptr %n, i32 {rank})\n  ret {ty} %r", ' "feature"="a"'))
+    for suffix, aqrl, rank in [("", "00", 0), (".rl", "01", 2)]:
+        A.append(define("i32", f"SC{c}{suffix.replace('.', '').upper()}", f'{ty} "reg"="{cls}" %m, ptr "reg"="x" %n',
+                        f"00011 {aqrl} m:5 n:5 {f3} d:5 0101111", f"sc.{c.lower()}{suffix} {{d}}, {{m}}, ({{n}})",
+                        f"  %r = call i32 @llvm.epitome.sc.{ty}(ptr %n, {ty} %m, i32 {rank})\n  ret i32 %r", ' "feature"="a"'))
+# Fences (RV64I): an acquire orders loads before it with everything after;
+# the others order everything.
+A.append(define("void", "FENCERRW", "", "0000 0010 0011 00000 000 00000 0001111", "fence r, rw", "  fence acquire\n  ret void"))
+A.append(define("void", "FENCERWRW", "", "0000 0011 0011 00000 000 00000 0001111", "fence rw, rw", "  fence seq_cst\n  ret void"))
+out("25-a.ll", "\n".join(A))
 
 # ---------------------------------------------------------------------------
 # 30-zbb.ll

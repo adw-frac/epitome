@@ -1,5 +1,5 @@
 //! A small RV64 machine for testing: a static linker for ELF relocatable
-//! files, and an interpreter for RV64I, M, F, D and Zbb, written from the
+//! files, and an interpreter for RV64I, M, A, F, D and Zbb, written from the
 //! RISC-V Instruction Set Manual (Volume I) and the RISC-V ELF psABI, not
 //! from the description under test.
 //!
@@ -39,6 +39,9 @@ pub struct Machine {
     pub out: String,
     entry: u64,
     stubs: HashMap<u64, &'static str>,
+    /// The address `lr` reserved, until an `sc` (there is one hart, so
+    /// nothing else breaks a reservation).
+    reserved: Option<u64>,
 }
 
 fn sext(v: u64, bits: u32) -> i64 {
@@ -60,6 +63,7 @@ impl Machine {
             out: String::new(),
             entry: 0,
             stubs: HashMap::new(),
+            reserved: None,
         };
         let files: Vec<ElfFile> = objects.iter().map(|b| elf::read(b)).collect::<Result<_, _>>()?;
         // Lay out every allocated section.
@@ -458,6 +462,55 @@ impl Machine {
                 self.set(rd, v as i64 as u64);
             }
             0x0f => {}
+            // A: with one hart, the orderings (aq, rl) change nothing.
+            0x2f => {
+                let n = match f3 {
+                    2 => 4,
+                    3 => 8,
+                    _ => return Err(bad()),
+                };
+                let a = x1;
+                if a % n as u64 != 0 {
+                    return Err(format!("a misaligned atomic at {a:#x} ({pc:#x})"));
+                }
+                let narrow = |v: u64| if n == 4 { sext(v, 32) as u64 } else { v };
+                let f5 = bits(w, 31, 27);
+                match f5 {
+                    0b00010 => {
+                        self.reserved = Some(a);
+                        let v = narrow(self.load(a, n)?);
+                        self.set(rd, v);
+                    }
+                    0b00011 => {
+                        let ok = self.reserved.take() == Some(a);
+                        if ok {
+                            self.store(a, n, x2)?;
+                        }
+                        self.set(rd, u64::from(!ok));
+                    }
+                    _ => {
+                        let old = narrow(self.load(a, n)?);
+                        let src = narrow(x2);
+                        let (so, ss) = (old as i64, src as i64);
+                        let new = match f5 {
+                            0b00001 => src,
+                            0b00000 => old.wrapping_add(src),
+                            0b00100 => old ^ src,
+                            0b01100 => old & src,
+                            0b01000 => old | src,
+                            0b10000 => so.min(ss) as u64,
+                            0b10100 => so.max(ss) as u64,
+                            // Unsigned at the width: the 32-bit values are
+                            // sign-extended alike, so their order is kept.
+                            0b11000 => old.min(src),
+                            0b11100 => old.max(src),
+                            _ => return Err(bad()),
+                        };
+                        self.store(a, n, new)?;
+                        self.set(rd, old);
+                    }
+                }
+            }
             0x73 if w == 0x0010_0073 => return Err("ebreak".into()),
             0x07 => {
                 let a = x1.wrapping_add(imm_i as u64);

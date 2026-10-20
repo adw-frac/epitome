@@ -448,6 +448,7 @@ must print what rustc's build of it does, at `-C opt-level=0` and `2`.
   section whole, so it cannot drop unused functions.
 - Zero-filled sections in Mach-O (`__DATA,__bss`): zeros are stored.
 - Weak and `linkonce` definitions (written as global), common symbols,
-  thread-local storage, and sections chosen by attribute.
+  thread-local storage in ELF (Mach-O's is done), and sections chosen by
+  attribute.
 - Disassembling instructions the description does not have (`ldp`, `stp`,
   pointer authentication, system instructions): they print as `.word`.

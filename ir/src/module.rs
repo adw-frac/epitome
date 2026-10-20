@@ -864,7 +864,7 @@ pub struct Atomic {
     pub ordering: Ordering,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum RmwOp {
     Xchg,
     Add,

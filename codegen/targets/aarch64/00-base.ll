@@ -68,6 +68,7 @@
 ;                         result, the operand called d2 (a load pair's)
 ;   "reloc"="adrp"        how an object file fixes up its "sym" operand, by
 ;                         a relocation's name in !target.relocs (01-target.ll)
+;   "format"="macho"      for this object format only (its relocation is)
 
 target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128"
 

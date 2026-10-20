@@ -7,12 +7,13 @@
 ;   10-integer.ll   RV64I: arithmetic, logic, shifts, comparisons, moves,
 ;                   constants, loads and stores, branches, calls
 ;   20-m.ll         the M extension: multiplication and division
+;   25-a.ll         the A extension (atomics), and fences
 ;   30-zbb.ll       Zbb (basic bit manipulation), used when it is on
 ;   40-float.ll     the F and D extensions
 ;   60-recipes.ll   recipes: IR with no single instruction
 ;   70-abi.ll       the LP64D calling convention
 ;
-; Not yet: compressed instructions (C), atomics (A), vectors (V), PIC.
+; Not yet: compressed instructions (C), vectors (V), PIC.
 
 ; ===========================================================================
 ; Registers, by their ABI names, in two files: the integer registers
@@ -94,7 +95,7 @@
 ; CPUs, by LLVM's names for them and their features.
 
 !target.cpus = !{!1150}
-!1150 = !{!"generic-rv64", !"m", !"f", !"d"}
+!1150 = !{!"generic-rv64", !"m", !"a", !"f", !"d"}
 
 ; ===========================================================================
 ; Relocations, from the RISC-V ELF psABI.

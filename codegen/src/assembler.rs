@@ -762,6 +762,8 @@ fn section_kind(args: &str, syntax: Syntax) -> Option<Option<SectionKind>> {
         "__TEXT,__const" | ".rodata" => SectionKind::ReadOnly,
         "__DATA,__const" | ".data.rel.ro" => SectionKind::RelRo,
         "__TEXT,__gcc_except_tab" | ".gcc_except_table" => SectionKind::ExceptTable,
+        "__DATA,__thread_vars" => SectionKind::ThreadVars,
+        "__DATA,__thread_data" => SectionKind::ThreadData,
         ".note.GNU-stack" => return Some(None),
         _ => return None,
     }))

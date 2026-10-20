@@ -188,10 +188,7 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
 
     // Before each return, and each tail call (whose callee returns to this
     // function's caller).
-    let leaves =
-        |inst: &MInst| {
-            matches!(inst.op, Opcode::Instr(k) if t.has_role(k, "ret") || t.has_role(k, "tailcall") || t.has_role(k, "tailcallr"))
-        };
+    let leaves = |inst: &MInst| matches!(inst.op, Opcode::Instr(k) if t.has_role(k, "ret") || t.has_role(k, "tailcall") || t.has_role(k, "tailcallr"));
     for b in &mut f.blocks {
         let old = std::mem::take(&mut b.insts);
         for inst in old {
@@ -271,7 +268,8 @@ fn adjust(t: &Target, out: &mut Vec<MInst>, dst: u8, src: u8, amount: i64, scrat
     });
     let Some((op, op12, pages, rest)) = split else {
         // Else the amount, made in a scratch register, added.
-        let scratch = *scratch.first().ok_or_else(|| format!("no scratch register for a large frame{NEEDS_SCRATCH}"))?;
+        let scratch =
+            *scratch.first().ok_or_else(|| format!("no scratch register for a large frame{NEEDS_SCRATCH}"))?;
         constant(t, out, scratch, amount)?;
         let add = t.role("add").ok_or("no \"add\" instruction for a large frame")?;
         out.push(MInst::new(add, vec![r(dst), r(src), r(scratch)]));

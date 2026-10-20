@@ -60,6 +60,9 @@ pub struct Instr {
     /// For assembly and disassembly only: its body says nothing (entries
     /// written from Arm's specification, `80-asm.ll`).
     pub asm_only: bool,
+    /// The object format it is for, if only one (`"format"="macho"`: its
+    /// relocation is that format's only).
+    pub format: Option<crate::abi::Syntax>,
     /// Other mnemonics it may be written with, by Arm's specification
     /// (`cinc`, of `csinc`): for comparing with other disassemblers.
     pub aliases: Vec<String>,
@@ -153,6 +156,9 @@ pub enum Head {
     StoreRel(u32),
     /// A fence: `true` if it orders only loads (acquire).
     Fence(bool),
+    /// An atomic read-modify-write of this width, its ordering as
+    /// `order_rank` gives it.
+    Rmw(RmwOp, u32, u8),
     /// A call to an intrinsic, by its index in `Target::intrinsics`.
     Intrinsic(u16, u32),
     FCmp(FCmpPred, u32),
@@ -372,6 +378,7 @@ pub const AARCH64_FILES: &[(&str, &str)] = &[
     ("10-integer.ll", include_str!("../targets/aarch64/10-integer.ll")),
     ("15-extend.ll", include_str!("../targets/aarch64/15-extend.ll")),
     ("20-memory.ll", include_str!("../targets/aarch64/20-memory.ll")),
+    ("22-atomics.ll", include_str!("../targets/aarch64/22-atomics.ll")),
     ("25-pairs.ll", include_str!("../targets/aarch64/25-pairs.ll")),
     ("30-bits.ll", include_str!("../targets/aarch64/30-bits.ll")),
     ("40-float.ll", include_str!("../targets/aarch64/40-float.ll")),
@@ -874,6 +881,12 @@ impl Target {
                 },
                 matchable: attr(&f.fn_attrs, "nomatch").is_none() && attr(&f.fn_attrs, "asmonly").is_none(),
                 asm_only: attr(&f.fn_attrs, "asmonly").is_some(),
+                format: match attr(&f.fn_attrs, "format").flatten() {
+                    None => None,
+                    Some("macho") => Some(crate::abi::Syntax::MachO),
+                    Some("elf") => Some(crate::abi::Syntax::Elf),
+                    Some(o) => return Err(format!("@{name}: \"format\"=\"{o}\": not elf or macho")),
+                },
                 aliases: attr(&f.fn_attrs, "aliases")
                     .flatten()
                     .map_or(vec![], |a| a.split(',').map(str::to_string).collect()),
@@ -975,6 +988,9 @@ impl Target {
             Op::FCmp { pred, lhs, rhs, .. } => mk(Head::FCmp(*pred, ty_bits(*lhs)), vec![ev(*lhs)?, ev(*rhs)?]),
             Op::FNeg { value, .. } => mk(Head::FNeg(res_hbits), vec![ev(*value)?]),
             Op::Load { ptr, atomic, .. } if acquires(atomic) => mk(Head::LoadAcq(res_hbits), vec![ev(*ptr)?]),
+            Op::AtomicRmw { op, ptr, value, ordering, .. } => {
+                mk(Head::Rmw(*op, res_hbits, order_rank(*ordering)), vec![ev(*ptr)?, ev(*value)?])
+            }
             Op::Load { ptr, .. } => mk(Head::Load(res_hbits), vec![ev(*ptr)?]),
             Op::Gep { ptr, indices, source_ty, .. }
                 if indices.len() == 1 && matches!(m.types.get(*source_ty), Type::Int(8)) =>
@@ -1074,8 +1090,31 @@ impl Target {
                     .insts
                     .iter()
                     .rev()
-                    .find(|&&i| matches!(f.insts[i.index()].op, Op::Store { .. } | Op::Fence { .. }));
+                    .find(|&&i| matches!(f.insts[i.index()].op, Op::Store { .. } | Op::Fence { .. } | Op::Call(_)));
                 match store {
+                    // An intrinsic without a value (`llvm.aarch64.isb`).
+                    Some(&s) if matches!(f.insts[s.index()].op, Op::Call(_)) => {
+                        let Op::Call(call) = &f.insts[s.index()].op else { unreachable!() };
+                        let id = match call.callee {
+                            Value::Const(c) => match self.module.constant(c).kind {
+                                ConstKind::Global(g) => self
+                                    .module
+                                    .global(g)
+                                    .name
+                                    .as_ref()
+                                    .and_then(|n| self.intrinsics.iter().position(|x| x == n)),
+                                _ => None,
+                            },
+                            _ => None,
+                        };
+                        let id = id.ok_or("a call of something not an intrinsic in a body")?;
+                        let args = call
+                            .args
+                            .iter()
+                            .map(|a| self.eval_value(f, a.value, env, base))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        mk(Head::Intrinsic(id as u16, 0), args)
+                    }
                     Some(&s) if matches!(f.insts[s.index()].op, Op::Fence { .. }) => {
                         let Op::Fence { ordering, .. } = f.insts[s.index()].op else { unreachable!() };
                         Tree::Op(Head::Fence(ordering == Ordering::Acquire), vec![])
@@ -1535,7 +1574,15 @@ impl Target {
                         e.locals.iter().any(|l| matches!(m.types.get(l.ty), Type::Vector { .. }))
                     },
                 );
-            if through_vectors {
+            // Nor those that touch memory (atomic read-modify-writes):
+            // there is no memory to evaluate them on.
+            let touches_memory = f.blocks.iter().flat_map(|b| &b.insts).any(|i| {
+                matches!(
+                    f.insts[i.index()].op,
+                    Op::AtomicRmw { .. } | Op::CmpXchg { .. } | Op::Load { .. } | Op::Store { .. }
+                )
+            });
+            if through_vectors || touches_memory {
                 continue;
             }
             let want = self.body_tree(f, &HashMap::new(), 0)?.ok_or("recipe without a value")?;
@@ -1780,4 +1827,22 @@ fn returns_first(f: &Function) -> bool {
     let (Some(&first), Some(&last)) = (insts.first(), insts.last()) else { return false };
     insts.len() == 2
         && matches!(f.insts[last.index()].op, Op::Ret(Some(Value::Local(l))) if Some(l) == f.insts[first.index()].result)
+}
+
+/// An atomic ordering as instructions offer it: 0 none (monotonic,
+/// unordered), 1 acquire, 2 release, 3 both (acq_rel and seq_cst, which on
+/// the machines described are the same instructions).
+pub fn order_rank(o: Ordering) -> u8 {
+    match o {
+        Ordering::Unordered | Ordering::Monotonic => 0,
+        Ordering::Acquire => 1,
+        Ordering::Release => 2,
+        Ordering::AcqRel | Ordering::SeqCst => 3,
+    }
+}
+
+/// A compare-and-swap's rank: its success ordering, with acquire too if the
+/// failure ordering acquires.
+pub fn cmpxchg_rank(success: Ordering, failure: Ordering) -> u8 {
+    order_rank(success) | (order_rank(failure) & 1)
 }

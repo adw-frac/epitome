@@ -475,6 +475,9 @@ impl<'a, 'b> Sel<'a, 'b> {
             }
             Op::Store { value, ptr, .. } => (Head::Store(self.vhbits(*value)), vec![v(*value), v(*ptr)]),
             Op::Fence { ordering, .. } => (Head::Fence(*ordering == Ordering::Acquire), vec![]),
+            Op::AtomicRmw { op, ptr, value, ordering, .. } => {
+                (Head::Rmw(*op, res_hbits, crate::target::order_rank(*ordering)), vec![v(*ptr), v(*value)])
+            }
             Op::Gep { ptr, indices, .. } if indices.len() == 1 => (Head::Gep, vec![v(*ptr), v(indices[0])]),
             Op::CondBr { cond, then_dest, else_dest } => {
                 (Head::CondBr, vec![v(*cond), Term::B(*then_dest), Term::B(*else_dest)])
@@ -1537,9 +1540,28 @@ impl<'a, 'b> Sel<'a, 'b> {
         self.parts_of(ty)
     }
 
+    /// The registers landing pad `r`'s exception and selector are copied
+    /// to: made by the first to ask, the landing pad or a use of it in a
+    /// block placed before it.
+    fn landing_regs(&mut self, r: LocalId) -> Vec<u32> {
+        if let Some(regs) = self.agg_params.get(&r) {
+            return regs.clone();
+        }
+        let regs: Vec<u32> = (0..self.mf.abi.eh_regs.len()).map(|_| self.ivreg(true)).collect();
+        self.agg_params.insert(r, regs.clone());
+        regs
+    }
+
     /// The parts of a small struct value: from the `insertvalue`s that
-    /// built it, from a constant, or from a parameter's registers.
+    /// built it, from a constant, or from a parameter's (or a landing
+    /// pad's) registers.
     fn parts(&mut self, v: Value, n: usize) -> Result<Vec<Reg>, String> {
+        if let Value::Local(x) = v
+            && let LocalDef::Inst(d) = self.f.locals[x.index()].def
+            && matches!(self.f.insts[d.index()].op, Op::LandingPad { .. })
+        {
+            return Ok(self.landing_regs(x).into_iter().map(Reg::V).collect());
+        }
         if let Value::Local(x) = v
             && let Some(regs) = self.agg_params.get(&x)
         {
@@ -2002,6 +2024,21 @@ impl<'a, 'b> Sel<'a, 'b> {
                     }
                     return Ok(());
                 }
+                // A thread-local variable's descriptor (see
+                // `prepare::thread_locals`).
+                "llvm.epitome.tlv" => {
+                    let Value::Const(c) = args[0].value else { return self.err("llvm.epitome.tlv of a value") };
+                    let Some((g, 0)) = prepare::const_address(self.cx, c) else {
+                        return self.err("llvm.epitome.tlv of something not a variable");
+                    };
+                    let name = self.cx.m.global(g).name.clone().unwrap_or_default();
+                    let r = inst.result.ok_or("llvm.epitome.tlv without a result")?;
+                    let d = self.vreg_of(r);
+                    let (hi, lo) = (self.t.by_role("tlv.hi"), self.t.by_role("tlv.lo"));
+                    self.push(MInst::new(hi, vec![MOp::Reg(Reg::V(d)), MOp::Sym(name.clone())]));
+                    self.push(MInst::new(lo, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(d)), MOp::Sym(name)]));
+                    return Ok(());
+                }
                 s if s.starts_with("llvm.va_copy") => {
                     let dst = self.reg_for(args[0].value, self.int_class(true))?;
                     let src = self.reg_for(args[1].value, self.int_class(true))?;
@@ -2244,7 +2281,10 @@ impl<'a, 'b> Sel<'a, 'b> {
         for (k, &i) in insts.iter().enumerate() {
             self.mark_barrier(atomic_from.take());
             let inst = &f.insts[i.index()];
-            if is_atomic(&inst.op) {
+            if is_atomic(&inst.op)
+                || matches!(&inst.op, Op::Call(c) if prepare::callee_name(self.cx.m, c)
+                    .is_some_and(|n| n.starts_with("llvm.epitome.")))
+            {
                 atomic_from = Some((self.cur, self.mf.blocks[self.cur].insts.len()));
             }
             if inst.op.is_terminator() {
@@ -2295,13 +2335,10 @@ impl<'a, 'b> Sel<'a, 'b> {
                 // the convention's registers for them.
                 Op::LandingPad { .. } => {
                     if let Some(r) = inst.result {
-                        let mut regs = Vec::new();
-                        for p in self.mf.abi.eh_regs.clone() {
-                            let d = self.ivreg(true);
+                        let regs = self.landing_regs(r);
+                        for (p, d) in self.mf.abi.eh_regs.clone().into_iter().zip(regs) {
                             self.push(MInst::copy(Reg::V(d), Reg::P(p)));
-                            regs.push(d);
                         }
-                        self.agg_params.insert(r, regs);
                     }
                     continue;
                 }

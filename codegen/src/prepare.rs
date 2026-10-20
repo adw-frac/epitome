@@ -61,6 +61,26 @@ impl Ctx<'_> {
 
     /// Is there a pattern, of instructions that are on, with an IR node
     /// `want` accepts?
+    pub fn selects_head(&self, want: impl Fn(&Head) -> bool) -> bool {
+        self.selects(want)
+    }
+
+    /// Is there an instruction for intrinsic `name` whose last operand is
+    /// the constant `last` (`llvm.epitome.cmpxchg.i64`'s ordering)?
+    pub fn selects_intrinsic_with(&self, name: &str, last: i64) -> bool {
+        let Some(id) = self.t.intrinsics.iter().position(|n| n == name) else { return false };
+        fn has(t: &Tree, id: usize, last: i64) -> bool {
+            match t {
+                Tree::Op(Head::Intrinsic(k, _), kids) if *k as usize == id => {
+                    matches!(kids.last(), Some(Tree::Lit(v, _)) if *v == last)
+                }
+                Tree::Op(_, kids) => kids.iter().any(|k| has(k, id, last)),
+                _ => false,
+            }
+        }
+        self.t.patterns.iter().any(|p| has(&p.tree, id, last) && p.emit.iter().all(|e| self.enabled(e.instr)))
+    }
+
     fn selects(&self, want: impl Fn(&Head) -> bool) -> bool {
         fn has(t: &Tree, want: &dyn Fn(&Head) -> bool) -> bool {
             match t {
@@ -120,6 +140,8 @@ impl Ctx<'_> {
 /// Puts a copy of `f` into selection form.
 pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, String> {
     let mut f = f.clone();
+    thread_locals(cx, &mut f);
+    crate::atomics::expand_atomics(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     expand_overflow(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     crate::wide::split_wide(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     split_struct_phis(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
@@ -130,6 +152,7 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     expand_intrinsics(cx, &mut f);
     lane_indices(cx, &mut f);
     split_aggregate_memory(cx, &mut f);
+    bool_memory(cx, &mut f);
     expand_small_mem_ops(cx, &mut f);
     crate::legalize::legalize_vectors(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     // Element-wise intrinsics split into scalars expand as scalars do.
@@ -235,6 +258,99 @@ fn split_struct_phis(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         f.blocks[b.index()].insts = list;
     }
     Ok(())
+}
+
+/// The address of a thread-local variable, where the machine reaches them
+/// by Mach-O's descriptors (`tlv.hi` and `tlv.lo`): its descriptor's
+/// address (`llvm.epitome.tlv`), then a call of the descriptor's first
+/// word with it, which returns the variable's address in this thread. (The
+/// call keeps more registers than a call need, but is taken as one.)
+fn thread_locals(cx: &mut Ctx, f: &mut Function) {
+    let darwin = cx.m.triple.as_deref().is_some_and(|t| {
+        let t = String::from_utf8_lossy(t);
+        t.contains("apple") || t.contains("darwin") || t.contains("macos")
+    });
+    if !darwin || cx.t.role("tlv.hi").is_none() {
+        return;
+    }
+    let ptr = cx.m.types.ptr(0);
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::Call(call) = &f.insts[i.index()].op else {
+                k += 1;
+                continue;
+            };
+            if !callee_name(cx.m, call).is_some_and(|n| n.starts_with("llvm.threadlocal.address.")) {
+                k += 1;
+                continue;
+            }
+            let var = call.args[0].value;
+            let r = f.insts[i.index()].result.unwrap();
+            let mut s = Seq { f, new: Vec::new() };
+            let desc = call_intrinsic(cx, &mut s, "llvm.epitome.tlv", vec![var], ptr);
+            let get = s.op(Op::Load { volatile: false, atomic: None, ptr: desc, align: Some(8) }, ptr);
+            let fn_ty = cx.m.types.intern(Type::Function { ret: ptr, params: vec![ptr], varargs: false });
+            let addr = s.op(
+                Op::Call(Box::new(Call {
+                    tail: TailKind::None,
+                    fmf: FastMath::default(),
+                    cconv: CallConv::default(),
+                    ret_attrs: vec![],
+                    addrspace: None,
+                    fn_ty,
+                    callee: get,
+                    args: vec![CallArg { value: desc, attrs: vec![] }],
+                    fn_attrs: vec![],
+                    bundles: vec![],
+                })),
+                ptr,
+            );
+            s.f.replace_uses(Value::Local(r), addr);
+            let new = std::mem::take(&mut s.new);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
+}
+
+/// An `i1` in memory is a byte, 0 or 1: its stores store it zero-extended,
+/// and its loads truncate the byte.
+fn bool_memory(cx: &mut Ctx, f: &mut Function) {
+    let (i1, i8t) = (cx.m.types.int(1), cx.m.types.int(8));
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let mut s = Seq { f, new: Vec::new() };
+            match s.f.insts[i.index()].op.clone() {
+                Op::Store { volatile, atomic, value, ptr, align } if cx.value_ty(s.f, value) == i1 => {
+                    let v = s.cast(CastOp::ZExt, value, i8t);
+                    s.op_void(Op::Store { volatile, atomic, value: v, ptr, align });
+                }
+                Op::Load { volatile, atomic, ptr, align }
+                    if s.f.insts[i.index()].result.is_some_and(|r| s.f.locals[r.index()].ty == i1) =>
+                {
+                    let r = s.f.insts[i.index()].result.unwrap();
+                    let v = s.op(Op::Load { volatile, atomic, ptr, align }, i8t);
+                    let t = s.cast(CastOp::Trunc, v, i1);
+                    s.f.replace_uses(Value::Local(r), t);
+                }
+                _ => {
+                    k += 1;
+                    continue;
+                }
+            }
+            let new = std::mem::take(&mut s.new);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
 }
 
 /// The most loads and stores a `memset` or `memcpy` is written out as.
@@ -344,7 +460,13 @@ fn expand_small_mem_ops(cx: &mut Ctx, f: &mut Function) {
                     let real = |a: u64| if off == 0 { a } else { a.min(1 << off.trailing_zeros()) };
                     let to = offset_ptr(cx, &mut s, dst, off, i8t, i64t, ptr);
                     let st = s.f.add_inst(
-                        Op::Store { volatile: false, atomic: None, value, ptr: to, align: Some(real(dst_align).min(w)) },
+                        Op::Store {
+                            volatile: false,
+                            atomic: None,
+                            value,
+                            ptr: to,
+                            align: Some(real(dst_align).min(w)),
+                        },
                         None,
                     );
                     s.new.push(st);
@@ -592,9 +714,6 @@ fn check(cx: &Ctx, f: &Function, fname: &str) -> Result<(), String> {
             | Op::CatchRet { .. }
             | Op::CleanupRet { .. } => {
                 return Err(format!("@{fname}: Windows exception handling is not supported"));
-            }
-            Op::AtomicRmw { .. } | Op::CmpXchg { .. } => {
-                return Err(format!("@{fname}: atomic read-modify-write is not supported yet"));
             }
             _ => {}
         }
@@ -1287,32 +1406,7 @@ fn expand_overflow(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                 }
                 _ => return Err(format!("{name} is not supported yet")),
             };
-            // The extractvalues of the result take its parts; anything
-            // else, a struct made of them.
-            let mut gone = Vec::new();
-            let mut others = false;
-            let order: Vec<InstId> = s.f.insts_in_order().collect();
-            for j in order {
-                match &s.f.insts[j.index()].op {
-                    Op::ExtractValue { aggregate: Value::Local(x), indices } if *x == r && indices.len() == 1 => {
-                        let part = if indices[0] == 0 { value } else { ov };
-                        if let Some(e) = s.f.insts[j.index()].result {
-                            s.f.replace_uses(Value::Local(e), part);
-                        }
-                        gone.push(j);
-                    }
-                    op => op.for_each_value(|v| others |= *v == Value::Local(r)),
-                }
-            }
-            for blk in s.f.blocks.iter_mut() {
-                blk.insts.retain(|j| !gone.contains(j));
-            }
-            if others {
-                let poison = Value::Const(cx.m.consts.intern(Constant { ty: sty, kind: ConstKind::Poison }));
-                let x = s.op(Op::InsertValue { aggregate: poison, element: value, indices: vec![0] }, sty);
-                let y = s.op(Op::InsertValue { aggregate: x, element: ov, indices: vec![1] }, sty);
-                s.f.replace_uses(Value::Local(r), y);
-            }
+            replace_pair(cx, &mut s, r, sty, value, ov);
             let new = std::mem::take(&mut s.new);
             // (Extractvalues before it in its block were removed.)
             let k0 = f.blocks[b.index()].insts.iter().position(|&j| j == i).unwrap();
@@ -1323,6 +1417,36 @@ fn expand_overflow(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The uses of `r`, a pair (`{ i64, i1 }`) now made as `a` and `b`: its
+/// extractvalues take them; anything else, a struct made of them (at the
+/// end of `s`). The extractvalues are removed from their blocks.
+pub(crate) fn replace_pair(cx: &mut Ctx, s: &mut Seq, r: LocalId, sty: TypeId, a: Value, b: Value) {
+    let mut gone = Vec::new();
+    let mut others = false;
+    let order: Vec<InstId> = s.f.insts_in_order().collect();
+    for j in order {
+        match &s.f.insts[j.index()].op {
+            Op::ExtractValue { aggregate: Value::Local(x), indices } if *x == r && indices.len() == 1 => {
+                let part = if indices[0] == 0 { a } else { b };
+                if let Some(e) = s.f.insts[j.index()].result {
+                    s.f.replace_uses(Value::Local(e), part);
+                }
+                gone.push(j);
+            }
+            op => op.for_each_value(|v| others |= *v == Value::Local(r)),
+        }
+    }
+    for blk in s.f.blocks.iter_mut() {
+        blk.insts.retain(|j| !gone.contains(j));
+    }
+    if others {
+        let poison = Value::Const(cx.m.consts.intern(Constant { ty: sty, kind: ConstKind::Poison }));
+        let x = s.op(Op::InsertValue { aggregate: poison, element: a, indices: vec![0] }, sty);
+        let y = s.op(Op::InsertValue { aggregate: x, element: b, indices: vec![1] }, sty);
+        s.f.replace_uses(Value::Local(r), y);
+    }
 }
 
 fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
@@ -1377,6 +1501,19 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 }
                 let new = std::mem::take(&mut s.new);
                 f.replace_uses(Value::Local(r), acc);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
+            // A pointer with some bits cleared: of its integer.
+            if name.starts_with("llvm.ptrmask.") && matches!(cx.m.types.get(ty), Type::Ptr(_)) {
+                let mty = cx.value_ty(s.f, args[1]);
+                let p = s.cast(CastOp::PtrToInt, args[0], mty);
+                let masked = s.bin(BinOp::And, p, args[1], mty);
+                let v = s.cast(CastOp::IntToPtr, masked, ty);
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), v);
                 let n = new.len();
                 f.blocks[b.index()].insts.splice(k..=k, new);
                 k += n;
@@ -1545,7 +1682,9 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 // when the operands' signs differ and the result's differs
                 // from a's.
                 (_, "llvm.sadd" | "llvm.ssub")
-                    if scalar && bits <= 64 && (name.starts_with("llvm.sadd.sat") || name.starts_with("llvm.ssub.sat")) =>
+                    if scalar
+                        && bits <= 64
+                        && (name.starts_with("llvm.sadd.sat") || name.starts_with("llvm.ssub.sat")) =>
                 {
                     let add = base == "llvm.sadd";
                     let (a, b) = (args[0], args[1]);
@@ -1604,7 +1743,7 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
 /// instruction for it: by the same at a wider width it has one for, or
 /// with shifts and masks. Zero gives the full width.
 /// A call of intrinsic `name`, declared if new, returning `ret`.
-fn call_intrinsic(cx: &mut Ctx, s: &mut Seq, name: &str, args: Vec<Value>, ret: TypeId) -> Value {
+pub(crate) fn call_intrinsic(cx: &mut Ctx, s: &mut Seq, name: &str, args: Vec<Value>, ret: TypeId) -> Value {
     let params: Vec<TypeId> = args.iter().map(|&a| cx.value_ty(s.f, a)).collect();
     let callee = crate::legalize::declare(cx, name, ret, &params);
     let fn_ty = cx.m.types.intern(Type::Function { ret, params, varargs: false });
@@ -1805,7 +1944,8 @@ pub(crate) fn bool_vector_casts(cx: &mut Ctx, f: &mut Function) {
         let mut k = 0;
         while k < f.blocks[b.index()].insts.len() {
             let i = f.blocks[b.index()].insts[k];
-            let (Op::Cast { op: CastOp::BitCast, value, .. }, Some(r)) = (&f.insts[i.index()].op, f.insts[i.index()].result)
+            let (Op::Cast { op: CastOp::BitCast, value, .. }, Some(r)) =
+                (&f.insts[i.index()].op, f.insts[i.index()].result)
             else {
                 k += 1;
                 continue;
@@ -1900,23 +2040,28 @@ fn lane_indices(cx: &mut Ctx, f: &mut Function) {
 }
 
 /// Builds instructions to go before another, of one integer type.
-struct Seq<'f> {
-    f: &'f mut Function,
-    new: Vec<InstId>,
+pub(crate) struct Seq<'f> {
+    pub f: &'f mut Function,
+    pub new: Vec<InstId>,
 }
 
 impl Seq<'_> {
-    fn op(&mut self, op: Op, ty: TypeId) -> Value {
+    pub fn op(&mut self, op: Op, ty: TypeId) -> Value {
         let i = self.f.add_inst(op, Some((None, ty)));
         self.new.push(i);
         self.f.result(i)
     }
 
-    fn bin(&mut self, op: BinOp, lhs: Value, rhs: Value, ty: TypeId) -> Value {
+    pub fn op_void(&mut self, op: Op) {
+        let i = self.f.add_inst(op, None);
+        self.new.push(i);
+    }
+
+    pub fn bin(&mut self, op: BinOp, lhs: Value, rhs: Value, ty: TypeId) -> Value {
         self.op(Op::Binary { op, flags: IntFlags::NONE, fmf: FastMath::default(), lhs, rhs }, ty)
     }
 
-    fn cast(&mut self, op: CastOp, value: Value, ty: TypeId) -> Value {
+    pub fn cast(&mut self, op: CastOp, value: Value, ty: TypeId) -> Value {
         self.op(Op::Cast { op, flags: IntFlags::NONE, fmf: FastMath::default(), value }, ty)
     }
 }
@@ -2252,8 +2397,6 @@ pub fn struct_fields(cx: &Ctx, ty: TypeId) -> Result<(Vec<TypeId>, bool), String
     }
 }
 
-/// Splits each edge from a block with several successors into a block
-/// with phis.
 /// For machines whose branches compare whole registers: a branch on a
 /// boolean that is not an integer comparison in the same block (whose
 /// branch can compare its operands) becomes a branch on the boolean,
@@ -2268,10 +2411,25 @@ fn compare_boolean_branches(cx: &mut Ctx, f: &mut Function) {
         let Op::CondBr { cond: Value::Local(c), then_dest, else_dest } = f.insts[t.index()].op.clone() else {
             continue;
         };
-        let compared_here = matches!(f.locals[c.index()].def,
-            LocalDef::Inst(d) if matches!(f.insts[d.index()].op, Op::ICmp { .. })
-                && f.blocks[b.index()].insts.contains(&d));
-        if compared_here {
+        let compared_here = match f.locals[c.index()].def {
+            LocalDef::Inst(d) if matches!(f.insts[d.index()].op, Op::ICmp { .. }) => {
+                f.blocks[b.index()].insts.contains(&d).then_some(d)
+            }
+            _ => None,
+        };
+        if let Some(d) = compared_here {
+            // Used elsewhere too, the comparison is a value selection
+            // does not take into the branch: the branch gets its own.
+            let mut uses = 0;
+            for i in f.insts_in_order() {
+                f.insts[i.index()].op.for_each_value(|v| uses += usize::from(*v == Value::Local(c)));
+            }
+            if uses > 1 {
+                let again = f.add_inst(f.insts[d.index()].op.clone(), Some((None, i1)));
+                let at = f.blocks[b.index()].insts.len() - 1;
+                f.blocks[b.index()].insts.insert(at, again);
+                f.insts[t.index()].op = Op::CondBr { cond: f.result(again), then_dest, else_dest };
+            }
             continue;
         }
         let z = f.add_inst(
@@ -2286,6 +2444,8 @@ fn compare_boolean_branches(cx: &mut Ctx, f: &mut Function) {
     }
 }
 
+/// Splits each edge from a block with several successors into a block
+/// with phis.
 fn split_phi_edges(f: &mut Function) {
     let blocks: Vec<BlockId> = f.layout.clone();
     for p in blocks {
