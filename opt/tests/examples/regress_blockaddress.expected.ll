@@ -1,5 +1,6 @@
 ; @caller: inlined @small: cost 1, bonus 12, threshold 100
 ; @main: not inlined @caller: its blocks have their address taken
+; @main: constcall: 1 calls worked out
 ; @small: deleted, no longer used
 
 
@@ -24,6 +25,5 @@ L:                                                ; preds = %small.exit
 }
 
 define i32 @main() {
-  %v = tail call i32 @caller(i32 1)
-  ret i32 %v
+  ret i32 2
 }

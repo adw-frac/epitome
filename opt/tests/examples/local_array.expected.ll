@@ -6,6 +6,7 @@
 ; @walk: simplifycfg: 0 unreachable blocks removed, 0 empty blocks bypassed, 0 selects made, 1 blocks merged
 ; @walk: indvars: loop %recur runs %n.arg times when entered
 ; @walk: indvars: 1 exact exit tests, 0 exit values, 0 counters widened
+; @main: constcall: 1 calls worked out
 
 
 define i32 @walk(i32 %n.arg) {
@@ -28,6 +29,5 @@ done:                                             ; preds = %recur, %entry.rec
 
 define i32 @main() {
 entry:
-  %x = tail call i32 @walk(i32 10)
-  ret i32 %x
+  ret i32 55
 }

@@ -49,8 +49,11 @@ replacement must go to the same block.
   are empty blocks (or one arm is missing), the branch only chooses values
   for the phis where the arms meet. Those become selects in the branching
   block, which then jumps straight to the join, for at most 8 phis per
-  join. Nothing runs speculatively, because the arms are empty.
-  **Open:** hoist a few cheap, safe instructions out of the arms too.
+  join. An arm may also compute up to two values that are safe to compute
+  when it would not have run: pure, and unable to trap, as for `licm`
+  (division only by a constant that cannot trap). Those move before the
+  branch first. A clamp, `x < lo ? lo : x > hi ? hi : x`, then becomes two
+  selects with no branch.
 - **Straight lines** merge: a block that is the only successor of its only
   predecessor joins it.
 

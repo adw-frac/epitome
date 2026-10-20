@@ -6,6 +6,8 @@
 ; @is_even: combine: (dead) x1, icmp_eq_add x1
 ; @is_even: simplifycfg: 0 unreachable blocks removed, 0 empty blocks bypassed, 0 selects made, 1 blocks merged
 ; @is_odd: combine: sub_const x1
+; @main: constcall: 1 calls worked out
+; @main: combine: (folded) x1
 ; @is_odd: deleted, no longer used
 
 
@@ -33,7 +35,5 @@ yes:                                              ; preds = %recur.i, %entry.rec
 
 define i32 @main() {
 entry:
-  %e = tail call i1 @is_even(i32 77)
-  %x = zext i1 %e to i32
-  ret i32 %x
+  ret i32 0
 }

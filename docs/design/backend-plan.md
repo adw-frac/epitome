@@ -45,6 +45,12 @@ The allocator is linear scan over live segments. It has hints from copies,
 fixed stretches for arguments, results and calls, and it spills a whole
 value: a load before every use and a store after the definition.
 
+Done: a function that spills nothing and has a small frame gets the
+scratch registers too. The first allocation tries with them in the pool,
+and is kept if nothing spills; otherwise it is made again with them kept
+free for spill code. On `pressure` that avoids saving two callee-saved
+registers.
+
 The plan, in order of what the measurements say it gains:
 
 1. **Rematerialisation.** A value made by one instruction from nothing
@@ -159,3 +165,33 @@ instructions to 128, and `call_many` from 16 to 3, as clang has it:
 
 Our pipeline now does a little better than clang's own optimised IR does
 through our backend.
+
+Then three backend changes: small copies use wide unaligned accesses where
+the target allows them, a global's address is made once per block, and the
+first machine pass, `peephole::redundant_compares`, removes a compare the
+same as the last one in the block:
+
+| | Instructions | Against clang |
+| --- | --- | --- |
+| clang | 3,085 | 1.00x |
+| ours | 3,408 | 1.10x |
+| backend only | 3,467 | 1.12x |
+
+And two in the optimiser: an arm of up to two safe instructions runs
+before its branch so the join becomes selects (`simplifycfg.md`), and a
+call on constants is worked out through its callee (`constcall.rs`):
+
+| | Instructions | Against clang |
+| --- | --- | --- |
+| clang | 3,085 | 1.00x |
+| ours | 3,373 | 1.09x |
+| backend only | 3,467 | 1.12x |
+
+With the scratch registers allocated where nothing spills: ours 3,365
+(1.09x), backend only 3,465 (1.12x). With comparisons decided by known
+bits, and constants of one instruction no longer hoisted out of loops
+(`isel.md`): ours 3,322 (1.08x), backend only 3,428 (1.11x).
+
+What is left, largest first: `inlining`'s `main`, `i128` additions (`adds`
+and `adc`, which the flags model cannot express yet: it models the flags
+as the last two values compared), and register allocation around calls.

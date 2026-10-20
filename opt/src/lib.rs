@@ -29,6 +29,7 @@ pub mod callgraph;
 pub mod cfg;
 pub mod cleanup;
 pub mod combine;
+pub mod constcall;
 pub mod cse;
 pub mod ctx;
 pub mod fx;

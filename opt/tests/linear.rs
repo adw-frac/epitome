@@ -105,6 +105,28 @@ fn eval(m: &Module, a: u64, b: u64) -> Option<u64> {
                 };
                 vals[to.index()] = r;
             }
+            Op::ICmp { pred, lhs, rhs, .. } => {
+                let (x, y) = (get(&vals, *lhs), get(&vals, *rhs));
+                let sx = |v: u64| ((v << (64 - w)) as i64) >> (64 - w);
+                let r = match pred {
+                    ICmpPred::Eq => x == y,
+                    ICmpPred::Ne => x != y,
+                    ICmpPred::Ult => x < y,
+                    ICmpPred::Ule => x <= y,
+                    ICmpPred::Ugt => x > y,
+                    ICmpPred::Uge => x >= y,
+                    ICmpPred::Slt => sx(x) < sx(y),
+                    ICmpPred::Sle => sx(x) <= sx(y),
+                    ICmpPred::Sgt => sx(x) > sx(y),
+                    ICmpPred::Sge => sx(x) >= sx(y),
+                };
+                vals[f.insts[i.index()].result.unwrap().index()] = r as u64;
+            }
+            Op::Select { cond, then_value, else_value, .. } => {
+                let c = get(&vals, *cond) & 1;
+                let v = get(&vals, if c != 0 { *then_value } else { *else_value });
+                vals[f.insts[i.index()].result.unwrap().index()] = v;
+            }
             Op::Call(call) => {
                 let a: Vec<u64> = call.args.iter().map(|a| get(&vals, a.value)).collect();
                 let k = a[2] % w as u64;
@@ -160,7 +182,7 @@ fn arithmetic_steps_keep_values() {
 /// A function `@f` of `n` instructions on `i64`, packing and unpacking
 /// halves as SROA does, with shifts, masks and `trunc`/`zext` pairs.
 fn generate_bits(rng: &mut Rng, n: usize) -> String {
-    let masks = ["4294967295", "-4294967296", "255", "-256", "65280", "1", "-1"];
+    let masks = ["4294967295", "-4294967296", "255", "-256", "65280", "1", "-1", "15"];
     let mut body = String::new();
     let mut values: Vec<String> = vec!["%a".into(), "%b".into()];
     let mut t = 0;
@@ -171,7 +193,16 @@ fn generate_bits(rng: &mut Rng, n: usize) -> String {
             values[at].clone()
         };
         let x = pick(rng, &values);
-        let line = match rng.below(9) {
+        let line = match rng.below(10) {
+            9 => {
+                let preds = ["eq", "ne", "ult", "ule", "ugt", "uge", "slt", "sle", "sgt", "sge"];
+                let p = preds[rng.below(preds.len() as u64) as usize];
+                let k = [0i64, 1, 14, 15, 16, 50, 254, 255, 256, -1, -100][rng.below(11) as usize];
+                body.push_str(&format!("  %t{t} = icmp {p} i64 {x}, {k}\n"));
+                let line = format!("select i1 %t{t}, i64 {}, i64 {}", pick(rng, &values), pick(rng, &values));
+                t += 1;
+                line
+            }
             0 => format!("and i64 {x}, {}", masks[rng.below(masks.len() as u64) as usize]),
             1 | 2 => format!("or i64 {x}, {}", pick(rng, &values)),
             3 => format!("xor i64 {x}, {}", pick(rng, &values)),
@@ -234,4 +265,51 @@ fn bit_steps_keep_values() {
     }
     assert!(after < before, "{before} instructions became {after}");
     assert!(steps > 100, "only {steps} demanded-bits, known-bits and funnel steps");
+}
+
+/// Comparisons of a masked value with a constant, which known bits may
+/// decide: every predicate, constants around each mask, every value the
+/// mask lets through.
+#[test]
+fn comparisons_of_masked_values() {
+    let opts = Options {
+        inline: false,
+        cse: false,
+        memory: false,
+        mem2reg: false,
+        sroa: false,
+        simplifycfg: false,
+        loops: false,
+        tailmark: false,
+        recursion: RecursionMode::Off,
+        threads: 1,
+        ..Options::default()
+    };
+    let preds = ["eq", "ne", "ult", "ule", "ugt", "uge", "slt", "sle", "sgt", "sge"];
+    let mut decided = 0;
+    for mask in [1i64, 3, 15, 255, 0x7fff_ffff_ffff_ffff] {
+        let mut ks: Vec<i64> = (-3..=3).collect();
+        ks.extend([mask - 1, mask, mask.wrapping_add(1), mask.wrapping_add(2), i64::MIN, i64::MAX]);
+        for p in preds {
+            for &k in &ks {
+                let src = format!(
+                    "define i64 @f(i64 %a, i64 %b) {{\n  %x = and i64 %a, {mask}\n  %c = icmp {p} i64 %x, {k}\n  %v0 = select i1 %c, i64 1, i64 0\n  ret i64 %v0\n}}\n"
+                );
+                let original = draconian_ir::parse_module(&src).unwrap();
+                let mut m = draconian_ir::parse_module(&src).unwrap();
+                let report = pipeline::run(&mut m, &opts);
+                decided += report.combines.fired.get("(known bits)").copied().unwrap_or(0);
+                let values: Vec<u64> = if mask < 256 {
+                    (0..=mask as u64).collect()
+                } else {
+                    vec![0, 1, 2, mask as u64 - 1, mask as u64, u64::MAX, 1 << 63]
+                };
+                for a in values {
+                    let want = eval(&original, a, 0);
+                    assert_eq!(eval(&m, a, 0), want, "x = {a:#x} on\n{src}\nbecame\n{m}");
+                }
+            }
+        }
+    }
+    assert!(decided > 100, "only {decided} comparisons decided");
 }

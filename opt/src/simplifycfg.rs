@@ -15,7 +15,8 @@
 //!   empty blocks (or with one arm missing) only chooses a value for the
 //!   phis where the arms meet, so the phis can be computed with `select` in
 //!   the block that branches, and the branch goes straight to the join.
-//!   Nothing is moved or run speculatively: the arms are empty.
+//!   An arm may also compute up to two values that are safe to compute
+//!   anyway (pure, unable to trap); they move before the branch.
 //! - **Straight lines** merge: a block that is the only successor of its
 //!   only predecessor joins it.
 //!
@@ -32,6 +33,8 @@ pub struct Stats {
     pub unreachable: usize,
     pub bypassed: usize,
     pub selects: usize,
+    /// Instructions run before a branch, so that an arm became empty.
+    pub speculated: usize,
     pub merged: usize,
 }
 
@@ -96,6 +99,32 @@ fn forwards_to(f: &Function, b: BlockId) -> Option<BlockId> {
         Op::Br(next) if next != b && inst.debug_records.is_empty() => Some(next),
         _ => None,
     }
+}
+
+/// The most instructions an arm may have and still be run before the
+/// branch, so that its phis become selects.
+const MAX_SPECULATED: usize = 2;
+
+/// Like `forwards_to`, for a block that may also compute up to
+/// `MAX_SPECULATED` values that are safe to compute when the block would
+/// not have run: pure, and unable to trap (`licm::safe_to_speculate`).
+fn speculates_to(sh: &Shared, f: &Function, b: BlockId) -> Option<BlockId> {
+    let insts = &f.blocks[b.index()].insts;
+    let (&last, body) = insts.split_last()?;
+    if body.len() > MAX_SPECULATED {
+        return None;
+    }
+    let inst = &f.insts[last.index()];
+    let Op::Br(next) = inst.op else { return None };
+    if next == b || !inst.debug_records.is_empty() {
+        return None;
+    }
+    body.iter()
+        .all(|&i| {
+            let op = &f.insts[i.index()].op;
+            !matches!(op, Op::Phi { .. }) && crate::licm::safe_to_speculate(sh, op)
+        })
+        .then_some(next)
 }
 
 /// A conditional branch whose targets bypassing made the same is a plain
@@ -238,7 +267,7 @@ fn select_all(sh: &Shared, f: &mut Function, out: &mut Outcome) {
         }
         let only_from_a = |preds: &[Vec<BlockId>], x: BlockId| preds[x.index()].as_slice() == [a];
         // Where the two ways meet, and the block each value arrives from.
-        let (join, from_then, from_else) = match (forwards_to(f, then_dest), forwards_to(f, else_dest)) {
+        let (join, from_then, from_else) = match (speculates_to(sh, f, then_dest), speculates_to(sh, f, else_dest)) {
             (Some(j1), Some(j2)) if j1 == j2 && only_from_a(&preds, then_dest) && only_from_a(&preds, else_dest) => {
                 (j1, then_dest, else_dest)
             }
@@ -280,6 +309,18 @@ fn select_all(sh: &Shared, f: &mut Function, out: &mut Outcome) {
             }
             v
         };
+        // What the arms compute moves before the branch.
+        for x in [then_dest, else_dest] {
+            if x == a || x == join {
+                continue;
+            }
+            let n = f.blocks[x.index()].insts.len() - 1;
+            let moved: Vec<InstId> = f.blocks[x.index()].insts.drain(..n).collect();
+            let at = f.blocks[a.index()].insts.len() - 1;
+            out.touched.extend(moved.iter().copied());
+            out.stats.speculated += moved.len();
+            f.blocks[a.index()].insts.splice(at..at, moved);
+        }
         // Compute each phi with a select before the branch.
         for &phi in &join_phis {
             let tv = resolve(&replaced, incoming(f, phi, from_then).unwrap());

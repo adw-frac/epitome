@@ -180,7 +180,9 @@ levels down.
   set is its operand. A shift left and back right by the same amount (or
   right and back left) that loses none of them is the value shifted.
   `zext (trunc y)` is `y` when `y` fits in the narrow type. A value with no
-  bit that may be set is 0.
+  bit that may be set is 0. A comparison with a constant is decided when
+  the value's range, `[0, ones]`, decides it: `(x & 15) < 0` is false, and
+  `(x & 15) > 50` is false. Clamps of a masked value then fold away.
 - **Demanded bits.** Some instructions read only some bits of their
   operand: `trunc` the low ones, `lshr` and `ashr` by a constant the high
   ones, `shl` by a constant the low ones, and `and` with a constant those
@@ -206,8 +208,10 @@ raw bits.
 
 `tests/linear.rs` checks these steps against an evaluator, as it does
 linear combinations: 500 random functions on `i64` of masks, `or`, `xor`,
-shifts, `add` and `trunc`/`zext` pairs, each on 81 pairs of inputs. Weakening
-a condition of any of the three steps (the `and` in demanded bits, the
+shifts, `add` and `trunc`/`zext` pairs, each on 81 pairs of inputs. A third test
+is exhaustive for comparisons: every predicate, against constants around
+each of five masks, on every value the mask lets through. Weakening
+a condition of any of these steps (the `and` in demanded bits, the
 widths of a funnel shift, the mask in known bits) makes it fail.
 
 ### Loads from constant globals

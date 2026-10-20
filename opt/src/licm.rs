@@ -161,7 +161,7 @@ pub fn run(sh: &Shared, f: &mut Function) -> Stats {
 
 /// Whether running `op` where it would not have run is harmless: pure,
 /// and cannot trap.
-fn safe_to_speculate(sh: &Shared, op: &Op) -> bool {
+pub(crate) fn safe_to_speculate(sh: &Shared, op: &Op) -> bool {
     match op {
         Op::Binary { op, rhs, .. } => match op {
             BinOp::UDiv | BinOp::URem => const_int(sh, *rhs).is_some_and(|d| d != 0),

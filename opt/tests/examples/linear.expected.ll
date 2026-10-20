@@ -2,6 +2,8 @@
 ; @scaled: combine: (dead) x6, (linear) x2, mul_pow2 x1
 ; @negative: combine: (dead) x2, (linear) x1, sub_const x1
 ; @shared: combine: sub_add_cancel x1
+; @main: constcall: 4 calls worked out
+; @main: combine: (folded) x5
 
 
 define i32 @many(i32 %x) {
@@ -28,14 +30,5 @@ define i32 @shared(i32 %x, i32 %y) {
 }
 
 define i32 @main() {
-  %m = call i32 @many(i32 5)
-  %s = call i64 @scaled(i64 2, i64 3)
-  %s32 = trunc i64 %s to i32
-  %n = call i32 @negative(i32 1, i32 2)
-  %h = call i32 @shared(i32 3, i32 4)
-  %t = add i32 %m, %s32
-  %u = add i32 %t, %n
-  %v = add i32 %u, %h
-  %r = and i32 %v, 255
-  ret i32 %r
+  ret i32 13
 }

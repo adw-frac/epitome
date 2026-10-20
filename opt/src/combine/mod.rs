@@ -675,6 +675,14 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
     fn known_bits(&self, i: InstId) -> Option<Value> {
         let r = self.f.insts[i.index()].result?;
         let ty = self.f.locals[r.index()].ty;
+        if let Op::ICmp { pred, lhs, rhs: Value::Const(c), .. } = self.f.insts[i.index()].op {
+            let k = self.int(c)?;
+            let b = self.value_type(lhs).and_then(|t| eval::int_bits(self.sh.types(), t)).filter(|&b| b <= 64)?;
+            if !matches!(self.sh.types().get(ty), Type::Int(1)) {
+                return None;
+            }
+            return self.compare_known(pred, self.ones(lhs, b, 6), k.value, b).map(|v| self.int_value(ty, v as u64))?;
+        }
         let bits = eval::int_bits(self.sh.types(), ty).filter(|&b| b <= 64)?;
         if !matches!(self.sh.types().get(ty), Type::Int(_)) {
             return None;
@@ -767,6 +775,35 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
         let v = self.f.insts[new.index()].result.unwrap();
         self.f.locals[v.index()].name = name;
         Some(Value::Local(v))
+    }
+
+    /// The answer of `x pred c`, where `x` lies in `[0, ones]` (its bits
+    /// outside `ones` are zero), if that range decides it.
+    fn compare_known(&self, pred: ICmpPred, ones: u64, c: u64, bits: u32) -> Option<bool> {
+        let top = 1u64 << (bits - 1);
+        // Within [0, hi] as unsigned; as signed too if hi's sign bit is clear.
+        let hi = ones;
+        let signed = hi & top == 0;
+        let sc = eval::sext(c, bits);
+        match pred {
+            ICmpPred::Eq if c & !ones != 0 => Some(false),
+            ICmpPred::Ne if c & !ones != 0 => Some(true),
+            ICmpPred::Ult if hi < c => Some(true),
+            ICmpPred::Ult if c == 0 => Some(false),
+            ICmpPred::Ule if hi <= c => Some(true),
+            ICmpPred::Ugt if hi <= c => Some(false),
+            ICmpPred::Uge if hi < c => Some(false),
+            ICmpPred::Uge if c == 0 => Some(true),
+            ICmpPred::Slt if signed && sc <= 0 => Some(false),
+            ICmpPred::Slt if signed && (hi as i64) < sc => Some(true),
+            ICmpPred::Sle if signed && sc < 0 => Some(false),
+            ICmpPred::Sle if signed && (hi as i64) <= sc => Some(true),
+            ICmpPred::Sgt if signed && sc < 0 => Some(true),
+            ICmpPred::Sgt if signed && (hi as i64) <= sc => Some(false),
+            ICmpPred::Sge if signed && sc <= 0 => Some(true),
+            ICmpPred::Sge if signed && (hi as i64) < sc => Some(false),
+            _ => None,
+        }
     }
 
     /// `extractvalue` from an `insertvalue`: the element inserted at the

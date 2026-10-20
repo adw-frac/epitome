@@ -1,4 +1,5 @@
 ; @gcd: recursion: 1 tail call(s) now jump back to the start
+; @main: constcall: 1 calls worked out
 
 
 define i32 @gcd(i32 %a.arg, i32 %b.arg) {
@@ -21,6 +22,5 @@ done:                                             ; preds = %entry
 
 define i32 @main() {
 entry:
-  %x = tail call i32 @gcd(i32 1071, i32 462)
-  ret i32 %x
+  ret i32 21
 }

@@ -28,6 +28,8 @@
 ; @squares: indvars: loop %for.body runs 10 times when entered
 ; @squares: indvars: 1 exact exit tests, 0 exit values, 0 counters widened
 ; @main: mem2reg: 1 allocas promoted (0 loads, 1 stores removed)
+; @main: constcall: 3 calls worked out
+; @main: combine: (dead) x2, (folded) x3, add_add_const x2
 
 target datalayout = "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32"
 
@@ -118,15 +120,7 @@ entry:
   call void @llvm.memcpy.p0.p0.i64(ptr align 4 %a, ptr align 4 @__const.main.a, i64 28, i1 false)
   %arraydecay = getelementptr inbounds [7 x i32], ptr %a, i64 0, i64 0
   %call = call i64 @sum_to(ptr noundef %arraydecay, i32 noundef 7)
-  %call1 = call i32 @last(i32 noundef 5)
-  %conv = sext i32 %call1 to i64
-  %add = add nsw i64 %call, %conv
-  %call2 = call i32 @count_down(i32 noundef 4)
-  %conv3 = zext i32 %call2 to i64
-  %add4 = add nsw i64 %add, %conv3
-  %call5 = call i32 @squares()
-  %conv6 = sext i32 %call5 to i64
-  %add7 = add nsw i64 %add4, %conv6
+  %add7 = add i64 %call, 660
   %conv8 = trunc i64 %add7 to i32
   %and = and i32 %conv8, 255
   ret i32 %and

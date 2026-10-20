@@ -190,7 +190,7 @@ exists.
 | `function-attrs` | Infers attributes such as `readnone`, `readonly` and `nocapture`. | Planned |
 | `argpromotion` | Turns read-only pointer arguments into value arguments. | Later |
 | `deadargelim` | Removes unused arguments of internal functions. | Planned |
-| `ipsccp` | Interprocedural sparse conditional constant propagation. | Later |
+| `ipsccp` | Interprocedural sparse conditional constant propagation. Only its simplest part: a call whose arguments are all constants is followed through the callee's body, and replaced by its result when that path only computes integers (`constcall.rs`). | Partial |
 | `globalopt` | Optimises globals whose address is never taken. Loads from constant globals fold in the combiner; see [combines](combine.md). The rest is not done yet. | Partial |
 | `globaldce` | Deletes unreachable internal globals, including cycles of them. The inliner deletes internal functions it leaves unused, but not variables or cycles. | Planned |
 | `constmerge` | Merges identical global constants. | Planned |

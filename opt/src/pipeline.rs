@@ -357,6 +357,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                         all.unreachable += s.unreachable;
                         all.bypassed += s.bypassed;
                         all.selects += s.selects;
+                        all.speculated += s.speculated;
                         all.merged += s.merged;
                     }
                     if !opts.combine || out.touched.is_empty() {
@@ -369,6 +370,13 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                 let _counted = counted(*g);
                 if opts.combine {
                     combine(*g, f, None);
+                    // Calls on constants that can be worked out, now that
+                    // the arguments are folded.
+                    let n = crate::constcall::run(sh, *g, f);
+                    if n > 0 {
+                        sh.remark(*g, format!("constcall: {n} calls worked out"));
+                        combine(*g, f, None);
+                    }
                 }
                 // Then the CFG, and the combiner again on what that touched,
                 // which may fold more branches.
