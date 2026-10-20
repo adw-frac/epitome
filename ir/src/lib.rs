@@ -16,6 +16,7 @@ pub mod edit;
 pub mod float;
 pub mod io;
 pub mod layout;
+pub mod memlimit;
 pub mod lexer;
 pub mod metadata;
 pub mod module;

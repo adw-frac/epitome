@@ -27,10 +27,22 @@
 //! otherwise the IR is LLVM's, optimised as the profile says, and only
 //! code generation is ours. `EPITOME_RUSTC_SKIP=a,b` leaves those crates
 //! alone; `EPITOME_RUSTC_ONLY=a,b` takes only those.
+//!
+//! Cargo already builds several crates at once, so each compilation here
+//! uses `EPITOME_RUSTC_THREADS` threads (default 2), not one per core:
+//! with one per core, a dozen crates at once each running a dozen threads,
+//! each thread with its own copy of the module, can run a machine out of
+//! memory.
+//!
+//! Each crate's line in the log ends with numbers for comparing: rustc's
+//! time for the crate (`rustc_ms`, its whole compilation, LLVM included),
+//! ours (`ours_ms`, reading the IR and compiling it), and the size of the
+//! machine code (`__text`) in rustc's object and in ours.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+use std::time::Instant;
 
 use epitome_codegen::target::Target;
 use epitome_codegen::{Options, compile};
@@ -41,7 +53,14 @@ const LL_VAR: &str = "EPITOME_RUSTC_LL";
 const PREFIX_VAR: &str = "EPITOME_RUSTC_PREFIX";
 const LOG_VAR: &str = "EPITOME_RUSTC_LOG_FILE";
 
+/// A runaway compilation stops at a memory limit (`epitome_ir::memlimit`;
+/// `EPITOME_MEMORY_LIMIT_MB`, default 4096) rather than taking the machine
+/// down.
+#[global_allocator]
+static MEMORY: epitome_ir::memlimit::Limited = epitome_ir::memlimit::Limited;
+
 fn main() -> ExitCode {
+    epitome_ir::memlimit::set_from_env(4096);
     let args: Vec<String> = std::env::args().collect();
     if let Ok(ll) = std::env::var(LL_VAR) {
         return link(&ll, &args[1..]);
@@ -169,7 +188,13 @@ fn wrap(rustc: &str, args: &[String]) -> ExitCode {
         new.extend(["-C".into(), format!("linker={}", me.display()), "-C".into(), "linker-flavor=gcc".into()]);
         cmd.env(LL_VAR, &ll).env(PREFIX_VAR, &prefix).env(LOG_VAR, &log);
     }
+    let started = Instant::now();
     let code = status(cmd.args(&new));
+    let rustc_ms = started.elapsed().as_millis();
+    if binary {
+        // (Its link, and so our compilation, is inside this time.)
+        note(&log, &format!("{krate}: rustc time (binary) | rustc_ms={rustc_ms}"));
+    }
     if code != ExitCode::SUCCESS || binary {
         return code;
     }
@@ -177,8 +202,14 @@ fn wrap(rustc: &str, args: &[String]) -> ExitCode {
     if types.is_empty() || types.iter().any(|t| matches!(*t, "lib" | "rlib")) {
         let rlib = out_dir.join(format!("lib{krate}{extra}.rlib"));
         match replace_in_rlib(&rlib, &ll, &prefix, ours_opt) {
-            Ok(n) => note(&log, &format!("{krate}: ours (library, {n} bytes)")),
-            Err(e) => note(&log, &format!("{krate}: rustc's (ours failed: {e})")),
+            Ok(r) => note(
+                &log,
+                &format!(
+                    "{krate}: ours (library) | rustc_ms={rustc_ms} ours_ms={} text_rustc={} text_ours={}",
+                    r.ms, r.text_rustc, r.text_ours
+                ),
+            ),
+            Err(e) => note(&log, &format!("{krate}: rustc's (ours failed: {e}) | rustc_ms={rustc_ms}")),
         }
     }
     code
@@ -204,19 +235,36 @@ fn object_of(ll: &Path, ours_opt: bool) -> Result<Vec<u8>, String> {
 fn object_of_inner(ll: &Path, ours_opt: bool) -> Result<Vec<u8>, String> {
     let text = std::fs::read_to_string(ll).map_err(|e| format!("{}: {e}", ll.display()))?;
     let mut m = epitome_ir::parse_module(&text).map_err(|e| format!("parsing: {e:?}"))?;
+    let threads = std::env::var("EPITOME_RUSTC_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(2);
     if ours_opt {
-        epitome_opt::pipeline::run(&mut m, &epitome_opt::pipeline::Options::default());
+        epitome_opt::pipeline::run(&mut m, &epitome_opt::pipeline::Options { threads, ..Default::default() });
     }
     let t = Target::aarch64();
-    let compiled = compile(&t, &mut m, &Options::default())?;
+    let compiled = compile(&t, &mut m, &Options { threads, ..Options::default() })?;
     if !compiled.errors.is_empty() {
         return Err(compiled.errors.join("; "));
     }
     compiled.object_file(&t)
 }
 
-fn replace_in_rlib(rlib: &Path, ll: &Path, prefix: &str, ours_opt: bool) -> Result<usize, String> {
+/// The size of an object's machine code: its `__text` sections.
+fn text_size(object: &[u8]) -> u64 {
+    epitome_codegen::macho::read(object)
+        .map(|m| m.sections.iter().filter(|s| s.name == "__text").map(|s| s.size).sum())
+        .unwrap_or(0)
+}
+
+/// Our object for a crate, and how it compares with rustc's.
+struct Replaced {
+    ms: u128,
+    text_rustc: u64,
+    text_ours: u64,
+}
+
+fn replace_in_rlib(rlib: &Path, ll: &Path, prefix: &str, ours_opt: bool) -> Result<Replaced, String> {
+    let started = Instant::now();
     let bytes = object_of(ll, ours_opt)?;
+    let ms = started.elapsed().as_millis();
     let listing = Command::new("ar").arg("t").arg(rlib).output().map_err(|e| format!("ar: {e}"))?;
     let members = String::from_utf8_lossy(&listing.stdout).into_owned();
     let mine: Vec<&str> =
@@ -224,6 +272,8 @@ fn replace_in_rlib(rlib: &Path, ll: &Path, prefix: &str, ours_opt: bool) -> Resu
     let [member] = mine[..] else {
         return Err(format!("{} objects for the crate in the archive, not one", mine.len()));
     };
+    let theirs = Command::new("ar").arg("p").arg(rlib).arg(member).output().map_err(|e| format!("ar: {e}"))?;
+    let text_rustc = text_size(&theirs.stdout);
     let dir = ll.with_extension("epitome");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     std::fs::write(dir.join(member), &bytes).map_err(|e| e.to_string())?;
@@ -237,7 +287,7 @@ fn replace_in_rlib(rlib: &Path, ll: &Path, prefix: &str, ours_opt: bool) -> Resu
     if !ok.success() {
         return Err("ar failed".into());
     }
-    Ok(bytes.len())
+    Ok(Replaced { ms, text_rustc, text_ours: text_size(&bytes) })
 }
 
 /// As the linker: our object for the crate in place of rustc's, then the
@@ -252,7 +302,12 @@ fn link(ll: &str, args: &[String]) -> ExitCode {
         name.starts_with(&prefix) && name.ends_with("-cgu.0.rcgu.o")
     };
     let mut args = args.to_vec();
-    match object_of(Path::new(ll), ours_opt) {
+    let started = Instant::now();
+    let ours = object_of(Path::new(ll), ours_opt);
+    let ms = started.elapsed().as_millis();
+    let text_rustc: u64 =
+        args.iter().filter(|a| is_mine(a)).map(|a| std::fs::read(a).map_or(0, |b| text_size(&b))).sum();
+    match ours {
         Ok(bytes) => {
             let obj = Path::new(ll).with_extension("epitome.o");
             match std::fs::write(&obj, &bytes) {
@@ -265,7 +320,13 @@ fn link(ll: &str, args: &[String]) -> ExitCode {
                     }
                     if let Some(log) = &log {
                         let what = if n == 1 { "ours (binary)".to_string() } else { format!("rustc's ({n} objects)") };
-                        note(log, &format!("{krate}: {what}, {} bytes", bytes.len()));
+                        note(
+                            log,
+                            &format!(
+                                "{krate}: {what} | ours_ms={ms} text_rustc={text_rustc} text_ours={}",
+                                text_size(&bytes)
+                            ),
+                        );
                     }
                 }
                 Err(e) => {

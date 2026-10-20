@@ -45,7 +45,14 @@ const USAGE: &str = "usage: epitome-opt [options] <file.ll>
                           the write that reaches each load and store) as
                           comments; with --passes= alone, for the input";
 
+/// A runaway compilation stops at a memory limit (`epitome_ir::memlimit`;
+/// `EPITOME_MEMORY_LIMIT_MB`, default 8192) rather than taking the machine
+/// down.
+#[global_allocator]
+static MEMORY: epitome_ir::memlimit::Limited = epitome_ir::memlimit::Limited;
+
 fn main() -> ExitCode {
+    epitome_ir::memlimit::set_from_env(8192);
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut opts = Options::default();
     let mut input = None;
@@ -196,6 +203,9 @@ fn main() -> ExitCode {
         match last {
             Some(d) => eprintln!("; chop: stopped in @{name} (function {k}) after step {steps}: {d}"),
             None => eprintln!("; chop: stopped in @{name} (function {k}) after {steps} steps"),
+        }
+        if let Some(next) = &report.chop_next {
+            eprintln!("; chop: the next step, refused: {next}");
         }
     }
     if chop_counts {

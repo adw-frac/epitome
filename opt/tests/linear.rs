@@ -333,3 +333,44 @@ fn comparisons_of_masked_values() {
     }
     assert!(decided > 100, "only {decided} comparisons decided");
 }
+
+/// The memory cap, so that a step that runs away fails its test rather
+/// than taking the machine down (`epitome_ir::memlimit`).
+#[global_allocator]
+static MEMORY: epitome_ir::memlimit::Limited = epitome_ir::memlimit::Limited;
+
+/// In code that cannot be reached, a value may be its own operand once a
+/// one-entry phi folds (`%p = phi [ %s, %dead ]`, `%s = sub %p, %x`, so
+/// `%s = sub %s, %x`). The arithmetic steps must still end. (Linear
+/// combinations used to expand such a root without bound.)
+#[test]
+fn a_value_that_is_its_own_operand_ends() {
+    epitome_ir::memlimit::set_limit_mb(1024);
+    // (The store gives %s a use besides itself, as it had in the program
+    // this came from.)
+    let src = "@g = global i64 0\n\
+               define i64 @f(i64 %x) {\n\
+               entry:\n  ret i64 %x\n\
+               dead:\n  %p = phi i64 [ %s, %dead ]\n  %q = phi i64 [ %t, %dead ]\n\
+               \x20 %s = sub i64 %p, %x\n  %t = add i64 %q, %q\n  store i64 %s, ptr @g\n  br label %dead\n}\n";
+    let opts = Options {
+        inline: false,
+        cse: false,
+        memory: false,
+        mem2reg: false,
+        sroa: false,
+        simplifycfg: false,
+        loops: false,
+        tailmark: false,
+        recursion: RecursionMode::Off,
+        threads: 1,
+        ..Options::default()
+    };
+    let mut m = parse(src);
+    pipeline::run(&mut m, &opts);
+    assert!(m.to_string().contains("ret i64 %x"));
+}
+
+fn parse(src: &str) -> Module {
+    epitome_ir::parse_module(src).unwrap()
+}

@@ -72,11 +72,17 @@ pub struct Counter {
     /// The last step allowed in the function the limit stops in, which is
     /// the one a search reports.
     pub last: Option<String>,
+    /// The first step refused there: the one that, allowed, would come
+    /// next (what a search that has found the failing step wants to see).
+    pub next: Option<String>,
 }
 
 impl Counter {
     fn allow(&mut self, what: impl FnOnce() -> String) -> bool {
         if self.steps >= self.allowed {
+            if self.refused == 0 && self.allowed != u64::MAX {
+                self.next = Some(what());
+            }
             self.refused += 1;
             return false;
         }
@@ -151,6 +157,12 @@ impl Session {
         let l = self.limit?;
         let c = self.counters.lock().unwrap().get(l.func)?.clone();
         Some((l.func, c.steps, c.last))
+    }
+
+    /// The first step the limit refused in the function it stops in.
+    pub fn refused_first(&self) -> Option<String> {
+        let l = self.limit?;
+        self.counters.lock().unwrap().get(l.func)?.next.clone()
     }
 }
 

@@ -49,7 +49,14 @@ const USAGE: &str = "usage: epitome-llc [options] <file.ll>
   --keep-going            report every function that cannot be compiled,
                           and compile the rest";
 
+/// A runaway compilation stops at a memory limit (`epitome_ir::memlimit`;
+/// `EPITOME_MEMORY_LIMIT_MB`, default 8192) rather than taking the machine
+/// down.
+#[global_allocator]
+static MEMORY: epitome_ir::memlimit::Limited = epitome_ir::memlimit::Limited;
+
 fn main() -> ExitCode {
+    epitome_ir::memlimit::set_from_env(8192);
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (mut input, mut output, mut target_file) = (None, None, None);
     let mut adds: Vec<String> = Vec::new();

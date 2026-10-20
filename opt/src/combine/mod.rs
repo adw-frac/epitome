@@ -505,6 +505,11 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
         let mut konst = 0u64;
         let mut interior = 0usize;
         let mut stack = vec![(Value::Local(r), 1u64)];
+        // The root is expanded once, at the top. In code that cannot be
+        // reached, a value may be its own operand (`%a = sub %a, %x`, after
+        // a one-entry phi folds); met again, it is an inner node like any
+        // other, under the same bound.
+        let mut top = true;
         while let Some((v, c)) = stack.pop() {
             if let Value::Const(k) = v
                 && let Some(k) = self.int(k)
@@ -512,7 +517,7 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
                 konst = konst.wrapping_add(c.wrapping_mul(k.value)) & m;
                 continue;
             }
-            let here = if v == Value::Local(r) {
+            let here = if std::mem::take(&mut top) {
                 node(self, i)
             } else if interior < MAX_CHAIN {
                 inner(self, v)

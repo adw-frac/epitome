@@ -112,6 +112,8 @@ pub struct Report {
     pub chop_names: Vec<String>,
     pub chop_counts: Vec<epitome_ir::chop::Counter>,
     pub chop_stopped: Option<(usize, u64, Option<String>)>,
+    /// The first step refused there.
+    pub chop_next: Option<String>,
     /// Functions deleted because nothing used them any more.
     pub deleted: Vec<String>,
     /// The size of all functions, and of the longest chain of SCCs that
@@ -520,6 +522,7 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
         chop_order.iter().map(|&g| m.global(g).name.clone().unwrap_or_else(|| g.0.to_string())).collect();
     report.chop_counts = chop.counts();
     report.chop_stopped = chop.stopped_at();
+    report.chop_next = chop.refused_first();
     report.timings = timings;
     report
 }
