@@ -6,6 +6,10 @@ not a clone of LLVM: it reads and writes the same IR, and its tools take
 the same kinds of input and give the same kinds of output, but how it gets
 there is its own.
 
+> **Experimental.** Epitome is young and changes quickly, and it is
+> suitable only for the adventurous at the moment: expect missing features,
+> rough edges and bugs, and check its output before relying on it.
+
 - **Its own passes and algorithms.** The pass structure differs from
   LLVM's. Much of what LLVM does in separate passes (instcombine,
   reassociate, DSE, parts of GVN and memcpyopt) is one rule-driven

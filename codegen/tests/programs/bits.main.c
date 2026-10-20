@@ -14,6 +14,9 @@ u64 swap64(u64);
 u32 rotl32(u32, int);
 u64 rotr64(u64, int);
 u32 funnel(u32, u32, int);
+int bit_branches(u64, u32);
+static int hits;
+void hit(int k) { hits = hits * 3 + k; }
 
 static const u64 values[] = {
     0, 1, 2, 3, 0x80, 0xff, 0x100, 0x8000, 0xffff, 0x10000, 0x12345678, 0x80000000, 0xffffffff,
@@ -26,6 +29,9 @@ int main(void) {
         printf("%llx: clz %d %d %d ctz %d %d %d pop %d %d %d swap %x %x %llx\n", v, clz16((u16)v), clz32((u32)v),
                clz64(v), ctz16((u16)v), ctz32((u32)v), ctz64(v), pop8((u8)v), pop32((u32)v), pop64(v),
                swap16((u16)v), swap32((u32)v), swap64(v));
+        hits = 0;
+        int nb = bit_branches(v, (u32)(v >> 3));
+        printf("  bits %d %d\n", nb, hits);
         printf("  rot %x %llx %x %x %llx %x\n", rotl32((u32)v, (int)i), rotr64(v, (int)i * 5), rotl32((u32)v, -3),
                funnel((u32)v, (u32)(v >> 32), (int)i), rotr64(v, 64), funnel((u32)v, 0x87654321, 0));
     }

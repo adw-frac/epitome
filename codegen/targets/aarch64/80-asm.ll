@@ -1106,10 +1106,6 @@ define void @SYSP_CR_syspairinstrs.0(i64 "imm" %op1, i64 "imm" %cn, i64 "imm" %c
   ret void
 }
 
-define void @BR_64_branch_reg.0(i64 "reg"="x" %xn) "enc"="1101011000011111000000 xn:5 00000" "asm"="br {xn}" "asmonly" {
-  ret void
-}
-
 define void @BRAAZ_64_branch_reg.0(i64 "reg"="x" %xn) "enc"="1101011000011111000010 xn:5 11111" "asm"="braaz {xn}" "asmonly" {
   ret void
 }

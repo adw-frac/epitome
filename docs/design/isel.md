@@ -362,6 +362,51 @@ constant arguments kept all eight in callee-saved registers, and spilled
 its counters. **Later:** with rematerialisation in the allocator, hoist
 these too and let the allocator undo it.
 
+### After selection: stack slots, calls that do not return
+
+- **Stack slots addressed from `sp`** (`peephole::frame_addresses`).
+  Selection makes an alloca's address once, `add d, sp, #slot`, which would
+  keep `d` in a callee-saved register for the whole function. Instead, an
+  instruction that uses `d` plus an immediate takes `sp` and the slot
+  directly (`[sp, #slot+k]`), and any other use makes the address again
+  just before it. Which operands are a base and an offset comes from the
+  description: an entry whose body starts `getelementptr i8, ptr %n, i64
+  %off` or `add %n, %off` (`Instr::base_offset`, and `address_of` when the
+  body returns that address). The pass repeats until nothing changes,
+  since an address made from one becomes one itself.
+- **No trap after a call that does not return.** An `unreachable` right
+  after a call to a `noreturn` function emits nothing: the call ends the
+  block (`MInst::noreturn`), as `_Unwind_Resume` does. Such blocks are not
+  copied into their predecessors as small return blocks are.
+- **True is 1.** A boolean is read by its lowest bit, so the constant true
+  is made as 1, already its own zero extension.
+
+### Tail calls through a register
+
+A tail call through a pointer (the role `tailcallr`, AArch64's `br`) moves
+the callee's address to the convention's last scratch register first: the
+epilogue restores the saved registers before the jump, and must not
+overwrite it.
+
+### Load and store pairs
+
+After frame lowering, two neighbouring loads (or stores) of one register
+class, from one base at offsets one register's width apart, become a pair
+instruction (`peephole::pair_memory`; roles `load.pair.<class>` and
+`store.pair.<class>`, for `x`, `w`, `d`, `s` and `q` on AArch64). For
+loads the two destinations must differ, and the first must not overwrite
+the base the second reads. Small copies are written out two pieces at a
+time, both loads and then both stores, so that their accesses are
+neighbours. Each pair is an elective change (autochop).
+
+### Testing one bit
+
+`(x & 2^k) == 0` and its opposite branch with `tbz` and `tbnz` on bit `k`
+(`TBZWm`, `TBZXlo`, `TBZXhi` and their `TBNZ` partners; the bit's number
+is `log2` of the mask, and a 64-bit bit at 32 or above sets the encoding's
+top bit). A sign test, `x > -1` or `x < 0`, is a test of the top bit
+(`TBZXpos`, `TBNZXneg`).
+
 ### Redundant compares
 
 A pattern covers a compare together with what reads the flags, so each

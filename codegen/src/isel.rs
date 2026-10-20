@@ -1102,7 +1102,9 @@ impl<'a, 'b> Sel<'a, 'b> {
         let zr_ok = self.t.machine.zero_in(class);
         match &k.kind {
             ConstKind::Int(a) => {
-                let v = sext(a.low_u64(), bits);
+                // A boolean is read by its lowest bit only: true is 1 (one
+                // `mov`, and already its zero extension), not -1.
+                let v = if bits == 1 { (a.low_u64() & 1) as i64 } else { sext(a.low_u64(), bits) };
                 self.int_reg(v, wide, zr_ok)
             }
             ConstKind::Null | ConstKind::Zero | ConstKind::Undef | ConstKind::Poison => self.int_reg(0, wide, zr_ok),
@@ -2111,6 +2113,22 @@ impl<'a, 'b> Sel<'a, 'b> {
             }
             return Ok(());
         }
+        // Through a register: the callee's address goes to a scratch
+        // register first, which the epilogue (restoring the saved
+        // registers) leaves alone.
+        if let (Some(ret), Some(r), Some(tcr), Some(&via)) =
+            (tail, callee_reg, self.t.role("tailcallr"), self.mf.abi.scratch.last())
+        {
+            self.push(MInst::copy(Reg::P(via), r));
+            let mut m = MInst::new(tcr, vec![MOp::Reg(Reg::P(via))]);
+            m.imp_uses = in_regs.iter().map(|&(p, _)| p).chain([via]).collect();
+            self.push(m);
+            self.covered.insert(ret);
+            if let Some(b) = self.inst_block[i.index()] {
+                self.tail_blocks.insert(b);
+            }
+            return Ok(());
+        }
         if call.tail == TailKind::MustTail {
             return self.err("a musttail call that cannot be made a tail call".to_string());
         }
@@ -2170,14 +2188,76 @@ impl<'a, 'b> Sel<'a, 'b> {
         Ok(Reg::V(d))
     }
 
+    /// Whether IR instruction `i` is a call of a function that does not
+    /// return (`noreturn` on the call or the callee).
+    fn ends_flow_by_call(&self, i: InstId) -> bool {
+        let Op::Call(call) = &self.f.insts[i.index()].op else { return false };
+        let m: &Module = self.cx.m;
+        let on = |attrs: &[Attr]| has_word(m, attrs, "noreturn");
+        on(&call.fn_attrs)
+            || match call.callee {
+                Value::Const(c) => match m.constant(c).kind {
+                    ConstKind::Global(g) => match &m.global(g).kind {
+                        GlobalKind::Function(f) => on(&f.fn_attrs),
+                        _ => false,
+                    },
+                    _ => false,
+                },
+                _ => false,
+            }
+    }
+
+    /// Marks the block's last machine instruction, if it is a call, as one
+    /// that does not return.
+    fn mark_last_call_noreturn(&mut self) -> bool {
+        let t = self.t;
+        let Some(last) = self.mf.blocks[self.cur].insts.last_mut() else { return false };
+        match last.op {
+            Opcode::Instr(k) if t.has_role(k, "call") || t.has_role(k, "callr") => {
+                last.noreturn = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Marks the machine instructions from `from` (block, index) to the end
+    /// of that block as barriers.
+    fn mark_barrier(&mut self, from: Option<(usize, usize)>) {
+        if let Some((b, at)) = from
+            && b == self.cur
+        {
+            for m in &mut self.mf.blocks[b].insts[at..] {
+                m.barrier = true;
+            }
+        }
+    }
+
     fn emit_block(&mut self, b: BlockId, layout_next: Option<BlockId>) -> Result<(), String> {
         let f = self.f;
         self.cur = self.bmap[&b];
         let insts = f.blocks[b.index()].insts.clone();
-        for &i in &insts {
+        // What each atomic operation emits is marked a barrier when the
+        // next instruction starts (the emission has many ways out; a block
+        // ends with its terminator, so none is missed).
+        let mut atomic_from: Option<(usize, usize)> = None;
+        for (k, &i) in insts.iter().enumerate() {
+            self.mark_barrier(atomic_from.take());
             let inst = &f.insts[i.index()];
+            if is_atomic(&inst.op) {
+                atomic_from = Some((self.cur, self.mf.blocks[self.cur].insts.len()));
+            }
             if inst.op.is_terminator() {
                 self.mf.blocks[self.cur].term_start = self.mf.blocks[self.cur].insts.len();
+            }
+            // `unreachable` right after a call that does not return (a
+            // panic): nothing, the call ends the block.
+            if matches!(inst.op, Op::Unreachable)
+                && k > 0
+                && self.ends_flow_by_call(insts[k - 1])
+                && self.mark_last_call_noreturn()
+            {
+                continue;
             }
             if self.covered.contains(&i) {
                 continue;
@@ -2233,8 +2313,9 @@ impl<'a, 'b> Sel<'a, 'b> {
                     let mut c = MInst::new(self.t.by_role("call"), vec![MOp::Sym("_Unwind_Resume".into())]);
                     c.imp_uses = vec![a0];
                     c.imp_defs = self.mf.abi.all_clobbers();
+                    // _Unwind_Resume does not return.
+                    c.noreturn = true;
                     self.push(c);
-                    self.push(MInst::new(self.t.by_role("trap"), vec![]));
                     continue;
                 }
                 Op::Call(call) if inline_asm(self.cx.m, call).is_some() => {
@@ -2660,4 +2741,25 @@ fn move_wide_of(t: &Target, wide: bool) -> Option<(usize, usize, u32)> {
     let fits = |c: u32| t.instrs[movz].fits(&[None, Some((1i64 << c) - 1), Some(0)]);
     let chunk = (1..=32).rev().find(|&c| fits(c))?;
     Some((movz, movk, chunk))
+}
+
+/// Whether `attrs` (with their groups) has the keyword attribute `word`.
+fn has_word(m: &Module, attrs: &[Attr], word: &str) -> bool {
+    attrs.iter().any(|a| match a {
+        Attr::Word(w) => w == word,
+        Attr::Group(g) => m.attr_groups.iter().find(|x| x.id == *g).is_some_and(|x| has_word(m, &x.attrs, word)),
+        _ => false,
+    })
+}
+
+/// An atomic operation, of any ordering, or a fence.
+fn is_atomic(op: &Op) -> bool {
+    matches!(
+        op,
+        Op::Load { atomic: Some(_), .. }
+            | Op::Store { atomic: Some(_), .. }
+            | Op::AtomicRmw { .. }
+            | Op::CmpXchg { .. }
+            | Op::Fence { .. }
+    )
 }

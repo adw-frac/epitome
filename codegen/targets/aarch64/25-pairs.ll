@@ -36,7 +36,7 @@
 ; load's second register is its second result ("result2"). They are not
 ; patterns: frames use them by role, to save and restore registers.
 
-define { i32, i32 } @LDPWi(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="0010100101 imm7:s7=off/4 d2:5 n:5 d:5" "asm"="ldp {d}, {d2}, [{n}, #{off}]" "result2" "nomatch" {
+define { i32, i32 } @LDPWi(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="0010100101 imm7:s7=off/4 d2:5 n:5 d:5" "asm"="ldp {d}, {d2}, [{n}, #{off}]" "result2" "role"="load.pair.w" "nomatch" {
   %p = getelementptr i8, ptr %n, i64 %off
   %a = load i32, ptr %p
   %q = getelementptr i8, ptr %p, i64 4
@@ -46,7 +46,7 @@ define { i32, i32 } @LDPWi(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="0010100101
   ret { i32, i32 } %r1
 }
 
-define void @STPWi(i32 "reg"="w" %t, i32 "reg"="w" %t2, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="0010100100 imm7:s7=off/4 t2:5 n:5 t:5" "asm"="stp {t}, {t2}, [{n}, #{off}]" "nomatch" {
+define void @STPWi(i32 "reg"="w" %t, i32 "reg"="w" %t2, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="0010100100 imm7:s7=off/4 t2:5 n:5 t:5" "asm"="stp {t}, {t2}, [{n}, #{off}]" "role"="store.pair.w" "nomatch" {
   %p = getelementptr i8, ptr %n, i64 %off
   store i32 %t, ptr %p
   %q = getelementptr i8, ptr %p, i64 4
@@ -148,7 +148,7 @@ define ptr @STPXpost(i64 "reg"="x" %t, i64 "reg"="x" %t2, ptr "reg"="xsp" "write
   ret ptr %next
 }
 
-define { float, float } @LDPSi(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="0010110101 imm7:s7=off/4 d2:5 n:5 d:5" "asm"="ldp {d}, {d2}, [{n}, #{off}]" "result2" "nomatch" {
+define { float, float } @LDPSi(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="0010110101 imm7:s7=off/4 d2:5 n:5 d:5" "asm"="ldp {d}, {d2}, [{n}, #{off}]" "result2" "role"="load.pair.s" "nomatch" {
   %p = getelementptr i8, ptr %n, i64 %off
   %a = load float, ptr %p
   %q = getelementptr i8, ptr %p, i64 4
@@ -158,7 +158,7 @@ define { float, float } @LDPSi(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="001011
   ret { float, float } %r1
 }
 
-define void @STPSi(float "reg"="s" %t, float "reg"="s" %t2, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="0010110100 imm7:s7=off/4 t2:5 n:5 t:5" "asm"="stp {t}, {t2}, [{n}, #{off}]" "nomatch" {
+define void @STPSi(float "reg"="s" %t, float "reg"="s" %t2, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="0010110100 imm7:s7=off/4 t2:5 n:5 t:5" "asm"="stp {t}, {t2}, [{n}, #{off}]" "role"="store.pair.s" "nomatch" {
   %p = getelementptr i8, ptr %n, i64 %off
   store float %t, ptr %p
   %q = getelementptr i8, ptr %p, i64 4
@@ -260,7 +260,7 @@ define ptr @STPDpost(double "reg"="d" %t, double "reg"="d" %t2, ptr "reg"="xsp" 
   ret ptr %next
 }
 
-define { <2 x i64>, <2 x i64> } @LDPQi(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="1010110101 imm7:s7=off/16 d2:5 n:5 d:5" "asm"="ldp {d}, {d2}, [{n}, #{off}]" "result2" "nomatch" {
+define { <2 x i64>, <2 x i64> } @LDPQi(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="1010110101 imm7:s7=off/16 d2:5 n:5 d:5" "asm"="ldp {d}, {d2}, [{n}, #{off}]" "result2" "role"="load.pair.q" "nomatch" {
   %p = getelementptr i8, ptr %n, i64 %off
   %a = load <2 x i64>, ptr %p
   %q = getelementptr i8, ptr %p, i64 16
@@ -270,7 +270,7 @@ define { <2 x i64>, <2 x i64> } @LDPQi(ptr "reg"="xsp" %n, i64 "imm" %off) "enc"
   ret { <2 x i64>, <2 x i64> } %r1
 }
 
-define void @STPQi(<2 x i64> "reg"="q" %t, <2 x i64> "reg"="q" %t2, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="1010110100 imm7:s7=off/16 t2:5 n:5 t:5" "asm"="stp {t}, {t2}, [{n}, #{off}]" "nomatch" {
+define void @STPQi(<2 x i64> "reg"="q" %t, <2 x i64> "reg"="q" %t2, ptr "reg"="xsp" %n, i64 "imm" %off) "enc"="1010110100 imm7:s7=off/16 t2:5 n:5 t:5" "asm"="stp {t}, {t2}, [{n}, #{off}]" "role"="store.pair.q" "nomatch" {
   %p = getelementptr i8, ptr %n, i64 %off
   store <2 x i64> %t, ptr %p
   %q = getelementptr i8, ptr %p, i64 16

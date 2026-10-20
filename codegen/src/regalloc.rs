@@ -75,7 +75,17 @@ impl Busy {
 pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
     let slots: u64 = f.slots.iter().map(|s| s.size + s.align).sum();
     let small = !f.dynamic_stack && slots + f.out_size.max(0) as u64 + 512 < 4000;
-    if small && !(f.abi.scratch.is_empty() && f.abi.fp_scratch.is_empty()) {
+    allocate_as(t, f, small)
+}
+
+/// Allocates registers keeping the scratch registers free: for a frame
+/// that turned out to need one (`frame::NEEDS_SCRATCH`).
+pub fn allocate_keeping_scratch(t: &Target, f: &mut MFunc) -> Result<(), String> {
+    allocate_as(t, f, false)
+}
+
+fn allocate_as(t: &Target, f: &mut MFunc, try_scratch: bool) -> Result<(), String> {
+    if try_scratch && !(f.abi.scratch.is_empty() && f.abi.fp_scratch.is_empty()) {
         let kept = f.abi.clone();
         f.abi.scratch.clear();
         f.abi.fp_scratch.clear();

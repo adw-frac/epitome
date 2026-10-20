@@ -71,6 +71,14 @@ pub struct Instr {
     pub second_result: bool,
     /// The features it needs (see `features.rs`).
     pub features: Vec<String>,
+    /// Operands `(base, offset)` whose address it uses is `base + offset`,
+    /// the offset an immediate: a load or store whose body starts
+    /// `getelementptr i8, ptr %base, i64 %offset`, or an add of an
+    /// immediate (`add %base, %offset`). Found from the body.
+    pub base_offset: Option<(usize, usize)>,
+    /// Its value is that address itself (`add` or `getelementptr` of base
+    /// and offset, returned): an address computation, not an access.
+    pub address_of: bool,
     pub func: GlobalId,
 }
 
@@ -876,6 +884,8 @@ impl Target {
                     .flatten()
                     .map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect())
                     .unwrap_or_default(),
+                base_offset: base_offset_of(m, f, has_result),
+                address_of: has_result && base_offset_of(m, f, has_result).is_some() && returns_first(f),
                 func: g,
             });
         }
@@ -1729,4 +1739,45 @@ impl Trie {
         }
         self.nodes[n].accept.push(id);
     }
+}
+
+/// The operands `(base, offset)` of an entry whose body computes
+/// `base + offset` first (see `Instr::base_offset`), `offset` an immediate
+/// parameter and `base` not written back.
+fn base_offset_of(m: &Module, f: &Function, has_result: bool) -> Option<(usize, usize)> {
+    if !f.has_body {
+        return None;
+    }
+    let first = *f.blocks[f.entry().index()].insts.first()?;
+    let param = |v: Value| match v {
+        Value::Local(l) => match f.locals[l.index()].def {
+            LocalDef::Param(k) => Some(k as usize),
+            _ => None,
+        },
+        _ => None,
+    };
+    let (base, off) = match &f.insts[first.index()].op {
+        Op::Gep { source_ty, ptr, indices, .. }
+            if matches!(m.types.get(*source_ty), Type::Int(8)) && indices.len() == 1 =>
+        {
+            (param(*ptr)?, param(indices[0])?)
+        }
+        Op::Binary { op: BinOp::Add, lhs, rhs, .. } => (param(*lhs)?, param(*rhs)?),
+        _ => return None,
+    };
+    let is = |k: usize, name: &str| attr(&f.params[k].attrs, name).is_some();
+    if !is(off, "imm") || is(base, "writeback") || attr(&f.params[base].attrs, "reg").is_none() {
+        return None;
+    }
+    let at = has_result as usize;
+    Some((base + at, off + at))
+}
+
+/// Whether the body's value is its first instruction's result: `%r = ...;
+/// ret %r`.
+fn returns_first(f: &Function) -> bool {
+    let insts = &f.blocks[f.entry().index()].insts;
+    let (Some(&first), Some(&last)) = (insts.first(), insts.last()) else { return false };
+    insts.len() == 2
+        && matches!(f.insts[last.index()].op, Op::Ret(Some(Value::Local(l))) if Some(l) == f.insts[first.index()].result)
 }

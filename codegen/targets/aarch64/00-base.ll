@@ -295,6 +295,111 @@ next:
   ret void
 }
 
+; Testing one bit of a value against zero, the bit given as a mask
+; (`(x & 4) == 0`): tbz and tbnz with the bit's number. For 64 bits, a bit
+; at 32 or above sets the encoding's top bit (those are also the
+; decoders of tbz and tbnz on a 64-bit register's high bits).
+
+define void @TBZWm(i32 "reg"="w" %t, i32 "imm" %m, ptr "label" %dest) "enc"="0 011011 0 b:5=log2(m) imm14:s14=dest/4 t:5" "asm"="tbz {t}, #{=log2(m)}, {dest}" "inverse"="TBNZWm" "nodecode" {
+  %a = and i32 %t, %m
+  %c = icmp eq i32 %a, 0
+  br i1 %c, label %taken, label %next
+taken:
+  indirectbr ptr %dest, []
+next:
+  ret void
+}
+
+define void @TBNZWm(i32 "reg"="w" %t, i32 "imm" %m, ptr "label" %dest) "enc"="0 011011 1 b:5=log2(m) imm14:s14=dest/4 t:5" "asm"="tbnz {t}, #{=log2(m)}, {dest}" "inverse"="TBZWm" "nodecode" {
+  %a = and i32 %t, %m
+  %c = icmp ne i32 %a, 0
+  br i1 %c, label %taken, label %next
+taken:
+  indirectbr ptr %dest, []
+next:
+  ret void
+}
+
+define void @TBZXlo(i64 "reg"="x" %t, i64 "imm" %m, ptr "label" %dest) "enc"="0 011011 0 b:5=log2(m) imm14:s14=dest/4 t:5" "asm"="tbz {t:w}, #{=log2(m)}, {dest}" "inverse"="TBNZXlo" "nodecode" {
+  %a = and i64 %t, %m
+  %c = icmp eq i64 %a, 0
+  br i1 %c, label %taken, label %next
+taken:
+  indirectbr ptr %dest, []
+next:
+  ret void
+}
+
+define void @TBNZXlo(i64 "reg"="x" %t, i64 "imm" %m, ptr "label" %dest) "enc"="0 011011 1 b:5=log2(m) imm14:s14=dest/4 t:5" "asm"="tbnz {t:w}, #{=log2(m)}, {dest}" "inverse"="TBZXlo" "nodecode" {
+  %a = and i64 %t, %m
+  %c = icmp ne i64 %a, 0
+  br i1 %c, label %taken, label %next
+taken:
+  indirectbr ptr %dest, []
+next:
+  ret void
+}
+
+define void @TBZXhi(i64 "reg"="x" %t, i64 "imm" %m, ptr "label" %dest) "enc"="1 011011 0 b:5=log2(m)-32 imm14:s14=dest/4 t:5" "asm"="tbz {t}, #{=log2(m)}, {dest}" "inverse"="TBNZXhi" {
+  %a = and i64 %t, %m
+  %c = icmp eq i64 %a, 0
+  br i1 %c, label %taken, label %next
+taken:
+  indirectbr ptr %dest, []
+next:
+  ret void
+}
+
+define void @TBNZXhi(i64 "reg"="x" %t, i64 "imm" %m, ptr "label" %dest) "enc"="1 011011 1 b:5=log2(m)-32 imm14:s14=dest/4 t:5" "asm"="tbnz {t}, #{=log2(m)}, {dest}" "inverse"="TBZXhi" {
+  %a = and i64 %t, %m
+  %c = icmp ne i64 %a, 0
+  br i1 %c, label %taken, label %next
+taken:
+  indirectbr ptr %dest, []
+next:
+  ret void
+}
+
+; A sign test is a test of the top bit: x >= 0 (as LLVM writes it, x > -1)
+; is tbz on bit 63 (31), x < 0 tbnz. The 64-bit ones decode bit 63, which
+; the mask entries cannot (1 << 63 is negative).
+
+define void @TBZXpos(i64 "reg"="x" %t, ptr "label" %dest) "enc"="1 011011 0 11111 imm14:s14=dest/4 t:5" "asm"="tbz {t}, #63, {dest}" "inverse"="TBNZXneg" {
+  %c = icmp sgt i64 %t, -1
+  br i1 %c, label %taken, label %next
+taken:
+  indirectbr ptr %dest, []
+next:
+  ret void
+}
+
+define void @TBNZXneg(i64 "reg"="x" %t, ptr "label" %dest) "enc"="1 011011 1 11111 imm14:s14=dest/4 t:5" "asm"="tbnz {t}, #63, {dest}" "inverse"="TBZXpos" {
+  %c = icmp slt i64 %t, 0
+  br i1 %c, label %taken, label %next
+taken:
+  indirectbr ptr %dest, []
+next:
+  ret void
+}
+
+define void @TBZWpos(i32 "reg"="w" %t, ptr "label" %dest) "enc"="0 011011 0 11111 imm14:s14=dest/4 t:5" "asm"="tbz {t}, #31, {dest}" "inverse"="TBNZWneg" "nodecode" {
+  %c = icmp sgt i32 %t, -1
+  br i1 %c, label %taken, label %next
+taken:
+  indirectbr ptr %dest, []
+next:
+  ret void
+}
+
+define void @TBNZWneg(i32 "reg"="w" %t, ptr "label" %dest) "enc"="0 011011 1 11111 imm14:s14=dest/4 t:5" "asm"="tbnz {t}, #31, {dest}" "inverse"="TBZWpos" "nodecode" {
+  %c = icmp slt i32 %t, 0
+  br i1 %c, label %taken, label %next
+taken:
+  indirectbr ptr %dest, []
+next:
+  ret void
+}
+
 define void @RET() "enc"="1101011 0 0 10 11111 0000 0 0 11110 00000" "asm"="ret" "role"="ret" {
   ret void
 }
@@ -309,6 +414,11 @@ define void @BL(ptr "sym" %s) "enc"="100101 imm26:s26=s/4" "asm"="bl {s}" "reloc
 
 ; A tail call: the callee returns to this function's caller.
 define void @Btail(ptr "sym" %s) "enc"="000101 imm26:s26=s/4" "asm"="b {s}" "reloc"="jump26" "role"="tailcall" "nomatch" "nodecode" {
+  ret void
+}
+
+; A tail call through a register.
+define void @BRtail(ptr "reg"="x" %n) "enc"="1101011 0 0 00 11111 0000 0 0 n:5 00000" "asm"="br {n}" "role"="tailcallr" "nomatch" {
   ret void
 }
 

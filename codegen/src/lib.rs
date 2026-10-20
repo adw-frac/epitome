@@ -176,13 +176,31 @@ fn compile_function(t: &Target, abi: &abi::Abi, cx: &mut Ctx, job: &Job, opts: &
     let mut mf = isel::Sel::new(t, abi, cx, &prepared, &job.name, job.global).run()?;
     timing::add(&timing::SELECT, now);
     peephole::redundant_compares(t, &mut mf);
+    // Until nothing changes: an address made from one by adding to it
+    // becomes one itself.
+    for _ in 0..4 {
+        if peephole::frame_addresses(t, &mut mf) == 0 {
+            break;
+        }
+    }
     if opts.stop != Stop::AfterSelection {
         let now = Instant::now();
+        let selected = (opts.stop != Stop::AfterAllocation).then(|| mf.clone());
         regalloc::allocate(t, &mut mf)?;
         timing::add(&timing::ALLOCATE, now);
         if opts.stop != Stop::AfterAllocation {
             let now = Instant::now();
-            frame::lower(t, &mut mf)?;
+            match frame::lower(t, &mut mf) {
+                // The frame needed a scratch register the allocator had
+                // given a value: allocate again, keeping them free.
+                Err(e) if e.ends_with(frame::NEEDS_SCRATCH) => {
+                    mf = selected.expect("kept for this");
+                    regalloc::allocate_keeping_scratch(t, &mut mf)?;
+                    frame::lower(t, &mut mf)?;
+                }
+                r => r?,
+            }
+            peephole::pair_memory(t, &mut mf);
             timing::add(&timing::FRAME, now);
             let now = Instant::now();
             layout::place(t, &mut mf);

@@ -309,38 +309,46 @@ fn expand_small_mem_ops(cx: &mut Ctx, f: &mut Function) {
             let (dst_align, src_align) = (align(0), if copy { align(1) } else { 1 });
             let (i8t, i64t, ptr) = (cx.m.types.int(8), cx.m.types.int(64), cx.m.types.ptr(0));
             let mut s = Seq { f, new: Vec::new() };
-            for (off, w) in pieces {
-                // What alignment each piece really has: the call's, at
-                // most, and no more than its offset's.
-                let real = |a: u64| if off == 0 { a } else { a.min(1 << off.trailing_zeros()) };
-                let ty = cx.m.types.int(8 * w as u32);
-                let at_off = |cx: &mut Ctx, s: &mut Seq, p: Value| {
-                    if off == 0 {
-                        p
-                    } else {
-                        let o = cx.int(i64t, off as i64);
-                        s.op(gep8(i8t, p, o), ptr)
-                    }
-                };
-                let value = match byte {
-                    Some(b) => {
-                        let v = (0..w).fold(0u64, |acc, _| (acc << 8) | b as u64);
-                        cx.int(ty, v as i64)
-                    }
-                    None => {
-                        let from = at_off(cx, &mut s, src);
-                        s.op(
-                            Op::Load { volatile: false, atomic: None, ptr: from, align: Some(real(src_align).min(w)) },
-                            ty,
-                        )
-                    }
-                };
-                let to = at_off(cx, &mut s, dst);
-                let st = s.f.add_inst(
-                    Op::Store { volatile: false, atomic: None, value, ptr: to, align: Some(real(dst_align).min(w)) },
-                    None,
-                );
-                s.new.push(st);
+            // Two pieces at a time: both loads, then both stores, so that
+            // the accesses are neighbours a load or store pair can take
+            // (`peephole::pair_memory`). A memcpy's two ranges do not
+            // overlap, so the order is free.
+            for two in pieces.chunks(2) {
+                let mut values = Vec::new();
+                for &(off, w) in two {
+                    // What alignment each piece really has: the call's, at
+                    // most, and no more than its offset's.
+                    let real = |a: u64| if off == 0 { a } else { a.min(1 << off.trailing_zeros()) };
+                    let ty = cx.m.types.int(8 * w as u32);
+                    let value = match byte {
+                        Some(b) => {
+                            let v = (0..w).fold(0u64, |acc, _| (acc << 8) | b as u64);
+                            cx.int(ty, v as i64)
+                        }
+                        None => {
+                            let from = offset_ptr(cx, &mut s, src, off, i8t, i64t, ptr);
+                            s.op(
+                                Op::Load {
+                                    volatile: false,
+                                    atomic: None,
+                                    ptr: from,
+                                    align: Some(real(src_align).min(w)),
+                                },
+                                ty,
+                            )
+                        }
+                    };
+                    values.push(value);
+                }
+                for (&(off, w), value) in two.iter().zip(values) {
+                    let real = |a: u64| if off == 0 { a } else { a.min(1 << off.trailing_zeros()) };
+                    let to = offset_ptr(cx, &mut s, dst, off, i8t, i64t, ptr);
+                    let st = s.f.add_inst(
+                        Op::Store { volatile: false, atomic: None, value, ptr: to, align: Some(real(dst_align).min(w)) },
+                        None,
+                    );
+                    s.new.push(st);
+                }
             }
             let new = std::mem::take(&mut s.new);
             let n = new.len();
@@ -1760,6 +1768,16 @@ fn popcount(cx: &mut Ctx, s: &mut Seq, x: Value, w: u32) -> Value {
     }
     let m = c(cx, 0x7f);
     s.bin(BinOp::And, x, m, wt)
+}
+
+/// `p + off` as a pointer: `p` itself for 0.
+fn offset_ptr(cx: &mut Ctx, s: &mut Seq, p: Value, off: u64, i8t: TypeId, i64t: TypeId, ptr: TypeId) -> Value {
+    if off == 0 {
+        p
+    } else {
+        let o = cx.int(i64t, off as i64);
+        s.op(gep8(i8t, p, o), ptr)
+    }
 }
 
 /// Bit casts between a vector of booleans and an integer of as many bits

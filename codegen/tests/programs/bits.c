@@ -21,3 +21,17 @@ u64 swap64(u64 a) { return __builtin_bswap64(a); }
 u32 rotl32(u32 a, int n) { return (a << (n & 31)) | (a >> (-n & 31)); }
 u64 rotr64(u64 a, int n) { return (a >> (n & 63)) | (a << (-n & 63)); }
 u32 funnel(u32 hi, u32 lo, int n) { return n & 31 ? (hi << (n & 31)) | (lo >> (32 - (n & 31))) : hi; }
+
+// Branches on one bit, low and high (tbz and tbnz with the bit's number).
+void hit(int k);
+int bit_branches(u64 a, u32 b) {
+    int n = 0;
+    if (a & 1) hit(n += 1);
+    if (a & (1ull << 5)) hit(n += 2);
+    if (!(a & (1ull << 31))) hit(n += 4);
+    if (a & (1ull << 40)) hit(n += 8);
+    if (!(a & (1ull << 63))) hit(n += 16);
+    if (b & (1u << 7)) hit(n += 32);
+    if (!(b & (1u << 31))) hit(n += 64);
+    return n;
+}

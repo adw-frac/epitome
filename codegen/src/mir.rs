@@ -107,11 +107,18 @@ pub struct MInst {
     /// For a copy: the class of what is copied (recorded before register
     /// allocation, while the virtual registers say).
     pub class: Option<Class>,
+    /// A call that does not return: the block ends with it, with no trap
+    /// after (as a return or a jump would end it).
+    pub noreturn: bool,
+    /// Made from an atomic operation (any ordering) or a fence: a memory
+    /// barrier. No pass moves, merges or removes it, or moves another
+    /// access across it.
+    pub barrier: bool,
 }
 
 impl MInst {
     pub fn new(op: usize, ops: Vec<MOp>) -> MInst {
-        MInst { op: Opcode::Instr(op), ops, imp_uses: Vec::new(), imp_defs: Vec::new(), class: None }
+        MInst { op: Opcode::Instr(op), ops, imp_uses: Vec::new(), imp_defs: Vec::new(), class: None, noreturn: false, barrier: false }
     }
 
     pub fn copy(dst: Reg, src: Reg) -> MInst {
@@ -121,6 +128,8 @@ impl MInst {
             imp_uses: Vec::new(),
             imp_defs: Vec::new(),
             class: None,
+            noreturn: false,
+            barrier: false,
         }
     }
 

@@ -12,6 +12,11 @@ use crate::mir::*;
 use crate::target::Target;
 use crate::unwind::Cfi;
 
+/// Ends the error of a frame that needed a scratch register when the
+/// allocator had given them all to values (it does when nothing spills):
+/// the function is allocated again with them kept free.
+pub const NEEDS_SCRATCH: &str = " (the scratch registers were allocated)";
+
 pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     let (fp_reg, lr_reg) = (f.abi.fp, f.abi.lr);
     let mut callee_saved = f.abi.callee_saved();
@@ -105,7 +110,7 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
                     // convention's far-scratch register.
                     let tmp = free_scratch(t, &f.abi.scratch, &inst, &old[j + 1..]).or(far).ok_or_else(|| {
                         format!(
-                            "{}: a frame offset of {off}, no scratch register free, and the convention names no far-scratch register",
+                            "{}: a frame offset of {off}, no scratch register free, and the convention names no far-scratch register{NEEDS_SCRATCH}",
                             f.name
                         )
                     })?;
@@ -184,7 +189,9 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     // Before each return, and each tail call (whose callee returns to this
     // function's caller).
     let leaves =
-        |inst: &MInst| matches!(inst.op, Opcode::Instr(k) if t.has_role(k, "ret") || t.has_role(k, "tailcall"));
+        |inst: &MInst| {
+            matches!(inst.op, Opcode::Instr(k) if t.has_role(k, "ret") || t.has_role(k, "tailcall") || t.has_role(k, "tailcallr"))
+        };
     for b in &mut f.blocks {
         let old = std::mem::take(&mut b.insts);
         for inst in old {
@@ -264,7 +271,7 @@ fn adjust(t: &Target, out: &mut Vec<MInst>, dst: u8, src: u8, amount: i64, scrat
     });
     let Some((op, op12, pages, rest)) = split else {
         // Else the amount, made in a scratch register, added.
-        let scratch = *scratch.first().ok_or("no scratch register for a large frame")?;
+        let scratch = *scratch.first().ok_or_else(|| format!("no scratch register for a large frame{NEEDS_SCRATCH}"))?;
         constant(t, out, scratch, amount)?;
         let add = t.role("add").ok_or("no \"add\" instruction for a large frame")?;
         out.push(MInst::new(add, vec![r(dst), r(src), r(scratch)]));
@@ -316,7 +323,12 @@ fn tidy_branches(t: &Target, f: &mut MFunc) {
     let ends_flow = |t: &Target, b: &MBlock| {
         b.insts.last().is_some_and(|i| match i.op {
             Opcode::Instr(k) => {
-                t.has_role(k, "jump") || t.has_role(k, "ret") || t.has_role(k, "trap") || t.has_role(k, "tailcall")
+                i.noreturn
+                    || t.has_role(k, "jump")
+                    || t.has_role(k, "ret")
+                    || t.has_role(k, "trap")
+                    || t.has_role(k, "tailcall")
+                    || t.has_role(k, "tailcallr")
             }
             _ => false,
         })

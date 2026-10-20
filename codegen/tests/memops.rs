@@ -22,23 +22,27 @@ fn small_ones_are_written_out() {
     let a = asm(
         "define void @z(ptr %p) {\n  call void @llvm.memset.p0.i64(ptr align 8 %p, i8 0, i64 24, i1 false)\n  ret void\n}",
     );
-    assert_eq!(a.matches("str xzr").count(), 3, "{a}");
+    // Three 8-byte zeros, two of them a pair.
+    assert_eq!(a.matches("stp xzr, xzr").count(), 1, "{a}");
+    assert_eq!(a.matches("str xzr").count(), 1, "{a}");
     assert!(!a.contains("memset"), "{a}");
     // Ones at 2-byte alignment: four bytes, then two.
     let a = asm(
         "define void @o(ptr %p) {\n  call void @llvm.memset.p0.i64(ptr align 2 %p, i8 -1, i64 6, i1 false)\n  ret void\n}",
     );
     assert_eq!(a.matches("str w").count() + a.matches("strh").count(), 2, "{a}");
-    // A copy at 1-byte alignment: 8, 8 and 4 bytes.
+    // A copy at 1-byte alignment: 8, 8 and 4 bytes, the two 8s a pair.
     let a = asm(
         "define void @u(ptr %d, ptr %s) {\n  call void @llvm.memcpy.p0.p0.i64(ptr align 1 %d, ptr align 1 %s, i64 20, i1 false)\n  ret void\n}",
     );
-    assert_eq!(a.matches("ldr x").count(), 2, "{a}");
+    assert_eq!(a.matches("ldp x").count(), 1, "{a}");
     assert_eq!(a.matches("ldr w").count(), 1, "{a}");
     let a = asm(
         "define void @c(ptr %d, ptr %s) {\n  call void @llvm.memcpy.p0.p0.i64(ptr align 8 %d, ptr align 8 %s, i64 16, i1 false)\n  ret void\n}",
     );
-    assert_eq!(a.matches("ldr x").count(), 2, "{a}");
+    // Sixteen bytes: one pair each way.
+    assert_eq!(a.matches("ldp x").count(), 1, "{a}");
+    assert_eq!(a.matches("stp x").count(), 1, "{a}");
     assert!(!a.contains("memcpy"), "{a}");
 }
 

@@ -40,7 +40,13 @@ fn split(t: &Target, f: &MFunc) -> Vec<(Vec<MInst>, Exit)> {
         let mut body = b.insts.clone();
         let fall = i + 1;
         let leaves = |inst: &MInst| match inst.op {
-            Opcode::Instr(k) => t.has_role(k, "ret") || t.has_role(k, "trap") || t.has_role(k, "tailcall"),
+            Opcode::Instr(k) => {
+                inst.noreturn
+                    || t.has_role(k, "ret")
+                    || t.has_role(k, "trap")
+                    || t.has_role(k, "tailcall")
+                    || t.has_role(k, "tailcallr")
+            }
             _ => false,
         };
         let exit = if body.last().is_some_and(leaves) {
@@ -109,9 +115,14 @@ pub fn place(t: &Target, f: &mut MFunc) {
         parts[k].1 = exit;
     }
 
-    // Copy small return blocks into the blocks that go to them.
+    // Copy small return blocks into the blocks that go to them. (Only
+    // returns: a block that traps or calls a function that does not return
+    // is not worth a copy.)
+    let returns = |body: &Vec<MInst>| {
+        body.last().is_some_and(|i| matches!(i.op, Opcode::Instr(k) if t.has_role(k, "ret")) && !i.noreturn)
+    };
     for r in 0..n {
-        if !matches!(parts[r].1, Exit::Leaves) || parts[r].0.len() > MAX_TAIL {
+        if !matches!(parts[r].1, Exit::Leaves) || parts[r].0.len() > MAX_TAIL || !returns(&parts[r].0) {
             continue;
         }
         let tail = parts[r].0.clone();
