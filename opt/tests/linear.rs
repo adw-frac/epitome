@@ -32,7 +32,8 @@ fn generate(rng: &mut Rng, w: u32, n: usize) -> String {
             } else {
                 // Mostly recent values, so that most are used once.
                 let back = (rng.below(3) as usize).min(values.len() - 1);
-                let at = if rng.below(4) == 0 { rng.below(values.len() as u64) as usize } else { values.len() - 1 - back };
+                let at =
+                    if rng.below(4) == 0 { rng.below(values.len() as u64) as usize } else { values.len() - 1 - back };
                 values[at].clone()
             }
         };
@@ -155,7 +156,8 @@ fn arithmetic_steps_keep_values() {
         threads: 1,
         ..Options::default()
     };
-    let samples: Vec<u64> = vec![0, 1, 2, 3, 5, 0x7f, 0x80, 0xff, 0x7fff_ffff, 0x8000_0000, u64::MAX, 0x1234_5678_9abc_def0];
+    let samples: Vec<u64> =
+        vec![0, 1, 2, 3, 5, 0x7f, 0x80, 0xff, 0x7fff_ffff, 0x8000_0000, u64::MAX, 0x1234_5678_9abc_def0];
     let (mut before, mut after) = (0usize, 0usize);
     for case in 0..400 {
         let w = [8, 32, 64][case % 3];
@@ -164,7 +166,11 @@ fn arithmetic_steps_keep_values() {
         let original = epitome_ir::parse_module(&src).unwrap();
         let mut m = epitome_ir::parse_module(&src).unwrap();
         pipeline::run(&mut m, &opts);
-        let count = |m: &Module| m.functions().map(|(_, f)| f.layout.iter().map(|b| f.blocks[b.index()].insts.len()).sum::<usize>()).sum::<usize>();
+        let count = |m: &Module| {
+            m.functions()
+                .map(|(_, f)| f.layout.iter().map(|b| f.blocks[b.index()].insts.len()).sum::<usize>())
+                .sum::<usize>()
+        };
         before += count(&original);
         after += count(&m);
         for &a in &samples {
@@ -240,8 +246,17 @@ fn bit_steps_keep_values() {
         threads: 1,
         ..Options::default()
     };
-    let samples: Vec<u64> =
-        vec![0, 1, 0xff, 0x80, 0x1234_5678_9abc_def0, 0xffff_ffff, 0xffff_ffff_0000_0000, u64::MAX, 0x8000_0000_0000_0000];
+    let samples: Vec<u64> = vec![
+        0,
+        1,
+        0xff,
+        0x80,
+        0x1234_5678_9abc_def0,
+        0xffff_ffff,
+        0xffff_ffff_0000_0000,
+        u64::MAX,
+        0x8000_0000_0000_0000,
+    ];
     let (mut before, mut after, mut steps) = (0usize, 0usize, 0usize);
     for _ in 0..500 {
         let n = 2 + rng.below(12) as usize;
@@ -249,9 +264,14 @@ fn bit_steps_keep_values() {
         let original = epitome_ir::parse_module(&src).unwrap();
         let mut m = epitome_ir::parse_module(&src).unwrap();
         let report = pipeline::run(&mut m, &opts);
-        steps += ["(demanded bits)", "(known bits)", "(funnel shift)"].iter().map(|k| report.combines.fired.get(*k).copied().unwrap_or(0)).sum::<usize>();
+        steps += ["(demanded bits)", "(known bits)", "(funnel shift)"]
+            .iter()
+            .map(|k| report.combines.fired.get(*k).copied().unwrap_or(0))
+            .sum::<usize>();
         let count = |m: &Module| {
-            m.functions().map(|(_, f)| f.layout.iter().map(|b| f.blocks[b.index()].insts.len()).sum::<usize>()).sum::<usize>()
+            m.functions()
+                .map(|(_, f)| f.layout.iter().map(|b| f.blocks[b.index()].insts.len()).sum::<usize>())
+                .sum::<usize>()
         };
         before += count(&original);
         after += count(&m);

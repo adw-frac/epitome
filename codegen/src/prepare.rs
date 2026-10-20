@@ -298,11 +298,7 @@ fn expand_small_mem_ops(cx: &mut Ctx, f: &mut Function) {
             }
             if pieces.len() as u64 > MAX_MEM_PIECES
                 || !epitome_ir::chop::allow(|| {
-                    format!(
-                        "write the {name} at {} as {} accesses",
-                        epitome_ir::printer::inst_name(f, i),
-                        pieces.len()
-                    )
+                    format!("write the {name} at {} as {} accesses", epitome_ir::printer::inst_name(f, i), pieces.len())
                 })
             {
                 k += 1;
@@ -332,7 +328,10 @@ fn expand_small_mem_ops(cx: &mut Ctx, f: &mut Function) {
                     }
                     None => {
                         let from = at_off(cx, &mut s, src);
-                        s.op(Op::Load { volatile: false, atomic: None, ptr: from, align: Some(real(src_align).min(w)) }, ty)
+                        s.op(
+                            Op::Load { volatile: false, atomic: None, ptr: from, align: Some(real(src_align).min(w)) },
+                            ty,
+                        )
                     }
                 };
                 let to = at_off(cx, &mut s, dst);
@@ -1366,10 +1365,8 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 // A rotation by a variable amount, where the description
                 // has one (the role "rotr.iN"): right as it is, left as
                 // right by the negated amount.
-                let rotate = !vector
-                    && constant.is_none()
-                    && args[0] == args[1]
-                    && cx.t.role(&format!("rotr.i{eb}")).is_some();
+                let rotate =
+                    !vector && constant.is_none() && args[0] == args[1] && cx.t.role(&format!("rotr.i{eb}")).is_some();
                 if rotate && base == "llvm.fshl" {
                     let zero = cx.int(ty, 0);
                     let neg = s.bin(BinOp::Sub, zero, args[2], ty);

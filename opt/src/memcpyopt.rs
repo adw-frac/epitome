@@ -70,11 +70,7 @@ pub fn run(sh: &Shared, f: &mut Function) -> Stats {
     drop(aa);
     for (b, run) in runs {
         if !epitome_ir::chop::allow(|| {
-            format!(
-                "memcpyopt: {} stores to {} as a memset",
-                run.len(),
-                epitome_ir::printer::inst_name(f, run[0].inst)
-            )
+            format!("memcpyopt: {} stores to {} as a memset", run.len(), epitome_ir::printer::inst_name(f, run[0].inst))
         }) {
             continue;
         }

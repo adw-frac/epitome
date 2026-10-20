@@ -71,8 +71,19 @@ fn main() -> ExitCode {
             s if s.starts_with("--passes=") => {
                 let list: Vec<&str> = s["--passes=".len()..].split(',').filter(|p| !p.is_empty()).collect();
                 if let Some(bad) = list.iter().find(|p| {
-                    !["sroa", "mem2reg", "inline", "recursion", "combine", "simplifycfg", "loops", "cse", "memory", "tailmark"]
-                        .contains(p)
+                    ![
+                        "sroa",
+                        "mem2reg",
+                        "inline",
+                        "recursion",
+                        "combine",
+                        "simplifycfg",
+                        "loops",
+                        "cse",
+                        "memory",
+                        "tailmark",
+                    ]
+                    .contains(p)
                 }) {
                     return usage(&format!("unknown pass {bad}"));
                 }

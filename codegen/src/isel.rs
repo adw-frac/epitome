@@ -1079,7 +1079,10 @@ impl<'a, 'b> Sel<'a, 'b> {
                 for &ci in self.t.constants.iter().filter(|&&ci| self.cx.enabled(ci)) {
                     let ins = &self.t.instrs[ci];
                     let same_file = matches!(ins.operands[0].kind, Kind::Reg(c) if self.t.machine.def(c).file == self.t.machine.def(class).file);
-                    if same_file && ins.operands[0].bits == self.t.machine.def(class).bits.min(64) && ins.fits(&[None, Some(raw as i64)]) {
+                    if same_file
+                        && ins.operands[0].bits == self.t.machine.def(class).bits.min(64)
+                        && ins.fits(&[None, Some(raw as i64)])
+                    {
                         let d = self.mf.new_vreg(class);
                         self.push(MInst::new(ci, vec![MOp::Reg(Reg::V(d)), MOp::Imm(raw as i64)]));
                         self.block_floats.insert((self.cur, raw, class), d);
@@ -2095,11 +2098,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         let tail = tail.filter(|_| {
             call.tail == TailKind::MustTail
                 || epitome_ir::chop::allow(|| {
-                    format!(
-                        "tail call @{} at {}",
-                        name.as_deref().unwrap_or("?"),
-                        epitome_ir::printer::inst_name(f, i)
-                    )
+                    format!("tail call @{} at {}", name.as_deref().unwrap_or("?"), epitome_ir::printer::inst_name(f, i))
                 })
         });
         if let (Some(ret), Some(s), Some(tc)) = (tail, &target, self.t.role("tailcall")) {

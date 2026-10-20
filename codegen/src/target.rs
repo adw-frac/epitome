@@ -718,9 +718,11 @@ impl Target {
                     asm: attr(&f.fn_attrs, "asm").flatten().unwrap_or("").to_string(),
                     reads: match attr(&f.fn_attrs, "reads").flatten() {
                         Some(r) => r.to_string(),
-                        None => self.machine.flags.clone().ok_or_else(|| {
-                            format!("@{name}: no \"reads\", and no target parameter flags")
-                        })?,
+                        None => self
+                            .machine
+                            .flags
+                            .clone()
+                            .ok_or_else(|| format!("@{name}: no \"reads\", and no target parameter flags"))?,
                     },
                     func: g,
                     flags_ty: f.locals[f.params[0].local.index()].ty,
@@ -853,9 +855,11 @@ impl Target {
                 sets: if flags {
                     Some(match attr(&f.fn_attrs, "sets").flatten() {
                         Some(s) => s.to_string(),
-                        None => self.machine.flags.clone().ok_or_else(|| {
-                            format!("@{name}: no \"sets\", and no target parameter flags")
-                        })?,
+                        None => self
+                            .machine
+                            .flags
+                            .clone()
+                            .ok_or_else(|| format!("@{name}: no \"sets\", and no target parameter flags"))?,
                     })
                 } else {
                     None
@@ -1514,10 +1518,13 @@ impl Target {
             }
             // Nor scalar ones made of vector instructions (a population
             // count): the program tests check those.
-            let through_vectors = m.global_order.iter().copied().find(|&g| m.global(g).name.as_deref() == Some(expand)).is_some_and(|g| {
-                let e = self.func(g);
-                e.locals.iter().any(|l| matches!(m.types.get(l.ty), Type::Vector { .. }))
-            });
+            let through_vectors =
+                m.global_order.iter().copied().find(|&g| m.global(g).name.as_deref() == Some(expand)).is_some_and(
+                    |g| {
+                        let e = self.func(g);
+                        e.locals.iter().any(|l| matches!(m.types.get(l.ty), Type::Vector { .. }))
+                    },
+                );
             if through_vectors {
                 continue;
             }

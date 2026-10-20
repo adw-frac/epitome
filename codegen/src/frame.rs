@@ -260,10 +260,7 @@ fn adjust(t: &Target, out: &mut Vec<MInst>, dst: u8, src: u8, amount: i64, scrat
     let split = op.zip(op12).and_then(|(op, op12)| {
         let step = (0..40).map(|k| 1i64 << k).find(|&s| fit(op12, s))?;
         let (high, low) = (a & !(step - 1), a & (step - 1));
-        (fit(op12, high) || high == 0)
-            .then_some(())
-            .filter(|_| fit(op, low) || low == 0)
-            .map(|_| (op, op12, high, low))
+        (fit(op12, high) || high == 0).then_some(()).filter(|_| fit(op, low) || low == 0).map(|_| (op, op12, high, low))
     });
     let Some((op, op12, pages, rest)) = split else {
         // Else the amount, made in a scratch register, added.

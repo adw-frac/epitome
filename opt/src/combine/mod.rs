@@ -618,7 +618,12 @@ impl<'s, 'm, 'f> Combiner<'s, 'm, 'f> {
                 let Some(w) = eval::int_bits(self.sh.types(), self.f.locals[to.index()].ty) else { return false };
                 (*value, eval::mask(w))
             }
-            Op::Binary { op: op @ (BinOp::LShr | BinOp::AShr | BinOp::Shl | BinOp::And), lhs, rhs: Value::Const(c), .. } => {
+            Op::Binary {
+                op: op @ (BinOp::LShr | BinOp::AShr | BinOp::Shl | BinOp::And),
+                lhs,
+                rhs: Value::Const(c),
+                ..
+            } => {
                 let Some(k) = self.int(*c) else { return false };
                 let m = eval::mask(k.bits);
                 let d = match op {

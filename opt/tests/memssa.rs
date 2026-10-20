@@ -154,8 +154,7 @@ fn demo_is_sound_and_prints_as_expected() {
     let mut m = epitome_ir::parse_module(&src).unwrap();
     let reports = epitome_opt::memssa::analyse_module(&mut m, 1, true);
     let by: std::collections::HashMap<_, _> = reports.into_iter().collect();
-    let text =
-        epitome_ir::printer::print_module_with(&m, &|g, at| by.get(&g).and_then(|r| r.notes.get(&at).cloned()));
+    let text = epitome_ir::printer::print_module_with(&m, &|g, at| by.get(&g).and_then(|r| r.notes.get(&at).cloned()));
     let expected_path = examples().join("demo.expected.ll");
     if std::env::var("BLESS").is_ok() {
         std::fs::write(&expected_path, &text).unwrap();

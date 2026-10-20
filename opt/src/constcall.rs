@@ -67,9 +67,7 @@ pub fn run(sh: &Shared, g: GlobalId, f: &mut Function) -> usize {
     }
     let mut done = 0;
     for (b, i, result) in found {
-        if !epitome_ir::chop::allow(|| {
-            format!("constcall: {} worked out", epitome_ir::printer::inst_name(f, i))
-        }) {
+        if !epitome_ir::chop::allow(|| format!("constcall: {} worked out", epitome_ir::printer::inst_name(f, i))) {
             continue;
         }
         if let Some(r) = f.insts[i.index()].result {

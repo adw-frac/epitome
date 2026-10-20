@@ -112,10 +112,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         let text = std::fs::read_to_string(&ll).unwrap();
         let mut m = epitome_ir::parse_module(&text).map_err(|e| format!("{stem}: {e:?}"))?;
         if *config == "opt" {
-            epitome_opt::pipeline::run(
-                &mut m,
-                &epitome_opt::pipeline::Options { threads: 1, ..Default::default() },
-            );
+            epitome_opt::pipeline::run(&mut m, &epitome_opt::pipeline::Options { threads: 1, ..Default::default() });
             let text = m.to_string();
             m = epitome_ir::parse_module(&text).map_err(|e| format!("{stem}: reparse: {e:?}"))?;
         }
@@ -207,10 +204,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         let text = std::fs::read_to_string(&ll).unwrap();
         let mut m = epitome_ir::parse_module(&text).map_err(|e| format!("{elf_stem}: {e:?}"))?;
         if *config == "opt" {
-            epitome_opt::pipeline::run(
-                &mut m,
-                &epitome_opt::pipeline::Options { threads: 1, ..Default::default() },
-            );
+            epitome_opt::pipeline::run(&mut m, &epitome_opt::pipeline::Options { threads: 1, ..Default::default() });
             let text = m.to_string();
             m = epitome_ir::parse_module(&text).map_err(|e| format!("{elf_stem}: reparse: {e:?}"))?;
         }
