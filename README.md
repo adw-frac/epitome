@@ -1,7 +1,32 @@
 # Epitome of synaptic excellence
 
-Epitome of synaptic excellence (Epitome for short) is a clean-room,
-functional clone of LLVM, written in Rust.
+Epitome of synaptic excellence (Epitome for short) is an alternative code
+generation tool, written in Rust, that takes LLVM IR as its input. It is
+not a clone of LLVM: it reads and writes the same IR, and its tools take
+the same kinds of input and give the same kinds of output, but how it gets
+there is its own.
+
+- **Its own passes and algorithms.** The pass structure differs from
+  LLVM's. Much of what LLVM does in separate passes (instcombine,
+  reassociate, DSE, parts of GVN and memcpyopt) is one rule-driven
+  combiner here, with its rules in a small language
+  (`opt/rules/combine.rules`), and memory dependences are found on demand
+  rather than kept up to date.
+- **Data-driven code generation.** A machine is a description written as
+  LLVM IR: each instruction is a function whose body says what it
+  computes, with its encoding and assembly as attributes. Selection,
+  encoding, assembly, disassembly and the checks are all made from it, so a
+  new machine or CPU is a set of description files, not new code
+  (`codegen/targets/`).
+- **Multithreaded throughout.** Optimisation runs on many functions at
+  once, in call-graph order, and so does code generation; the output is
+  the same for any number of threads.
+- **Large basic blocks.** Special attention is paid to compiling very large
+  basic blocks, such as those generated from SystemVerilog by simulators:
+  every pass is kept close to linear in a block's size, with budgets on the
+  searches that could grow, and tests check that time grows in proportion
+  as blocks and functions grow (`opt/tests/scaling.rs`,
+  `codegen/tests/parallel.rs`).
 
 ## Clean-room policy
 

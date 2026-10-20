@@ -81,6 +81,7 @@ Each pass or component has one of these labels:
 
 - **Planned**: in scope, not started.
 - **Later**: in scope, but after the core works end to end.
-- **Skip**: not needed for a functional clone, such as GraphViz viewers.
+- **Skip**: not needed for an alternative code generator that takes LLVM
+  IR, such as GraphViz viewers.
 - **Partial**: started; the entry says what is missing.
 - **Done**: implemented and tested.
