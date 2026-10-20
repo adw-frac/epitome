@@ -58,14 +58,10 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     let calls =
         f.blocks.iter().any(|b| b.insts.iter().any(|i| !i.imp_defs.is_empty() && !matches!(i.op, Opcode::Asm { .. })));
     let record = if calls { 16 } else { 0 };
-    let size = (off + record + 15) / 16 * 16;
+    let align = f.abi.stack_align;
+    let size = (off + record + align - 1) / align * align;
     let fp_at = size - 16;
     f.frame_size = size;
-    // Offsets from sp of up to 32760 reach saved registers with one
-    // scaled store; adjusting sp takes one or two immediates of 12 bits.
-    if size > 32760 {
-        return Err(format!("{}: a frame of {size} bytes is too big for now", f.name));
-    }
 
     // Frame offsets become immediates. Where one is more than the
     // instruction's immediate holds (RISC-V's reach 2047 bytes), the
@@ -149,7 +145,7 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
             t.role(&role).is_some_and(|i| t.instrs[i].fits(&[None, None, Some(at)]))
         })
     };
-    let low = if reaches(&slots) { 0 } else { slots.iter().map(|s| s.1).min().unwrap_or(0) / 16 * 16 };
+    let low = if reaches(&slots) { 0 } else { slots.iter().map(|s| s.1).min().unwrap_or(0) / align * align };
     let near: Vec<(u8, i64)> = slots.iter().map(|&(reg, at)| (reg, at - low)).collect();
     let (saves, restores) = save_restore(t, &near);
     // The unwind rules (unwind.rs) go after what they describe: where the
@@ -240,8 +236,10 @@ fn save_restore(t: &Target, slots: &[(u8, i64)]) -> (Vec<MInst>, Vec<MInst>) {
 
 /// `dst = src + amount`, for a frame's sizes: one add (or subtract) of an
 /// immediate if the description has one that holds it; else, where it has
-/// them (AArch64), an immediate shifted by 12 for the 4KB pages and one for
-/// the rest.
+/// a shifted one (`addi12`, AArch64's `add #imm, lsl #12`), that for the
+/// high part and the plain one for the rest, the split being where the
+/// shifted one's smallest step is; else the amount made in a scratch
+/// register and added.
 fn adjust(t: &Target, out: &mut Vec<MInst>, dst: u8, src: u8, amount: i64, scratch: &[u8]) -> Result<(), String> {
     let r = |n: u8| MOp::Reg(Reg::P(n));
     let fits = |role: &str, v: i64| t.role(role).filter(|&i| t.instrs[i].fits(&[None, None, Some(v)]));
@@ -256,7 +254,18 @@ fn adjust(t: &Target, out: &mut Vec<MInst>, dst: u8, src: u8, amount: i64, scrat
         return Ok(());
     }
     let (op, op12) = if amount < 0 { (t.role("subi"), t.role("subi12")) } else { (t.role("addi"), t.role("addi12")) };
-    let (Some(op), Some(op12)) = (op, op12) else {
+    let a = amount.abs();
+    let fit = |i: usize, v: i64| t.instrs[i].fits(&[None, None, Some(v)]);
+    // The shifted add's step: the least power of two it holds.
+    let split = op.zip(op12).and_then(|(op, op12)| {
+        let step = (0..40).map(|k| 1i64 << k).find(|&s| fit(op12, s))?;
+        let (high, low) = (a & !(step - 1), a & (step - 1));
+        (fit(op12, high) || high == 0)
+            .then_some(())
+            .filter(|_| fit(op, low) || low == 0)
+            .map(|_| (op, op12, high, low))
+    });
+    let Some((op, op12, pages, rest)) = split else {
         // Else the amount, made in a scratch register, added.
         let scratch = *scratch.first().ok_or("no scratch register for a large frame")?;
         constant(t, out, scratch, amount)?;
@@ -264,8 +273,6 @@ fn adjust(t: &Target, out: &mut Vec<MInst>, dst: u8, src: u8, amount: i64, scrat
         out.push(MInst::new(add, vec![r(dst), r(src), r(scratch)]));
         return Ok(());
     };
-    let a = amount.abs();
-    let (pages, rest) = (a & !0xfff, a & 0xfff);
     let mut from = src;
     if pages != 0 {
         out.push(MInst::new(op12, vec![r(dst), r(from), MOp::Imm(pages)]));

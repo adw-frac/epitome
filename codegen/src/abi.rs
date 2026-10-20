@@ -75,6 +75,8 @@ pub struct Abi {
     pub fp: u8,
     pub lr: u8,
     pub stack_args: StackArgs,
+    /// The stack pointer's alignment at calls, in bytes (`stack-align`).
+    pub stack_align: i64,
     pub variadic: Variadic,
     pub syntax: Syntax,
     pub triples: Vec<String>,
@@ -208,7 +210,7 @@ impl Abi {
             }
             locs.push(here);
         }
-        (locs, (stack + 15) / 16 * 16)
+        (locs, (stack + self.stack_align - 1) / self.stack_align * self.stack_align)
     }
 
     /// The symbol for a global's name. A name starting with byte 1 is
@@ -311,6 +313,13 @@ pub fn read(m: &Module, prefix: &str, machine: &crate::machine::Machine) -> Resu
             fp_scratch: regs(&get("fp-scratch")?)?,
             fp: frame[0],
             lr: frame[1],
+            stack_align: {
+                let a: i64 = one("stack-align")?.parse().map_err(|_| format!("{name}: stack-align"))?;
+                if a <= 0 || a & (a - 1) != 0 {
+                    return Err(format!("{name}: stack-align {a} is not a power of two"));
+                }
+                a
+            },
             stack_args: match one("stack-args")?.as_str() {
                 "natural" => StackArgs::Natural,
                 "slots" => StackArgs::Slots,

@@ -40,7 +40,7 @@
 ; ===========================================================================
 ; Parameters
 
-!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110, !1111, !1112}
+!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110, !1111, !1112, !1113}
 !1100 = !{!"sp", !"sp"}
 !1101 = !{!"zero", !"xzr"}
 !1102 = !{!"vector-bits", !"128", !"neon"}
@@ -57,6 +57,9 @@
 !1111 = !{!"cfi-data-align", !"-4", !"-8"}
 ; Loads and stores of normal memory need no alignment, at no cost.
 !1112 = !{!"unaligned-access", !"fast"}
+; The flags a comparison sets and a condition reads, unless an entry says
+; otherwise ("sets", "reads").
+!1113 = !{!"flags", !"nzcv"}
 
 ; ===========================================================================
 ; Inline assembly: what its constraint codes and template modifiers mean,

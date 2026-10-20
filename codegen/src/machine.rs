@@ -258,6 +258,9 @@ pub struct Machine {
     /// Loads and stores need no alignment and cost no more without it
     /// (`unaligned-access` = `fast`), so small copies may use wide ones.
     pub unaligned_fast: bool,
+    /// The flags a comparison sets and a condition reads where an entry
+    /// does not say (`flags`: AArch64's `nzcv`).
+    pub flags: Option<String>,
     pub asm_constraints: HashMap<char, AsmCode>,
     pub asm_modifiers: HashMap<char, AsmModifier>,
     /// How assembly starts a comment.
@@ -390,6 +393,7 @@ impl Machine {
             default_cpu: None,
             compare_booleans: false,
             unaligned_fast: false,
+            flags: None,
             asm_constraints: HashMap::new(),
             asm_modifiers: HashMap::new(),
             asm_comment: String::new(),
@@ -420,6 +424,7 @@ impl Machine {
             Some("compare") => true,
             Some(o) => return Err(format!("target parameter boolean-branches: {o}")),
         };
+        mc.flags = params.get("flags").cloned();
         mc.unaligned_fast = match params.get("unaligned-access").map(String::as_str) {
             None | Some("no") => false,
             Some("fast") => true,

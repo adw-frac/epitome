@@ -33,6 +33,7 @@
 ;                 record of the saved argument registers and the stack
 ;                 (__stack, __gr_top, __vr_top, __gr_offs, __vr_offs);
 ;                 without it, a pointer to the next argument
+;   stack-align   the stack pointer's alignment at calls, in bytes
 ;   far-scratch   a register never allocated, for the address of a stack
 ;                 slot too far for an instruction's offset
 ;   fp-args, fp-result, fp-clobbers, fp-saved, fp-scratch
@@ -41,7 +42,7 @@
 
 ; Apple's arm64 ABI: AAPCS64 with x18 reserved, stack arguments packed,
 ; variadic arguments on the stack.
-!abi.darwin = !{!100, !101, !102, !103, !104, !105, !106, !107, !108, !109, !110, !111, !112, !113, !114, !115, !116, !117}
+!abi.darwin = !{!100, !101, !102, !103, !104, !105, !106, !107, !108, !109, !110, !111, !112, !113, !114, !115, !116, !117, !118}
 !100 = !{!"args", !"x0-x7"}
 !101 = !{!"result", !"x0"}
 !102 = !{!"clobbers", !"x0-x18", !"x30"}
@@ -60,11 +61,12 @@
 !115 = !{!"fp-scratch", !"d29-d31"}
 !116 = !{!"sret", !"x8"}
 !117 = !{!"base", !"x19"}
+!118 = !{!"stack-align", !"16"}
 
 ; The Procedure Call Standard for the Arm 64-bit Architecture, as used by
 ; Linux: x18 is an ordinary temporary, stack arguments take 8-byte slots,
 ; and variadic arguments go where named ones would.
-!abi.aapcs64 = !{!200, !201, !202, !203, !204, !205, !206, !207, !208, !209, !210, !211, !212, !213, !214, !215, !216, !217, !218, !219}
+!abi.aapcs64 = !{!200, !201, !202, !203, !204, !205, !206, !207, !208, !209, !210, !211, !212, !213, !214, !215, !216, !217, !218, !219, !220}
 !200 = !{!"args", !"x0-x7"}
 !201 = !{!"result", !"x0"}
 !202 = !{!"clobbers", !"x0-x18", !"x30"}
@@ -85,3 +87,4 @@
 !217 = !{!"base", !"x19"}
 !218 = !{!"wide-pairs", !"even"}
 !219 = !{!"va-list", !"aapcs64"}
+!220 = !{!"stack-align", !"16"}

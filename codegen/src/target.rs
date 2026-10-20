@@ -716,7 +716,12 @@ impl Target {
                     name: name.clone(),
                     value: v.parse().map_err(|_| format!("@{name}: bad cond value"))?,
                     asm: attr(&f.fn_attrs, "asm").flatten().unwrap_or("").to_string(),
-                    reads: attr(&f.fn_attrs, "reads").flatten().unwrap_or("nzcv").to_string(),
+                    reads: match attr(&f.fn_attrs, "reads").flatten() {
+                        Some(r) => r.to_string(),
+                        None => self.machine.flags.clone().ok_or_else(|| {
+                            format!("@{name}: no \"reads\", and no target parameter flags")
+                        })?,
+                    },
                     func: g,
                     flags_ty: f.locals[f.params[0].local.index()].ty,
                 });
@@ -846,7 +851,12 @@ impl Target {
                 },
                 role: attr(&f.fn_attrs, "role").flatten().map(str::to_string),
                 sets: if flags {
-                    Some(attr(&f.fn_attrs, "sets").flatten().unwrap_or("nzcv").to_string())
+                    Some(match attr(&f.fn_attrs, "sets").flatten() {
+                        Some(s) => s.to_string(),
+                        None => self.machine.flags.clone().ok_or_else(|| {
+                            format!("@{name}: no \"sets\", and no target parameter flags")
+                        })?,
+                    })
                 } else {
                     None
                 },

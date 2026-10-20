@@ -137,6 +137,7 @@ read them. A template writes a register as another class names it with
 | `external-via-got` | `yes` | `no` | whether symbols defined elsewhere are reached through the GOT |
 | `boolean-branches` | `bit` | `compare` | whether a branch can test a boolean's low bit, or must compare whole registers |
 | `unaligned-access` | `fast` | (`no`) | whether loads and stores need no alignment, at no cost, so small copies may use wide ones |
+| `flags` | `nzcv` | (none) | the flags a comparison sets and a condition reads, where an entry has no `"sets"` or `"reads"` |
 | `elf-machine`, `elf-flags`, `macho-cpu` | 183, 0, `0x0100000c` | 243, 4 | the object files' identity |
 | `cpu` | `generic` | `generic-rv64` | the CPU when none is named |
 
@@ -313,8 +314,11 @@ several roles: `"role"="addi,addi12"`.
 | `dup.*`, `ins.*` | building vectors | where the machine has vectors |
 | `load.pair.<class>`, `store.pair.<class>` | saving two registers at once | no |
 
-The calling convention adds a few registers:
+The calling convention adds a few registers, and the stack's alignment:
 
+- `stack-align`: the stack pointer's alignment at calls, in bytes (16 for
+  all three conventions). Frames and the stack arguments' area are rounded
+  to it;
 - `scratch` and `fp-scratch`: for spill code;
 - `far-scratch`: for the address of a stack slot further away than an
   instruction's offset can reach (beyond 2,047 bytes on RISC-V). Without
@@ -335,10 +339,17 @@ still assumes about a machine:
 - **The vocabularies are fixed:** of conventions (`args`, `saved`,
   `stack-args`, ...), parameters and roles. A convention passes integers
   and floating-point values in two lists of registers. A machine needing
-  something they cannot say (delay slots, register windows, AArch64's
-  `va_list` for another convention) needs Rust.
+  something they cannot say (delay slots, register windows) needs Rust. So
+  does AAPCS64's `va_list` (`va-list` = `aapcs64` only turns it on), and
+  the even-register rule for `i128` (`wide-pairs` = `even`).
 - **Flags are a lazy comparison** (`%nzcv`, the two values last compared),
   which suits AArch64's flags and machines without them alike.
+- **Some limits are found from the description, not named in it.** How
+  far a frame may be is what the save instructions' offsets reach (a frame
+  beyond that is made in two steps, the saves near `sp`). A large
+  adjustment of `sp` is split where the shifted add (`addi12`) takes its
+  smallest step. Constants are built a chunk at a time, the chunk being the
+  widest immediate `movz.x` holds unshifted.
 - **No state between instructions** beyond registers and flags, such as
   RVV's vector length.
 

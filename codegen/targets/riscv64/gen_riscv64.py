@@ -601,7 +601,7 @@ out("70-abi.ll", HEADER.format(what="the LP64D calling convention") + """
 ; t6 (and ft9-ft11) are kept for spill code, and t4 for the addresses of
 ; stack slots too far for an offset ("far-scratch").
 
-!abi.lp64d = !{!100, !101, !102, !103, !104, !105, !106, !107, !108, !109, !110, !111, !112, !113, !114, !115, !116, !117}
+!abi.lp64d = !{!100, !101, !102, !103, !104, !105, !106, !107, !108, !109, !110, !111, !112, !113, !114, !115, !116, !117, !118}
 !100 = !{!"args", !"a0-a7"}
 !101 = !{!"result", !"a0"}
 !102 = !{!"clobbers", !"ra", !"t0-t2", !"a0-a7", !"t3-t6"}
@@ -620,6 +620,7 @@ out("70-abi.ll", HEADER.format(what="the LP64D calling convention") + """
 !115 = !{!"fp-scratch", !"ft9-ft11"}
 !116 = !{!"far-scratch", !"t4"}
 !117 = !{!"base", !"s1"}
+!118 = !{!"stack-align", !"16"}
 """)
 
 for name, parts in files.items():

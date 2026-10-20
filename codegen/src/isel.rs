@@ -127,6 +127,8 @@ pub struct Sel<'a, 'b> {
     block_floats: HashMap<(usize, u64, Class), VReg>,
     /// The addresses of globals made in each block, for later uses there.
     block_addrs: HashMap<(usize, ConstId), VReg>,
+    /// `move_wide_of` for 32 and 64 bits.
+    move_wide: [Option<(usize, usize, u32)>; 2],
     hoisted_addr: HashMap<ConstId, VReg>,
     /// The registers holding each part of a small struct parameter.
     agg_params: HashMap<LocalId, Vec<VReg>>,
@@ -302,6 +304,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             block_ints: HashMap::new(),
             block_floats: HashMap::new(),
             block_addrs: HashMap::new(),
+            move_wide: [move_wide_of(t, false), move_wide_of(t, true)],
             hoisted_addr: HashMap::new(),
             agg_params: HashMap::new(),
             va_offset: 0,
@@ -1276,12 +1279,28 @@ impl<'a, 'b> Sel<'a, 'b> {
         Ok(r)
     }
 
+    fn move_wide(&self, wide: bool) -> Option<(usize, usize, u32)> {
+        self.move_wide[wide as usize]
+    }
+
+    /// A value with one nonzero chunk above the lowest: one shifted `movz`,
+    /// which is what an assembler makes of `mov` for such a value (it
+    /// prefers movz to movn).
+    fn shifted_movz(&self, u: u64, wide: bool) -> bool {
+        let Some((movz, _, chunk)) = self.move_wide(wide) else { return false };
+        let s = u.trailing_zeros() / chunk * chunk;
+        u != 0
+            && s > 0
+            && s < 64
+            && (u >> s) < (1u64 << chunk)
+            && self.t.instrs[movz].fits(&[None, Some((u >> s) as i64), Some(s as i64)])
+    }
+
     /// Whether `make_int` makes `v` with one instruction.
     fn one_instruction(&self, v: i64, wide: bool) -> bool {
         let bits = if wide { 64 } else { 32 };
         let u = (v as u64) & (u64::MAX >> (64 - bits));
-        let shifted_movz = u != 0 && u.trailing_zeros() >= 16 && (u >> (u.trailing_zeros() / 16 * 16)) <= 0xffff;
-        shifted_movz
+        self.shifted_movz(u, wide)
             || self.t.constants.iter().any(|&ci| {
                 let ins = &self.t.instrs[ci];
                 self.cx.enabled(ci) && (ins.operands[0].bits > 32) == wide && ins.fits(&[None, Some(v)])
@@ -1290,12 +1309,11 @@ impl<'a, 'b> Sel<'a, 'b> {
 
     fn make_int(&mut self, v: i64, wide: bool) -> Result<Reg, String> {
         let d = self.ivreg(wide);
-        // One nonzero 16 bits above the lowest is a shifted movz, which is
-        // what an assembler makes of `mov` for such a value (it prefers
-        // movz to movn): written out so that both say the same.
+        // A shifted movz is written out as one, so that we and an assembler
+        // say the same.
         let bits = if wide { 64 } else { 32 };
         let u = (v as u64) & (u64::MAX >> (64 - bits));
-        let shifted_movz = u != 0 && u.trailing_zeros() >= 16 && (u >> (u.trailing_zeros() / 16 * 16)) <= 0xffff;
+        let shifted_movz = self.shifted_movz(u, wide);
         // One instruction, if the description has one that holds it.
         for &ci in self.t.constants.iter().filter(|&&ci| !shifted_movz && self.cx.enabled(ci)) {
             let ins = &self.t.instrs[ci];
@@ -1308,18 +1326,17 @@ impl<'a, 'b> Sel<'a, 'b> {
             }
         }
         // Without movz and movk: a high part, plus the low bits by an add.
-        if self.t.role("movz.x").is_none() {
+        let Some((movz, movk, chunk)) = self.move_wide(wide) else {
             return self.make_int_pieces(d, v, wide);
-        }
-        // Otherwise sixteen bits at a time.
-        let (movz, movk, pieces) = if wide {
-            (self.t.by_role("movz.x"), self.t.by_role("movk.x"), 4)
-        } else {
-            (self.t.by_role("movz.w"), self.t.by_role("movk.w"), 2)
         };
+        // Otherwise a chunk at a time.
+        let pieces = (bits as u32).div_ceil(chunk);
+        let mask = (1u64 << chunk) - 1;
         let u = v as u64;
-        let chunks: Vec<(i64, i64)> =
-            (0..pieces).map(|k| (((u >> (16 * k)) & 0xffff) as i64, 16 * k as i64)).filter(|(c, _)| *c != 0).collect();
+        let chunks: Vec<(i64, i64)> = (0..pieces)
+            .map(|k| (((u >> (chunk * k)) & mask) as i64, (chunk * k) as i64))
+            .filter(|(c, _)| *c != 0)
+            .collect();
         let (first, rest) = chunks.split_first().expect("zero is made above");
         self.push(MInst::new(movz, vec![MOp::Reg(Reg::V(d)), MOp::Imm(first.0), MOp::Imm(first.1)]));
         for &(c, sh) in rest {
@@ -2633,4 +2650,15 @@ fn mem_size(size: u64, fp: bool) -> &'static str {
         (4, _) => "w",
         _ => "x",
     }
+}
+
+/// The description's move-wide pair (roles `movz.x`/`movk.x`, or `.w`),
+/// and how many bits one moves: the widest immediate `movz` holds
+/// unshifted (AArch64's 16).
+fn move_wide_of(t: &Target, wide: bool) -> Option<(usize, usize, u32)> {
+    let (z, k) = if wide { ("movz.x", "movk.x") } else { ("movz.w", "movk.w") };
+    let (movz, movk) = (t.role(z)?, t.role(k)?);
+    let fits = |c: u32| t.instrs[movz].fits(&[None, Some((1i64 << c) - 1), Some(0)]);
+    let chunk = (1..=32).rev().find(|&c| fits(c))?;
+    Some((movz, movk, chunk))
 }
