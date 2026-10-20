@@ -13,6 +13,7 @@ pub mod apint;
 pub mod chop;
 pub mod edit;
 pub mod float;
+pub mod io;
 pub mod layout;
 pub mod lexer;
 pub mod metadata;

@@ -10,8 +10,9 @@ use epitome_codegen::target::Target;
 
 const USAGE: &str = "usage: epitome-as [options] <file.s>
 
-  -o <file>               write the object here (default: the input's name
-                          with .o)
+  -o <file>               write the object here, - for stdout (default: the
+                          input's name with .o; needed when the input is -,
+                          standard input)
   --format=macho|elf      the object file format (default: Mach-O if the
                           assembly names Mach-O sections or has
                           .build_version, else ELF)
@@ -48,7 +49,7 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             },
-            s if s.starts_with('-') => {
+            s if s.starts_with('-') && s != "-" => {
                 eprintln!("epitome-as: unknown option {s}\n\n{USAGE}");
                 return ExitCode::FAILURE;
             }
@@ -59,7 +60,14 @@ fn main() -> ExitCode {
         eprintln!("{USAGE}");
         return ExitCode::FAILURE;
     };
-    let output = output.unwrap_or_else(|| format!("{}.o", input.strip_suffix(".s").unwrap_or(&input)));
+    let output = match output {
+        Some(o) => o,
+        None if input == "-" => {
+            eprintln!("epitome-as: reading standard input needs -o");
+            return ExitCode::FAILURE;
+        }
+        None => format!("{}.o", input.strip_suffix(".s").unwrap_or(&input)),
+    };
     let target = match Target::resolve(target_file.as_deref(), "", &adds) {
         Ok(t) => t,
         Err(e) => {
@@ -67,7 +75,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let text = match std::fs::read_to_string(&input) {
+    let text = match epitome_ir::io::read_to_string(&input) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("epitome-as: {input}: {e}");
@@ -90,7 +98,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if let Err(e) = std::fs::write(&output, bytes) {
+    if let Err(e) = epitome_ir::io::write(&output, bytes) {
         eprintln!("epitome-as: {output}: {e}");
         return ExitCode::FAILURE;
     }

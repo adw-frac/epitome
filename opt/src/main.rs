@@ -12,7 +12,8 @@ const USAGE: &str = "usage: epitome-opt [options] <file.ll>
 
   -O1 -O2 -O3 -Os -Oz     optimisation level (default -O2)
   -j <n>                  threads (default: one per core)
-  -o <file>               write the result here instead of stdout
+  -o <file>               write the result here instead of stdout (- is
+                          stdout; an input of - is stdin)
   --passes=<list>         which passes to run, from sroa, mem2reg, inline,
                           recursion, combine, simplifycfg, loops, cse,
                           memory (the combiner's memory rules) and
@@ -135,7 +136,7 @@ fn main() -> ExitCode {
                     other => return usage(&format!("unknown recursion mode {other}")),
                 }
             }
-            s if s.starts_with('-') => return usage(&format!("unknown option {s}")),
+            s if s.starts_with('-') && s != "-" => return usage(&format!("unknown option {s}")),
             s => input = Some(s.to_string()),
         }
     }
@@ -145,7 +146,7 @@ fn main() -> ExitCode {
         Err(e) => return usage(&e),
     };
 
-    let src = match std::fs::read_to_string(&path) {
+    let src = match epitome_ir::io::read_to_string(&path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("{path}: {e}");
@@ -323,7 +324,7 @@ fn main() -> ExitCode {
     }
     match output {
         Some(o) => {
-            if let Err(e) = std::fs::write(&o, text) {
+            if let Err(e) = epitome_ir::io::write(&o, text) {
                 eprintln!("{o}: {e}");
                 return ExitCode::FAILURE;
             }

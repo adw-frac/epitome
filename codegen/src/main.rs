@@ -14,8 +14,9 @@ const USAGE: &str = "usage: epitome-llc [options] <file.ll>
                           from 0) get every elective choice, F its first T,
                           the rest none; also EPITOME_LLC_CHOP
   --chop-counts           print each function's count of elective choices
-  -o <file>               write the output here instead of stdout; a name
-                          ending in .o asks for an object file
+  -o <file>               write the output here instead of stdout (- is
+                          stdout; an input of - is stdin); a name ending in
+                          .o asks for an object file
   --filetype=asm|obj      assembly (the default) or an object file, Mach-O
                           or ELF as the convention uses
   --target=<name|path>    the machine description: a .ll file, a directory
@@ -92,7 +93,7 @@ fn main() -> ExitCode {
             "--syntax=macho" => opts.syntax = Some(epitome_codegen::abi::Syntax::MachO),
             "--syntax=elf" => opts.syntax = Some(epitome_codegen::abi::Syntax::Elf),
             s if s.starts_with("--reserve=") => reserve.extend(s["--reserve=".len()..].split(',').map(str::to_string)),
-            s if s.starts_with('-') => {
+            s if s.starts_with('-') && s != "-" => {
                 eprintln!("epitome-llc: unknown option {s}\n\n{USAGE}");
                 return ExitCode::FAILURE;
             }
@@ -131,7 +132,7 @@ fn main() -> ExitCode {
         eprintln!("{USAGE}");
         return ExitCode::FAILURE;
     };
-    let src = match std::fs::read_to_string(&input) {
+    let src = match epitome_ir::io::read_to_string(&input) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("epitome-llc: {input}: {e}");
@@ -241,7 +242,7 @@ fn main() -> ExitCode {
             eprintln!("epitome-llc: an object file needs -o");
             return ExitCode::FAILURE;
         };
-        if let Err(e) = std::fs::write(&path, bytes) {
+        if let Err(e) = epitome_ir::io::write(&path, bytes) {
             eprintln!("epitome-llc: {path}: {e}");
             return ExitCode::FAILURE;
         }
@@ -276,7 +277,7 @@ fn main() -> ExitCode {
     }
     match output {
         Some(path) => {
-            if let Err(e) = std::fs::write(&path, text) {
+            if let Err(e) = epitome_ir::io::write(&path, text) {
                 eprintln!("epitome-llc: {path}: {e}");
                 return ExitCode::FAILURE;
             }
