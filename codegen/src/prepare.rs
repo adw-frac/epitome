@@ -283,7 +283,11 @@ fn expand_small_mem_ops(cx: &mut Ctx, f: &mut Function) {
                 continue;
             }
             let len = len as u64;
-            let widest = if copy { align(0).min(align(1)) } else { align(0) }.clamp(1, 8);
+            let widest = if cx.t.machine.unaligned_fast {
+                8
+            } else {
+                if copy { align(0).min(align(1)) } else { align(0) }.clamp(1, 8)
+            };
             // The pieces: (offset, bytes), each as wide as it can be.
             let mut pieces = Vec::new();
             let mut at = 0u64;
@@ -305,9 +309,13 @@ fn expand_small_mem_ops(cx: &mut Ctx, f: &mut Function) {
                 continue;
             }
             let (dst, src) = (arg(0), arg(1));
+            let (dst_align, src_align) = (align(0), if copy { align(1) } else { 1 });
             let (i8t, i64t, ptr) = (cx.m.types.int(8), cx.m.types.int(64), cx.m.types.ptr(0));
             let mut s = Seq { f, new: Vec::new() };
             for (off, w) in pieces {
+                // What alignment each piece really has: the call's, at
+                // most, and no more than its offset's.
+                let real = |a: u64| if off == 0 { a } else { a.min(1 << off.trailing_zeros()) };
                 let ty = cx.m.types.int(8 * w as u32);
                 let at_off = |cx: &mut Ctx, s: &mut Seq, p: Value| {
                     if off == 0 {
@@ -324,12 +332,12 @@ fn expand_small_mem_ops(cx: &mut Ctx, f: &mut Function) {
                     }
                     None => {
                         let from = at_off(cx, &mut s, src);
-                        s.op(Op::Load { volatile: false, atomic: None, ptr: from, align: Some(w.min(widest)) }, ty)
+                        s.op(Op::Load { volatile: false, atomic: None, ptr: from, align: Some(real(src_align).min(w)) }, ty)
                     }
                 };
                 let to = at_off(cx, &mut s, dst);
                 let st = s.f.add_inst(
-                    Op::Store { volatile: false, atomic: None, value, ptr: to, align: Some(w.min(widest)) },
+                    Op::Store { volatile: false, atomic: None, value, ptr: to, align: Some(real(dst_align).min(w)) },
                     None,
                 );
                 s.new.push(st);

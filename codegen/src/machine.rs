@@ -255,6 +255,9 @@ pub struct Machine {
     /// Branches on a boolean in a register must compare the whole register
     /// (RISC-V), rather than test its lowest bit (AArch64's `tbnz`).
     pub compare_booleans: bool,
+    /// Loads and stores need no alignment and cost no more without it
+    /// (`unaligned-access` = `fast`), so small copies may use wide ones.
+    pub unaligned_fast: bool,
     pub asm_constraints: HashMap<char, AsmCode>,
     pub asm_modifiers: HashMap<char, AsmModifier>,
     /// How assembly starts a comment.
@@ -386,6 +389,7 @@ impl Machine {
             cpus: Vec::new(),
             default_cpu: None,
             compare_booleans: false,
+            unaligned_fast: false,
             asm_constraints: HashMap::new(),
             asm_modifiers: HashMap::new(),
             asm_comment: String::new(),
@@ -415,6 +419,11 @@ impl Machine {
             None | Some("bit") => false,
             Some("compare") => true,
             Some(o) => return Err(format!("target parameter boolean-branches: {o}")),
+        };
+        mc.unaligned_fast = match params.get("unaligned-access").map(String::as_str) {
+            None | Some("no") => false,
+            Some("fast") => true,
+            Some(o) => return Err(format!("target parameter unaligned-access: {o}")),
         };
         for t in tuples(m, "target.cpus") {
             if let Some((name, feats)) = t.split_first() {

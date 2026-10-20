@@ -20,6 +20,7 @@ pub mod macho;
 pub mod mir;
 pub mod objdump;
 pub mod object;
+pub mod peephole;
 pub mod prepare;
 pub mod regalloc;
 pub mod target;
@@ -174,6 +175,7 @@ fn compile_function(t: &Target, abi: &abi::Abi, cx: &mut Ctx, job: &Job, opts: &
     let now = Instant::now();
     let mut mf = isel::Sel::new(t, abi, cx, &prepared, &job.name, job.global).run()?;
     timing::add(&timing::SELECT, now);
+    peephole::redundant_compares(t, &mut mf);
     if opts.stop != Stop::AfterSelection {
         let now = Instant::now();
         regalloc::allocate(t, &mut mf)?;

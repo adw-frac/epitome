@@ -65,7 +65,31 @@ impl Busy {
     }
 }
 
+/// Allocates registers. Spill code needs scratch registers (`scratch`,
+/// `fp-scratch`), and so do frames too big for an instruction's offsets;
+/// a function that needs neither may use them like any others. So the
+/// first attempt, for a small frame, allocates the scratch registers too,
+/// and is kept if nothing spills: the function then has no scratch
+/// registers, and anything after that would need one says so. Otherwise
+/// the allocation is made again with them kept free.
 pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
+    let slots: u64 = f.slots.iter().map(|s| s.size + s.align).sum();
+    let small = !f.dynamic_stack && slots + f.out_size.max(0) as u64 + 512 < 4000;
+    if small && !(f.abi.scratch.is_empty() && f.abi.fp_scratch.is_empty()) {
+        let kept = f.abi.clone();
+        f.abi.scratch.clear();
+        f.abi.fp_scratch.clear();
+        if allocate_with(t, f, true)? {
+            return Ok(());
+        }
+        f.abi = kept;
+    }
+    allocate_with(t, f, false).map(|_| ())
+}
+
+/// Allocates registers; with `bail` set, gives up (`false`, nothing
+/// changed) instead of spilling.
+fn allocate_with(t: &Target, f: &mut MFunc, bail: bool) -> Result<bool, String> {
     record_copy_classes(f);
     let m = &t.machine;
     let abi = f.abi.clone();
@@ -293,6 +317,9 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
             None => spilled.push(v),
         }
     }
+    if bail && !spilled.is_empty() {
+        return Ok(false);
+    }
 
     // Spill slots, and loads and stores around each use and definition.
     let mut slot_of: HashMap<VReg, usize> = HashMap::new();
@@ -396,7 +423,7 @@ pub fn allocate(t: &Target, f: &mut MFunc) -> Result<(), String> {
         }
         b.insts = new;
     }
-    lower_copies(t, f)
+    lower_copies(t, f).map(|_| true)
 }
 
 /// Turns copies into moves, dropping those between the same register:

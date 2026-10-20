@@ -122,6 +122,8 @@ pub struct Sel<'a, 'b> {
     /// use in the same block takes the same register.
     block_ints: HashMap<(usize, i64, bool), VReg>,
     block_floats: HashMap<(usize, u64, Class), VReg>,
+    /// The addresses of globals made in each block, for later uses there.
+    block_addrs: HashMap<(usize, ConstId), VReg>,
     hoisted_addr: HashMap<ConstId, VReg>,
     /// The registers holding each part of a small struct parameter.
     agg_params: HashMap<LocalId, Vec<VReg>>,
@@ -296,6 +298,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             hoisted: HashMap::new(),
             block_ints: HashMap::new(),
             block_floats: HashMap::new(),
+            block_addrs: HashMap::new(),
             hoisted_addr: HashMap::new(),
             agg_params: HashMap::new(),
             va_offset: 0,
@@ -1016,6 +1019,31 @@ impl<'a, 'b> Sel<'a, 'b> {
     }
 
     fn const_reg(&mut self, c: ConstId, class: Class) -> Result<Reg, String> {
+        // A global's address, made once per block.
+        let address = !matches!(self.t.machine.def(class).holds, Some(Holds::Float | Holds::Vector))
+            && !matches!(
+                self.cx.m.constant(c).kind,
+                ConstKind::Int(_)
+                    | ConstKind::Null
+                    | ConstKind::Zero
+                    | ConstKind::Undef
+                    | ConstKind::Poison
+                    | ConstKind::Expr(ConstExpr::Cast { op: CastOp::IntToPtr, .. })
+            );
+        if !address {
+            return self.const_reg_made(c, class);
+        }
+        if let Some(&r) = self.block_addrs.get(&(self.cur, c)) {
+            return Ok(Reg::V(r));
+        }
+        let r = self.const_reg_made(c, class)?;
+        if let Reg::V(x) = r {
+            self.block_addrs.insert((self.cur, c), x);
+        }
+        Ok(r)
+    }
+
+    fn const_reg_made(&mut self, c: ConstId, class: Class) -> Result<Reg, String> {
         let k = self.cx.m.constant(c).clone();
         let holds = self.t.machine.def(class).holds;
         if holds == Some(Holds::Vector) {
@@ -1214,7 +1242,14 @@ impl<'a, 'b> Sel<'a, 'b> {
         if let Some(&r) = self.hoisted.get(&(v, wide)).filter(|_| self.hoisting()) {
             return Ok(Reg::V(r));
         }
-        if self.hoisting() && draconian_ir::chop::allow(|| format!("hoist the constant {v} out of the loop")) {
+        // Only a constant that takes more than one instruction is worth a
+        // register for the whole loop: the allocator cannot make one again
+        // where registers run short, so a cheap one would only crowd out
+        // the loop's own values.
+        if self.hoisting()
+            && !self.one_instruction(v, wide)
+            && draconian_ir::chop::allow(|| format!("hoist the constant {v} out of the loop"))
+        {
             let r = self.in_entry(|s| s.make_int(v, wide))?;
             if let Reg::V(x) = r {
                 self.hoisted.insert((v, wide), x);
@@ -1229,6 +1264,18 @@ impl<'a, 'b> Sel<'a, 'b> {
             self.block_ints.insert((self.cur, v, wide), x);
         }
         Ok(r)
+    }
+
+    /// Whether `make_int` makes `v` with one instruction.
+    fn one_instruction(&self, v: i64, wide: bool) -> bool {
+        let bits = if wide { 64 } else { 32 };
+        let u = (v as u64) & (u64::MAX >> (64 - bits));
+        let shifted_movz = u != 0 && u.trailing_zeros() >= 16 && (u >> (u.trailing_zeros() / 16 * 16)) <= 0xffff;
+        shifted_movz
+            || self.t.constants.iter().any(|&ci| {
+                let ins = &self.t.instrs[ci];
+                self.cx.enabled(ci) && (ins.operands[0].bits > 32) == wide && ins.fits(&[None, Some(v)])
+            })
     }
 
     fn make_int(&mut self, v: i64, wide: bool) -> Result<Reg, String> {

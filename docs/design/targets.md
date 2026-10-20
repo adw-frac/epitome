@@ -136,6 +136,7 @@ read them. A template writes a register as another class names it with
 | `narrow-results` | `zero` | `sign` | how a 32-bit result sits in a 64-bit register |
 | `external-via-got` | `yes` | `no` | whether symbols defined elsewhere are reached through the GOT |
 | `boolean-branches` | `bit` | `compare` | whether a branch can test a boolean's low bit, or must compare whole registers |
+| `unaligned-access` | `fast` | (`no`) | whether loads and stores need no alignment, at no cost, so small copies may use wide ones |
 | `elf-machine`, `elf-flags`, `macho-cpu` | 183, 0, `0x0100000c` | 243, 4 | the object files' identity |
 | `cpu` | `generic` | `generic-rv64` | the CPU when none is named |
 

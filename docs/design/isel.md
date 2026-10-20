@@ -340,6 +340,38 @@ library, and so do volatile ones and memsets of a value not known. The
 optimiser's `memcpyopt` turns runs of narrow stores into memsets that come
 back here as wide ones: a struct's six fields zeroed become three `str xzr`.
 
+On a machine whose target parameter `unaligned-access` is `fast` (AArch64),
+the pieces are as wide as what is left allows, whatever the alignment: a
+20-byte copy from a string is two 8-byte loads and stores and a 4-byte
+pair. Each access still claims only the alignment it really has, the
+call's at most and no more than its offset's.
+
+### Values made once per block, or once per loop
+
+A constant (an integer, a float's bits) or a global's address that a block
+needs again is taken from the register that holds it already, rather than
+made again (`adrp` and `add` each time). The cache is per block, so the
+register's live range stays within it.
+
+In a loop, an address, or an integer that takes more than one instruction
+to make, is made once in the entry block instead. An integer one
+instruction makes (`mov w0, #8`) is not: the allocator cannot make it again
+where registers run short, so holding it for the whole loop would push the
+loop's own values to the stack. A loop calling a function with eight
+constant arguments kept all eight in callee-saved registers, and spilled
+its counters. **Later:** with rematerialisation in the allocator, hoist
+these too and let the allocator undo it.
+
+### Redundant compares
+
+A pattern covers a compare together with what reads the flags, so each
+reader comes with its own compare: `(a < b) + (a == b) * 2` compares `a` and
+`b` twice. After selection, `peephole::redundant_compares` removes a compare
+the same as the last instruction in the block that set the flags, on the
+same operands, when nothing between them wrote the flags (another compare,
+a call, anything with `imp_defs`, inline assembly) or either operand. Each
+removal is an elective change (autochop).
+
 ### Address sinking
 
 Selection looks at one block at a time, so an address computed in another
