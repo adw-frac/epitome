@@ -128,6 +128,7 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     drop_noop_calls(cx, &mut f);
     lower_switches(cx, &mut f);
     expand_intrinsics(cx, &mut f);
+    lane_indices(cx, &mut f);
     split_aggregate_memory(cx, &mut f);
     expand_small_mem_ops(cx, &mut f);
     crate::legalize::legalize_vectors(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
@@ -1238,6 +1239,44 @@ fn expand_overflow(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         (v, cmp(&mut s, ICmpPred::Ne, hi, sign))
                     }
                 }
+                // 128 bits, from the 64-bit halves (a = ah:al, b = bh:bl):
+                // it overflows if both high halves are nonzero, if either
+                // cross product (ah*bl, al*bh) needs more than 64 bits, or
+                // if the middle column (their low halves, plus the carry
+                // from al*bl) carries out.
+                "umul" if bits == 128 => {
+                    let i64t = cx.m.types.int(64);
+                    let c64 = cx.int(ty, 64);
+                    let lo64 = |s: &mut Seq, x: Value| s.cast(CastOp::Trunc, x, i64t);
+                    let hi64 = |s: &mut Seq, x: Value| {
+                        let h = s.bin(BinOp::LShr, x, c64, ty);
+                        s.cast(CastOp::Trunc, h, i64t)
+                    };
+                    let (al, ah, bl, bh) = (lo64(&mut s, a), hi64(&mut s, a), lo64(&mut s, b2), hi64(&mut s, b2));
+                    let wide = |s: &mut Seq, x: Value, y: Value| {
+                        let (wx, wy) = (s.cast(CastOp::ZExt, x, ty), s.cast(CastOp::ZExt, y, ty));
+                        s.bin(BinOp::Mul, wx, wy, ty)
+                    };
+                    let (p0, p1, p2) = (wide(&mut s, al, bl), wide(&mut s, ah, bl), wide(&mut s, al, bh));
+                    let z64 = cx.int(i64t, 0);
+                    let ah_nz = cmp(&mut s, ICmpPred::Ne, ah, z64);
+                    let bh_nz = cmp(&mut s, ICmpPred::Ne, bh, z64);
+                    let mut ov = s.bin(BinOp::And, ah_nz, bh_nz, i1);
+                    let (h1, h2) = (hi64(&mut s, p1), hi64(&mut s, p2));
+                    for h in [h1, h2] {
+                        let nz = cmp(&mut s, ICmpPred::Ne, h, z64);
+                        ov = s.bin(BinOp::Or, ov, nz, i1);
+                    }
+                    let (l1, l2) = (lo64(&mut s, p1), lo64(&mut s, p2));
+                    let (w1, w2) = (s.cast(CastOp::ZExt, l1, ty), s.cast(CastOp::ZExt, l2, ty));
+                    let carry = s.bin(BinOp::LShr, p0, c64, ty);
+                    let mid = s.bin(BinOp::Add, w1, w2, ty);
+                    let mid = s.bin(BinOp::Add, mid, carry, ty);
+                    let out = hi64(&mut s, mid);
+                    let nz = cmp(&mut s, ICmpPred::Ne, out, z64);
+                    ov = s.bin(BinOp::Or, ov, nz, i1);
+                    (s.bin(BinOp::Mul, a, b2, ty), ov)
+                }
                 _ => return Err(format!("{name} is not supported yet")),
             };
             // The extractvalues of the result take its parts; anything
@@ -1462,12 +1501,57 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                     let min = cx.const_int(args[1]).unwrap_or(0) != 0;
                     Some(cx.int(ty, if min { 0 } else { -1 }))
                 }
+                // Three-way comparison (Rust's `Ord::cmp`): 1, 0 or -1, as
+                // (a > b) - (a < b).
+                (_, "llvm.ucmp" | "llvm.scmp") if scalar => {
+                    let signed = base == "llvm.scmp";
+                    let (gt, lt) = if signed { (ICmpPred::Sgt, ICmpPred::Slt) } else { (ICmpPred::Ugt, ICmpPred::Ult) };
+                    let g = s.op(Op::ICmp { pred: gt, samesign: false, lhs: args[0], rhs: args[1] }, i1);
+                    let l = s.op(Op::ICmp { pred: lt, samesign: false, lhs: args[0], rhs: args[1] }, i1);
+                    let (g, l) = (s.cast(CastOp::ZExt, g, ty), s.cast(CastOp::ZExt, l, ty));
+                    Some(s.bin(BinOp::Sub, g, l, ty))
+                }
+                // Whether a value is known to be constant here: "no" is
+                // always an allowed answer. (An optimiser folds the cases
+                // it can see.)
+                (_, "llvm.is") if name.starts_with("llvm.is.constant") => Some(cx.int(ty, 0)),
                 // Saturating subtraction: a > b ? a - b : 0.
                 (_, "llvm.usub") if scalar && name.starts_with("llvm.usub.sat") => {
                     let zero = cx.int(ty, 0);
                     let diff = s.bin(BinOp::Sub, args[0], args[1], ty);
                     let c = s.op(Op::ICmp { pred: ICmpPred::Ugt, samesign: false, lhs: args[0], rhs: args[1] }, i1);
                     Some(s.op(Op::Select { fmf: FastMath::default(), cond: c, then_value: diff, else_value: zero }, ty))
+                }
+                // Saturating addition: the sum, or all ones if it wrapped
+                // (came out below an operand).
+                (_, "llvm.uadd") if scalar && name.starts_with("llvm.uadd.sat") => {
+                    let ones = cx.int(ty, -1);
+                    let sum = s.bin(BinOp::Add, args[0], args[1], ty);
+                    let c = s.op(Op::ICmp { pred: ICmpPred::Ult, samesign: false, lhs: sum, rhs: args[0] }, i1);
+                    Some(s.op(Op::Select { fmf: FastMath::default(), cond: c, then_value: ones, else_value: sum }, ty))
+                }
+                // Signed saturation: on overflow, the most negative value if
+                // a is negative, else the most positive (a's sign bit
+                // spread, xor the most positive). Addition overflows when
+                // the result's sign differs from both operands'; subtraction
+                // when the operands' signs differ and the result's differs
+                // from a's.
+                (_, "llvm.sadd" | "llvm.ssub")
+                    if scalar && bits <= 64 && (name.starts_with("llvm.sadd.sat") || name.starts_with("llvm.ssub.sat")) =>
+                {
+                    let add = base == "llvm.sadd";
+                    let (a, b) = (args[0], args[1]);
+                    let r = s.bin(if add { BinOp::Add } else { BinOp::Sub }, a, b, ty);
+                    let ar = s.bin(BinOp::Xor, a, r, ty);
+                    let other = if add { s.bin(BinOp::Xor, b, r, ty) } else { s.bin(BinOp::Xor, a, b, ty) };
+                    let both = s.bin(BinOp::And, ar, other, ty);
+                    let zero = cx.int(ty, 0);
+                    let over = s.op(Op::ICmp { pred: ICmpPred::Slt, samesign: false, lhs: both, rhs: zero }, i1);
+                    let top = cx.int(ty, bits as i64 - 1);
+                    let sign = s.bin(BinOp::AShr, a, top, ty);
+                    let max = cx.int(ty, if bits >= 64 { i64::MAX } else { (1i64 << (bits - 1)) - 1 });
+                    let sat = s.bin(BinOp::Xor, sign, max, ty);
+                    Some(s.op(Op::Select { fmf: FastMath::default(), cond: over, then_value: sat, else_value: r }, ty))
                 }
                 // Vector abs keeps its call, for the abs instruction; its
                 // flag (poison for the most negative value) may be dropped.
@@ -1676,6 +1760,125 @@ fn popcount(cx: &mut Ctx, s: &mut Seq, x: Value, w: u32) -> Value {
     }
     let m = c(cx, 0x7f);
     s.bin(BinOp::And, x, m, wt)
+}
+
+/// Bit casts between a vector of booleans and an integer of as many bits
+/// (`bitcast <16 x i1> %m to i16`, a vector comparison's lanes as a mask),
+/// lane by lane: the lanes extended to bytes, each extracted, extended and
+/// shifted to its bit, and
+/// the bits or'ed; or the other way, each bit shifted down, truncated and
+/// inserted. Lane k is bit k. Run after `legalize::fix_masks`, which
+/// makes the common `icmp eq (bitcast mask), 0` a reduction; casts left
+/// unused by that are skipped.
+pub(crate) fn bool_vector_casts(cx: &mut Ctx, f: &mut Function) {
+    let i1 = cx.m.types.int(1);
+    let i64t = cx.m.types.int(64);
+    let mut used = std::collections::HashSet::new();
+    for &b in &f.layout {
+        for &i in &f.blocks[b.index()].insts {
+            f.insts[i.index()].op.for_each_value(|v| {
+                if let Value::Local(l) = v {
+                    used.insert(*l);
+                }
+            });
+        }
+    }
+    for b in f.layout.clone() {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let (Op::Cast { op: CastOp::BitCast, value, .. }, Some(r)) = (&f.insts[i.index()].op, f.insts[i.index()].result)
+            else {
+                k += 1;
+                continue;
+            };
+            let value = *value;
+            if !used.contains(&r) {
+                k += 1;
+                continue;
+            }
+            let (from, to) = (cx.value_ty(f, value), f.locals[r.index()].ty);
+            let lanes_of = |cx: &Ctx, t: TypeId| match cx.m.types.get(t) {
+                Type::Vector { len, elem, scalable: false } if *elem == i1 => Some(*len as u32),
+                _ => None,
+            };
+            let bits_of = |cx: &Ctx, t: TypeId| match cx.m.types.get(t) {
+                Type::Int(w) if *w <= 64 => Some(*w),
+                _ => None,
+            };
+            let mut s = Seq { f, new: Vec::new() };
+            let out = match (lanes_of(cx, from), bits_of(cx, to), bits_of(cx, from), lanes_of(cx, to)) {
+                (Some(n), Some(w), _, _) if n == w => {
+                    // The lanes as bytes of 0 or 1 first: masks have
+                    // instructions for that, and bytes can be extracted.
+                    let i8t = cx.m.types.int(8);
+                    let bytes_ty = cx.m.types.intern(Type::Vector { scalable: false, len: n, elem: i8t });
+                    let bytes = s.cast(CastOp::ZExt, value, bytes_ty);
+                    let mut acc = cx.int(to, 0);
+                    for lane in 0..n {
+                        let idx = cx.int(i64t, lane as i64);
+                        let e = s.op(Op::ExtractElement { vector: bytes, index: idx }, i8t);
+                        let z = s.cast(CastOp::ZExt, e, to);
+                        let sh = cx.int(to, lane as i64);
+                        let bit = if lane == 0 { z } else { s.bin(BinOp::Shl, z, sh, to) };
+                        acc = if lane == 0 { bit } else { s.bin(BinOp::Or, acc, bit, to) };
+                    }
+                    acc
+                }
+                (_, _, Some(w), Some(n)) if n == w => {
+                    // Bytes of 0 or 1, then compared with zero.
+                    let i8t = cx.m.types.int(8);
+                    let bytes_ty = cx.m.types.intern(Type::Vector { scalable: false, len: n, elem: i8t });
+                    let one = cx.int(from, 1);
+                    let mut acc = Value::Const(cx.m.consts.intern(Constant { ty: bytes_ty, kind: ConstKind::Poison }));
+                    for lane in 0..n {
+                        let sh = cx.int(from, lane as i64);
+                        let down = if lane == 0 { value } else { s.bin(BinOp::LShr, value, sh, from) };
+                        let bit = s.bin(BinOp::And, down, one, from);
+                        let byte = s.cast(CastOp::Trunc, bit, i8t);
+                        let idx = cx.int(i64t, lane as i64);
+                        acc = s.op(Op::InsertElement { vector: acc, element: byte, index: idx }, bytes_ty);
+                    }
+                    let zero = Value::Const(cx.m.consts.intern(Constant { ty: bytes_ty, kind: ConstKind::Zero }));
+                    s.op(Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: acc, rhs: zero }, to)
+                }
+                _ => {
+                    k += 1;
+                    continue;
+                }
+            };
+            let new = std::mem::take(&mut s.new);
+            f.replace_uses(Value::Local(r), out);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
+}
+
+/// Constant lane indices as `i64`, whatever type they were written with
+/// (rustc writes `i32 0`): the description's patterns name them so, and a
+/// lane's number does not depend on its type.
+fn lane_indices(cx: &mut Ctx, f: &mut Function) {
+    let i64t = cx.m.types.int(64);
+    for b in f.layout.clone() {
+        for k in 0..f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let index = match &f.insts[i.index()].op {
+                Op::ExtractElement { index, .. } | Op::InsertElement { index, .. } => *index,
+                _ => continue,
+            };
+            if cx.value_ty(f, index) == i64t {
+                continue;
+            }
+            let Some(v) = cx.const_int(index) else { continue };
+            let new = cx.int(i64t, v);
+            match &mut f.insts[i.index()].op {
+                Op::ExtractElement { index, .. } | Op::InsertElement { index, .. } => *index = new,
+                _ => {}
+            }
+        }
+    }
 }
 
 /// Builds instructions to go before another, of one integer type.

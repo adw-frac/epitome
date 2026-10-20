@@ -172,3 +172,32 @@ fn riscv_tables_are_llvms() {
         .collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Rust's shape for dropping a value while unwinding: the landing pad
+/// saves the exception and invokes the drop, whose own landing pad only
+/// calls a function that does not return (`panic_in_cleanup`). Only
+/// unwind edges reach those pads, and block layout must keep them for the
+/// exception table.
+#[test]
+fn landing_pads_reached_only_by_unwinding_are_kept() {
+    let src = "target triple = \"arm64-apple-macosx14.0.0\"\n\
+        declare i1 @may_throw()\n\
+        declare void @drop_it()\n\
+        declare void @abort() noreturn\n\
+        declare i32 @__gxx_personality_v0(...)\n\
+        define i1 @f() personality ptr @__gxx_personality_v0 {\n\
+        entry:\n  %slot = alloca { ptr, i32 }\n\
+          %r = invoke i1 @may_throw() to label %ok unwind label %cleanup\n\
+        again:\n  invoke void @drop_it() to label %resume unwind label %terminate\n\
+        cleanup:\n  %e = landingpad { ptr, i32 } cleanup\n  %e0 = extractvalue { ptr, i32 } %e, 0\n  %e1 = extractvalue { ptr, i32 } %e, 1\n\
+          store ptr %e0, ptr %slot\n  %at = getelementptr i8, ptr %slot, i64 8\n  store i32 %e1, ptr %at\n  br label %again\n\
+        ok:\n  call void @drop_it()\n  ret i1 %r\n\
+        terminate:\n  %t = landingpad { ptr, i32 } filter [0 x ptr] zeroinitializer\n  call void @abort()\n  unreachable\n\
+        resume:\n  %v0 = load ptr, ptr %slot\n  %at2 = getelementptr i8, ptr %slot, i64 8\n  %v1 = load i32, ptr %at2\n\
+          %w = insertvalue { ptr, i32 } poison, ptr %v0, 0\n  %v = insertvalue { ptr, i32 } %w, i32 %v1, 1\n  resume { ptr, i32 } %v\n}\n";
+    let t = Target::aarch64();
+    let mut m = epitome_ir::parse_module(src).unwrap();
+    let compiled = compile(&t, &mut m, &Options::default()).unwrap();
+    compiled.object_file(&t).unwrap();
+    assert!(compiled.asm.contains("_abort") && compiled.asm.contains("Unwind_Resume"), "{}", compiled.asm);
+}

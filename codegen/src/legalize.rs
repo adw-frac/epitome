@@ -841,6 +841,7 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     pointer_vectors(cx, f)?;
     rewrite_vector_ops(cx, f);
     fix_masks(cx, f)?;
+    crate::prepare::bool_vector_casts(cx, f);
     widen_masks(cx, f);
     chain_casts(cx, f);
     let mut parts: HashMap<LocalId, Vec<Value>> = HashMap::new();
@@ -1053,7 +1054,7 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                     let from_ty = cx.value_ty(bld.f, value);
                     let to_ty = res_ty.unwrap();
                     let (len, fe_ty, fe) = vec_info(cx, from_ty).ok_or("a cast of a split vector to a scalar")?;
-                    let (_, te_ty, te) = vec_info(cx, to_ty).unwrap();
+                    let (_, te_ty, te) = vec_info(cx, to_ty).ok_or("a cast of a split vector to a scalar")?;
                     // The source as 128-bit parts (one, if it is legal).
                     let src: Vec<Value> = match value {
                         Value::Local(x) if parts.contains_key(&x) => parts[&x].clone(),
@@ -1229,12 +1230,27 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                 }
                 Op::ExtractElement { vector, index } => {
                     let vt = cx.value_ty(bld.f, vector);
-                    let n = split_count(cx, vt).unwrap();
-                    let (vlen, elem, eb) = vec_info(cx, vt).unwrap();
-                    let pt = part(cx, vlen, elem, eb);
+                    let (vlen, elem, eb) = vec_info(cx, vt).ok_or("an extractelement from a split non-vector")?;
                     let idx =
                         cx.const_int(index).ok_or("an extractelement from a split vector at a lane not constant")?;
-                    let vs = parts_of(cx, &parts, bld.f, vector, n, pt)?;
+                    // A mask's parts say how it was split (its lanes have
+                    // no width of their own); else its type does.
+                    let made = match vector {
+                        Value::Local(x) => parts.get(&x).cloned(),
+                        _ => None,
+                    };
+                    let (vs, pt) = match made {
+                        Some(vs) if !vs.is_empty() => {
+                            let pt = cx.value_ty(bld.f, vs[0]);
+                            (vs, pt)
+                        }
+                        _ => {
+                            let n = split_count(cx, vt).ok_or("an extractelement from a mask split in no known way")?;
+                            let pt = part(cx, vlen, elem, eb);
+                            (parts_of(cx, &parts, bld.f, vector, n, pt)?, pt)
+                        }
+                    };
+                    let n = vs.len();
                     let l = (vlen as usize / n) as i64;
                     let i64t = cx.m.types.int(64);
                     let lane = cx.int(i64t, idx % l);

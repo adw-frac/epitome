@@ -98,3 +98,18 @@ fn panics_unwind_and_are_caught() {
 fn overflow_checks() {
     check("overflow");
 }
+
+#[test]
+fn saturating_arithmetic() {
+    check("saturating");
+}
+
+#[test]
+fn wide_multiplication_overflow() {
+    check("widemul");
+}
+
+#[test]
+fn three_way_comparisons() {
+    check("compare");
+}

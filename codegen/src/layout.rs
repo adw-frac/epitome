@@ -131,12 +131,16 @@ pub fn place(t: &Target, f: &mut MFunc) {
         }
     };
     let leaves = |b: usize| matches!(parts[b].1, Exit::Leaves);
-    // Which blocks anything still reaches.
+    // Which blocks anything still reaches: by the exits, and by labels in
+    // the instructions (a call's landing pad, which only unwinding reaches).
     let mut reached = vec![false; n];
     let mut stack = vec![0];
     while let Some(b) = stack.pop() {
         if !std::mem::replace(&mut reached[b], true) {
             stack.extend(succs(&parts[b].1));
+            for inst in &parts[b].0 {
+                stack.extend(inst.ops.iter().filter_map(|o| if let MOp::Label(x) = o { Some(*x) } else { None }));
+            }
         }
     }
 

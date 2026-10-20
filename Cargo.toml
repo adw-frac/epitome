@@ -6,6 +6,8 @@ repository = "https://github.com/andy-thomason/epitome"
 
 [dependencies]
 epitome-ir = { path = "ir" }
+epitome-opt = { path = "opt" }
+epitome-codegen = { path = "codegen" }
 
 [workspace]
 members = ["ir", "opt", "codegen"]

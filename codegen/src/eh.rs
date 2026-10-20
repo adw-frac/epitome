@@ -102,8 +102,13 @@ pub fn lsda(t: &Target, f: &MFunc, syntax: Syntax, symbol: &dyn Fn(&str) -> Stri
                 let n = t.instrs[k].operands.len();
                 let (landing, action) = match (inst.ops.get(n), inst.ops.get(n + 1)) {
                     (Some(MOp::Label(lp)), Some(MOp::Imm(a))) => {
-                        let a = *a as usize;
-                        (starts[*lp], chain_at[a].map_or(0, |c| c + 1))
+                        let c = usize::try_from(*a).ok().and_then(|a| chain_at.get(a)).ok_or_else(|| {
+                            format!("{}: a call with landing-pad action {a}, of {}", f.name, chain_at.len())
+                        })?;
+                        let at = starts.get(*lp).ok_or_else(|| {
+                            format!("{}: a call whose landing pad is block {lp}, of {}", f.name, starts.len())
+                        })?;
+                        (*at, c.map_or(0, |c| c + 1))
                     }
                     _ => (0, 0),
                 };
