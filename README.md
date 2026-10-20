@@ -22,7 +22,10 @@ and run their output with `clang` when it is installed.
 
 ## Crates
 
-- `ir` (`epitome-ir`): the IR, with a parser and printer for `.ll` files.
+- `epitome` (the root package): `epitome-rustc`, which builds Rust crates
+  with Epitome (see below), and `examples/factorial.rs`.
+- `ir` (`epitome-ir`): the IR, with a parser and printer for `.ll` files,
+  and builders for making it in code (`epitome_ir::build`).
 - `opt` (`epitome-opt`): optimisation passes, run on many functions in
   parallel. So far: the call graph, an inliner with a cost model,
   recursion removal, and a rule-driven combiner whose rules are in
@@ -40,6 +43,16 @@ and run their output with `clang` when it is installed.
 ## Running
 
 ```sh
+# Build a factorial function and a main in code, optimise and compile them,
+# then link and run the program (needs clang).
+cargo run --release --example factorial -- --run
+
+# Run a Rust crate's tests with its code compiled by Epitome (from this
+# directory; see "Building Rust crates with Epitome").
+cargo build --release --bin epitome-rustc
+W=$PWD/target/release/epitome-rustc
+(cd /path/to/some-crate && RUSTC_WRAPPER=$W cargo test)
+
 # Read a .ll file and print it back.
 cargo run --release -- file.ll
 
@@ -77,26 +90,43 @@ inputs with their expected output.
 
 ## Building IR in code
 
-`epitome_ir::build` has constructors for the main structures
-(`Types::function`, `Constant::int`, `Call::new`, `Global::function`,
-`Module::declare`, ...) and a `FunctionBuilder` that adds instructions at
-the end of the current block, working out result types and checking
-operands:
+`epitome_ir::build` has chained builders for functions and globals
+(`Function::builder`, `Global::builder`), and a `FunctionBuilder` that adds
+instructions at the end of the current block, working out result types and
+checking operands. Instructions with settings are chained too
+(`build_call`, `build_load`, `build_store`, `build_gep`, `build_binary`):
 
 ```rust
-let mut m = epitome_ir::Module::default();
+use epitome_ir::module::{BinOp, Function, ICmpPred, Linkage, Module};
+
+let mut m = Module::default();
 let i64t = m.types.int(64);
-let mut b = m.function("max", i64t, &[("a", i64t), ("b", i64t)]);
+let mut b = Function::builder("max")
+    .returns(i64t)
+    .param("a", i64t)
+    .param("b", i64t)
+    .linkage(Linkage::Internal)
+    .attr("nounwind")
+    .begin(&mut m);
 let (x, y) = (b.param(0), b.param(1));
 b.block("entry");
-let gt = b.icmp(epitome_ir::module::ICmpPred::Sgt, x, y);
+let gt = b.icmp(ICmpPred::Sgt, x, y);
 let r = b.select(gt, x, y);
-b.ret(r);
+let r1 = b.build_binary(BinOp::Add, r, x).nsw().build();
+b.ret(r1);
 b.finish()?; // every block must end in a terminator
 ```
 
+There are plain constructors as well (`Types::function`, `Constant::int`,
+`Call::new`, `Global::variable`, `Module::declare`, `Module::const_int`).
 The module can then go to `epitome_opt::pipeline::run` and
-`epitome_codegen::compile` like a parsed one.
+`epitome_codegen::compile` like a parsed one. `examples/factorial.rs`
+builds a factorial function and a `main` that prints some factorials,
+optimises and compiles them, and with `--run` links and runs the program:
+
+```sh
+cargo run --release --example factorial -- --run
+```
 
 ## Building Rust crates with Epitome
 

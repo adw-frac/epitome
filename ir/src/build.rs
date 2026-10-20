@@ -210,6 +210,13 @@ impl Module {
         Value::Const(self.consts.intern(Constant { ty, kind }))
     }
 
+    /// An array of bytes, `[N x i8] c"..."` (add a 0 for a C string).
+    pub fn const_bytes(&mut self, bytes: &[u8]) -> Value {
+        let i8t = self.types.int(8);
+        let ty = self.types.array(bytes.len() as u64, i8t);
+        Value::Const(self.consts.intern(Constant { ty, kind: ConstKind::Bytes(bytes.to_vec()) }))
+    }
+
     pub fn poison(&mut self, ty: TypeId) -> Value {
         Value::Const(self.consts.intern(Constant { ty, kind: ConstKind::Poison }))
     }
@@ -234,17 +241,223 @@ impl Module {
 
     /// Starts defining function `name`: `ret name(params...)`, the
     /// parameters named as given. `finish` adds it to the module, in place
-    /// of a declaration of the same name if there is one.
+    /// of a declaration of the same name if there is one. The short form of
+    /// `Function::builder(name).returns(ret).param(..)...begin(m)`.
     pub fn function(&mut self, name: &str, ret: TypeId, params: &[(&str, TypeId)]) -> FunctionBuilder<'_> {
-        let tys: Vec<TypeId> = params.iter().map(|p| p.1).collect();
-        let ty = self.types.function(ret, &tys, false);
-        let mut f = Function { ty, has_body: true, ..Default::default() };
-        for (k, (pname, pty)) in params.iter().enumerate() {
-            let name = (!pname.is_empty()).then(|| pname.to_string());
-            let local = f.add_local(name, *pty, LocalDef::Param(k as u32));
-            f.params.push(Param { local, attrs: vec![] });
+        params.iter().fold(Function::builder(name).returns(ret), |s, &(n, t)| s.param(n, t)).begin(self)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fluent builders for functions and globals
+
+impl Function {
+    /// A function's signature and settings, chained:
+    ///
+    /// ```
+    /// # use epitome_ir::module::{Function, Linkage, Module};
+    /// let mut m = Module::default();
+    /// let i64t = m.types.int(64);
+    /// let mut b = Function::builder("twice")
+    ///     .returns(i64t)
+    ///     .param("x", i64t)
+    ///     .linkage(Linkage::Internal)
+    ///     .attr("nounwind")
+    ///     .begin(&mut m);
+    /// b.block("entry");
+    /// let x = b.param(0);
+    /// let r = b.add(x, x);
+    /// b.ret(r);
+    /// b.finish().unwrap();
+    /// assert!(m.to_string().contains("define internal i64 @twice(i64 %x) nounwind {"));
+    /// ```
+    pub fn builder(name: &str) -> FunctionSpec {
+        FunctionSpec {
+            name: name.to_string(),
+            ret: None,
+            params: vec![],
+            varargs: false,
+            props: GlobalProps::default(),
+            attrs: vec![],
         }
-        FunctionBuilder { m: self, f, name: name.to_string(), cur: None, next_name: None }
+    }
+}
+
+/// A function's name, signature, linkage and attributes, chained; then
+/// `begin` to define it (a `FunctionBuilder`) or `declare` to declare it.
+#[derive(Clone, Debug)]
+pub struct FunctionSpec {
+    name: String,
+    /// `void` when not given.
+    ret: Option<TypeId>,
+    params: Vec<(String, TypeId, Vec<Attr>)>,
+    varargs: bool,
+    props: GlobalProps,
+    attrs: Vec<Attr>,
+}
+
+impl FunctionSpec {
+    /// The return type (`void` if never given).
+    pub fn returns(mut self, ty: TypeId) -> Self {
+        self.ret = Some(ty);
+        self
+    }
+
+    /// A parameter, named (or `""` for a numbered one).
+    pub fn param(mut self, name: &str, ty: TypeId) -> Self {
+        self.params.push((name.to_string(), ty, vec![]));
+        self
+    }
+
+    /// A keyword attribute on the last parameter (`noundef`, `nonnull`).
+    pub fn param_attr(mut self, word: &str) -> Self {
+        let last = self.params.last_mut().expect("param_attr: no parameter yet");
+        last.2.push(Attr::Word(word.to_string()));
+        self
+    }
+
+    /// Takes variable arguments (`...`).
+    pub fn varargs(mut self) -> Self {
+        self.varargs = true;
+        self
+    }
+
+    pub fn linkage(mut self, linkage: Linkage) -> Self {
+        self.props.linkage = linkage;
+        self.props.explicit_linkage = true;
+        self
+    }
+
+    /// `dso_local`
+    pub fn dso_local(mut self) -> Self {
+        self.props.dso_local = true;
+        self
+    }
+
+    /// A keyword function attribute (`nounwind`, `noinline`).
+    pub fn attr(mut self, word: &str) -> Self {
+        self.attrs.push(Attr::Word(word.to_string()));
+        self
+    }
+
+    fn function(&self, m: &mut Module, has_body: bool) -> Function {
+        let ret = self.ret.unwrap_or_else(|| m.types.void());
+        let tys: Vec<TypeId> = self.params.iter().map(|p| p.1).collect();
+        let ty = m.types.function(ret, &tys, self.varargs);
+        let mut f = Function { ty, has_body, fn_attrs: self.attrs.clone(), ..Default::default() };
+        for (k, (pname, pty, attrs)) in self.params.iter().enumerate() {
+            let name = (!pname.is_empty()).then(|| pname.clone());
+            let local = f.add_local(name, *pty, LocalDef::Param(k as u32));
+            f.params.push(Param { local, attrs: attrs.clone() });
+        }
+        f
+    }
+
+    /// Starts the definition: blocks and instructions go in with the
+    /// builder, and its `finish` adds the function to the module.
+    pub fn begin(self, m: &mut Module) -> FunctionBuilder<'_> {
+        let f = self.function(m, true);
+        FunctionBuilder { m, f, name: self.name, props: self.props, cur: None, next_name: None }
+    }
+
+    /// Declares the function (or finds the module's global of that name).
+    pub fn declare(self, m: &mut Module) -> GlobalId {
+        if let Some(g) = m.find_global(&self.name) {
+            return g;
+        }
+        let f = self.function(m, false);
+        let mut g = Global::function(&self.name, f);
+        g.props = self.props;
+        m.add_global(g)
+    }
+}
+
+impl Global {
+    /// A global variable's settings, chained, then `build`:
+    ///
+    /// ```
+    /// # use epitome_ir::module::{Global, Linkage, Module};
+    /// let mut m = Module::default();
+    /// let i32t = m.types.int(32);
+    /// let seven = m.const_int(i32t, 7);
+    /// Global::builder("seven").ty(i32t).init(seven).constant().linkage(Linkage::Private).align(4).build(&mut m);
+    /// assert!(m.to_string().contains("@seven = private constant i32 7, align 4"));
+    /// ```
+    pub fn builder(name: &str) -> GlobalSpec {
+        GlobalSpec {
+            name: name.to_string(),
+            ty: None,
+            init: None,
+            constant: false,
+            props: GlobalProps::default(),
+            align: None,
+            section: None,
+        }
+    }
+}
+
+/// A global variable's type, initial value, linkage and placement, chained.
+#[derive(Clone, Debug)]
+pub struct GlobalSpec {
+    name: String,
+    ty: Option<TypeId>,
+    init: Option<Value>,
+    constant: bool,
+    props: GlobalProps,
+    align: Option<u64>,
+    section: Option<Vec<u8>>,
+}
+
+impl GlobalSpec {
+    /// The type (needed unless `init` gives it).
+    pub fn ty(mut self, ty: TypeId) -> Self {
+        self.ty = Some(ty);
+        self
+    }
+
+    /// The initial value: a constant (`Module::const_int` and the like).
+    pub fn init(mut self, value: Value) -> Self {
+        assert!(matches!(value, Value::Const(_)), "init: a global's initial value must be a constant");
+        self.init = Some(value);
+        self
+    }
+
+    /// `constant` rather than `global`.
+    pub fn constant(mut self) -> Self {
+        self.constant = true;
+        self
+    }
+
+    pub fn linkage(mut self, linkage: Linkage) -> Self {
+        self.props.linkage = linkage;
+        self.props.explicit_linkage = true;
+        self
+    }
+
+    pub fn align(mut self, align: u64) -> Self {
+        self.align = Some(align);
+        self
+    }
+
+    pub fn section(mut self, name: &str) -> Self {
+        self.section = Some(name.as_bytes().to_vec());
+        self
+    }
+
+    /// Adds the global to the module.
+    pub fn build(self, m: &mut Module) -> GlobalId {
+        let init = self.init.map(|v| match v {
+            Value::Const(c) => c,
+            _ => unreachable!(),
+        });
+        let ty = self.ty.or_else(|| init.map(|c| m.consts.get(c).ty)).expect("a global needs a type or an initial value");
+        let mut g = Global::variable(&self.name, ty, init, self.constant);
+        g.props = self.props;
+        if let GlobalKind::Variable(v) = &mut g.kind {
+            v.align = self.align;
+            v.section = self.section;
+        }
+        m.add_global(g)
     }
 }
 
@@ -257,6 +470,7 @@ pub struct FunctionBuilder<'m> {
     m: &'m mut Module,
     f: Function,
     name: String,
+    props: GlobalProps,
     cur: Option<BlockId>,
     next_name: Option<String>,
 }
@@ -637,6 +851,44 @@ impl<'m> FunctionBuilder<'m> {
         self.push(Op::Unreachable, None);
     }
 
+    // Instructions with settings, chained ------------------------------------
+
+    /// A binary operation with flags, chained: `b.build_binary(BinOp::Add,
+    /// x, y).nsw().nuw().build()`.
+    pub fn build_binary(&mut self, op: BinOp, a: Value, b: Value) -> BinarySpec<'_, 'm> {
+        BinarySpec { b: self, op, lhs: a, rhs: b, flags: IntFlags::NONE }
+    }
+
+    /// A call of function `callee`, chained: `b.build_call(f).arg(x).arg(y)
+    /// .tail().build()`.
+    pub fn build_call(&mut self, callee: GlobalId) -> CallSpec<'_, 'm> {
+        let GlobalKind::Function(f) = &self.m.global(callee).kind else { panic!("build_call: not a function") };
+        let fn_ty = f.ty;
+        let target = self.m.global_value(callee);
+        CallSpec { b: self, fn_ty, target, args: vec![], tail: TailKind::None, attrs: vec![] }
+    }
+
+    /// A call through pointer `target`, of function type `fn_ty`, chained.
+    pub fn build_call_indirect(&mut self, fn_ty: TypeId, target: Value) -> CallSpec<'_, 'm> {
+        CallSpec { b: self, fn_ty, target, args: vec![], tail: TailKind::None, attrs: vec![] }
+    }
+
+    /// `load ty, ptr p`, chained: `.align(8).volatile().build()`.
+    pub fn build_load(&mut self, ty: TypeId, p: Value) -> LoadSpec<'_, 'm> {
+        LoadSpec { b: self, ty, ptr: p, align: None, volatile: false }
+    }
+
+    /// `store v, ptr p`, chained: `.align(8).volatile().build()`.
+    pub fn build_store(&mut self, v: Value, p: Value) -> StoreSpec<'_, 'm> {
+        StoreSpec { b: self, value: v, ptr: p, align: None, volatile: false }
+    }
+
+    /// `getelementptr source_ty, ptr p`, chained: `.index(i).inbounds()
+    /// .build()`.
+    pub fn build_gep(&mut self, source_ty: TypeId, p: Value) -> GepSpec<'_, 'm> {
+        GepSpec { b: self, source_ty, ptr: p, indices: vec![], flags: 0 }
+    }
+
     /// Checks that every block ends in a terminator and has no other, then
     /// adds the function to the module, in place of a declaration of the
     /// same name if there is one.
@@ -662,10 +914,189 @@ impl<'m> FunctionBuilder<'m> {
                     return Err(format!("@{}: already defined", self.name));
                 }
                 **old = f;
+                self.m.globals[g.index()].props = self.props;
                 Ok(g)
             }
-            None => Ok(self.m.add_global(Global::function(&self.name, f))),
+            None => {
+                let mut g = Global::function(&self.name, f);
+                g.props = self.props;
+                Ok(self.m.add_global(g))
+            }
         }
+    }
+}
+
+/// A binary operation's flags, then `build`.
+pub struct BinarySpec<'b, 'm> {
+    b: &'b mut FunctionBuilder<'m>,
+    op: BinOp,
+    lhs: Value,
+    rhs: Value,
+    flags: IntFlags,
+}
+
+impl BinarySpec<'_, '_> {
+    /// `nsw`: signed overflow is poison.
+    pub fn nsw(mut self) -> Self {
+        self.flags = self.flags | IntFlags::NSW;
+        self
+    }
+    /// `nuw`: unsigned overflow is poison.
+    pub fn nuw(mut self) -> Self {
+        self.flags = self.flags | IntFlags::NUW;
+        self
+    }
+    /// `exact`: a division or right shift that loses no bits.
+    pub fn exact(mut self) -> Self {
+        self.flags = self.flags | IntFlags::EXACT;
+        self
+    }
+    pub fn build(self) -> Value {
+        assert!(
+            self.op.allowed_flags().contains(self.flags),
+            "{}: flags it does not take",
+            self.op.keyword()
+        );
+        self.b.binary_with(self.op, self.flags, self.lhs, self.rhs)
+    }
+}
+
+/// A call's arguments and settings, then `build`.
+pub struct CallSpec<'b, 'm> {
+    b: &'b mut FunctionBuilder<'m>,
+    fn_ty: TypeId,
+    target: Value,
+    args: Vec<Value>,
+    tail: TailKind,
+    attrs: Vec<Attr>,
+}
+
+impl CallSpec<'_, '_> {
+    pub fn arg(mut self, v: Value) -> Self {
+        self.args.push(v);
+        self
+    }
+    pub fn args(mut self, vs: &[Value]) -> Self {
+        self.args.extend_from_slice(vs);
+        self
+    }
+    /// `tail`: the callee does not use the caller's stack.
+    pub fn tail(mut self) -> Self {
+        self.tail = TailKind::Tail;
+        self
+    }
+    /// `musttail`
+    pub fn must_tail(mut self) -> Self {
+        self.tail = TailKind::MustTail;
+        self
+    }
+    /// A keyword attribute on the call (`nounwind`).
+    pub fn attr(mut self, word: &str) -> Self {
+        self.attrs.push(Attr::Word(word.to_string()));
+        self
+    }
+    /// Adds the call; its value, unless it returns `void`.
+    pub fn build(self) -> Option<Value> {
+        let r = self.b.call_indirect(self.fn_ty, self.target, &self.args);
+        let b = self.b.cur.unwrap();
+        let i = *self.b.f.blocks[b.index()].insts.last().unwrap();
+        if let Op::Call(c) = &mut self.b.f.insts[i.index()].op {
+            c.tail = self.tail;
+            c.fn_attrs = self.attrs;
+        }
+        r
+    }
+}
+
+/// A load's alignment and volatility, then `build`.
+pub struct LoadSpec<'b, 'm> {
+    b: &'b mut FunctionBuilder<'m>,
+    ty: TypeId,
+    ptr: Value,
+    align: Option<u64>,
+    volatile: bool,
+}
+
+impl LoadSpec<'_, '_> {
+    pub fn align(mut self, align: u64) -> Self {
+        self.align = Some(align);
+        self
+    }
+    pub fn volatile(mut self) -> Self {
+        self.volatile = true;
+        self
+    }
+    pub fn build(self) -> Value {
+        let op = Op::Load { volatile: self.volatile, atomic: None, ptr: self.ptr, align: self.align };
+        self.b.value(op, self.ty)
+    }
+}
+
+/// A store's alignment and volatility, then `build`.
+pub struct StoreSpec<'b, 'm> {
+    b: &'b mut FunctionBuilder<'m>,
+    value: Value,
+    ptr: Value,
+    align: Option<u64>,
+    volatile: bool,
+}
+
+impl StoreSpec<'_, '_> {
+    pub fn align(mut self, align: u64) -> Self {
+        self.align = Some(align);
+        self
+    }
+    pub fn volatile(mut self) -> Self {
+        self.volatile = true;
+        self
+    }
+    pub fn build(self) {
+        let op = Op::Store { volatile: self.volatile, atomic: None, value: self.value, ptr: self.ptr, align: self.align };
+        self.b.push(op, None);
+    }
+}
+
+/// A `getelementptr`'s indices and flags, then `build`.
+pub struct GepSpec<'b, 'm> {
+    b: &'b mut FunctionBuilder<'m>,
+    source_ty: TypeId,
+    ptr: Value,
+    indices: Vec<Value>,
+    flags: u8,
+}
+
+impl GepSpec<'_, '_> {
+    pub fn index(mut self, v: Value) -> Self {
+        self.indices.push(v);
+        self
+    }
+    /// A constant `i64` index.
+    pub fn const_index(mut self, k: i64) -> Self {
+        let i64t = self.b.m.types.int(64);
+        let v = self.b.m.const_int(i64t, k);
+        self.indices.push(v);
+        self
+    }
+    /// `inbounds`: the address stays within the object.
+    pub fn inbounds(mut self) -> Self {
+        self.flags |= GepFlags::INBOUNDS;
+        self
+    }
+    /// `nuw`: the offset additions do not wrap.
+    pub fn nuw(mut self) -> Self {
+        self.flags |= GepFlags::NUW;
+        self
+    }
+    pub fn build(self) -> Value {
+        let ptr = self.b.m.types.ptr(0);
+        let op = Op::Gep {
+            flags: GepFlags(self.flags),
+            inrange: None,
+            source_ty: self.source_ty,
+            ptr: self.ptr,
+            indices: self.indices,
+        };
+        self.b.value(op, ptr)
     }
 }
 
@@ -739,6 +1170,51 @@ mod tests {
         let x = b.param(0);
         b.add(x, x);
         assert!(b.finish().unwrap_err().contains("does not end in a terminator"));
+    }
+
+    /// The chained builders: a function's linkage and attributes, a
+    /// global, a call's settings, a load's and a store's, a gep's, a
+    /// binary operation's flags.
+    #[test]
+    fn chained_settings_print() {
+        let mut m = Module::default();
+        let (i32t, i64t, ptr) = (m.types.int(32), m.types.int(64), m.types.ptr(0));
+        let arr = m.types.array(4, i32t);
+        let zero = m.const_zero(arr);
+        let table = Global::builder("table").ty(arr).init(zero).linkage(Linkage::Internal).align(16).build(&mut m);
+        let log = Function::builder("log").param("v", i32t).param_attr("noundef").declare(&mut m);
+        let mut b = Function::builder("get")
+            .returns(i32t)
+            .param("k", i64t)
+            .linkage(Linkage::Internal)
+            .attr("nounwind")
+            .begin(&mut m);
+        let k = b.param(0);
+        b.block("entry");
+        let t = b.module().global_value(table);
+        let at = b.name("at").build_gep(arr, t).const_index(0).index(k).inbounds().build();
+        let v = b.name("v").build_load(i32t, at).align(4).volatile().build();
+        let one = b.const_int(i32t, 1);
+        let w = b.name("w").build_binary(BinOp::Add, v, one).nsw().build();
+        b.build_store(w, at).align(4).build();
+        b.build_call(log).arg(w).tail().build();
+        b.ret(w);
+        b.finish().unwrap();
+        let _ = ptr;
+        let text = m.to_string();
+        for want in [
+            "@table = internal global [4 x i32] zeroinitializer, align 16",
+            "declare void @log(i32 noundef)",
+            "define internal i32 @get(i64 %k) nounwind {",
+            "%at = getelementptr inbounds [4 x i32], ptr @table, i64 0, i64 %k",
+            "%v = load volatile i32, ptr %at, align 4",
+            "%w = add nsw i32 %v, 1",
+            "store i32 %w, ptr %at, align 4",
+            "tail call void @log(i32 %w)",
+        ] {
+            assert!(text.contains(want), "no {want:?} in\n{text}");
+        }
+        assert_eq!(crate::parse_module(&text).unwrap().to_string(), text);
     }
 
     #[test]
