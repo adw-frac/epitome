@@ -141,10 +141,14 @@ impl Ctx<'_> {
 pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, String> {
     let mut f = f.clone();
     thread_locals(cx, &mut f);
+    one_lane_vectors(cx, &mut f);
+    variable_lanes(cx, &mut f);
     vector_int_bitcasts(cx, &mut f);
+    bitcast_round_trips(cx, &mut f);
     memset_patterns(cx, &mut f);
     crate::atomics::expand_atomics(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     expand_overflow(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
+    wide_intrinsics(cx, &mut f);
     crate::wide::split_wide(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     split_struct_selects(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     split_struct_phis(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
@@ -296,6 +300,39 @@ fn split_struct_phis(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     for b in blocks {
         let phis: Vec<InstId> =
             f.blocks[b.index()].insts.iter().copied().take_while(|&i| f.insts[i.index()].op.is_phi()).collect();
+        // A struct an invoke returns, coming into a phi: its fields are
+        // taken out on the edge, in a block of its own between the invoke
+        // and this one (the invoke ends its block, and they can only be
+        // taken once it has returned).
+        let mut edges: Vec<BlockId> = Vec::new();
+        for &i in &phis {
+            let r = f.insts[i.index()].result.unwrap();
+            if !matches!(cx.m.types.get(f.locals[r.index()].ty), Type::Struct { .. }) {
+                continue;
+            }
+            let Op::Phi { incoming, .. } = &f.insts[i.index()].op else { unreachable!() };
+            for &(v, pred) in incoming {
+                let term = f.terminator(pred);
+                if term.is_some_and(|t| f.insts[t.index()].result.map(Value::Local) == Some(v))
+                    && !edges.contains(&pred)
+                {
+                    edges.push(pred);
+                }
+            }
+        }
+        for pred in edges {
+            let e = f.add_block(None);
+            let at = f.layout.iter().position(|&x| x == pred).unwrap();
+            f.layout.insert(at + 1, e);
+            f.push_inst(e, Op::Br(b), None);
+            let t = f.terminator(pred).unwrap();
+            if let Op::Invoke { normal, .. } = &mut f.insts[t.index()].op
+                && *normal == b
+            {
+                *normal = e;
+            }
+            f.retarget_phis(b, pred, e);
+        }
         let mut rebuilt = Vec::new();
         for &i in &phis {
             let r = f.insts[i.index()].result.unwrap();
@@ -426,6 +463,161 @@ fn thread_locals(cx: &mut Ctx, f: &mut Function) {
                 ptr,
             );
             s.f.replace_uses(Value::Local(r), addr);
+            let new = std::mem::take(&mut s.new);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
+}
+
+/// A bitcast back to the type a bitcast came from is the value it started
+/// as (the steps above make such pairs: `<1 x i64>` through `<8 x i8>` to
+/// `i64` and back).
+fn bitcast_round_trips(cx: &mut Ctx, f: &mut Function) {
+    let order: Vec<InstId> = f.insts_in_order().collect();
+    for i in order {
+        let Op::Cast { op: CastOp::BitCast, value: Value::Local(x), .. } = f.insts[i.index()].op else { continue };
+        let LocalDef::Inst(d) = f.locals[x.index()].def else { continue };
+        let Op::Cast { op: CastOp::BitCast, value: orig, .. } = f.insts[d.index()].op else { continue };
+        let r = f.insts[i.index()].result.unwrap();
+        if cx.value_ty(f, orig) == f.locals[r.index()].ty {
+            f.replace_uses(Value::Local(r), orig);
+        }
+    }
+}
+
+/// A lane chosen by a value, not a constant (`extractelement <4 x i32> %v,
+/// i64 %k`), through memory: the vector stored to a stack slot, and the
+/// lane loaded from it (or stored into it, and the vector loaded back).
+/// The index is taken modulo the lanes, a power of two, so that one past
+/// the end (poison in LLVM) stays in the slot. (Not vectors of `i1`,
+/// whose bits memory packs.)
+fn variable_lanes(cx: &mut Ctx, f: &mut Function) {
+    let (i8t, i64t, ptr) = (cx.m.types.int(8), cx.m.types.int(64), cx.m.types.ptr(0));
+    let Some(&entry) = f.layout.first() else { return };
+    let mut slots = Vec::new();
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let (vector, index, element) = match f.insts[i.index()].op {
+                Op::ExtractElement { vector, index } if cx.const_int(index).is_none() => (vector, index, None),
+                Op::InsertElement { vector, element, index } if cx.const_int(index).is_none() => {
+                    (vector, index, Some(element))
+                }
+                _ => {
+                    k += 1;
+                    continue;
+                }
+            };
+            let vty = cx.value_ty(f, vector);
+            let Type::Vector { len, elem, scalable: false } = *cx.m.types.get(vty) else {
+                k += 1;
+                continue;
+            };
+            if matches!(cx.m.types.get(elem), Type::Int(1)) || !len.is_power_of_two() {
+                k += 1;
+                continue;
+            }
+            let r = f.insts[i.index()].result.unwrap();
+            let esize = cx.size_of(elem).unwrap_or(1) as i64;
+            let align = Some(cx.size_of(vty).unwrap_or(16).next_power_of_two().clamp(1, 16));
+            let mut s = Seq { f, new: Vec::new() };
+            let slot = s.f.add_inst(
+                Op::Alloca { inalloca: false, ty: vty, count: None, align, addrspace: None },
+                Some((None, ptr)),
+            );
+            slots.push(slot);
+            let at = s.f.result(slot);
+            s.op_void(Op::Store { volatile: false, atomic: None, value: vector, ptr: at, align });
+            let idx = if cx.value_ty(s.f, index) == i64t { index } else { s.cast(CastOp::ZExt, index, i64t) };
+            let mask = cx.int(i64t, i64::from(len) - 1);
+            let idx = s.bin(BinOp::And, idx, mask, i64t);
+            let off = if esize & (esize - 1) == 0 {
+                let sh = cx.int(i64t, i64::from(esize.trailing_zeros()));
+                s.bin(BinOp::Shl, idx, sh, i64t)
+            } else {
+                let sz = cx.int(i64t, esize);
+                s.bin(BinOp::Mul, idx, sz, i64t)
+            };
+            let lane = s.op(
+                Op::Gep { flags: GepFlags::default(), inrange: None, source_ty: i8t, ptr: at, indices: vec![off] },
+                ptr,
+            );
+            let ealign = Some(esize as u64);
+            let v = match element {
+                None => s.op(Op::Load { volatile: false, atomic: None, ptr: lane, align: ealign }, elem),
+                Some(e) => {
+                    s.op_void(Op::Store { volatile: false, atomic: None, value: e, ptr: lane, align: ealign });
+                    s.op(Op::Load { volatile: false, atomic: None, ptr: at, align }, vty)
+                }
+            };
+            s.f.replace_uses(Value::Local(r), v);
+            let new = std::mem::take(&mut s.new);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
+    f.blocks[entry.index()].insts.splice(0..0, slots);
+}
+
+/// Vectors of one lane (`<1 x i64>`, as NEON's `vget_lane_u64` has them)
+/// stay vectors where the convention passes them (in a d register), but
+/// what is done with them is done to their element: taking out or putting
+/// in the lane is a bitcast, and arithmetic is the element's, between
+/// bitcasts.
+fn one_lane_vectors(cx: &mut Ctx, f: &mut Function) {
+    let one = |cx: &Ctx, ty: TypeId| match cx.m.types.get(ty) {
+        Type::Vector { len: 1, elem, scalable: false } => Some(*elem),
+        _ => None,
+    };
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            // A store of one: of its element.
+            if let Op::Store { volatile, atomic: None, value, ptr, align } = f.insts[i.index()].op.clone()
+                && let Some(e) = one(cx, cx.value_ty(f, value))
+            {
+                let mut s = Seq { f, new: Vec::new() };
+                let x = s.cast(CastOp::BitCast, value, e);
+                s.op_void(Op::Store { volatile, atomic: None, value: x, ptr, align });
+                let new = std::mem::take(&mut s.new);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
+            let Some(r) = f.insts[i.index()].result else {
+                k += 1;
+                continue;
+            };
+            let ty = f.locals[r.index()].ty;
+            let mut s = Seq { f, new: Vec::new() };
+            let v = match s.f.insts[i.index()].op.clone() {
+                Op::Load { volatile, atomic: None, ptr, align } if let Some(e) = one(cx, ty) => {
+                    let x = s.op(Op::Load { volatile, atomic: None, ptr, align }, e);
+                    s.cast(CastOp::BitCast, x, ty)
+                }
+                Op::ExtractElement { vector, .. } if one(cx, cx.value_ty(s.f, vector)).is_some() => {
+                    s.cast(CastOp::BitCast, vector, ty)
+                }
+                Op::InsertElement { element, .. } if one(cx, ty).is_some() => s.cast(CastOp::BitCast, element, ty),
+                Op::Binary { op, flags, fmf, lhs, rhs } if let Some(e) = one(cx, ty) => {
+                    let (a, c) = (s.cast(CastOp::BitCast, lhs, e), s.cast(CastOp::BitCast, rhs, e));
+                    let x = s.op(Op::Binary { op, flags, fmf, lhs: a, rhs: c }, e);
+                    s.cast(CastOp::BitCast, x, ty)
+                }
+                _ => {
+                    k += 1;
+                    continue;
+                }
+            };
+            s.f.replace_uses(Value::Local(r), v);
             let new = std::mem::take(&mut s.new);
             let n = new.len();
             f.blocks[b.index()].insts.splice(k..=k, new);
@@ -1148,7 +1340,18 @@ fn promote_odd(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
             l.ty = cx.m.types.int(c);
         }
     }
-    if orig.is_empty() {
+    // (Or constants of them: a store of an `i24` constant.)
+    let odd_const = || {
+        f.insts_in_order().any(|i| {
+            let mut odd = false;
+            f.insts[i.index()].op.for_each_value(|v| {
+                odd |= matches!(*v, Value::Const(c)
+                    if matches!(*cx.m.types.get(cx.m.constant(c).ty), Type::Int(b) if container(b).is_some()));
+            });
+            odd
+        })
+    };
+    if orig.is_empty() && !odd_const() {
         return Ok(());
     }
     let bits_of = |cx: &Ctx, f: &Function, orig: &std::collections::HashMap<LocalId, u32>, v: Value| -> u32 {
@@ -1170,6 +1373,12 @@ fn promote_odd(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         while k < f.blocks[b.index()].insts.len() {
             let i = f.blocks[b.index()].insts[k];
             let mut new: Vec<InstId> = Vec::new();
+            // What a store stores, before its constant is widened below:
+            // a store of an `i24` constant writes three bytes, not four.
+            let stored_bits = match &f.insts[i.index()].op {
+                Op::Store { value, .. } => Some(bits_of(cx, f, &orig, *value)),
+                _ => None,
+            };
             // Constants of odd widths become constants of the wider type.
             let mut op = f.insts[i.index()].op.clone();
             op.for_each_value_mut(|v| {
@@ -1213,13 +1422,13 @@ fn promote_odd(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
             let res = f.insts[i.index()].result;
             let res_odd = res.and_then(|r| orig.get(&r).copied());
             if matches!(op, Op::Load { .. } | Op::Store { .. }) {
-                let mut odd = res_odd.is_some();
+                let mut odd = res_odd.is_some() || stored_bits.and_then(container).is_some();
                 op.for_each_value(|v| odd |= container(bits_of(cx, f, &orig, *v)).is_some());
                 // A whole number of bytes: in pieces of 4, 2 and 1 bytes,
                 // the lowest first (little-endian).
-                let bits = match &op {
-                    Op::Store { value, .. } => bits_of(cx, f, &orig, *value),
-                    _ => res_odd.unwrap_or(0),
+                let bits = match stored_bits {
+                    Some(b) => b,
+                    None => res_odd.unwrap_or(0),
                 };
                 let plain = matches!(
                     &op,
@@ -1251,11 +1460,15 @@ fn promote_odd(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                             for (n, &(off, size)) in pieces.iter().enumerate() {
                                 let pt = cx.m.types.int(8 * size as u32);
                                 let sh = cx.int(w, 8 * off as i64);
-                                let v = add(
-                                    f,
-                                    Op::Binary { op: BinOp::LShr, flags: nf, fmf: fm, lhs: value, rhs: sh },
-                                    Some(w),
-                                );
+                                let v = if off == 0 {
+                                    value
+                                } else {
+                                    add(
+                                        f,
+                                        Op::Binary { op: BinOp::LShr, flags: nf, fmf: fm, lhs: value, rhs: sh },
+                                        Some(w),
+                                    )
+                                };
                                 let v = add(f, Op::Cast { op: CastOp::Trunc, flags: nf, fmf: fm, value: v }, Some(pt));
                                 let o = cx.int(i64t, off as i64);
                                 let p = add(f, gep8(i8t, ptr, o), Some(ptr_ty));
@@ -1291,8 +1504,11 @@ fn promote_odd(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                                 );
                                 let v = add(f, Op::Cast { op: CastOp::ZExt, flags: nf, fmf: fm, value: v }, Some(w));
                                 let sh = cx.int(w, 8 * off as i64);
-                                let v =
-                                    add(f, Op::Binary { op: BinOp::Shl, flags: nf, fmf: fm, lhs: v, rhs: sh }, Some(w));
+                                let v = if off == 0 {
+                                    v
+                                } else {
+                                    add(f, Op::Binary { op: BinOp::Shl, flags: nf, fmf: fm, lhs: v, rhs: sh }, Some(w))
+                                };
                                 acc = Some(match acc {
                                     None => v,
                                     Some(a) if n + 1 == pieces.len() => {
@@ -1564,37 +1780,30 @@ fn expand_overflow(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                 // cross product (ah*bl, al*bh) needs more than 64 bits, or
                 // if the middle column (their low halves, plus the carry
                 // from al*bl) carries out.
-                "umul" if bits == 128 => {
-                    let i64t = cx.m.types.int(64);
-                    let c64 = cx.int(ty, 64);
-                    let lo64 = |s: &mut Seq, x: Value| s.cast(CastOp::Trunc, x, i64t);
-                    let hi64 = |s: &mut Seq, x: Value| {
-                        let h = s.bin(BinOp::LShr, x, c64, ty);
-                        s.cast(CastOp::Trunc, h, i64t)
+                "umul" if bits == 128 => umul128_overflow(cx, &mut s, a, b2, ty),
+                // Signed, by the magnitudes: the unsigned product must not
+                // overflow, and must fit the sign: up to 2^127 - 1, or
+                // 2^127 when negative.
+                "smul" if bits == 128 => {
+                    let zero = cx.int(ty, 0);
+                    let mag = |s: &mut Seq, x: Value| {
+                        let neg = s.op(Op::ICmp { pred: ICmpPred::Slt, samesign: false, lhs: x, rhs: zero }, i1);
+                        let minus = s.bin(BinOp::Sub, zero, x, ty);
+                        let m = s.op(
+                            Op::Select { fmf: FastMath::default(), cond: neg, then_value: minus, else_value: x },
+                            ty,
+                        );
+                        (neg, m)
                     };
-                    let (al, ah, bl, bh) = (lo64(&mut s, a), hi64(&mut s, a), lo64(&mut s, b2), hi64(&mut s, b2));
-                    let wide = |s: &mut Seq, x: Value, y: Value| {
-                        let (wx, wy) = (s.cast(CastOp::ZExt, x, ty), s.cast(CastOp::ZExt, y, ty));
-                        s.bin(BinOp::Mul, wx, wy, ty)
-                    };
-                    let (p0, p1, p2) = (wide(&mut s, al, bl), wide(&mut s, ah, bl), wide(&mut s, al, bh));
-                    let z64 = cx.int(i64t, 0);
-                    let ah_nz = cmp(&mut s, ICmpPred::Ne, ah, z64);
-                    let bh_nz = cmp(&mut s, ICmpPred::Ne, bh, z64);
-                    let mut ov = s.bin(BinOp::And, ah_nz, bh_nz, i1);
-                    let (h1, h2) = (hi64(&mut s, p1), hi64(&mut s, p2));
-                    for h in [h1, h2] {
-                        let nz = cmp(&mut s, ICmpPred::Ne, h, z64);
-                        ov = s.bin(BinOp::Or, ov, nz, i1);
-                    }
-                    let (l1, l2) = (lo64(&mut s, p1), lo64(&mut s, p2));
-                    let (w1, w2) = (s.cast(CastOp::ZExt, l1, ty), s.cast(CastOp::ZExt, l2, ty));
-                    let carry = s.bin(BinOp::LShr, p0, c64, ty);
-                    let mid = s.bin(BinOp::Add, w1, w2, ty);
-                    let mid = s.bin(BinOp::Add, mid, carry, ty);
-                    let out = hi64(&mut s, mid);
-                    let nz = cmp(&mut s, ICmpPred::Ne, out, z64);
-                    ov = s.bin(BinOp::Or, ov, nz, i1);
+                    let (na, ma) = mag(&mut s, a);
+                    let (nb, mb) = mag(&mut s, b2);
+                    let (p, uov) = umul128_overflow(cx, &mut s, ma, mb, ty);
+                    let neg = s.bin(BinOp::Xor, na, nb, i1);
+                    let max = Value::Const(cx.m.consts.intern(Constant { ty, kind: ConstKind::Int(signed_max(128)) }));
+                    let extra = s.cast(CastOp::ZExt, neg, ty);
+                    let limit = s.bin(BinOp::Add, max, extra, ty);
+                    let past = cmp(&mut s, ICmpPred::Ugt, p, limit);
+                    let ov = s.bin(BinOp::Or, uov, past, i1);
                     (s.bin(BinOp::Mul, a, b2, ty), ov)
                 }
                 _ => return Err(format!("{name} is not supported yet")),
@@ -1639,6 +1848,156 @@ pub(crate) fn replace_pair(cx: &mut Ctx, s: &mut Seq, r: LocalId, sty: TypeId, a
         let x = s.op(Op::InsertValue { aggregate: poison, element: a, indices: vec![0] }, sty);
         let y = s.op(Op::InsertValue { aggregate: x, element: b, indices: vec![1] }, sty);
         s.f.replace_uses(Value::Local(r), y);
+    }
+}
+
+/// The largest signed value of `bits` bits, 2^(bits - 1) - 1.
+fn signed_max(bits: u32) -> ApInt {
+    let ones = bits - 1;
+    let lead = ones % 4;
+    let mut hex = String::new();
+    if lead > 0 {
+        hex.push(char::from_digit((1 << lead) - 1, 16).unwrap());
+    }
+    hex.push_str(&"f".repeat((ones / 4) as usize));
+    ApInt::parse_hex(bits, &hex, false).unwrap()
+}
+
+/// The product of two `i128`s, and whether it overflows unsigned: from the
+/// 64-bit halves (a = ah:al, b = bh:bl), it does if both high halves are
+/// nonzero, if either cross product (ah*bl, al*bh) needs more than 64
+/// bits, or if the middle column (their low halves, plus the carry from
+/// al*bl) carries out.
+fn umul128_overflow(cx: &mut Ctx, s: &mut Seq, a: Value, b2: Value, ty: TypeId) -> (Value, Value) {
+    let i1 = cx.m.types.int(1);
+    let cmp = |s: &mut Seq, pred, l, r| s.op(Op::ICmp { pred, samesign: false, lhs: l, rhs: r }, i1);
+    let i64t = cx.m.types.int(64);
+    let c64 = cx.int(ty, 64);
+    let lo64 = |s: &mut Seq, x: Value| s.cast(CastOp::Trunc, x, i64t);
+    let hi64 = |s: &mut Seq, x: Value| {
+        let h = s.bin(BinOp::LShr, x, c64, ty);
+        s.cast(CastOp::Trunc, h, i64t)
+    };
+    let (al, ah, bl, bh) = (lo64(s, a), hi64(s, a), lo64(s, b2), hi64(s, b2));
+    let wide = |s: &mut Seq, x: Value, y: Value| {
+        let (wx, wy) = (s.cast(CastOp::ZExt, x, ty), s.cast(CastOp::ZExt, y, ty));
+        s.bin(BinOp::Mul, wx, wy, ty)
+    };
+    let (p0, p1, p2) = (wide(s, al, bl), wide(s, ah, bl), wide(s, al, bh));
+    let z64 = cx.int(i64t, 0);
+    let ah_nz = cmp(s, ICmpPred::Ne, ah, z64);
+    let bh_nz = cmp(s, ICmpPred::Ne, bh, z64);
+    let mut ov = s.bin(BinOp::And, ah_nz, bh_nz, i1);
+    let (h1, h2) = (hi64(s, p1), hi64(s, p2));
+    for h in [h1, h2] {
+        let nz = cmp(s, ICmpPred::Ne, h, z64);
+        ov = s.bin(BinOp::Or, ov, nz, i1);
+    }
+    let (l1, l2) = (lo64(s, p1), lo64(s, p2));
+    let (w1, w2) = (s.cast(CastOp::ZExt, l1, ty), s.cast(CastOp::ZExt, l2, ty));
+    let carry = s.bin(BinOp::LShr, p0, c64, ty);
+    let mid = s.bin(BinOp::Add, w1, w2, ty);
+    let mid = s.bin(BinOp::Add, mid, carry, ty);
+    let out = hi64(s, mid);
+    let nz = cmp(s, ICmpPred::Ne, out, z64);
+    ov = s.bin(BinOp::Or, ov, nz, i1);
+    (s.bin(BinOp::Mul, a, b2, ty), ov)
+}
+
+/// Intrinsics of 128-bit integers that `wide.rs` has no halves for,
+/// written as `i128` operations it does: three-way comparisons, and
+/// saturating additions and subtractions.
+fn wide_intrinsics(cx: &mut Ctx, f: &mut Function) {
+    let i1 = cx.m.types.int(1);
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::Call(call) = &f.insts[i.index()].op else {
+                k += 1;
+                continue;
+            };
+            let name = callee_name(cx.m, call).unwrap_or_default();
+            let args: Vec<Value> = call.args.iter().map(|a| a.value).collect();
+            let (Some(r), Some(&a0)) = (f.insts[i.index()].result, args.first()) else {
+                k += 1;
+                continue;
+            };
+            let aty = cx.value_ty(f, a0);
+            if !matches!(cx.m.types.get(aty), Type::Int(b) if *b > 64) {
+                k += 1;
+                continue;
+            }
+            let rty = f.locals[r.index()].ty;
+            // `llvm.scmp`, `llvm.usub.sat`: the name without its types.
+            let is_type =
+                |p: &&str| p.strip_prefix('i').is_some_and(|d| !d.is_empty() && d.bytes().all(|c| c.is_ascii_digit()));
+            let base = name.split('.').take_while(|p| !is_type(p)).collect::<Vec<_>>().join(".");
+            let mut s = Seq { f, new: Vec::new() };
+            let cmp = |s: &mut Seq, pred, l, r| s.op(Op::ICmp { pred, samesign: false, lhs: l, rhs: r }, i1);
+            let sel = |s: &mut Seq, c, t, e, ty| {
+                s.op(Op::Select { fmf: FastMath::default(), cond: c, then_value: t, else_value: e }, ty)
+            };
+            let (a, bv) = (a0, args.get(1).copied().unwrap_or(a0));
+            let v = match base.as_str() {
+                // (a > b) - (a < b)
+                "llvm.scmp" | "llvm.ucmp" => {
+                    let (gt, lt) = if base == "llvm.scmp" {
+                        (ICmpPred::Sgt, ICmpPred::Slt)
+                    } else {
+                        (ICmpPred::Ugt, ICmpPred::Ult)
+                    };
+                    let g = cmp(&mut s, gt, a, bv);
+                    let l = cmp(&mut s, lt, a, bv);
+                    let g = s.cast(CastOp::ZExt, g, rty);
+                    let l = s.cast(CastOp::ZExt, l, rty);
+                    s.bin(BinOp::Sub, g, l, rty)
+                }
+                "llvm.usub.sat" => {
+                    let d = s.bin(BinOp::Sub, a, bv, aty);
+                    let ok = cmp(&mut s, ICmpPred::Uge, a, bv);
+                    let zero = cx.int(aty, 0);
+                    sel(&mut s, ok, d, zero, aty)
+                }
+                "llvm.uadd.sat" => {
+                    let t = s.bin(BinOp::Add, a, bv, aty);
+                    let wrapped = cmp(&mut s, ICmpPred::Ult, t, a);
+                    let ones = cx.int(aty, -1);
+                    sel(&mut s, wrapped, ones, t, aty)
+                }
+                // Overflowed if the result's sign is not what the operands
+                // say; then the limit on the side of a's sign.
+                "llvm.sadd.sat" | "llvm.ssub.sat" => {
+                    let add = base == "llvm.sadd.sat";
+                    let t = s.bin(if add { BinOp::Add } else { BinOp::Sub }, a, bv, aty);
+                    let x = s.bin(BinOp::Xor, a, t, aty);
+                    let y = if add { s.bin(BinOp::Xor, bv, t, aty) } else { s.bin(BinOp::Xor, a, bv, aty) };
+                    let both = s.bin(BinOp::And, x, y, aty);
+                    let zero = cx.int(aty, 0);
+                    let ov = cmp(&mut s, ICmpPred::Slt, both, zero);
+                    let bits = match cx.m.types.get(aty) {
+                        Type::Int(b) => *b,
+                        _ => 128,
+                    };
+                    let max =
+                        Value::Const(cx.m.consts.intern(Constant { ty: aty, kind: ConstKind::Int(signed_max(bits)) }));
+                    let neg = cmp(&mut s, ICmpPred::Slt, a, zero);
+                    let min = s.bin(BinOp::Xor, max, cx.int(aty, -1), aty);
+                    let limit = sel(&mut s, neg, min, max, aty);
+                    sel(&mut s, ov, limit, t, aty)
+                }
+                _ => {
+                    k += 1;
+                    continue;
+                }
+            };
+            s.f.replace_uses(Value::Local(r), v);
+            let new = std::mem::take(&mut s.new);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
     }
 }
 
@@ -1808,6 +2167,98 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 if let Op::Call(c) = &mut s.f.insts[i.index()].op {
                     c.args[1].value = no;
                 }
+            }
+            // The sign of one, the rest of the other: as integers.
+            if base == "llvm.copysign" && !cx.selects_intrinsic(&name) {
+                let (ity, bits) = match cx.m.types.get(ty).clone() {
+                    Type::Vector { len, elem, scalable: false } => {
+                        let b = cx.size_of(elem).unwrap_or(8) as u32 * 8;
+                        let e = cx.m.types.int(b);
+                        (cx.m.types.intern(Type::Vector { len, elem: e, scalable: false }), b)
+                    }
+                    _ => {
+                        let b = cx.size_of(ty).unwrap_or(8) as u32 * 8;
+                        (cx.m.types.int(b), b)
+                    }
+                };
+                let elem_int = match cx.m.types.get(ity) {
+                    Type::Vector { elem, .. } => *elem,
+                    _ => ity,
+                };
+                let sign_c = cx
+                    .m
+                    .consts
+                    .intern(Constant { ty: elem_int, kind: ConstKind::Int(ApInt::from_u64(bits, 1u64 << (bits - 1))) });
+                let rest_c = cx.m.consts.intern(Constant {
+                    ty: elem_int,
+                    kind: ConstKind::Int(ApInt::from_u64(bits, (1u64 << (bits - 1)) - 1)),
+                });
+                let splat = |cx: &mut Ctx, c: ConstId| {
+                    if ity == elem_int {
+                        Value::Const(c)
+                    } else {
+                        Value::Const(cx.m.consts.intern(Constant { ty: ity, kind: ConstKind::Splat(c) }))
+                    }
+                };
+                let (sign, rest) = (splat(cx, sign_c), splat(cx, rest_c));
+                let a = s.cast(CastOp::BitCast, args[0], ity);
+                let b2 = s.cast(CastOp::BitCast, args[1], ity);
+                let a = s.bin(BinOp::And, a, rest, ity);
+                let b2 = s.bin(BinOp::And, b2, sign, ity);
+                let v = s.bin(BinOp::Or, a, b2, ity);
+                let v = s.cast(CastOp::BitCast, v, ty);
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), v);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
+            // Saturating conversions without an instruction: the limits,
+            // NaN as 0, else the plain conversion (defined there).
+            if (base == "llvm.fptosi" || base == "llvm.fptoui")
+                && name.contains(".sat.")
+                && scalar
+                && !cx.selects_intrinsic(&name)
+            {
+                let signed = base == "llvm.fptosi";
+                let x = args[0];
+                let fty = cx.value_ty(s.f, x);
+                let fc = |cx: &mut Ctx, v: f64| {
+                    let b = match cx.m.types.get(fty) {
+                        Type::Float => u128::from((v as f32).to_bits()),
+                        _ => u128::from(v.to_bits()),
+                    };
+                    Value::Const(cx.m.consts.intern(Constant { ty: fty, kind: ConstKind::Float(b) }))
+                };
+                let fcmp =
+                    |s: &mut Seq, pred, l, r| s.op(Op::FCmp { pred, fmf: FastMath::default(), lhs: l, rhs: r }, i1);
+                let sel = |s: &mut Seq, c, t, e| {
+                    s.op(Op::Select { fmf: FastMath::default(), cond: c, then_value: t, else_value: e }, ty)
+                };
+                let (min, max, lo_bound, hi_bound) = if signed {
+                    let h = 2f64.powi(bits as i32 - 1);
+                    (cx.int(ty, i64::MIN >> (64 - bits)), cx.int(ty, i64::MAX >> (64 - bits)), -h, h)
+                } else {
+                    (cx.int(ty, 0), cx.int(ty, -1), -1.0, 2f64.powi(bits as i32))
+                };
+                let (lo_c, hi_c) = (fc(cx, lo_bound), fc(cx, hi_bound));
+                let plain = s.cast(if signed { CastOp::FPToSI } else { CastOp::FPToUI }, x, ty);
+                // Signed: below -2^(w-1) the minimum; unsigned: at -1 or
+                // below, 0 (between -1 and 0 the conversion gives 0).
+                let below = fcmp(&mut s, if signed { FCmpPred::Olt } else { FCmpPred::Ole }, x, lo_c);
+                let v = sel(&mut s, below, min, plain);
+                let above = fcmp(&mut s, FCmpPred::Oge, x, hi_c);
+                let v = sel(&mut s, above, max, v);
+                let nan = fcmp(&mut s, FCmpPred::Uno, x, x);
+                let zero = cx.int(ty, 0);
+                let v = sel(&mut s, nan, zero, v);
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), v);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
             }
             // Bit counts and byte swaps of vectors without an instruction
             // (NEON counts only bytes' bits): lane by lane.

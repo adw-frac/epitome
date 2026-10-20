@@ -118,3 +118,13 @@ fn three_way_comparisons() {
 fn threads_and_atomics() {
     check("threads");
 }
+
+#[test]
+fn wide_signed_operations() {
+    check("wideops");
+}
+
+#[test]
+fn floating_point_conversions_and_rounding() {
+    check("floatops");
+}

@@ -637,6 +637,21 @@ for arr, n, ty, Q, imm5, s_ in [(a, n, it(e), Q, {8: '00001', 16: '00010', 32: '
   ret {T} %r
 }}
 ''')
+# Absolute value and rounding of floating-point lanes.
+for arr, n, ty, Q, sz in FLT:
+    T = vt(n, ty); c = cls(Q); suf = 'f32' if ty == 'float' else 'f64'
+    for name, intr, U, a_, op in [('FABS', 'fabs', 0, 1, '01111'), ('FRINTN', 'roundeven', 0, 0, '11000'),
+                                  ('FRINTM', 'floor', 0, 0, '11001'), ('FRINTP', 'ceil', 0, 1, '11000'),
+                                  ('FRINTZ', 'trunc', 0, 1, '11001'), ('FRINTA', 'round', 1, 0, '11000'),
+                                  ('FRINTX', 'rint', 1, 0, '11001'), ('FRINTI', 'nearbyint', 1, 1, '11001')]:
+        f = f'llvm.{intr}.v{n}{suf}'
+        o.append(f'''declare {T} @{f}({T})
+
+define {T} @{name}v{arr}({T} "reg"="{c}" %n) "enc"="0 {Q} {U} 01110 {a_} {sz} 10000 {op} 10 n:5 d:5" "asm"="{name.lower()} {{d:{arr}}}, {{n:{arr}}}" {{
+  %r = call {T} @{f}({T} %n)
+  ret {T} %r
+}}
+''')
 # tbl: each lane of the indices picks a byte of the 16-byte table (one
 # register), or zero past it.
 for arr, n, Q in [('16b', 16, 1), ('8b', 8, 0)]:

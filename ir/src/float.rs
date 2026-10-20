@@ -70,8 +70,10 @@ pub fn parse(kind: FloatKind, text: &str) -> Option<u128> {
         }
         let raw = parse_hex_u128(digits)?;
         return match (prefix, kind) {
-            (b'0', FloatKind::Double) if digits.len() == 16 => Some(raw),
-            (b'0', _) if digits.len() == 16 => from_f64(kind, f64::from_bits(raw as u64)),
+            // A double's bits, as LLVM prints them: without leading zeros
+            // (`0xADFB11E2ADB03C2` is 0x0ADFB11E2ADB03C2).
+            (b'0', FloatKind::Double) if (1..=16).contains(&digits.len()) => Some(raw),
+            (b'0', _) if (1..=16).contains(&digits.len()) => from_f64(kind, f64::from_bits(raw as u64)),
             (b'H', FloatKind::Half) | (b'R', FloatKind::BFloat) if digits.len() == 4 => Some(raw),
             (b'K', FloatKind::X86Fp80) if digits.len() == 20 => Some(raw),
             (b'L', FloatKind::Fp128) | (b'M', FloatKind::PpcFp128) if digits.len() == 32 => {

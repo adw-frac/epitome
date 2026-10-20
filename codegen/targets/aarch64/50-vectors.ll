@@ -3628,6 +3628,174 @@ define <2 x float> @DUP0v2sf(<2 x float> "reg"="v" %n) "feature"="neon" "enc"="0
   ret <2 x float> %r
 }
 
+declare <4 x float> @llvm.fabs.v4f32(<4 x float>)
+
+define <4 x float> @FABSv4s(<4 x float> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110 1 0 10000 01111 10 n:5 d:5" "asm"="fabs {d:4s}, {n:4s}" {
+  %r = call <4 x float> @llvm.fabs.v4f32(<4 x float> %n)
+  ret <4 x float> %r
+}
+
+declare <4 x float> @llvm.roundeven.v4f32(<4 x float>)
+
+define <4 x float> @FRINTNv4s(<4 x float> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110 0 0 10000 11000 10 n:5 d:5" "asm"="frintn {d:4s}, {n:4s}" {
+  %r = call <4 x float> @llvm.roundeven.v4f32(<4 x float> %n)
+  ret <4 x float> %r
+}
+
+declare <4 x float> @llvm.floor.v4f32(<4 x float>)
+
+define <4 x float> @FRINTMv4s(<4 x float> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110 0 0 10000 11001 10 n:5 d:5" "asm"="frintm {d:4s}, {n:4s}" {
+  %r = call <4 x float> @llvm.floor.v4f32(<4 x float> %n)
+  ret <4 x float> %r
+}
+
+declare <4 x float> @llvm.ceil.v4f32(<4 x float>)
+
+define <4 x float> @FRINTPv4s(<4 x float> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110 1 0 10000 11000 10 n:5 d:5" "asm"="frintp {d:4s}, {n:4s}" {
+  %r = call <4 x float> @llvm.ceil.v4f32(<4 x float> %n)
+  ret <4 x float> %r
+}
+
+declare <4 x float> @llvm.trunc.v4f32(<4 x float>)
+
+define <4 x float> @FRINTZv4s(<4 x float> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110 1 0 10000 11001 10 n:5 d:5" "asm"="frintz {d:4s}, {n:4s}" {
+  %r = call <4 x float> @llvm.trunc.v4f32(<4 x float> %n)
+  ret <4 x float> %r
+}
+
+declare <4 x float> @llvm.round.v4f32(<4 x float>)
+
+define <4 x float> @FRINTAv4s(<4 x float> "reg"="q" %n) "feature"="neon" "enc"="0 1 1 01110 0 0 10000 11000 10 n:5 d:5" "asm"="frinta {d:4s}, {n:4s}" {
+  %r = call <4 x float> @llvm.round.v4f32(<4 x float> %n)
+  ret <4 x float> %r
+}
+
+declare <4 x float> @llvm.rint.v4f32(<4 x float>)
+
+define <4 x float> @FRINTXv4s(<4 x float> "reg"="q" %n) "feature"="neon" "enc"="0 1 1 01110 0 0 10000 11001 10 n:5 d:5" "asm"="frintx {d:4s}, {n:4s}" {
+  %r = call <4 x float> @llvm.rint.v4f32(<4 x float> %n)
+  ret <4 x float> %r
+}
+
+declare <4 x float> @llvm.nearbyint.v4f32(<4 x float>)
+
+define <4 x float> @FRINTIv4s(<4 x float> "reg"="q" %n) "feature"="neon" "enc"="0 1 1 01110 1 0 10000 11001 10 n:5 d:5" "asm"="frinti {d:4s}, {n:4s}" {
+  %r = call <4 x float> @llvm.nearbyint.v4f32(<4 x float> %n)
+  ret <4 x float> %r
+}
+
+declare <2 x double> @llvm.fabs.v2f64(<2 x double>)
+
+define <2 x double> @FABSv2d(<2 x double> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110 1 1 10000 01111 10 n:5 d:5" "asm"="fabs {d:2d}, {n:2d}" {
+  %r = call <2 x double> @llvm.fabs.v2f64(<2 x double> %n)
+  ret <2 x double> %r
+}
+
+declare <2 x double> @llvm.roundeven.v2f64(<2 x double>)
+
+define <2 x double> @FRINTNv2d(<2 x double> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110 0 1 10000 11000 10 n:5 d:5" "asm"="frintn {d:2d}, {n:2d}" {
+  %r = call <2 x double> @llvm.roundeven.v2f64(<2 x double> %n)
+  ret <2 x double> %r
+}
+
+declare <2 x double> @llvm.floor.v2f64(<2 x double>)
+
+define <2 x double> @FRINTMv2d(<2 x double> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110 0 1 10000 11001 10 n:5 d:5" "asm"="frintm {d:2d}, {n:2d}" {
+  %r = call <2 x double> @llvm.floor.v2f64(<2 x double> %n)
+  ret <2 x double> %r
+}
+
+declare <2 x double> @llvm.ceil.v2f64(<2 x double>)
+
+define <2 x double> @FRINTPv2d(<2 x double> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110 1 1 10000 11000 10 n:5 d:5" "asm"="frintp {d:2d}, {n:2d}" {
+  %r = call <2 x double> @llvm.ceil.v2f64(<2 x double> %n)
+  ret <2 x double> %r
+}
+
+declare <2 x double> @llvm.trunc.v2f64(<2 x double>)
+
+define <2 x double> @FRINTZv2d(<2 x double> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110 1 1 10000 11001 10 n:5 d:5" "asm"="frintz {d:2d}, {n:2d}" {
+  %r = call <2 x double> @llvm.trunc.v2f64(<2 x double> %n)
+  ret <2 x double> %r
+}
+
+declare <2 x double> @llvm.round.v2f64(<2 x double>)
+
+define <2 x double> @FRINTAv2d(<2 x double> "reg"="q" %n) "feature"="neon" "enc"="0 1 1 01110 0 1 10000 11000 10 n:5 d:5" "asm"="frinta {d:2d}, {n:2d}" {
+  %r = call <2 x double> @llvm.round.v2f64(<2 x double> %n)
+  ret <2 x double> %r
+}
+
+declare <2 x double> @llvm.rint.v2f64(<2 x double>)
+
+define <2 x double> @FRINTXv2d(<2 x double> "reg"="q" %n) "feature"="neon" "enc"="0 1 1 01110 0 1 10000 11001 10 n:5 d:5" "asm"="frintx {d:2d}, {n:2d}" {
+  %r = call <2 x double> @llvm.rint.v2f64(<2 x double> %n)
+  ret <2 x double> %r
+}
+
+declare <2 x double> @llvm.nearbyint.v2f64(<2 x double>)
+
+define <2 x double> @FRINTIv2d(<2 x double> "reg"="q" %n) "feature"="neon" "enc"="0 1 1 01110 1 1 10000 11001 10 n:5 d:5" "asm"="frinti {d:2d}, {n:2d}" {
+  %r = call <2 x double> @llvm.nearbyint.v2f64(<2 x double> %n)
+  ret <2 x double> %r
+}
+
+declare <2 x float> @llvm.fabs.v2f32(<2 x float>)
+
+define <2 x float> @FABSv2s(<2 x float> "reg"="v" %n) "feature"="neon" "enc"="0 0 0 01110 1 0 10000 01111 10 n:5 d:5" "asm"="fabs {d:2s}, {n:2s}" {
+  %r = call <2 x float> @llvm.fabs.v2f32(<2 x float> %n)
+  ret <2 x float> %r
+}
+
+declare <2 x float> @llvm.roundeven.v2f32(<2 x float>)
+
+define <2 x float> @FRINTNv2s(<2 x float> "reg"="v" %n) "feature"="neon" "enc"="0 0 0 01110 0 0 10000 11000 10 n:5 d:5" "asm"="frintn {d:2s}, {n:2s}" {
+  %r = call <2 x float> @llvm.roundeven.v2f32(<2 x float> %n)
+  ret <2 x float> %r
+}
+
+declare <2 x float> @llvm.floor.v2f32(<2 x float>)
+
+define <2 x float> @FRINTMv2s(<2 x float> "reg"="v" %n) "feature"="neon" "enc"="0 0 0 01110 0 0 10000 11001 10 n:5 d:5" "asm"="frintm {d:2s}, {n:2s}" {
+  %r = call <2 x float> @llvm.floor.v2f32(<2 x float> %n)
+  ret <2 x float> %r
+}
+
+declare <2 x float> @llvm.ceil.v2f32(<2 x float>)
+
+define <2 x float> @FRINTPv2s(<2 x float> "reg"="v" %n) "feature"="neon" "enc"="0 0 0 01110 1 0 10000 11000 10 n:5 d:5" "asm"="frintp {d:2s}, {n:2s}" {
+  %r = call <2 x float> @llvm.ceil.v2f32(<2 x float> %n)
+  ret <2 x float> %r
+}
+
+declare <2 x float> @llvm.trunc.v2f32(<2 x float>)
+
+define <2 x float> @FRINTZv2s(<2 x float> "reg"="v" %n) "feature"="neon" "enc"="0 0 0 01110 1 0 10000 11001 10 n:5 d:5" "asm"="frintz {d:2s}, {n:2s}" {
+  %r = call <2 x float> @llvm.trunc.v2f32(<2 x float> %n)
+  ret <2 x float> %r
+}
+
+declare <2 x float> @llvm.round.v2f32(<2 x float>)
+
+define <2 x float> @FRINTAv2s(<2 x float> "reg"="v" %n) "feature"="neon" "enc"="0 0 1 01110 0 0 10000 11000 10 n:5 d:5" "asm"="frinta {d:2s}, {n:2s}" {
+  %r = call <2 x float> @llvm.round.v2f32(<2 x float> %n)
+  ret <2 x float> %r
+}
+
+declare <2 x float> @llvm.rint.v2f32(<2 x float>)
+
+define <2 x float> @FRINTXv2s(<2 x float> "reg"="v" %n) "feature"="neon" "enc"="0 0 1 01110 0 0 10000 11001 10 n:5 d:5" "asm"="frintx {d:2s}, {n:2s}" {
+  %r = call <2 x float> @llvm.rint.v2f32(<2 x float> %n)
+  ret <2 x float> %r
+}
+
+declare <2 x float> @llvm.nearbyint.v2f32(<2 x float>)
+
+define <2 x float> @FRINTIv2s(<2 x float> "reg"="v" %n) "feature"="neon" "enc"="0 0 1 01110 1 0 10000 11001 10 n:5 d:5" "asm"="frinti {d:2s}, {n:2s}" {
+  %r = call <2 x float> @llvm.nearbyint.v2f32(<2 x float> %n)
+  ret <2 x float> %r
+}
+
 declare <16 x i8> @llvm.aarch64.neon.tbl1.v16i8(<16 x i8>, <16 x i8>)
 
 define <16 x i8> @TBL1v16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "feature"="neon" "enc"="0 1 001110 000 m:5 0 00 0 00 n:5 d:5" "asm"="tbl {d:16b}, {lb}{n:16b}{rb}, {m:16b}" {

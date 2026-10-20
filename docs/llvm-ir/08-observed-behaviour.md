@@ -140,6 +140,9 @@ same way. The record is attached to the instruction after the call.
 - **`zeroinitializer` for target types.** It is rejected for
   `target("spirv.Image", void, 1)`: `invalid type for null constant`. Epitome
   accepts it today.
+- **A double's hex bit pattern drops leading zeros.** rustc's IR (LLVM's
+  printer) has `fcmp oeq double %x, 0xADFB11E2ADB03C2`, fifteen digits, for
+  `0x0ADFB11E2ADB03C2`. Epitome reads one to sixteen digits.
 
 ## The assembler
 

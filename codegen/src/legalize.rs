@@ -1056,6 +1056,80 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                     }
                     out_parts = Some(vec![]);
                 }
+                // A split mask's bits as an integer (`bitcast <4 x i1> to
+                // i4` of a `<4 x i64>` comparison): each part's, in its
+                // place, low lanes in the low bits.
+                Op::Cast { op: CastOp::BitCast, value: Value::Local(x), .. }
+                    if parts.contains_key(&x) && res_ty.is_some_and(|t| matches!(cx.m.types.get(t), Type::Int(_))) =>
+                {
+                    let ty = res_ty.unwrap();
+                    let mut acc: Option<Value> = None;
+                    let mut at = 0u32;
+                    for p in parts[&x].clone() {
+                        let pty = cx.value_ty(bld.f, p);
+                        let k = match cx.m.types.get(pty) {
+                            Type::Vector { len, .. } => *len,
+                            _ => 1,
+                        };
+                        let bits = if k == 1 && !is_vec(cx, pty) {
+                            p
+                        } else {
+                            let kt = cx.m.types.int(k);
+                            bld.op(
+                                Op::Cast {
+                                    op: CastOp::BitCast,
+                                    flags: IntFlags::NONE,
+                                    fmf: FastMath::default(),
+                                    value: p,
+                                },
+                                Some(kt),
+                            )
+                        };
+                        let z = bld.op(
+                            Op::Cast { op: CastOp::ZExt, flags: IntFlags::NONE, fmf: FastMath::default(), value: bits },
+                            Some(ty),
+                        );
+                        let z = if at == 0 {
+                            z
+                        } else {
+                            let sh = Value::Const(cx.m.consts.intern(Constant {
+                                ty,
+                                kind: ConstKind::Int(epitome_ir::apint::ApInt::from_i64(
+                                    match cx.m.types.get(ty) {
+                                        Type::Int(b) => *b,
+                                        _ => 64,
+                                    },
+                                    at as i64,
+                                )),
+                            }));
+                            bld.op(
+                                Op::Binary {
+                                    op: BinOp::Shl,
+                                    flags: IntFlags::NONE,
+                                    fmf: FastMath::default(),
+                                    lhs: z,
+                                    rhs: sh,
+                                },
+                                Some(ty),
+                            )
+                        };
+                        acc = Some(match acc {
+                            None => z,
+                            Some(a) => bld.op(
+                                Op::Binary {
+                                    op: BinOp::Or,
+                                    flags: IntFlags::NONE,
+                                    fmf: FastMath::default(),
+                                    lhs: a,
+                                    rhs: z,
+                                },
+                                Some(ty),
+                            ),
+                        });
+                        at += k;
+                    }
+                    replace = acc;
+                }
                 Op::Cast { op, flags, fmf, value } => {
                     let from_ty = cx.value_ty(bld.f, value);
                     let to_ty = res_ty.unwrap();

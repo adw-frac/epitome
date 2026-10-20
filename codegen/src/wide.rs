@@ -103,6 +103,24 @@ pub fn split_wide(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     let mut bits_of: HashMap<LocalId, u32> = HashMap::new();
     let entry = f.layout[0];
 
+    // An invoke of a wide result gets a block of its own on its normal
+    // edge, where the result's halves are taken out once it has returned.
+    for b in f.layout.clone() {
+        let Some(t) = f.terminator(b) else { continue };
+        let Op::Invoke { normal, .. } = f.insts[t.index()].op else { continue };
+        if !f.insts[t.index()].result.is_some_and(|r| wide_bits(cx, f.locals[r.index()].ty).is_some()) {
+            continue;
+        }
+        let e = f.add_block(None);
+        let at = f.layout.iter().position(|&x| x == b).unwrap();
+        f.layout.insert(at + 1, e);
+        f.push_inst(e, Op::Br(normal), None);
+        if let Op::Invoke { normal: n, .. } = &mut f.insts[t.index()].op {
+            *n = e;
+        }
+        f.retarget_phis(normal, b, e);
+    }
+
     // Parameters: a wide one comes as a [2 x i64].
     let mut entry_new = Vec::new();
     let mut new_params = params.clone();
@@ -142,7 +160,15 @@ pub fn split_wide(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         }
     }
 
-    let blocks: Vec<BlockId> = f.layout.clone();
+    // In reverse postorder, so that each value is split before its uses
+    // (the layout need not have definitions first); unreachable blocks
+    // after.
+    let mut blocks = reverse_postorder(f);
+    for &b in &f.layout {
+        if !blocks.contains(&b) {
+            blocks.push(b);
+        }
+    }
     for b in blocks {
         let old = std::mem::take(&mut f.blocks[b.index()].insts);
         let mut out: Vec<InstId> = if b == entry { std::mem::take(&mut entry_new) } else { Vec::new() };
@@ -248,6 +274,12 @@ fn rewrite(
 ) -> Result<bool, String> {
     let op = s.f.insts[i.index()].op.clone();
     let result = s.f.insts[i.index()].result;
+    // A half of a wide result, taken out already (after an invoke).
+    if let (Op::ExtractValue { aggregate: Value::Local(a), .. }, Some(r)) = (&op, result)
+        && parts.get(a).is_some_and(|&(lo, hi)| lo == Value::Local(r) || hi == Value::Local(r))
+    {
+        return Ok(true);
+    }
     let res_bits = result.and_then(|r| wide_bits(cx, s.f.locals[r.index()].ty));
     let mut wide_operand = false;
     op.for_each_value(|v| wide_operand |= width(cx, s.f, bits_of, *v).is_some());
@@ -471,6 +503,21 @@ fn rewrite(
             set(parts, bits_of, p);
             Ok(false)
         }
+        Op::Invoke { mut call, normal, unwind } => {
+            let wide_result = widen_call(cx, s, ty, parts, bits_of, &mut call, res_bits.is_some())?;
+            s.f.insts[i.index()].op = Op::Invoke { call, normal, unwind };
+            if let Some(r) = result.filter(|_| wide_result) {
+                // Its halves, in the block of its normal edge (made above).
+                s.f.locals[r.index()].ty = ty.pair;
+                let agg = Value::Local(r);
+                let lo = s.f.add_inst(Op::ExtractValue { aggregate: agg, indices: vec![0] }, Some((None, i64t)));
+                let hi = s.f.add_inst(Op::ExtractValue { aggregate: agg, indices: vec![1] }, Some((None, i64t)));
+                s.f.blocks[normal.index()].insts.splice(0..0, [lo, hi]);
+                parts.insert(r, (s.f.result(lo), s.f.result(hi)));
+                bits_of.insert(r, bits);
+            }
+            Ok(true)
+        }
         Op::Call(mut call) => {
             // Wide arguments as [2 x i64]s; a wide result as one.
             let Type::Function { ret, params, varargs } = cx.m.types.get(call.fn_ty).clone() else { unreachable!() };
@@ -513,6 +560,59 @@ fn rewrite(
         }
         other => Err(format!("wide integers: {} is not supported yet", op_name(&other))),
     }
+}
+
+/// The blocks reachable from the entry, in reverse postorder.
+fn reverse_postorder(f: &Function) -> Vec<BlockId> {
+    let mut seen = vec![false; f.blocks.len()];
+    let mut post = Vec::new();
+    let entry = f.layout[0];
+    seen[entry.index()] = true;
+    let mut stack = vec![(entry, f.successors(entry), 0usize)];
+    while let Some((b, succs, next)) = stack.last_mut() {
+        if let Some(&s) = succs.get(*next) {
+            *next += 1;
+            if !seen[s.index()] {
+                seen[s.index()] = true;
+                let ss = f.successors(s);
+                stack.push((s, ss, 0));
+            }
+        } else {
+            post.push(*b);
+            stack.pop();
+        }
+    }
+    post.reverse();
+    post
+}
+
+/// A call's (or an invoke's) wide arguments as [2 x i64]s, and, if
+/// `wide_result`, its result as one: whether it has one.
+fn widen_call(
+    cx: &mut Ctx,
+    s: &mut B,
+    ty: &Types,
+    parts: &HashMap<LocalId, Pair>,
+    bits_of: &HashMap<LocalId, u32>,
+    call: &mut Call,
+    wide_result: bool,
+) -> Result<bool, String> {
+    let Type::Function { ret, params, varargs } = cx.m.types.get(call.fn_ty).clone() else { unreachable!() };
+    let mut params = params;
+    for (k, a) in call.args.iter_mut().enumerate() {
+        if width(cx, s.f, bits_of, a.value).is_some() {
+            a.value = aggregate(cx, s, ty, parts, a.value)?;
+            a.attrs.push(Attr::Word(WIDE.into()));
+            if k < params.len() {
+                params[k] = ty.pair;
+            }
+        }
+    }
+    if wide_result {
+        call.ret_attrs.push(Attr::Word(WIDE.into()));
+    }
+    call.fn_ty = cx.m.types.intern(Type::Function { ret: if wide_result { ty.pair } else { ret }, params, varargs });
+    Ok(wide_result)
 }
 
 thread_local! {
@@ -576,6 +676,7 @@ fn shift(cx: &mut Ctx, s: &mut B, ty: &Types, op: BinOp, (lo, hi): Pair, amt: Va
         let k = k & 127;
         return match (op, k) {
             (_, 0) => (lo, hi),
+            (BinOp::Shl, 64) => (c(cx, 0), lo),
             (BinOp::Shl, k) if k >= 64 => {
                 let x = c(cx, k - 64);
                 (c(cx, 0), s.bin(BinOp::Shl, lo, x, i64t))
@@ -588,7 +689,7 @@ fn shift(cx: &mut Ctx, s: &mut B, ty: &Types, op: BinOp, (lo, hi): Pair, amt: Va
             }
             (op, k) if k >= 64 => {
                 let x = c(cx, k - 64);
-                let l = s.bin(op, hi, x, i64t);
+                let l = if k == 64 { hi } else { s.bin(op, hi, x, i64t) };
                 let h = if op == BinOp::AShr {
                     let k63 = c(cx, 63);
                     s.bin(BinOp::AShr, hi, k63, i64t)

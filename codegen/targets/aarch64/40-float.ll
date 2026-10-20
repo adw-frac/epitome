@@ -146,6 +146,108 @@ define double @FSQRTD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 000011 10000 
   ret double %r
 }
 
+; Rounding to an integral value, in the floating-point type: by the
+; mode each intrinsic names (frintn to even, frintp up, frintm down, frintz
+; toward zero, frinta away from zero at halves; frintx and frinti by the
+; current mode, frintx raising inexact).
+declare double @llvm.roundeven.f64(double)
+
+define double @FRINTND(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 001000 10000 n:5 d:5" "asm"="frintn {d}, {n}" {
+  %r = call double @llvm.roundeven.f64(double %n)
+  ret double %r
+}
+
+declare double @llvm.ceil.f64(double)
+
+define double @FRINTPD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 001001 10000 n:5 d:5" "asm"="frintp {d}, {n}" {
+  %r = call double @llvm.ceil.f64(double %n)
+  ret double %r
+}
+
+declare double @llvm.floor.f64(double)
+
+define double @FRINTMD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 001010 10000 n:5 d:5" "asm"="frintm {d}, {n}" {
+  %r = call double @llvm.floor.f64(double %n)
+  ret double %r
+}
+
+declare double @llvm.trunc.f64(double)
+
+define double @FRINTZD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 001011 10000 n:5 d:5" "asm"="frintz {d}, {n}" {
+  %r = call double @llvm.trunc.f64(double %n)
+  ret double %r
+}
+
+declare double @llvm.round.f64(double)
+
+define double @FRINTAD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 001100 10000 n:5 d:5" "asm"="frinta {d}, {n}" {
+  %r = call double @llvm.round.f64(double %n)
+  ret double %r
+}
+
+declare double @llvm.rint.f64(double)
+
+define double @FRINTXD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 001110 10000 n:5 d:5" "asm"="frintx {d}, {n}" {
+  %r = call double @llvm.rint.f64(double %n)
+  ret double %r
+}
+
+declare double @llvm.nearbyint.f64(double)
+
+define double @FRINTID(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 001111 10000 n:5 d:5" "asm"="frinti {d}, {n}" {
+  %r = call double @llvm.nearbyint.f64(double %n)
+  ret double %r
+}
+
+declare float @llvm.roundeven.f32(float)
+
+define float @FRINTNS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 001000 10000 n:5 d:5" "asm"="frintn {d}, {n}" {
+  %r = call float @llvm.roundeven.f32(float %n)
+  ret float %r
+}
+
+declare float @llvm.ceil.f32(float)
+
+define float @FRINTPS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 001001 10000 n:5 d:5" "asm"="frintp {d}, {n}" {
+  %r = call float @llvm.ceil.f32(float %n)
+  ret float %r
+}
+
+declare float @llvm.floor.f32(float)
+
+define float @FRINTMS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 001010 10000 n:5 d:5" "asm"="frintm {d}, {n}" {
+  %r = call float @llvm.floor.f32(float %n)
+  ret float %r
+}
+
+declare float @llvm.trunc.f32(float)
+
+define float @FRINTZS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 001011 10000 n:5 d:5" "asm"="frintz {d}, {n}" {
+  %r = call float @llvm.trunc.f32(float %n)
+  ret float %r
+}
+
+declare float @llvm.round.f32(float)
+
+define float @FRINTAS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 001100 10000 n:5 d:5" "asm"="frinta {d}, {n}" {
+  %r = call float @llvm.round.f32(float %n)
+  ret float %r
+}
+
+declare float @llvm.rint.f32(float)
+
+define float @FRINTXS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 001110 10000 n:5 d:5" "asm"="frintx {d}, {n}" {
+  %r = call float @llvm.rint.f32(float %n)
+  ret float %r
+}
+
+declare float @llvm.nearbyint.f32(float)
+
+define float @FRINTIS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 001111 10000 n:5 d:5" "asm"="frinti {d}, {n}" {
+  %r = call float @llvm.nearbyint.f32(float %n)
+  ret float %r
+}
+
 define double @FMADDD(double "reg"="d" %n, double "reg"="d" %m, double "reg"="d" %a) "enc"="0 0 0 11111 01 0 m:5 0 a:5 n:5 d:5" "asm"="fmadd {d}, {n}, {m}, {a}" {
   %r = call double @llvm.fmuladd.f64(double %n, double %m, double %a)
   ret double %r
@@ -479,4 +581,62 @@ define double @FMOVDi(double "imm" %c) "enc"="0 0 0 11110 01 1 imm8:8=fp8d(c) 10
 
 define float @FMOVSi(float "imm" %c) "enc"="0 0 0 11110 00 1 imm8:8=fp8s(c) 100 00000 d:5" "asm"="fmov {d}, #{c:f32}" {
   ret float %c
+}
+
+; Saturating conversions: fcvtzs and fcvtzu already are (to the type's
+; limits, and NaN to 0), as llvm.fptosi.sat and llvm.fptoui.sat ask.
+declare i64 @llvm.fptosi.sat.i64.f64(double)
+
+define i64 @FCVTZSXDsat(double "reg"="d" %n) "enc"="1 0 0 11110 01 1 11 000 000000 n:5 d:5" "asm"="fcvtzs {d}, {n}" "nodecode" {
+  %r = call i64 @llvm.fptosi.sat.i64.f64(double %n)
+  ret i64 %r
+}
+
+declare i64 @llvm.fptoui.sat.i64.f64(double)
+
+define i64 @FCVTZUXDsat(double "reg"="d" %n) "enc"="1 0 0 11110 01 1 11 001 000000 n:5 d:5" "asm"="fcvtzu {d}, {n}" "nodecode" {
+  %r = call i64 @llvm.fptoui.sat.i64.f64(double %n)
+  ret i64 %r
+}
+
+declare i64 @llvm.fptosi.sat.i64.f32(float)
+
+define i64 @FCVTZSXSsat(float "reg"="s" %n) "enc"="1 0 0 11110 00 1 11 000 000000 n:5 d:5" "asm"="fcvtzs {d}, {n}" "nodecode" {
+  %r = call i64 @llvm.fptosi.sat.i64.f32(float %n)
+  ret i64 %r
+}
+
+declare i64 @llvm.fptoui.sat.i64.f32(float)
+
+define i64 @FCVTZUXSsat(float "reg"="s" %n) "enc"="1 0 0 11110 00 1 11 001 000000 n:5 d:5" "asm"="fcvtzu {d}, {n}" "nodecode" {
+  %r = call i64 @llvm.fptoui.sat.i64.f32(float %n)
+  ret i64 %r
+}
+
+declare i32 @llvm.fptosi.sat.i32.f64(double)
+
+define i32 @FCVTZSWDsat(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 11 000 000000 n:5 d:5" "asm"="fcvtzs {d}, {n}" "nodecode" {
+  %r = call i32 @llvm.fptosi.sat.i32.f64(double %n)
+  ret i32 %r
+}
+
+declare i32 @llvm.fptoui.sat.i32.f64(double)
+
+define i32 @FCVTZUWDsat(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 11 001 000000 n:5 d:5" "asm"="fcvtzu {d}, {n}" "nodecode" {
+  %r = call i32 @llvm.fptoui.sat.i32.f64(double %n)
+  ret i32 %r
+}
+
+declare i32 @llvm.fptosi.sat.i32.f32(float)
+
+define i32 @FCVTZSWSsat(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 11 000 000000 n:5 d:5" "asm"="fcvtzs {d}, {n}" "nodecode" {
+  %r = call i32 @llvm.fptosi.sat.i32.f32(float %n)
+  ret i32 %r
+}
+
+declare i32 @llvm.fptoui.sat.i32.f32(float)
+
+define i32 @FCVTZUWSsat(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 11 001 000000 n:5 d:5" "asm"="fcvtzu {d}, {n}" "nodecode" {
+  %r = call i32 @llvm.fptoui.sat.i32.f32(float %n)
+  ret i32 %r
 }
