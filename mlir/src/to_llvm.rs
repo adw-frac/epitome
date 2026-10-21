@@ -138,6 +138,7 @@ fn llvm_type_text(m: &Module, ty: TypeId) -> Result<String, String> {
     Ok(match m.ty(m.resolve_type(ty)) {
         Type::Index => "i64".to_string(),
         Type::MemRef { .. } => "ptr".to_string(),
+        Type::Dialect { name, body: None } if name == "llvm.ptr" => "ptr".to_string(),
         Type::Int { width, .. } => format!("i{width}"),
         Type::Float(f) => f.to_string(),
         _ => return Err(format!("type {} is not supported", crate::printer::type_text(m, ty))),
@@ -772,6 +773,47 @@ impl<'a> Lower<'a> {
                 let ty = result_ty(self).unwrap();
                 let fm = self.fastmath();
                 self.emit(intrinsic(name).unwrap(), &args, &[ty], vec![("fastmathFlags", fm)])
+            }
+            "func.call" => {
+                let callee = src.op_attr(op, "callee").ok_or("no callee")?;
+                let name = match src.attr(callee) {
+                    Attr::SymbolRef(p) => p[0].clone(),
+                    _ => return Err("callee is not a symbol".into()),
+                };
+                let result = result_ty(self);
+                self.call(&name, &args, result)
+            }
+            "memref.extract_aligned_pointer_as_index" => {
+                // The pointer itself: a memref is its aligned pointer here.
+                let i64t = self.out.int_type(64);
+                self.emit("llvm.ptrtoint", &args, &[i64t], vec![])
+            }
+            "arith.minsi" | "arith.maxsi" | "arith.minui" | "arith.maxui" => {
+                let ty = result_ty(self).unwrap();
+                let pred = match name {
+                    "arith.minsi" => 2, // slt
+                    "arith.maxsi" => 4, // sgt
+                    "arith.minui" => 6, // ult
+                    _ => 8,             // ugt
+                };
+                let i64t = self.out.int_type(64);
+                let pred = self.out.int_attr(pred, i64t);
+                let i1 = self.out.int_type(1);
+                let which = self.emit("llvm.icmp", &args, &[i1], vec![("predicate", pred)]).unwrap();
+                let fm = self.fastmath();
+                self.emit("llvm.select", &[which, args[0], args[1]], &[ty], vec![("fastmathFlags", fm)])
+            }
+            // Already in the llvm dialect, as a kernel is: as it is, with
+            // index values as i64.
+            _ if name.starts_with("llvm.") => {
+                let results: Vec<TypeId> = o.results.iter().map(|&r| llvm_type(self.out, src.value_type(r))).collect();
+                let props = dict(src, o.properties);
+                let mut spec = OpSpec::new(name).operands(&args).results(&results);
+                for (k, v) in props {
+                    spec = spec.prop(&k, v);
+                }
+                let new = spec.build(self.out, Some(self.block));
+                self.out.ops[new.index()].results.first().copied()
             }
             "func.return" => {
                 self.emit("llvm.return", &args, &[], vec![]);

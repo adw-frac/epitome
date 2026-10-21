@@ -491,3 +491,73 @@ impl Module {
         Ok(())
     }
 }
+
+impl Module {
+    /// A copy of operation `op` of another module, `from`, with its regions,
+    /// at the end of `block`: as `clone_op`, but its types and attributes
+    /// are interned in this module.
+    pub fn import_op(
+        &mut self,
+        from: &Module,
+        op: OpId,
+        block: Option<BlockId>,
+        map: &mut std::collections::HashMap<ValueId, ValueId>,
+    ) -> Result<OpId, String> {
+        let none = |_: TypeId| None;
+        let o = &from.ops[op.index()];
+        let operands = o
+            .operands
+            .iter()
+            .map(|v| map.get(v).copied().ok_or_else(|| format!("{}: an operand from outside", from.op_name(op))))
+            .collect::<Result<Vec<_>, _>>()?;
+        let results: Vec<TypeId> =
+            o.results.iter().map(|&r| self.import_type(from, from.value_type(r), &none)).collect();
+        let loc = o.loc.map(|l| self.import_attr(from, l, &none));
+        let mut spec = OpSpec::new(from.op_name(op)).operands(&operands).results(&results).loc(loc);
+        if let Some(Attr::Dict(es)) = o.properties.map(|p| from.attr(p)) {
+            for (k, v) in es {
+                let v = self.import_attr(from, *v, &none);
+                spec = spec.prop(k, v);
+            }
+        }
+        if let Some(Attr::Dict(es)) = o.attrs.map(|a| from.attr(a)) {
+            for (k, v) in es {
+                let v = self.import_attr(from, *v, &none);
+                spec = spec.attr(k, v);
+            }
+        }
+        let new = spec.regions(o.regions.len()).build(self, block);
+        for (&old, &n) in o.results.iter().zip(&self.ops[new.index()].results.clone()) {
+            map.insert(old, n);
+        }
+        for (k, &r) in o.regions.iter().enumerate() {
+            let region = self.region_of(new, k);
+            let blocks = from.regions[r.index()].blocks.clone();
+            let mut new_blocks = Vec::new();
+            for &b in &blocks {
+                let types: Vec<TypeId> = from.blocks[b.index()]
+                    .args
+                    .iter()
+                    .map(|&a| self.import_type(from, from.value_type(a), &none))
+                    .collect();
+                let nb = self.add_block(region, &types);
+                for (&a, &n) in from.blocks[b.index()].args.iter().zip(&self.blocks[nb.index()].args.clone()) {
+                    map.insert(a, n);
+                }
+                new_blocks.push(nb);
+            }
+            for (&b, &nb) in blocks.iter().zip(&new_blocks) {
+                for &inner in &from.blocks[b.index()].ops {
+                    let n = self.import_op(from, inner, Some(nb), map)?;
+                    let succ: Vec<BlockId> = from.ops[inner.index()]
+                        .successors
+                        .iter()
+                        .map(|s| new_blocks[blocks.iter().position(|x| x == s).expect("a successor in the region")])
+                        .collect();
+                    self.ops[n.index()].successors = succ;
+                }
+            }
+        }
+        Ok(new)
+    }
+}

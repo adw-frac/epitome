@@ -488,6 +488,58 @@ with a dynamic batch uses `tensor.dim`.
   loop rather than unrolling one with a constant trip count of two, are
   steps.
 
+### 5.8 Target kernels: matrix products on SME
+
+`linalg-to-kernels=<target>` replaces a `linalg.generic` that a target has
+a kernel for with calls to the kernel, a tile at a time, as upstream lowers
+`linalg.matmul` to `arm_sme` outer products. It runs on buffers, after
+`bufferize` and before `linalg-to-loops`. What a target has, and the
+kernels themselves, are data in `mlir/targets/<target>.mlir`:
+
+```mlir
+"epitome.kernel"() <{op = "matmul", element = f32,
+    indexing_maps = [affine_map<(d0, d1, d2) -> (d0, d2)>, affine_map<(d0, d1, d2) -> (d2, d1)>,
+                     affine_map<(d0, d1, d2) -> (d0, d1)>],
+    iterator_types = ["parallel", "parallel", "reduction"],
+    body = ["arith.mulf", "arith.addf"],
+    tile = array<i64: 16, 16>,
+    function = @__epitome_sme_matmul_f32}> : () -> ()
+
+func.func private @__epitome_sme_matmul_f32(%c: !llvm.ptr, %ldc: i64, %at: !llvm.ptr, ...) {
+  "llvm.call_intrinsic"() <{intrin = "llvm.epitome.sme.start"}> : () -> ()
+  ...  // the tile of C into za0.s; za0.s += column of A x row of B, for each k; za0.s back to C
+}
+```
+
+A matching `linalg.generic` (the same maps, iterators, element type, and a
+body that multiplies the inputs and adds to the output) becomes:
+
+- the first input packed transposed, `AT[k, m]`, by a `linalg.generic`,
+  so that the kernel reads a tile's column of A as a contiguous vector;
+- two `scf.for`s over the tiles of C, each calling the kernel with
+  pointers to the tiles (`memref.extract_aligned_pointer_as_index`, then
+  `llvm.inttoptr`), the row strides from the memrefs' layouts, and how many
+  of the tile's columns are in C (`arith.minsi`);
+- for rows past the last whole tile, the original `linalg.generic` on
+  views of A and C, so loops.
+
+The kernel for AArch64 with SME (`aarch64-sme`) is written with Epitome's
+SME intrinsics, which the code generator's description implements
+(`codegen/targets/aarch64/45-sme.ll`, feature `sme`, CPU `apple-m4`):
+`smstart`, `ptrue`, `whilelt` for the last tile's columns, `ld1w` of a row
+of C into a horizontal slice of `za0.s`, `fmopa` of a column of A and a row
+of B (a recipe: two `ld1w` into fixed `z0` and `z1`, then `fmopa`), `st1w`
+back, and `smstop`. The kernel is a function of its own, so streaming mode
+covers only code that is legal in it (integer arithmetic and SME), and the
+frame saves `d8`-`d15`, which `smstart` zeroes (the entries say
+`"clobbers"`). A tile of 32-bit elements is 16 x 16: M4's streaming vector
+length is 512 bits.
+
+On TinyStories-1M, `--sme` (`examples/tinystories.rs`) takes generation
+from 2.1 to 32 tokens a second, with the same tokens. `mlir/tests/sme.rs`
+checks a 70 x 40 by 40 x 50 product, which has rows past the last whole
+tile and a narrow last tile of columns, against a plain one on an M4.
+
 ## 6. Dialect descriptions
 
 A description is written in the dialect it lowers to. `torch` lowers to

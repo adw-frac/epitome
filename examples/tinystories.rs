@@ -12,12 +12,17 @@
 //! 3. `epitome-opt`'s pipeline;
 //! 4. code generation for AArch64, to a Mach-O object, `model.o`;
 //!
+//! With `--sme`, matrix products go to the SME kernels of
+//! `mlir/targets/aarch64-sme.mlir` (`linalg-to-kernels`, after
+//! `bufferize`), and the code generator targets `apple-m4`.
+//!
 //! then links it with the Rust program in `examples/tinystories/driver.rs`,
 //! which tokenizes a prompt and runs the model to choose each next token.
 //!
 //! ```sh
 //! python examples/tinystories/export.py target/tinystories   # torch-mlir's Python
 //! cargo run --release --example tinystories                   # add --dump for each stage's MLIR
+//! cargo run --release --example tinystories -- --sme          # matrix products on SME (Apple M4)
 //! target/tinystories/tinystories "Once upon a time, there was a little dog called"
 //! ```
 //!
@@ -33,12 +38,13 @@ use epitome_codegen::{Options, compile};
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dump = args.iter().any(|a| a == "--dump");
+    let sme = args.iter().any(|a| a == "--sme");
     let dir = args
         .iter()
         .find(|a| !a.starts_with("--"))
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("target/tinystories"));
-    match build(&dir, dump) {
+    match build(&dir, dump, sme) {
         Ok(exe) => {
             println!("built {}", exe.display());
             ExitCode::SUCCESS
@@ -50,7 +56,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn build(dir: &Path, dump: bool) -> Result<PathBuf, String> {
+fn build(dir: &Path, dump: bool, sme: bool) -> Result<PathBuf, String> {
     let step = |what: &str, start: Instant| println!("{what:<34} {:>6.2} s", start.elapsed().as_secs_f64());
 
     let path = dir.join("model.mlir");
@@ -62,7 +68,12 @@ fn build(dir: &Path, dump: bool) -> Result<PathBuf, String> {
     step("read MLIR (linalg on tensors)", start);
 
     // MLIR, stage by stage, to the llvm dialect.
-    for (k, pass) in epitome_mlir::LINALG_TO_LLVM.iter().enumerate() {
+    let mut passes: Vec<&str> = epitome_mlir::LINALG_TO_LLVM.to_vec();
+    if sme {
+        let at = passes.iter().position(|&p| p == "bufferize").unwrap() + 1;
+        passes.insert(at, "linalg-to-kernels=aarch64-sme");
+    }
+    for (k, pass) in passes.iter().enumerate() {
         let start = Instant::now();
         m = epitome_mlir::run_pass(pass, &m).map_err(|e| format!("{pass}: {e}"))?;
         step(pass, start);
@@ -89,7 +100,8 @@ fn build(dir: &Path, dump: bool) -> Result<PathBuf, String> {
     // Machine code.
     let start = Instant::now();
     let t = Target::aarch64();
-    let compiled = compile(&t, &mut ir, &Options::default())?;
+    let opts = Options { mcpu: sme.then(|| "apple-m4".to_string()), ..Options::default() };
+    let compiled = compile(&t, &mut ir, &opts)?;
     let object = dir.join("model.o");
     std::fs::write(&object, compiled.object_file(&t)?).map_err(|e| format!("{}: {e}", object.display()))?;
     step("compile to model.o (Mach-O)", start);

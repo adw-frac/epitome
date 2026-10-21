@@ -140,6 +140,8 @@ cargo run --release -p epitome-codegen --bin epitome-llc -- mlp.ll -o mlp.o
 python examples/tinystories/export.py target/tinystories
 cargo run --release --example tinystories
 target/tinystories/tinystories "Once upon a time, there was a little dog called"
+# The same with matrix products on SME (Apple M4): 15 times as fast.
+cargo run --release --example tinystories -- --sme
 ```
 
 `epitome-opt --help` lists the options. `opt/tests/examples` has small
