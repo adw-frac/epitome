@@ -319,9 +319,14 @@ impl Buf<'_> {
                 for v in ins {
                     operands.push(self.buffer(*v)?);
                 }
-                // Buffers the body reads, as `tensor.extract` does.
+                // The inputs' buffers, and those the body reads, as
+                // `tensor.extract` does (not the outputs: writing into one
+                // in place is the point).
                 let mut reads = operands.clone();
                 src.walk(op, &mut |inner| {
+                    if inner == op {
+                        return;
+                    }
                     for v in &src.ops[inner.index()].operands {
                         if let Some(&b) = self.map.get(v) {
                             reads.push(b);
