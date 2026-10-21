@@ -48,6 +48,17 @@ these are for after.
 
 ## Extra instructions
 
+- **Half precision** (`prepare.rs`, `half_as_int`, `half_arith`): halves
+  live as the i16s of their bits in integer registers, and every
+  operation moves them to a floating-point register, widens to float,
+  computes, narrows and moves back (`fmov w0, s0` then `fmov s0, w0`
+  between two). Better: an `h` register class, and FEAT_FP16's own
+  arithmetic where the CPU has it; vectors with `fcvtl`/`fcvtn` rather
+  than lane by lane.
+- **Fused multiply-adds of halves** go through `double`: the product is
+  exact, but the sum is rounded to double before half, which is almost
+  always the half the fused operation gives, not always.
+
 - **Splats of a constant mask, and negated masks** (`legalize.rs`,
   `mask_constants`, `vector_fcmps`): a comparison against zero to make a
   mask of the right lane width (`cmtst` of a `dup`), where a `movi` of the

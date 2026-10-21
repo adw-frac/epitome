@@ -1696,7 +1696,7 @@ impl Target {
                     }
                     Head::Intrinsic(id, bits) => {
                         let m = mask(bits);
-                        let (a, b) = (k[0] & m, k[1] & m);
+                        let (a, b) = (k[0] & m, k.get(1).copied().unwrap_or(0) & m);
                         let (sa, sb) = (sext(a, bits), sext(b, bits));
                         let name = &self.intrinsics[id as usize];
                         let pick = |x: bool| if x { a } else { b };

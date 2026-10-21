@@ -1571,9 +1571,15 @@ impl<'a, 'b> Sel<'a, 'b> {
     }
 
     /// How argument `v` is passed: a part for each register it takes.
-    fn arg_shape(&self, v: Value, sret: bool, wide: bool) -> Vec<crate::abi::Part> {
+    fn arg_shape(&self, v: Value, attrs: &[Attr]) -> Vec<crate::abi::Part> {
+        let sret = attrs.iter().any(|x| matches!(x, Attr::Type { name, .. } if name == "sret"));
+        let wide = has_mark(attrs, crate::wide::WIDE);
         let ty = self.ty_of(v);
         let part = |size, fp| crate::abi::Part { size, fp, sret: false, wide: false, hfa: false };
+        // A half's bits, passed where a half is.
+        if has_mark(attrs, prepare::HALF) {
+            return vec![part(2, true)];
+        }
         if let Some((n, m)) = self.hfa_of(ty) {
             let size = (self.bits(m) / 8) as u64;
             return vec![crate::abi::Part { hfa: true, ..part(size, true) }; n];
@@ -2259,9 +2265,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         };
         let mut shapes: Vec<Vec<crate::abi::Part>> = Vec::new();
         for a in &args {
-            let sret = a.attrs.iter().any(|x| matches!(x, Attr::Type { name, .. } if name == "sret"));
-            let wide = a.attrs.iter().any(|x| matches!(x, Attr::Word(w) if w == crate::wide::WIDE));
-            shapes.push(self.arg_shape(a.value, sret, wide));
+            shapes.push(self.arg_shape(a.value, &a.attrs));
         }
         let (part_locs, stack) = self.mf.abi.assign_parts(&shapes, named);
         self.mf.out_size = self.mf.out_size.max(stack);
@@ -2272,6 +2276,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         let mut sizes = Vec::new();
         let mut fps = Vec::new();
         let mut is_named = Vec::new();
+        let mut halves = Vec::new();
         for (k, a) in args.iter().enumerate() {
             let ty = self.ty_of(a.value);
             if let Some(n) = self.agg_len(ty) {
@@ -2281,9 +2286,11 @@ impl<'a, 'b> Sel<'a, 'b> {
                     sizes.push(shapes[k][p].size);
                     fps.push(shapes[k][p].fp);
                     is_named.push(k < named);
+                    halves.push(false);
                 }
                 continue;
             }
+            halves.push(has_mark(&a.attrs, prepare::HALF));
             let bits = self.vbits(a.value);
             let class = self.class_of(a.value);
             let mut r = self.reg_for(a.value, class)?;
@@ -2304,7 +2311,11 @@ impl<'a, 'b> Sel<'a, 'b> {
         // Stack arguments first, while every argument register is free;
         // a variable argument takes a whole 8-byte slot.
         let mut in_regs = Vec::new();
+        let mut half_regs = Vec::new();
         for (k, (&loc, &r)) in locs.iter().zip(&regs).enumerate() {
+            if let (crate::abi::ArgLoc::Reg(p), true) = (loc, halves[k]) {
+                half_regs.push(p);
+            }
             match loc {
                 crate::abi::ArgLoc::Stack(off) => {
                     let size = if !is_named[k] && self.mf.abi.variadic == crate::abi::Variadic::Stack {
@@ -2318,6 +2329,11 @@ impl<'a, 'b> Sel<'a, 'b> {
             }
         }
         for &(p, r) in &in_regs {
+            if half_regs.contains(&p) {
+                // A half's bits, into its floating-point register.
+                self.push(MInst::new(self.t.by_role("move.h.w"), vec![MOp::Reg(Reg::P(p)), MOp::Reg(r)]));
+                continue;
+            }
             self.push(MInst::copy(Reg::P(p), r));
         }
         // A tail call: when the call's result is what the function returns,
@@ -2384,6 +2400,11 @@ impl<'a, 'b> Sel<'a, 'b> {
                 return Ok(());
             }
             let d = self.vreg_of(r);
+            if has_mark(&call.ret_attrs, prepare::HALF) {
+                let from = self.mf.abi.fp_result;
+                self.push(MInst::new(self.t.by_role("move.w.h"), vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::P(from))]));
+                return Ok(());
+            }
             let from = if self.is_fp(self.f.locals[r.index()].ty) { self.mf.abi.fp_result } else { self.mf.abi.result };
             self.push(MInst::copy(Reg::V(d), Reg::P(from)));
         }
@@ -2567,7 +2588,17 @@ impl<'a, 'b> Sel<'a, 'b> {
                         let bits = self.vbits(*v);
                         let class = self.class_of(*v);
                         let mut r = self.reg_for(*v, class)?;
-                        let to = if self.fp_class(class) {
+                        let to = if has_mark(&f.ret_attrs, prepare::HALF) {
+                            // A half's bits, into the floating-point
+                            // result register.
+                            let to = self.mf.abi.fp_result;
+                            self.push(MInst::new(self.t.by_role("move.h.w"), vec![MOp::Reg(Reg::P(to)), MOp::Reg(r)]));
+                            result = Some(to);
+                            let mut ret = MInst::new(self.t.by_role("ret"), vec![]);
+                            ret.imp_uses = result.into_iter().collect();
+                            self.push(ret);
+                            continue;
+                        } else if self.fp_class(class) {
                             self.mf.abi.fp_result
                         } else {
                             r = self.extend_for_abi(r, bits, &f.ret_attrs)?;
@@ -2796,9 +2827,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         self.cur = 0;
         let mut shapes: Vec<Vec<crate::abi::Part>> = Vec::new();
         for p in &f.params {
-            let sret = p.attrs.iter().any(|x| matches!(x, Attr::Type { name, .. } if name == "sret"));
-            let wide = p.attrs.iter().any(|x| matches!(x, Attr::Word(w) if w == crate::wide::WIDE));
-            shapes.push(self.arg_shape(Value::Local(p.local), sret, wide));
+            shapes.push(self.arg_shape(Value::Local(p.local), &p.attrs));
         }
         let (part_locs, _) = self.mf.abi.assign_parts(&shapes, shapes.len());
         let sizes: Vec<u64> = shapes.iter().map(|s| s[0].size).collect();
@@ -2891,10 +2920,16 @@ impl<'a, 'b> Sel<'a, 'b> {
                 continue;
             }
             let d = self.vreg_of(p.local);
+            let half = has_mark(&p.attrs, prepare::HALF);
             match part_locs[k][0] {
+                // A half's bits, out of the floating-point register.
+                crate::abi::ArgLoc::Reg(r) if half => {
+                    self.push(MInst::new(self.t.by_role("move.w.h"), vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::P(r))]))
+                }
                 crate::abi::ArgLoc::Reg(r) => self.push(MInst::copy(Reg::V(d), Reg::P(r))),
                 crate::abi::ArgLoc::Stack(off) => {
-                    let ld = self.t.by_role(&format!("load.{}", mem_size(sizes[k], shapes[k][0].fp)));
+                    let fp = shapes[k][0].fp && !half;
+                    let ld = self.t.by_role(&format!("load.{}", mem_size(sizes[k], fp)));
                     let sp = self.t.machine.sp;
                     self.push(MInst::new(ld, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::P(sp)), MOp::Incoming(off)]));
                 }
@@ -2965,6 +3000,11 @@ pub(crate) fn move_wide_of(t: &Target, wide: bool) -> Option<(usize, usize, u32)
     let fits = |c: u32| t.instrs[movz].fits(&[None, Some((1i64 << c) - 1), Some(0)]);
     let chunk = (1..=32).rev().find(|&c| fits(c))?;
     Some((movz, movk, chunk))
+}
+
+/// Whether `attrs` has our mark `word` (`WIDE`, `HALF`).
+fn has_mark(attrs: &[Attr], word: &str) -> bool {
+    attrs.iter().any(|x| matches!(x, Attr::Word(w) if w == word))
 }
 
 /// Whether `attrs` (with their groups) has the keyword attribute `word`.

@@ -551,6 +551,70 @@ define float @FCVTSD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 0001 00 10000 
   ret float %r
 }
 
+; Half precision, as the i16s of their bits (see `prepare::half_as_int`):
+; the bits into a floating-point register, then widened; narrowed, then
+; the bits out. (Without FEAT_FP16, these are all the machine does with
+; them.)
+define float @h2f(i16 "reg"="w" %x) "recipe"="h2f.expand" {
+  %r = call float @llvm.convert.from.fp16.f32(i16 %x)
+  ret float %r
+}
+
+define float @h2f.expand(i16 %x) {
+  %b = call float @FMOVSWh(i16 %x)
+  %r = call float @FCVTSH(float %b)
+  ret float %r
+}
+
+define i16 @f2h(float "reg"="s" %x) "recipe"="f2h.expand" {
+  %r = call i16 @llvm.convert.to.fp16.f32(float %x)
+  ret i16 %r
+}
+
+define i16 @f2h.expand(float %x) {
+  %h = call float @FCVTHS(float %x)
+  %r = call i16 @FMOVWSh(float %h)
+  ret i16 %r
+}
+
+define i16 @d2h(double "reg"="d" %x) "recipe"="d2h.expand" {
+  %r = call i16 @llvm.convert.to.fp16.f64(double %x)
+  ret i16 %r
+}
+
+define i16 @d2h.expand(double %x) {
+  %h = call float @FCVTHD(double %x)
+  %r = call i16 @FMOVWSh(float %h)
+  ret i16 %r
+}
+
+; (An s register holding a half's bits, in its low 16.)
+define float @FMOVSWh(i16 "reg"="w" %n) "enc"="0 00 11110 00 1 00 111 000000 n:5 d:5" "asm"="fmov {d}, {n}" "role"="move.h.w" "nomatch" "nodecode" {
+  %r = bitcast i32 0 to float
+  ret float %r
+}
+
+define i16 @FMOVWSh(float "reg"="s" %n) "enc"="0 00 11110 00 1 00 110 000000 n:5 d:5" "asm"="fmov {d}, {n}" "role"="move.w.h" "nomatch" "nodecode" {
+  ret i16 0
+}
+
+define float @FCVTSH(float "reg"="s" %n) "enc"="0 0 0 11110 11 1 0001 00 10000 n:5 d:5" "asm"="fcvt {d}, {n:h}" "nomatch" {
+  ret float %n
+}
+
+define float @FCVTHS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 0001 11 10000 n:5 d:5" "asm"="fcvt {d:h}, {n}" "nomatch" {
+  ret float %n
+}
+
+define float @FCVTHD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 0001 11 10000 n:5 d:5" "asm"="fcvt {d:h}, {n}" "nomatch" {
+  %r = fptrunc double %n to float
+  ret float %r
+}
+
+declare float @llvm.convert.from.fp16.f32(i16)
+declare i16 @llvm.convert.to.fp16.f32(float)
+declare i16 @llvm.convert.to.fp16.f64(double)
+
 ; Between the register files, bit for bit.
 define double @FMOVDX(i64 "reg"="x" %n) "enc"="1 00 11110 01 1 00 111 000000 n:5 d:5" "asm"="fmov {d}, {n}" "role"="move.d.x" {
   %r = bitcast i64 %n to double

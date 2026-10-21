@@ -1298,10 +1298,17 @@ fn identity_bitcasts(f: &mut Function) {
     }
 }
 
-/// Values of `half` (and vectors of them) as `i16`s of their bits, where
-/// all that is done with them is move bits about: loads, stores, bitcasts,
-/// lanes, phis and selects, and `fneg`, an `xor` of the sign bit. (There is
-/// no `half` register class yet; arithmetic on `half` is an error.)
+/// The mark of an argument, parameter or result of `half` turned into the
+/// `i16` of its bits (`half_as_int`): passed as a half is, in a
+/// floating-point register.
+pub const HALF: &str = "epitome.half";
+
+/// Values of `half` (and vectors of them) as `i16`s of their bits: moves
+/// of bits (loads, stores, bitcasts, lanes, phis and selects) as they are,
+/// `fneg` an `xor` of the sign bit, and arithmetic, comparisons,
+/// conversions and intrinsics in `float` (`half_arith`); parameters,
+/// results and calls' arguments marked `HALF`. (There is no `half`
+/// register class; vectors of `half` as parameters are an error.)
 fn half_as_int(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     let half = cx.m.types.intern(Type::Half);
     let i16t = cx.m.types.int(16);
@@ -1318,8 +1325,31 @@ fn half_as_int(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     if !f.locals.iter().map(|l| l.ty).collect::<Vec<_>>().into_iter().any(|t| has_half(cx, t)) {
         return Ok(());
     }
-    if f.params.iter().any(|p| has_half(cx, f.locals[p.local.index()].ty)) {
-        return Err("parameters of type half are not supported yet".into());
+    // Parameters and results of half, and calls' arguments and results:
+    // the i16s of their bits, marked as passed where halves are (`HALF`).
+    let scalar_half = |cx: &Ctx, t: TypeId| matches!(cx.m.types.get(t), Type::Half);
+    // Arithmetic and passing halves need the machine's conversions and
+    // moves of their bits (`move.w.h`, `llvm.convert.*.fp16`).
+    let converts = cx.t.role("move.w.h").is_some();
+    let ret_half = matches!(cx.m.types.get(f.ty), Type::Function { ret, .. } if scalar_half(cx, *ret));
+    if !converts && (ret_half || f.params.iter().any(|p| has_half(cx, f.locals[p.local.index()].ty))) {
+        return Err("parameters and results of half are not supported on this machine yet".into());
+    }
+    for k in 0..f.params.len() {
+        let t = f.locals[f.params[k].local.index()].ty;
+        if scalar_half(cx, t) {
+            f.params[k].attrs.push(Attr::Word(HALF.into()));
+        } else if has_half(cx, t) {
+            return Err("parameters of vectors of half are not supported yet".into());
+        }
+    }
+    if let Type::Function { ret, params, varargs } = cx.m.types.get(f.ty).clone() {
+        if scalar_half(cx, ret) {
+            f.ret_attrs.push(Attr::Word(HALF.into()));
+        }
+        let params: Vec<TypeId> = params.iter().map(|&t| as_int(cx, t).unwrap_or(t)).collect();
+        let ret = as_int(cx, ret).unwrap_or(ret);
+        f.ty = cx.m.types.intern(Type::Function { ret, params, varargs });
     }
     // Only operations on bits.
     for i in f.insts_in_order() {
@@ -1342,9 +1372,39 @@ fn half_as_int(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                 | Op::ExtractElement { .. }
                 | Op::InsertElement { .. }
                 | Op::ShuffleVector { .. }
-        );
-        if !bits_only {
-            return Err("arithmetic on half is not supported yet".into());
+        ) || matches!(op, Op::Ret(_) if converts);
+        let call = match op {
+            Op::Call(c) | Op::Invoke { call: c, .. } => {
+                !callee_name(cx.m, c).is_some_and(|n| n.starts_with("llvm."))
+                    && c.args.iter().all(|a| {
+                        let t = cx.value_ty(f, a.value);
+                        !has_half(cx, t) || scalar_half(cx, t)
+                    })
+                    && f.insts[i.index()].result.is_none_or(|r| {
+                        let t = f.locals[r.index()].ty;
+                        !has_half(cx, t) || scalar_half(cx, t)
+                    })
+            }
+            _ => false,
+        };
+        let arith = call
+            || match op {
+                Op::Binary { op: BinOp::FAdd | BinOp::FSub | BinOp::FMul | BinOp::FDiv | BinOp::FRem, .. }
+                | Op::FCmp { .. }
+                | Op::Cast {
+                    op:
+                        CastOp::FPExt | CastOp::FPTrunc | CastOp::SIToFP | CastOp::UIToFP | CastOp::FPToSI | CastOp::FPToUI,
+                    ..
+                } => true,
+                Op::Call(c) => callee_name(cx.m, c).is_some_and(|n| half_intrinsic(&n).is_some()),
+                _ => false,
+            };
+        if !bits_only && !(arith && converts) {
+            return Err(match op {
+                Op::Call(_) | Op::Invoke { .. } => "calls with arguments or results of half are not supported yet",
+                _ => "this operation on half is not supported yet",
+            }
+            .into());
         }
     }
     // Constants of half: integers of their bits.
@@ -1378,6 +1438,32 @@ fn half_as_int(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         };
         Some(cx.m.consts.intern(Constant { ty: t, kind }))
     };
+    // Calls' halves marked, before their types change.
+    for i in f.insts_in_order().collect::<Vec<_>>() {
+        let res_half = f.insts[i.index()].result.is_some_and(|r| scalar_half(cx, f.locals[r.index()].ty));
+        let marks: Vec<bool> = match &f.insts[i.index()].op {
+            Op::Call(c) | Op::Invoke { call: c, .. }
+                if !callee_name(cx.m, c).is_some_and(|n| n.starts_with("llvm.")) =>
+            {
+                c.args.iter().map(|a| scalar_half(cx, cx.value_ty(f, a.value))).collect()
+            }
+            _ => continue,
+        };
+        let Some(c) = f.insts[i.index()].op.call_mut() else { continue };
+        for (a, m) in c.args.iter_mut().zip(marks) {
+            if m {
+                a.attrs.push(Attr::Word(HALF.into()));
+            }
+        }
+        if res_half {
+            c.ret_attrs.push(Attr::Word(HALF.into()));
+        }
+        if let Type::Function { ret, params, varargs } = cx.m.types.get(c.fn_ty).clone() {
+            let params: Vec<TypeId> = params.iter().map(|&t| as_int(cx, t).unwrap_or(t)).collect();
+            let ret = as_int(cx, ret).unwrap_or(ret);
+            c.fn_ty = cx.m.types.intern(Type::Function { ret, params, varargs });
+        }
+    }
     for k in 0..f.locals.len() {
         if let Some(t) = as_int(cx, f.locals[k].ty) {
             f.locals[k].ty = t;
@@ -1413,7 +1499,204 @@ fn half_as_int(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         // `identity_bitcasts` takes away.)
         f.insts[i.index()].op = op;
     }
+    half_arith(cx, f);
     Ok(())
+}
+
+/// What intrinsic `name` of `half` (`llvm.sqrt.f16`) is done as: its
+/// `float` form, or for a fused one, its `double` form (whose product of
+/// halves is exact, and whose one rounding before the half's is almost
+/// always right; see later.md). `None` for others.
+fn half_intrinsic(name: &str) -> Option<(String, bool)> {
+    let rest = name.strip_prefix("llvm.")?;
+    let (base, ty) = rest.rsplit_once('.')?;
+    if !(ty == "f16" || ty.starts_with('v') && ty.ends_with("f16")) {
+        return None;
+    }
+    let ok = matches!(
+        base,
+        "fabs"
+            | "sqrt"
+            | "minnum"
+            | "maxnum"
+            | "minimum"
+            | "maximum"
+            | "minimumnum"
+            | "maximumnum"
+            | "copysign"
+            | "floor"
+            | "ceil"
+            | "trunc"
+            | "rint"
+            | "nearbyint"
+            | "round"
+            | "roundeven"
+            | "canonicalize"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "exp"
+            | "exp2"
+            | "exp10"
+            | "log"
+            | "log2"
+            | "log10"
+            | "pow"
+            | "fma"
+            | "fmuladd"
+    );
+    ok.then(|| {
+        let wide = matches!(base, "fma" | "fmuladd");
+        (format!("llvm.{base}.{}", if wide { "f64" } else { "f32" }), wide)
+    })
+}
+
+/// Arithmetic left on the `i16`s halves became (`half_as_int`), which only
+/// halves can be the operands of: done in `float` (exactly rounded to half
+/// for `+ - * /` and square roots, as float's 24 bits are more than twice
+/// half's 11 and two), and the result narrowed back; vectors lane by lane.
+/// Integers become halves through `double`, which holds every integer that
+/// is not too big for a half exactly.
+fn half_arith(cx: &mut Ctx, f: &mut Function) {
+    let i16t = cx.m.types.int(16);
+    let f32t = cx.m.types.intern(Type::Float);
+    let f64t = cx.m.types.intern(Type::Double);
+    let i64t = cx.m.types.int(64);
+    let is_h =
+        |cx: &Ctx, t: TypeId| t == i16t || matches!(cx.m.types.get(t), Type::Vector { elem, .. } if *elem == i16t);
+    let h2f = |cx: &mut Ctx, s: &mut Seq, v: Value| call_intrinsic(cx, s, "llvm.convert.from.fp16.f32", vec![v], f32t);
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let op = f.insts[i.index()].op.clone();
+            let Some(r) = f.insts[i.index()].result else {
+                k += 1;
+                continue;
+            };
+            let rty = f.locals[r.index()].ty;
+            let mut operand_tys = Vec::new();
+            op.for_each_value(|v| operand_tys.push(cx.value_ty(f, *v)));
+            // Which of the operations on halves this is.
+            let of_half = match &op {
+                Op::Binary { op: BinOp::FAdd | BinOp::FSub | BinOp::FMul | BinOp::FDiv | BinOp::FRem, .. } => {
+                    is_h(cx, rty)
+                }
+                Op::FCmp { lhs, .. } => is_h(cx, cx.value_ty(f, *lhs)),
+                Op::Cast { op: CastOp::FPExt | CastOp::FPToSI | CastOp::FPToUI, value, .. } => {
+                    is_h(cx, cx.value_ty(f, *value))
+                }
+                Op::Cast { op: CastOp::FPTrunc | CastOp::SIToFP | CastOp::UIToFP, .. } => is_h(cx, rty),
+                Op::Call(c) => callee_name(cx.m, c).is_some_and(|n| half_intrinsic(&n).is_some()),
+                _ => false,
+            };
+            if !of_half {
+                k += 1;
+                continue;
+            }
+            // Lanes, if a vector: each done as a scalar.
+            let lanes = match cx.m.types.get(rty) {
+                Type::Vector { len, .. } => Some(*len),
+                _ => operand_tys.iter().find_map(|&t| match cx.m.types.get(t) {
+                    Type::Vector { len, .. } => Some(*len),
+                    _ => None,
+                }),
+            };
+            let scalar = |cx: &Ctx, t: TypeId| match cx.m.types.get(t) {
+                Type::Vector { elem, .. } => *elem,
+                _ => t,
+            };
+            let mut s = Seq { f, new: Vec::new() };
+            let one = |cx: &mut Ctx, s: &mut Seq, op: &Op, lane: Option<u32>| -> Value {
+                let take = |cx: &mut Ctx, s: &mut Seq, v: Value| match lane {
+                    Some(l) => {
+                        let vt = cx.value_ty(s.f, v);
+                        let e = scalar(cx, vt);
+                        let idx = cx.int(i64t, l as i64);
+                        s.op(Op::ExtractElement { vector: v, index: idx }, e)
+                    }
+                    None => v,
+                };
+                let rs = scalar(cx, rty);
+                match op.clone() {
+                    Op::Binary { op: o, fmf, lhs, rhs, .. } => {
+                        let (a, b) = (take(cx, s, lhs), take(cx, s, rhs));
+                        let (a, b) = (h2f(cx, s, a), h2f(cx, s, b));
+                        let z = s.op(Op::Binary { op: o, flags: IntFlags::NONE, fmf, lhs: a, rhs: b }, f32t);
+                        call_intrinsic(cx, s, "llvm.convert.to.fp16.f32", vec![z], i16t)
+                    }
+                    Op::FCmp { pred, fmf, lhs, rhs } => {
+                        let (a, b) = (take(cx, s, lhs), take(cx, s, rhs));
+                        let (a, b) = (h2f(cx, s, a), h2f(cx, s, b));
+                        s.op(Op::FCmp { pred, fmf, lhs: a, rhs: b }, rs)
+                    }
+                    Op::Cast { op: c, value, .. } => {
+                        let x = take(cx, s, value);
+                        match c {
+                            CastOp::FPExt => {
+                                let w = h2f(cx, s, x);
+                                if rs == f32t { w } else { s.cast(CastOp::FPExt, w, rs) }
+                            }
+                            CastOp::FPToSI | CastOp::FPToUI => {
+                                let w = h2f(cx, s, x);
+                                s.cast(c, w, rs)
+                            }
+                            CastOp::FPTrunc => {
+                                let xt = cx.value_ty(s.f, x);
+                                if xt == f64t {
+                                    call_intrinsic(cx, s, "llvm.convert.to.fp16.f64", vec![x], i16t)
+                                } else {
+                                    call_intrinsic(cx, s, "llvm.convert.to.fp16.f32", vec![x], i16t)
+                                }
+                            }
+                            _ => {
+                                let d = s.cast(c, x, f64t);
+                                call_intrinsic(cx, s, "llvm.convert.to.fp16.f64", vec![d], i16t)
+                            }
+                        }
+                    }
+                    Op::Call(call) => {
+                        let name = callee_name(cx.m, &call).unwrap();
+                        let (wide_name, wide) = half_intrinsic(&name).unwrap();
+                        let ft = if wide { f64t } else { f32t };
+                        let mut args = Vec::new();
+                        for a in &call.args {
+                            let x = take(cx, s, a.value);
+                            let xt = cx.value_ty(s.f, x);
+                            args.push(if xt == i16t {
+                                let w = h2f(cx, s, x);
+                                if wide { s.cast(CastOp::FPExt, w, f64t) } else { w }
+                            } else {
+                                x
+                            });
+                        }
+                        let z = call_intrinsic(cx, s, &wide_name, args, ft);
+                        let back = if wide { "llvm.convert.to.fp16.f64" } else { "llvm.convert.to.fp16.f32" };
+                        call_intrinsic(cx, s, back, vec![z], i16t)
+                    }
+                    _ => unreachable!(),
+                }
+            };
+            let v = match lanes {
+                None => one(cx, &mut s, &op, None),
+                Some(n) => {
+                    let mut acc = Value::Const(cx.m.consts.intern(Constant { ty: rty, kind: ConstKind::Poison }));
+                    for l in 0..n {
+                        let x = one(cx, &mut s, &op, Some(l));
+                        let idx = cx.int(i64t, l as i64);
+                        acc = s.op(Op::InsertElement { vector: acc, element: x, index: idx }, rty);
+                    }
+                    acc
+                }
+            };
+            let new = std::mem::take(&mut s.new);
+            f.replace_uses(Value::Local(r), v);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
 }
 
 /// Bitcasts, in forms the code generator has: between registers where
