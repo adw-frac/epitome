@@ -1,0 +1,21 @@
+[package]
+name = "epitome-mlir"
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/andy-thomason/epitome"
+description = "MLIR: a parser and printer, lowering from torch through linalg to the llvm dialect, and translation to LLVM IR"
+
+[dependencies]
+epitome-ir = { path = "../ir" }
+
+[[bin]]
+name = "epitome-mlir-opt"
+path = "src/main.rs"
+
+[[bin]]
+name = "epitome-mlir-translate"
+path = "src/bin/epitome-mlir-translate.rs"
+
+[dev-dependencies]
+epitome-opt = { path = "../opt" }
+epitome-codegen = { path = "../codegen" }

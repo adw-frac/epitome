@@ -8,6 +8,7 @@ repository = "https://github.com/andy-thomason/epitome"
 epitome-ir = { path = "ir" }
 epitome-opt = { path = "opt" }
 epitome-codegen = { path = "codegen" }
+epitome-mlir = { path = "mlir" }
 
 [workspace]
-members = ["ir", "opt", "codegen"]
+members = ["ir", "opt", "codegen", "mlir"]
