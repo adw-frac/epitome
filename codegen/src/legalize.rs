@@ -580,6 +580,58 @@ fn native_shuffle(cx: &Ctx, f: &Function, i: InstId) -> bool {
     crate::target::mask_lanes(cx.m, *mask).is_some_and(|lanes| cx.t.has_shuffle(&lanes, hb, src_bits, of_insert))
 }
 
+/// A truncation of a vector to booleans (`trunc <16 x i8> to <16 x i1>`):
+/// a comparison, of each lane's lowest bit with zero, so that the mask has
+/// the lanes' width as one a comparison makes does.
+fn truncs_to_masks(cx: &mut Ctx, f: &mut Function) {
+    let i1 = cx.m.types.int(1);
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::Cast { op: CastOp::Trunc, value, .. } = f.insts[i.index()].op else {
+                k += 1;
+                continue;
+            };
+            let r = f.insts[i.index()].result.unwrap();
+            let mt = f.locals[r.index()].ty;
+            let vt = cx.value_ty(f, value);
+            let (Type::Vector { elem, .. }, Type::Vector { elem: from, .. }) =
+                (cx.m.types.get(mt).clone(), cx.m.types.get(vt).clone())
+            else {
+                k += 1;
+                continue;
+            };
+            if elem != i1 {
+                k += 1;
+                continue;
+            }
+            let one = Value::Const({
+                let fb = match cx.m.types.get(from) {
+                    Type::Int(b) => *b,
+                    _ => 64,
+                };
+                let c =
+                    cx.m.consts
+                        .intern(Constant { ty: from, kind: ConstKind::Int(epitome_ir::apint::ApInt::from_i64(fb, 1)) });
+                cx.m.consts.intern(Constant { ty: vt, kind: ConstKind::Splat(c) })
+            });
+            let zero = Value::Const(cx.m.consts.intern(Constant { ty: vt, kind: ConstKind::Zero }));
+            let mut bld = Builder { f, new: Vec::new() };
+            let low = bld.op(
+                Op::Binary { op: BinOp::And, flags: IntFlags::NONE, fmf: FastMath::default(), lhs: value, rhs: one },
+                Some(vt),
+            );
+            let new = bld.new;
+            let n = new.len();
+            f.insts[i.index()].op = Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: low, rhs: zero };
+            f.blocks[b.index()].insts.splice(k..k, new);
+            k += n + 1;
+        }
+    }
+}
+
 /// A select of whole vectors by one boolean: by a mask of it in every
 /// lane (a splat of one boolean, which `fix_masks` makes right at any
 /// width), lane by lane.
@@ -1087,6 +1139,7 @@ fn fix_masks(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
 pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     pointer_vectors(cx, f)?;
     scalar_selects(cx, f);
+    truncs_to_masks(cx, f);
     vector_fcmps(cx, f);
     rewrite_vector_ops(cx, f);
     fix_masks(cx, f)?;

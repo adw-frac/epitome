@@ -1542,16 +1542,43 @@ impl<'a, 'b> Sel<'a, 'b> {
     }
 
     /// The registers a returned value takes: a small aggregate's parts, or
-    /// a struct of integers and pointers (`{ ptr, ptr }`), a field each, in
-    /// as many result registers as there are.
-    fn result_parts(&self, ty: TypeId) -> Option<usize> {
+    /// a struct of scalars (`{ ptr, ptr }`, `{ double, i64 }`), a field
+    /// each: integers in the result registers in turn, floating-point ones
+    /// in the floating-point result registers in turn.
+    fn result_regs(&self, ty: TypeId) -> Option<Vec<u8>> {
         if let Type::Struct { fields, .. } = self.cx.m.types.get(ty)
-            && fields.len() <= self.mf.abi.results(usize::MAX).len()
-            && fields.iter().all(|t| matches!(self.cx.m.types.get(*t), Type::Int(1..=64) | Type::Ptr(0)))
+            && fields.iter().all(|t| {
+                matches!(self.cx.m.types.get(*t), Type::Int(1..=64) | Type::Ptr(0) | Type::Float | Type::Double)
+            })
         {
-            return Some(fields.len());
+            let fp = |t: &TypeId| matches!(self.cx.m.types.get(*t), Type::Float | Type::Double);
+            let (nf, ni) = (fields.iter().filter(|t| fp(t)).count(), fields.iter().filter(|t| !fp(t)).count());
+            let ints = self.mf.abi.results(usize::MAX);
+            let fps = self.mf.abi.fp_results(usize::MAX);
+            if ni > ints.len() || nf > fps.len() {
+                return None;
+            }
+            let (mut i, mut j) = (0, 0);
+            return Some(
+                fields
+                    .iter()
+                    .map(|t| {
+                        if fp(t) {
+                            j += 1;
+                            fps[j - 1]
+                        } else {
+                            i += 1;
+                            ints[i - 1]
+                        }
+                    })
+                    .collect(),
+            );
         }
-        self.parts_of(ty)
+        self.parts_of(ty).map(|n| self.mf.abi.results(n))
+    }
+
+    fn result_parts(&self, ty: TypeId) -> Option<usize> {
+        self.result_regs(ty).map(|r| r.len())
     }
 
     /// The registers landing pad `r`'s exception and selector are copied
@@ -1569,7 +1596,20 @@ impl<'a, 'b> Sel<'a, 'b> {
         if let Some(regs) = self.agg_params.get(&r) {
             return regs.clone();
         }
-        let regs: Vec<u32> = (0..n).map(|_| self.ivreg(true)).collect();
+        // Each field's register of its kind (a double's a d register).
+        let fields = match self.cx.m.types.get(self.f.locals[r.index()].ty) {
+            Type::Struct { fields, .. } if fields.len() == n => fields.clone(),
+            _ => Vec::new(),
+        };
+        let regs: Vec<u32> = (0..n)
+            .map(|k| match fields.get(k) {
+                Some(&t) if matches!(self.cx.m.types.get(t), Type::Float | Type::Double) => {
+                    let c = self.class_of_ty(t);
+                    self.mf.new_vreg(c)
+                }
+                _ => self.ivreg(true),
+            })
+            .collect();
         self.agg_params.insert(r, regs.clone());
         regs
     }
@@ -1651,7 +1691,10 @@ impl<'a, 'b> Sel<'a, 'b> {
         let mut regs = Vec::new();
         for (k, part) in found.into_iter().enumerate() {
             regs.push(match (part, base.as_ref().and_then(|b| b.get(k))) {
-                (Some(p), _) => self.reg_for(p, self.int_class(true))?,
+                (Some(p), _) => {
+                    let c = if self.fp_class(self.class_of(p)) { self.class_of(p) } else { self.int_class(true) };
+                    self.reg_for(p, c)?
+                }
                 (None, Some(&r)) => Reg::V(r),
                 (None, None) => self.int_reg(0, true, true)?,
             });
@@ -1802,7 +1845,16 @@ impl<'a, 'b> Sel<'a, 'b> {
                         let class = m
                             .value_class_in(*file, holds, bits)
                             .ok_or_else(|| bad(format!("no register class of its file holds {:?}", c.codes)))?;
-                        let r = self.reg_for(v, class)?;
+                        let mut r = self.reg_for(v, class)?;
+                        // In a register of the constraint's file (an i16 for
+                        // `w`, in an s register): copied there first.
+                        if let Reg::V(x) = r
+                            && m.classes[self.mf.vclass[x as usize].0 as usize].file != *file
+                        {
+                            let d = self.mf.new_vreg(class);
+                            before.push(MInst::copy(Reg::V(d), r));
+                            r = Reg::V(d);
+                        }
                         operands.push((false, ins.len(), AsmPrint::Reg(print.unwrap_or(class))));
                         ins.push(MOp::Reg(r));
                     }
@@ -2236,9 +2288,9 @@ impl<'a, 'b> Sel<'a, 'b> {
             && self.uses[r.index()] > 0
         {
             // A small aggregate ([2 x i64], an i128): one register a part.
-            if let Some(n) = self.result_parts(self.f.locals[r.index()].ty) {
-                let regs = self.early_regs(r, n);
-                for (from, d) in self.mf.abi.results(n).into_iter().zip(regs) {
+            if let Some(from_regs) = self.result_regs(self.f.locals[r.index()].ty) {
+                let regs = self.early_regs(r, from_regs.len());
+                for (from, d) in from_regs.into_iter().zip(regs) {
                     self.push(MInst::copy(Reg::V(d), Reg::P(from)));
                 }
                 return Ok(());
@@ -2411,9 +2463,8 @@ impl<'a, 'b> Sel<'a, 'b> {
                     continue;
                 }
                 Op::Ret(Some(v)) if self.result_parts(self.ty_of(*v)).is_some() => {
-                    let n = self.result_parts(self.ty_of(*v)).unwrap();
-                    let parts = self.parts(*v, n)?;
-                    let to = self.mf.abi.results(n);
+                    let to = self.result_regs(self.ty_of(*v)).unwrap();
+                    let parts = self.parts(*v, to.len())?;
                     for (&p, &r) in to.iter().zip(&parts) {
                         self.push(MInst::copy(Reg::P(p), r));
                     }

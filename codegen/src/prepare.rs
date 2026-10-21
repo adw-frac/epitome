@@ -142,6 +142,7 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     let mut f = f.clone();
     thread_locals(cx, &mut f);
     one_lane_vectors(cx, &mut f);
+    bit_masks(cx, &mut f);
     variable_lanes(cx, &mut f);
     vector_int_bitcasts(cx, &mut f);
     bitcast_round_trips(cx, &mut f);
@@ -206,6 +207,16 @@ fn split_struct_selects(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         let mut k = 0;
         while k < f.blocks[b.index()].insts.len() {
             let i = f.blocks[b.index()].insts[k];
+            // A freeze of an aggregate: in code, a value is what its
+            // registers hold, so the freeze is its operand.
+            if let Op::Freeze(v) = f.insts[i.index()].op
+                && let Some(r) = f.insts[i.index()].result
+                && matches!(cx.m.types.get(f.locals[r.index()].ty), Type::Struct { .. } | Type::Array { .. })
+            {
+                f.replace_uses(Value::Local(r), v);
+                f.blocks[b.index()].insts.remove(k);
+                continue;
+            }
             let Op::Select { fmf, cond, then_value, else_value } = f.insts[i.index()].op.clone() else {
                 k += 1;
                 continue;
@@ -490,6 +501,31 @@ fn bitcast_round_trips(cx: &mut Ctx, f: &mut Function) {
             f.replace_uses(Value::Local(r), orig);
         }
     }
+    // Bitcasts no longer used, until none is (a chain goes link by link).
+    loop {
+        let mut used = vec![false; f.locals.len()];
+        for i in f.insts_in_order() {
+            f.insts[i.index()].op.for_each_value(|v| {
+                if let Value::Local(x) = v {
+                    used[x.index()] = true;
+                }
+            });
+        }
+        let dead = |f: &Function, i: InstId| {
+            matches!(f.insts[i.index()].op, Op::Cast { op: CastOp::BitCast, .. })
+                && f.insts[i.index()].result.is_some_and(|r| !used[r.index()])
+        };
+        let mut removed = false;
+        for b in f.layout.clone() {
+            let before = f.blocks[b.index()].insts.len();
+            let keep: Vec<InstId> = f.blocks[b.index()].insts.iter().copied().filter(|&i| !dead(f, i)).collect();
+            removed |= keep.len() != before;
+            f.blocks[b.index()].insts = keep;
+        }
+        if !removed {
+            break;
+        }
+    }
 }
 
 /// Lanes of masks (`<N x i1>`), taken out or put in, through integer
@@ -550,6 +586,61 @@ fn mask_lanes(cx: &mut Ctx, f: &mut Function) {
             let n = new.len();
             f.blocks[b.index()].insts.splice(k..=k, new);
             k += n;
+        }
+    }
+}
+
+/// A bitcast of bits to a vector of booleans (`bitcast <8 x i8> to <64 x
+/// i1>`, a set of flags), whose lanes are only taken out: each lane is a
+/// bit of the bits as an integer, shifted down and truncated.
+fn bit_masks(cx: &mut Ctx, f: &mut Function) {
+    let i1 = cx.m.types.int(1);
+    let order: Vec<InstId> = f.insts_in_order().collect();
+    for i in order {
+        let Op::Cast { op: CastOp::BitCast, value, .. } = f.insts[i.index()].op else { continue };
+        let Some(r) = f.insts[i.index()].result else { continue };
+        let Type::Vector { len, elem, scalable: false } = *cx.m.types.get(f.locals[r.index()].ty) else { continue };
+        if elem != i1
+            || len > 64
+            || matches!(cx.m.types.get(cx.value_ty(f, value)), Type::Vector { elem, .. } if *elem == i1)
+        {
+            continue;
+        }
+        // Only extractelements of it.
+        let mut users = Vec::new();
+        let mut other = false;
+        for j in f.insts_in_order() {
+            let mut uses = false;
+            f.insts[j.index()].op.for_each_value(|v| uses |= *v == Value::Local(r));
+            if uses {
+                match f.insts[j.index()].op {
+                    Op::ExtractElement { vector: Value::Local(x), .. } if x == r => users.push(j),
+                    _ => other = true,
+                }
+            }
+        }
+        if other || users.is_empty() {
+            continue;
+        }
+        let it = cx.m.types.int(len);
+        for j in users {
+            let Op::ExtractElement { index, .. } = f.insts[j.index()].op else { unreachable!() };
+            let jr = f.insts[j.index()].result.unwrap();
+            let blk = f.blocks.iter().position(|b| b.insts.contains(&j)).unwrap();
+            let k = f.blocks[blk].insts.iter().position(|&x| x == j).unwrap();
+            let mut s = Seq { f, new: Vec::new() };
+            let bits = s.cast(CastOp::BitCast, value, it);
+            let ity = cx.value_ty(s.f, index);
+            let idx = match cx.m.types.get(ity) {
+                Type::Int(b) if *b > len => s.cast(CastOp::Trunc, index, it),
+                Type::Int(b) if *b < len => s.cast(CastOp::ZExt, index, it),
+                _ => index,
+            };
+            let sh = s.bin(BinOp::LShr, bits, idx, it);
+            let v = s.cast(CastOp::Trunc, sh, i1);
+            let new = std::mem::take(&mut s.new);
+            f.replace_uses(Value::Local(jr), v);
+            f.blocks[blk].insts.splice(k..=k, new);
         }
     }
 }
@@ -674,6 +765,36 @@ fn one_lane_vectors(cx: &mut Ctx, f: &mut Function) {
                     s.cast(CastOp::BitCast, vector, ty)
                 }
                 Op::InsertElement { element, .. } if one(cx, ty).is_some() => s.cast(CastOp::BitCast, element, ty),
+                // A shuffle of one-lane vectors into a wider one (a splat):
+                // the lanes (a's as 0, b's as 1) put into one of the
+                // result's width, shuffled by the same mask.
+                Op::ShuffleVector { a, b: bv, mask }
+                    if let Some(e) = one(cx, cx.value_ty(s.f, a))
+                        && matches!(cx.m.types.get(ty), Type::Vector { len, .. } if *len >= 2) =>
+                {
+                    let i64t = cx.m.types.int(64);
+                    // A one-lane value's lane: a constant's, or a bitcast.
+                    let lane = |cx: &mut Ctx, s: &mut Seq, v: Value| match v {
+                        Value::Const(c) => {
+                            let kind = match cx.m.constant(c).kind.clone() {
+                                ConstKind::Vector(es) => cx.m.constant(es[0]).kind.clone(),
+                                ConstKind::Splat(e1) => cx.m.constant(e1).kind.clone(),
+                                k => k,
+                            };
+                            Value::Const(cx.m.consts.intern(Constant { ty: e, kind }))
+                        }
+                        v => s.cast(CastOp::BitCast, v, e),
+                    };
+                    let x = lane(cx, &mut s, a);
+                    let poison = Value::Const(cx.m.consts.intern(Constant { ty, kind: ConstKind::Poison }));
+                    let (z, o) = (cx.int(i64t, 0), cx.int(i64t, 1));
+                    let mut w = s.op(Op::InsertElement { vector: poison, element: x, index: z }, ty);
+                    if crate::target::mask_lanes(cx.m, mask).is_some_and(|m| m.contains(&1)) {
+                        let y = lane(cx, &mut s, bv);
+                        w = s.op(Op::InsertElement { vector: w, element: y, index: o }, ty);
+                    }
+                    s.op(Op::ShuffleVector { a: w, b: poison, mask }, ty)
+                }
                 Op::Binary { op, flags, fmf, lhs, rhs } if let Some(e) = one(cx, ty) => {
                     let (a, c) = (s.cast(CastOp::BitCast, lhs, e), s.cast(CastOp::BitCast, rhs, e));
                     let x = s.op(Op::Binary { op, flags, fmf, lhs: a, rhs: c }, e);
@@ -1918,6 +2039,10 @@ pub(crate) fn replace_pair(cx: &mut Ctx, s: &mut Seq, r: LocalId, sty: TypeId, a
     }
 }
 
+fn scalar_float(cx: &Ctx, ty: TypeId) -> bool {
+    matches!(cx.m.types.get(ty), Type::Float | Type::Double)
+}
+
 /// The C library function an intrinsic (`llvm.log2`) is, if it is one.
 fn libm_base(base: &str) -> Option<&'static str> {
     Some(match base.strip_prefix("llvm.")? {
@@ -2307,6 +2432,125 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                     c.args[1].value = no;
                 }
             }
+            // The classes of a float (`llvm.is.fpclass`), from its bits: the
+            // magnitude against the exponent's limits, the quiet bit, the
+            // sign. Mask bits 0-9: signalling NaN, quiet NaN, -inf,
+            // -normal, -subnormal, -0, +0, +subnormal, +normal, +inf.
+            if name.starts_with("llvm.is.fpclass.") && scalar_float(cx, cx.value_ty(s.f, args[0])) {
+                let fty = cx.value_ty(s.f, args[0]);
+                let double = matches!(cx.m.types.get(fty), Type::Double);
+                let (bits, exp, quiet, min_normal): (u32, i64, i64, i64) = if double {
+                    (64, 0x7ff0_0000_0000_0000, 0x0008_0000_0000_0000, 0x0010_0000_0000_0000)
+                } else {
+                    (32, 0x7f80_0000, 0x0040_0000, 0x0080_0000)
+                };
+                let it = cx.m.types.int(bits);
+                let mask = cx.const_int(args[1]).unwrap_or(0);
+                let x = s.cast(CastOp::BitCast, args[0], it);
+                let c = |cx: &mut Ctx, v: i64| cx.int(it, v);
+                let all = c(cx, if double { i64::MAX } else { 0x7fff_ffff });
+                let abs = s.bin(BinOp::And, x, all, it);
+                let cmp = |s: &mut Seq, p, l, r| s.op(Op::ICmp { pred: p, samesign: false, lhs: l, rhs: r }, i1);
+                let and1 = |s: &mut Seq, a, b| s.bin(BinOp::And, a, b, i1);
+                let zero = c(cx, 0);
+                let neg = cmp(&mut s, ICmpPred::Slt, x, zero);
+                let t = cx.int(i1, 1);
+                let pos = s.bin(BinOp::Xor, neg, t, i1);
+                let e = c(cx, exp);
+                let q = c(cx, quiet);
+                let mn = c(cx, min_normal);
+                let nan = cmp(&mut s, ICmpPred::Ugt, abs, e);
+                let qbit = s.bin(BinOp::And, abs, q, it);
+                let is_q = cmp(&mut s, ICmpPred::Ne, qbit, zero);
+                let inf = cmp(&mut s, ICmpPred::Eq, abs, e);
+                let z = cmp(&mut s, ICmpPred::Eq, abs, zero);
+                let below = cmp(&mut s, ICmpPred::Ult, abs, mn);
+                let nz = s.bin(BinOp::Xor, z, t, i1);
+                let sub = and1(&mut s, below, nz);
+                let from = cmp(&mut s, ICmpPred::Uge, abs, mn);
+                let under = cmp(&mut s, ICmpPred::Ult, abs, e);
+                let normal = and1(&mut s, from, under);
+                let not_q = s.bin(BinOp::Xor, is_q, t, i1);
+                let classes: [Value; 10] = [
+                    and1(&mut s, nan, not_q),
+                    and1(&mut s, nan, is_q),
+                    and1(&mut s, inf, neg),
+                    and1(&mut s, normal, neg),
+                    and1(&mut s, sub, neg),
+                    and1(&mut s, z, neg),
+                    and1(&mut s, z, pos),
+                    and1(&mut s, sub, pos),
+                    and1(&mut s, normal, pos),
+                    and1(&mut s, inf, pos),
+                ];
+                let mut v = cx.int(i1, 0);
+                for (k, &cl) in classes.iter().enumerate() {
+                    if mask & (1 << k) != 0 {
+                        v = s.bin(BinOp::Or, v, cl, i1);
+                    }
+                }
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), v);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
+            // Floating-point maximum and minimum across lanes, without an
+            // instruction: the scalar ones, lane by lane.
+            if let Some(op) = ["fmax", "fmin", "fmaximum", "fminimum"]
+                .into_iter()
+                .find(|o| name.starts_with(&format!("llvm.vector.reduce.{o}.")))
+                && !cx.selects_intrinsic(&name)
+                && let Type::Vector { len, elem, scalable: false } = *cx.m.types.get(cx.value_ty(s.f, args[0]))
+            {
+                let scalar = match op {
+                    "fmax" => "maxnum",
+                    "fmin" => "minnum",
+                    "fmaximum" => "maximum",
+                    _ => "minimum",
+                };
+                let suf = if matches!(cx.m.types.get(elem), Type::Float) { "f32" } else { "f64" };
+                let i64t = cx.m.types.int(64);
+                let lane = |cx: &mut Ctx, s: &mut Seq, l: u32| {
+                    let idx = cx.int(i64t, i64::from(l));
+                    s.op(Op::ExtractElement { vector: args[0], index: idx }, elem)
+                };
+                let mut acc = lane(cx, &mut s, 0);
+                for l in 1..len {
+                    let x = lane(cx, &mut s, l);
+                    acc = call_intrinsic(cx, &mut s, &format!("llvm.{scalar}.{suf}"), vec![acc, x], elem);
+                }
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), acc);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
+            // Whether any (or every) lane of a mask is set: the unsigned
+            // maximum (minimum) of its lanes as integers, all ones or zeros.
+            if (name.starts_with("llvm.vector.reduce.or.") || name.starts_with("llvm.vector.reduce.and."))
+                && let Type::Vector { len, elem, scalable: false } = *cx.m.types.get(cx.value_ty(s.f, args[0]))
+                && elem == i1
+                && len.is_power_of_two()
+                && len > 1
+            {
+                let w = (128 / len).clamp(8, 64);
+                let e = cx.m.types.int(w);
+                let it = cx.m.types.intern(Type::Vector { len, elem: e, scalable: false });
+                let wide = s.cast(CastOp::SExt, args[0], it);
+                let red = if name.contains(".or.") { "umax" } else { "umin" };
+                let x = call_intrinsic(cx, &mut s, &format!("llvm.vector.reduce.{red}.v{len}i{w}"), vec![wide], e);
+                let zero = cx.int(e, 0);
+                let v = s.op(Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: x, rhs: zero }, i1);
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), v);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
             // The first set lane of a mask: of the mask as an integer, its
             // trailing zeros (all the lanes, if none is set).
             if name.starts_with("llvm.experimental.cttz.elts.")
@@ -2385,6 +2629,32 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 let b2 = s.bin(BinOp::And, b2, sign, ity);
                 let v = s.bin(BinOp::Or, a, b2, ity);
                 let v = s.cast(CastOp::BitCast, v, ty);
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), v);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
+            // Saturating conversions of vectors: lane by lane, by the
+            // scalar one (`llvm.fptosi.sat.v2i32.v2f64` by `.i32.f64`).
+            if (base == "llvm.fptosi" || base == "llvm.fptoui")
+                && name.contains(".sat.")
+                && !scalar
+                && matches!(cx.m.types.get(ty), Type::Vector { .. })
+                && !cx.selects_intrinsic(&name)
+            {
+                let lane_name: String = name
+                    .split('.')
+                    .map(|p| match p.strip_prefix('v') {
+                        Some(rest) if rest.starts_with(|c: char| c.is_ascii_digit()) => {
+                            rest.trim_start_matches(|c: char| c.is_ascii_digit()).to_string()
+                        }
+                        _ => p.to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(".");
+                let v = lanewise_call(cx, &mut s, &lane_name, args.clone(), ty);
                 let new = std::mem::take(&mut s.new);
                 f.replace_uses(Value::Local(r), v);
                 let n = new.len();

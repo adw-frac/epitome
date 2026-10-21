@@ -136,6 +136,15 @@ impl Abi {
         out
     }
 
+    /// The registers `n` floating-point results come in: the first, then
+    /// the floating-point argument registers after it.
+    pub fn fp_results(&self, n: usize) -> Vec<u8> {
+        let at = self.fp_args.iter().position(|&r| r == self.fp_result).unwrap_or(0);
+        let mut out = vec![self.fp_result];
+        out.extend(self.fp_args.iter().skip(at + 1).take(n.saturating_sub(1)).copied());
+        out
+    }
+
     /// Every register a call may change.
     pub fn all_clobbers(&self) -> Vec<u8> {
         self.clobbers.iter().chain(&self.fp_clobbers).copied().collect()

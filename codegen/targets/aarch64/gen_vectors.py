@@ -212,6 +212,11 @@ define {ty} @DUPe{es}({T} "reg"="q" %n, i64 "imm" %idx) "enc"="01 0 11110000 imm
   %r = extractelement {T} %n, i64 %idx
   ret {ty} %r
 }}
+
+define {T} @INSf{es}({T} "reg"="q" "tied" %old, {ty} "reg"="{scls}" %n, i64 "imm" %idx) "enc"="0 1 1 01110000 imm5:5=idx*{8 if es=='s' else 16}+{4 if es=='s' else 8} 0 0000 1 n:5 d:5" "asm"="mov {{d:.{es}}}[{{idx}}], {{n:.{es}}}[0]" {{
+  %r = insertelement {T} %old, {ty} %n, i64 %idx
+  ret {T} %r
+}}
 ''')
 # widening and narrowing, half a register at a time
 for (src, dst, n, e, sxt) in [('8b','8h',8,8,'0001000'),('4h','4s',4,16,'0010000'),('2s','2d',2,32,'0100000')]:

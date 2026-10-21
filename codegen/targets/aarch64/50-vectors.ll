@@ -1215,6 +1215,11 @@ define float @DUPes(<4 x float> "reg"="q" %n, i64 "imm" %idx) "feature"="neon" "
   ret float %r
 }
 
+define <4 x float> @INSfs(<4 x float> "reg"="q" "tied" %old, float "reg"="s" %n, i64 "imm" %idx) "feature"="neon" "enc"="0 1 1 01110000 imm5:5=idx*8+4 0 0000 1 n:5 d:5" "asm"="mov {d:.s}[{idx}], {n:.s}[0]" {
+  %r = insertelement <4 x float> %old, float %n, i64 %idx
+  ret <4 x float> %r
+}
+
 define <2 x double> @FADDv2d(<2 x double> "reg"="q" %n, <2 x double> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 0 1 1 m:5 11010 1 n:5 d:5" "asm"="fadd {d:2d}, {n:2d}, {m:2d}" {
   %r = fadd <2 x double> %n, %m
   ret <2 x double> %r
@@ -1306,6 +1311,11 @@ define <2 x double> @DUPf2d(double "reg"="d" %n) "feature"="neon" "enc"="0 1 0 0
 define double @DUPed(<2 x double> "reg"="q" %n, i64 "imm" %idx) "feature"="neon" "enc"="01 0 11110000 imm5:5=idx*16+8 0 0000 1 n:5 d:5" "asm"="mov {d}, {n:.d}[{idx}]" {
   %r = extractelement <2 x double> %n, i64 %idx
   ret double %r
+}
+
+define <2 x double> @INSfd(<2 x double> "reg"="q" "tied" %old, double "reg"="d" %n, i64 "imm" %idx) "feature"="neon" "enc"="0 1 1 01110000 imm5:5=idx*16+8 0 0000 1 n:5 d:5" "asm"="mov {d:.d}[{idx}], {n:.d}[0]" {
+  %r = insertelement <2 x double> %old, double %n, i64 %idx
+  ret <2 x double> %r
 }
 
 define <2 x float> @FADDv2s(<2 x float> "reg"="v" %n, <2 x float> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 0 0 1 m:5 11010 1 n:5 d:5" "asm"="fadd {d:2s}, {n:2s}, {m:2s}" {
