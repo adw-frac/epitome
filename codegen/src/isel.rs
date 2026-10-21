@@ -1542,10 +1542,45 @@ impl<'a, 'b> Sel<'a, 'b> {
     /// `[2 x i64]` and the like, as clang passes structs of up to 16 bytes.
     fn parts_of(&self, ty: TypeId) -> Option<usize> {
         let i64t = |t: &TypeId| matches!(self.cx.m.types.get(*t), Type::Int(64));
+        if let Type::Array { len, elem } = self.cx.m.types.get(ty) {
+            return (*len <= 2 && i64t(elem)).then_some(*len as usize);
+        }
+        let fields = self.fields(ty)?;
+        (fields.len() <= 2 && fields.iter().all(i64t)).then_some(fields.len())
+    }
+
+    /// The fields of a struct type, literal or named.
+    fn fields(&self, ty: TypeId) -> Option<Vec<TypeId>> {
         match self.cx.m.types.get(ty) {
-            Type::Array { len, elem } if *len <= 2 && i64t(elem) => Some(*len as usize),
-            Type::Struct { fields, .. } if fields.len() <= 2 && fields.iter().all(i64t) => Some(fields.len()),
+            Type::Struct { fields, .. } => Some(fields.clone()),
+            Type::Named(n) => self.cx.m.types.structs[*n as usize].body.as_ref().map(|b| b.fields.clone()),
             _ => None,
+        }
+    }
+
+    /// A homogeneous floating-point aggregate, where the convention passes
+    /// them in floating-point registers (`prepare::hfa_of`).
+    fn hfa_of(&self, ty: TypeId) -> Option<(usize, TypeId)> {
+        if self.mf.abi.hfa { prepare::hfa_of(self.cx.m, ty) } else { None }
+    }
+
+    /// How many parts an aggregate passed in registers has: a small
+    /// struct's, or a homogeneous floating-point one's.
+    fn agg_len(&self, ty: TypeId) -> Option<usize> {
+        self.hfa_of(ty).map(|(n, _)| n).or_else(|| self.parts_of(ty))
+    }
+
+    /// How argument `v` is passed: a part for each register it takes.
+    fn arg_shape(&self, v: Value, sret: bool, wide: bool) -> Vec<crate::abi::Part> {
+        let ty = self.ty_of(v);
+        let part = |size, fp| crate::abi::Part { size, fp, sret: false, wide: false, hfa: false };
+        if let Some((n, m)) = self.hfa_of(ty) {
+            let size = (self.bits(m) / 8) as u64;
+            return vec![crate::abi::Part { hfa: true, ..part(size, true) }; n];
+        }
+        match self.parts_of(ty) {
+            Some(n) => vec![crate::abi::Part { wide, ..part(8, false) }; n],
+            None => vec![crate::abi::Part { sret, ..part(self.arg_size(v), self.is_fp(ty)) }],
         }
     }
 
@@ -1554,7 +1589,13 @@ impl<'a, 'b> Sel<'a, 'b> {
     /// each: integers in the result registers in turn, floating-point ones
     /// in the floating-point result registers in turn.
     fn result_regs(&self, ty: TypeId) -> Option<Vec<u8>> {
-        if let Type::Struct { fields, .. } = self.cx.m.types.get(ty)
+        // A homogeneous floating-point aggregate: a member in each of the
+        // floating-point result registers.
+        if let Some((n, _)) = self.hfa_of(ty) {
+            let regs = self.mf.abi.fp_results(n);
+            return (regs.len() == n).then_some(regs);
+        }
+        if let Some(fields) = self.fields(ty)
             && fields.iter().all(|t| {
                 matches!(self.cx.m.types.get(*t), Type::Int(1..=64) | Type::Ptr(0) | Type::Float | Type::Double)
             })
@@ -1605,13 +1646,15 @@ impl<'a, 'b> Sel<'a, 'b> {
             return regs.clone();
         }
         // Each field's register of its kind (a double's a d register).
-        let fields = match self.cx.m.types.get(self.f.locals[r.index()].ty) {
-            Type::Struct { fields, .. } if fields.len() == n => fields.clone(),
+        let ty = self.f.locals[r.index()].ty;
+        let fields = match (self.hfa_of(ty), self.fields(ty)) {
+            (Some((len, m)), _) if len == n => vec![m; n],
+            (_, Some(fields)) if fields.len() == n => fields,
             _ => Vec::new(),
         };
         let regs: Vec<u32> = (0..n)
             .map(|k| match fields.get(k) {
-                Some(&t) if matches!(self.cx.m.types.get(t), Type::Float | Type::Double) => {
+                Some(&t) if self.is_fp(t) => {
                     let c = self.class_of_ty(t);
                     self.mf.new_vreg(c)
                 }
@@ -1716,7 +1759,8 @@ impl<'a, 'b> Sel<'a, 'b> {
             0..=8 => 1,
             9..=16 => 2,
             17..=32 => 4,
-            _ => 8,
+            33..=64 => 8,
+            _ => 16,
         }
     }
 
@@ -1745,9 +1789,9 @@ impl<'a, 'b> Sel<'a, 'b> {
         // The types of the results: one, or a struct of them.
         let result_tys: Vec<TypeId> = match inst.result.map(|r| f.locals[r.index()].ty) {
             None => vec![],
-            Some(ty) => match self.cx.m.types.get(ty) {
-                Type::Struct { fields, .. } => fields.clone(),
-                Type::Void => vec![],
+            Some(ty) => match (self.fields(ty), self.cx.m.types.get(ty)) {
+                (Some(fields), _) => fields,
+                (_, Type::Void) => vec![],
                 _ => vec![ty],
             },
         };
@@ -2215,13 +2259,9 @@ impl<'a, 'b> Sel<'a, 'b> {
         };
         let mut shapes: Vec<Vec<crate::abi::Part>> = Vec::new();
         for a in &args {
-            let ty = self.ty_of(a.value);
             let sret = a.attrs.iter().any(|x| matches!(x, Attr::Type { name, .. } if name == "sret"));
             let wide = a.attrs.iter().any(|x| matches!(x, Attr::Word(w) if w == crate::wide::WIDE));
-            shapes.push(match self.parts_of(ty) {
-                Some(n) => vec![crate::abi::Part { size: 8, fp: false, sret: false, wide }; n],
-                None => vec![crate::abi::Part { size: self.arg_size(a.value), fp: self.is_fp(ty), sret, wide: false }],
-            });
+            shapes.push(self.arg_shape(a.value, sret, wide));
         }
         let (part_locs, stack) = self.mf.abi.assign_parts(&shapes, named);
         self.mf.out_size = self.mf.out_size.max(stack);
@@ -2234,12 +2274,12 @@ impl<'a, 'b> Sel<'a, 'b> {
         let mut is_named = Vec::new();
         for (k, a) in args.iter().enumerate() {
             let ty = self.ty_of(a.value);
-            if let Some(n) = self.parts_of(ty) {
+            if let Some(n) = self.agg_len(ty) {
                 for (p, r) in self.parts(a.value, n)?.into_iter().enumerate() {
                     regs.push(r);
                     locs.push(part_locs[k][p]);
-                    sizes.push(8);
-                    fps.push(false);
+                    sizes.push(shapes[k][p].size);
+                    fps.push(shapes[k][p].fp);
                     is_named.push(k < named);
                 }
                 continue;
@@ -2584,11 +2624,10 @@ impl<'a, 'b> Sel<'a, 'b> {
                     }
                     let ty = self.ty_of(*aggregate);
                     // A small struct, or one of scalars built by insertvalue.
-                    let n = match self.cx.m.types.get(ty) {
-                        Type::Struct { fields, .. } => Some(fields.len()),
-                        _ => self.parts_of(ty),
-                    }
-                    .ok_or("extractvalue from an unsupported aggregate")?;
+                    let n = self
+                        .agg_len(ty)
+                        .or_else(|| self.fields(ty).map(|f| f.len()))
+                        .ok_or("extractvalue from an unsupported aggregate")?;
                     let parts = self.parts(*aggregate, n)?;
                     let d = self.vreg_of(r);
                     self.push(MInst::copy(Reg::V(d), parts[indices[0] as usize]));
@@ -2757,18 +2796,9 @@ impl<'a, 'b> Sel<'a, 'b> {
         self.cur = 0;
         let mut shapes: Vec<Vec<crate::abi::Part>> = Vec::new();
         for p in &f.params {
-            let ty = f.locals[p.local.index()].ty;
             let sret = p.attrs.iter().any(|x| matches!(x, Attr::Type { name, .. } if name == "sret"));
             let wide = p.attrs.iter().any(|x| matches!(x, Attr::Word(w) if w == crate::wide::WIDE));
-            shapes.push(match self.parts_of(ty) {
-                Some(n) => vec![crate::abi::Part { size: 8, fp: false, sret: false, wide }; n],
-                None => vec![crate::abi::Part {
-                    size: self.arg_size(Value::Local(p.local)),
-                    fp: self.is_fp(ty),
-                    sret,
-                    wide: false,
-                }],
-            });
+            shapes.push(self.arg_shape(Value::Local(p.local), sret, wide));
         }
         let (part_locs, _) = self.mf.abi.assign_parts(&shapes, shapes.len());
         let sizes: Vec<u64> = shapes.iter().map(|s| s[0].size).collect();
@@ -2830,15 +2860,25 @@ impl<'a, 'b> Sel<'a, 'b> {
             if self.uses[p.local.index()] == 0 {
                 continue;
             }
-            if self.parts_of(f.locals[p.local.index()].ty).is_some() {
-                // A small struct: a register for each part.
+            let ty = f.locals[p.local.index()].ty;
+            if self.agg_len(ty).is_some() {
+                // A small struct: a register for each part (a homogeneous
+                // floating-point one's, of its members' class).
+                let member = self.hfa_of(ty).map(|(_, m)| m);
                 let mut regs = Vec::new();
-                for &loc in &part_locs[k] {
-                    let d = self.ivreg(true);
+                for (q, &loc) in part_locs[k].iter().enumerate() {
+                    let d = match member {
+                        Some(m) => {
+                            let c = self.class_of_ty(m);
+                            self.mf.new_vreg(c)
+                        }
+                        None => self.ivreg(true),
+                    };
                     match loc {
                         crate::abi::ArgLoc::Reg(r) => self.push(MInst::copy(Reg::V(d), Reg::P(r))),
                         crate::abi::ArgLoc::Stack(off) => {
-                            let ld = self.t.by_role("load.x");
+                            let part = &shapes[k][q];
+                            let ld = self.t.by_role(&format!("load.{}", mem_size(part.size, part.fp)));
                             self.push(MInst::new(
                                 ld,
                                 vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::P(self.t.machine.sp)), MOp::Incoming(off)],
@@ -2907,6 +2947,7 @@ impl<'a, 'b> Sel<'a, 'b> {
 fn mem_size(size: u64, fp: bool) -> &'static str {
     match (size, fp) {
         (4, true) => "s",
+        (16, true) => "q",
         (_, true) => "d",
         (1, _) => "b",
         (2, _) => "h",

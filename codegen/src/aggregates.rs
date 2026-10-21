@@ -1,8 +1,8 @@
-//! Aggregate values with aggregates inside them (`{ { ptr, ptr } }`, a
-//! named struct, `[2 x { i32, i32 }]`), as their scalar leaves: what
-//! selection handles of aggregates is flat structs, so each such value
-//! becomes a value for each leaf, and each operation on it operations on
-//! the leaves.
+//! Aggregate values (`{ ptr, i64 }`, `{ { ptr, ptr } }`, a named struct,
+//! `[2 x { i32, i32 }]`), as their scalar leaves: selection takes
+//! aggregates only as `insertvalue`s make them and calls return them, so
+//! each such value becomes a value for each leaf, and each operation on it
+//! operations on the leaves.
 //!
 //! - A load of one is a load of each leaf, at its offset (a volatile load
 //!   is a volatile load of each); a store, a store of each.
@@ -56,8 +56,14 @@ fn members(cx: &Ctx, ty: TypeId) -> Option<Vec<(TypeId, u64)>> {
     }
 }
 
+/// A leaf: a scalar, or a vector of up to a register's width (a member of
+/// a homogeneous aggregate, `[2 x <4 x float>]`).
 fn is_scalar(cx: &Ctx, ty: TypeId) -> bool {
-    matches!(cx.m.types.get(ty), Type::Int(1..=64) | Type::Ptr(0) | Type::Float | Type::Double)
+    match cx.m.types.get(ty) {
+        Type::Int(1..=64) | Type::Ptr(0) | Type::Float | Type::Double => true,
+        Type::Vector { scalable: false, .. } => cx.size_of(ty).is_ok_and(|b| b <= 16),
+        _ => false,
+    }
 }
 
 /// The leaves of `ty`, if it is an aggregate of scalars, not too many.
@@ -79,12 +85,15 @@ fn leaves(cx: &Ctx, ty: TypeId) -> Option<Vec<Leaf>> {
     Some(out)
 }
 
-/// An aggregate this pass splits: a named struct, or one with an
-/// aggregate inside. (Flat literal structs selection takes as they are.)
+/// An aggregate this pass splits: any of scalar leaves, not too many,
+/// but the pairs of 64-bit halves wide integers become (see `wide.rs`),
+/// which selection keeps in two registers throughout. (Selection takes
+/// flat ones where they are made by `insertvalue`s, a call or a landing
+/// pad, and taken apart by `extractvalue`s; a load or a phi of one it does
+/// not.)
 fn complex(cx: &Ctx, ty: TypeId) -> bool {
-    let Some(ms) = members(cx, ty) else { return false };
-    let nested = matches!(cx.m.types.get(ty), Type::Named(_)) || ms.iter().any(|(t, _)| !is_scalar(cx, *t));
-    nested && leaves(cx, ty).is_some()
+    let halves = matches!(cx.m.types.get(ty), Type::Array { len: 1..=2, elem } if matches!(cx.m.types.get(*elem), Type::Int(64)));
+    !halves && members(cx, ty).is_some() && leaves(cx, ty).is_some()
 }
 
 /// The constant at `path` inside constant `c` (of type `ty`).
@@ -156,6 +165,24 @@ pub fn scalarize(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     let any = f.locals.iter().any(|l| complex(cx, l.ty));
     if !any {
         return Ok(());
+    }
+    // An invoke of an aggregate this splits gets a block of its own on its
+    // normal edge, where the result's leaves can be taken (for a phi
+    // there, which takes them at the end of the block it comes from).
+    for b in f.layout.clone() {
+        let Some(t) = f.terminator(b) else { continue };
+        let Op::Invoke { normal, .. } = f.insts[t.index()].op else { continue };
+        if !f.insts[t.index()].result.is_some_and(|r| complex(cx, f.locals[r.index()].ty)) {
+            continue;
+        }
+        let e = f.add_block(None);
+        let at = f.layout.iter().position(|&x| x == b).unwrap();
+        f.layout.insert(at + 1, e);
+        f.push_inst(e, Op::Br(normal), None);
+        if let Op::Invoke { normal: n, .. } = &mut f.insts[t.index()].op {
+            *n = e;
+        }
+        f.retarget_phis(normal, b, e);
     }
     let i8t = cx.m.types.int(8);
     let i64t = cx.m.types.int(64);

@@ -9,10 +9,11 @@ long run_relay(int);
 long run_wide(long);
 long run_big(long);
 long run_vmix(long);
+long run_hfa(long);
 
 int main(void) {
   for (int x = -20; x < 60; x += 7)
-    printf("%d: %ld %ld %ld %ld %ld %ld %ld\n", x, run_many(x), run_sum10(x), run_small(x), run_relay(x), run_wide(x), run_big(x),
-           run_vmix(x));
+    printf("%d: %ld %ld %ld %ld %ld %ld %ld %ld\n", x, run_many(x), run_sum10(x), run_small(x), run_relay(x), run_wide(x),
+           run_big(x), run_vmix(x), run_hfa(x));
   return 0;
 }

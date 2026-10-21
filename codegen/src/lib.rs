@@ -268,7 +268,7 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
         threads,
         || skeleton.clone(),
         |m, j| {
-            let mut cx = Ctx { m, dl: &dl, t, features: Default::default() };
+            let mut cx = Ctx { m, dl: &dl, t, features: Default::default(), hfa: abi.hfa };
             let _counted = chop.enter(j);
             compile_function(t, &abi, &mut cx, &jobs[j].1, opts)
         },
@@ -301,7 +301,7 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
         }
         funcs.push(mf);
     }
-    let cx = Ctx { m, dl: &dl, t, features: Default::default() };
+    let cx = Ctx { m, dl: &dl, t, features: Default::default(), hfa: abi.hfa };
     let min_os = min_os_version(&String::from_utf8_lossy(cx.m.triple.as_deref().unwrap_or_default()));
     let mut out = String::new();
     if abi.syntax == abi::Syntax::MachO {

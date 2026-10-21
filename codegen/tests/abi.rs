@@ -62,6 +62,23 @@ fn elf_to_macho(asm: &str) -> String {
             out.push_str("\t.section __TEXT,__text,regular,pure_instructions\n");
             continue;
         }
+        // Constants (clang's pools of them, `.rodata.cst16`).
+        if t.starts_with(".section") && t.contains(".rodata") {
+            out.push_str("\t.section __TEXT,__const\n");
+            continue;
+        }
+        // A symbol's page and the offset in it, as Mach-O writes them.
+        let paged;
+        let l = if t.starts_with("adrp") {
+            paged = format!("{l}@PAGE");
+            paged.as_str()
+        } else if let Some((head, rest)) = l.split_once(":lo12:") {
+            let end = rest.find([']', ',']).unwrap_or(rest.len());
+            paged = format!("{head}{}@PAGEOFF{}", &rest[..end], &rest[end..]);
+            paged.as_str()
+        } else {
+            l
+        };
         // Rename symbols and local labels, word by word.
         let mut word = String::new();
         let flush = |word: &mut String, out: &mut String| {

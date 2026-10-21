@@ -57,3 +57,26 @@ double vmix(int n, double scale, ...) {
   va_end(ap);
   return s + first;
 }
+
+// Homogeneous floating-point aggregates: in v registers, all or none; on
+// the stack, packed on Apple's, 8-aligned and padded to 8 in AAPCS64's;
+// returned in v0-v3. And 128-bit vectors past the registers, 16-aligned.
+typedef float v4f __attribute__((vector_size(16)));
+struct f3 { float x, y, z; };
+struct d4 { double a, b, c, d; };
+struct q2 { v4f a, b; };
+float hfa_late(double a0, double a1, double a2, double a3, double a4, double a5, double a6, struct f3 v, float after,
+               struct f3 w, int i, struct d4 d) {
+  return v.x + v.y * 2 + v.z * 3 + after * 5 + w.z * 7 + i * 11 + (float)d.c * 13;
+}
+struct d4 hfa_rev(struct d4 d, double _Complex z) {
+  struct d4 r = {d.d + __real__ z, d.c, d.b, d.a - __imag__ z};
+  return r;
+}
+struct q2 hfa_vec(struct q2 q, v4f k) {
+  struct q2 r = {q.b + k, q.a * k};
+  return r;
+}
+float vec_late(v4f a0, v4f a1, v4f a2, v4f a3, v4f a4, v4f a5, v4f a6, float f, v4f a7, v4f a8, v4f a9) {
+  return a0[0] + a7[1] * 2 + a8[2] * 3 + a9[3] * 4 + f * 5 + a6[1] * 6;
+}

@@ -62,6 +62,9 @@ pub struct Abi {
     /// argument (false), or AAPCS64's record of register save areas and
     /// the stack (`va-list` = `aapcs64`).
     pub va_list_aapcs64: bool,
+    /// Homogeneous floating-point aggregates are passed and returned in
+    /// floating-point registers (`hfa`; see `prepare::hfa_of`).
+    pub hfa: bool,
     /// The registers a landing pad finds the exception and its selector in
     /// (`eh-regs`; by default the first two argument registers).
     pub eh_regs: Vec<u8>,
@@ -94,6 +97,9 @@ pub struct Part {
     /// A part of an integer wider than a register (`i128`), which some
     /// conventions start in an even register.
     pub wide: bool,
+    /// A member of a homogeneous floating-point aggregate (`[3 x float]`,
+    /// see `prepare::hfa_of`): on the stack, the members are side by side.
+    pub hfa: bool,
 }
 
 /// Where one argument goes.
@@ -155,7 +161,7 @@ impl Abi {
     /// stack the call needs.
     pub fn assign(&self, sizes: &[u64], named: usize) -> (Vec<ArgLoc>, i64) {
         let parts: Vec<Vec<Part>> =
-            sizes.iter().map(|&s| vec![Part { size: s, fp: false, sret: false, wide: false }]).collect();
+            sizes.iter().map(|&s| vec![Part { size: s, fp: false, sret: false, wide: false, hfa: false }]).collect();
         let (locs, stack) = self.assign_parts(&parts, named);
         (locs.into_iter().map(|l| l[0]).collect(), stack)
     }
@@ -208,9 +214,29 @@ impl Abi {
             if even {
                 stack = (stack + 15) / 16 * 16;
             }
+            // A homogeneous aggregate: its members side by side, aligned as
+            // a member is (at least 8, its size rounded up to 8, but for
+            // natural placement).
+            if parts.first().is_some_and(|p| p.hfa) {
+                let member = parts[0].size.max(1) as i64;
+                let natural = self.stack_args == StackArgs::Natural;
+                let align = if natural { member } else { member.max(8) };
+                stack = (stack + align - 1) / align * align;
+                for k in 0..n as i64 {
+                    here.push(ArgLoc::Stack(stack + k * member));
+                }
+                stack += n as i64 * member;
+                if !natural {
+                    stack = (stack + 7) / 8 * 8;
+                }
+                locs.push(here);
+                continue;
+            }
             for &Part { size, .. } in parts {
+                // (A 16-byte vector: aligned to 16 either way.)
                 let (align, room) = match (self.stack_args, n) {
                     (StackArgs::Natural, 1) => (size.max(1) as i64, size.max(1) as i64),
+                    _ if size > 8 => (16, 16),
                     _ => (8, 8),
                 };
                 stack = (stack + align - 1) / align * align;
@@ -234,8 +260,6 @@ impl Abi {
         }
     }
 
-    /// The prefix of local labels, which the assembler keeps out of the
-    /// symbol table.
     /// How unwind and exception tables reach symbol `name` (a personality
     /// routine, a type caught): Mach-O's through its GOT entry, so by its
     /// own name; ELF's through a word of ours holding its address (see
@@ -247,6 +271,8 @@ impl Abi {
         }
     }
 
+    /// The prefix of local labels, which the assembler keeps out of the
+    /// symbol table.
     pub fn local_prefix(&self) -> &'static str {
         match self.syntax {
             Syntax::MachO => "L",
@@ -324,6 +350,7 @@ pub fn read(m: &Module, prefix: &str, machine: &crate::machine::Machine) -> Resu
             base: props.get("base").map(|v| regs(v)).transpose()?.and_then(|v| v.first().copied()),
             wide_pairs_even: props.get("wide-pairs").is_some_and(|v| v.first().is_some_and(|x| x == "even")),
             va_list_aapcs64: props.get("va-list").is_some_and(|v| v.first().is_some_and(|x| x == "aapcs64")),
+            hfa: props.get("hfa").is_some_and(|v| v.first().is_some_and(|x| x == "yes")),
             eh_regs: match props.get("eh-regs") {
                 Some(v) => regs(v)?,
                 None => regs(&get("args")?)?.into_iter().take(2).collect(),

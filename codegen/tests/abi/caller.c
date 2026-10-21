@@ -43,3 +43,28 @@ long run_vmix(long x) {
                   8.5);
   return (long)(a * 100) + (long)(b * 10);
 }
+
+typedef float v4f __attribute__((vector_size(16)));
+struct f3 { float x, y, z; };
+struct d4 { double a, b, c, d; };
+struct q2 { v4f a, b; };
+float hfa_late(double, double, double, double, double, double, double, struct f3, float, struct f3, int, struct d4);
+struct d4 hfa_rev(struct d4, double _Complex);
+struct q2 hfa_vec(struct q2, v4f);
+float vec_late(v4f, v4f, v4f, v4f, v4f, v4f, v4f, float, v4f, v4f, v4f);
+
+long run_hfa(long x) {
+  float k = (float)x;
+  struct f3 v = {k, k + 1, k + 2}, w = {k * 2, k * 3, k * 4};
+  struct d4 d = {x, x * 2.5, x - 7, x * x};
+  float a = hfa_late(1, 2, 3, 4, 5, 6, 7, v, k / 4, w, (int)x * 3, d);
+  double _Complex z = (double)x + 2.0i * (double)x;
+  struct d4 r = hfa_rev(d, z);
+  v4f q0 = {k, k + 1, k + 2, k + 3}, q1 = {1, 2, 3, 4};
+  struct q2 q = hfa_vec((struct q2){q0, q1}, (v4f){k, 2, k, 4});
+  v4f s[10];
+  for (int i = 0; i < 10; i++) s[i] = (v4f){i + k, i * 2 + k, i * 3 + k, i * 4 + k};
+  float b = vec_late(s[0], s[1], s[2], s[3], s[4], s[5], s[6], k * 3, s[7], s[8], s[9]);
+  return (long)(a * 10) + (long)(r.a + r.b * 3 + r.c * 5 + r.d * 7) + (long)(q.a[0] + q.a[3] * 3 + q.b[1] * 5 + q.b[2] * 7) +
+         (long)(b * 100);
+}

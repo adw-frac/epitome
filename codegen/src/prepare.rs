@@ -42,6 +42,9 @@ pub struct Ctx<'a> {
     pub t: &'a crate::target::Target,
     /// The features of the function being compiled.
     pub features: crate::features::Features,
+    /// Whether the convention passes homogeneous floating-point aggregates
+    /// in floating-point registers (`Abi::hfa`).
+    pub hfa: bool,
 }
 
 impl Ctx<'_> {
@@ -1586,9 +1589,46 @@ fn lower_dynamic_allocas(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     Ok(())
 }
 
+/// A homogeneous floating-point aggregate, as AAPCS64 has them: up to four
+/// members of one type, a float, a double or a vector of 64 or 128 bits
+/// (`[3 x float]`, `{ <4 x float>, <4 x float> }`, as clang passes and
+/// returns C's structs of them): how many, and the type.
+pub(crate) fn hfa_of(m: &Module, ty: TypeId) -> Option<(usize, TypeId)> {
+    let member = |t: TypeId| match m.types.get(t) {
+        Type::Float | Type::Double => true,
+        Type::Vector { scalable: false, len, elem } => {
+            let eb = match m.types.get(*elem) {
+                Type::Int(b @ (8 | 16 | 32 | 64)) => *b,
+                Type::Float => 32,
+                Type::Double => 64,
+                _ => return false,
+            };
+            matches!(len * eb, 64 | 128)
+        }
+        _ => false,
+    };
+    let (n, t) = match m.types.get(ty) {
+        Type::Array { len, elem } => (*len as usize, *elem),
+        Type::Struct { fields, .. } if !fields.is_empty() && fields.iter().all(|f| *f == fields[0]) => {
+            (fields.len(), fields[0])
+        }
+        Type::Named(i) => {
+            let fields = &m.types.structs[*i as usize].body.as_ref()?.fields;
+            if fields.is_empty() || fields.iter().any(|f| *f != fields[0]) {
+                return None;
+            }
+            (fields.len(), fields[0])
+        }
+        _ => return None,
+    };
+    ((1..=4).contains(&n) && member(t)).then_some((n, t))
+}
+
 /// Rejects what the code generator cannot do yet.
 fn check(cx: &Ctx, f: &Function, fname: &str) -> Result<(), String> {
-    // Small structs, as clang passes them ([2 x i64]), live as their parts.
+    // Small structs, as clang passes them ([2 x i64]), live as their parts;
+    // so do homogeneous floating-point ones, where the convention has them.
+    let hfa = |ty: TypeId| cx.hfa && hfa_of(cx.m, ty).is_some();
     let small_struct = |ty: &Type| match ty {
         Type::Array { len, elem } => *len <= 2 && matches!(cx.m.types.get(*elem), Type::Int(64)),
         Type::Struct { fields, .. } => {
@@ -1610,7 +1650,8 @@ fn check(cx: &Ctx, f: &Function, fname: &str) -> Result<(), String> {
         t => !small_struct(t),
     };
     for p in &f.params {
-        if bad_type(f.locals[p.local.index()].ty) {
+        let ty = f.locals[p.local.index()].ty;
+        if bad_type(ty) && !hfa(ty) {
             return Err(format!("@{fname}: parameters of this type are not supported yet"));
         }
     }

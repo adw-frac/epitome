@@ -59,6 +59,11 @@ these are for after.
 - **Inline assembly operands in another register file** (`isel.rs`,
   `emit_asm`): a copy in, and the result copied out (`fmov s1, s0`), where
   allocation could place them there.
+- **Chains of copies** (`regalloc.rs`): a value copied from one virtual
+  register to another and on (an aggregate's parts taken by
+  `extractvalue`s) keeps the copies, a dead one included, where
+  coalescing them would leave none. `aggregates.rs` leaves wide integers'
+  `[2 x i64]` halves whole for this reason.
 - **Struct results and phis** of fields: copies between result registers
   and their vregs that coalescing could remove (`mov x2, x0; mov x0, x1;
   mov x1, x2`).
