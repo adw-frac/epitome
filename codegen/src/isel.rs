@@ -2918,7 +2918,7 @@ fn mem_size(size: u64, fp: bool) -> &'static str {
 /// The description's move-wide pair (roles `movz.x`/`movk.x`, or `.w`),
 /// and how many bits one moves: the widest immediate `movz` holds
 /// unshifted (AArch64's 16).
-fn move_wide_of(t: &Target, wide: bool) -> Option<(usize, usize, u32)> {
+pub(crate) fn move_wide_of(t: &Target, wide: bool) -> Option<(usize, usize, u32)> {
     let (z, k) = if wide { ("movz.x", "movk.x") } else { ("movz.w", "movk.w") };
     let (movz, movk) = (t.role(z)?, t.role(k)?);
     let fits = |c: u32| t.instrs[movz].fits(&[None, Some((1i64 << c) - 1), Some(0)]);

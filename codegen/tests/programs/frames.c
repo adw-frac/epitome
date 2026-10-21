@@ -19,3 +19,15 @@ long medium_frame(int n) {
     long k = mix(n, buf[4999]);
     return k + buf[n % 5000] + buf[0];
 }
+
+// A frame whose size's low 12 bits, taken as signed, leave a high part no
+// single move holds (0x10818: 0x11000 less 0x7e8).
+long odd_frame(int k) {
+    char buf[67600];
+    long tail = k * 3;
+    touch(buf, (int)sizeof buf);
+    buf[k] = 9;
+    long s = 0;
+    for (int i = 0; i < (int)sizeof buf; i += 4096) s += buf[i];
+    return s + buf[67599] + buf[k] + tail;
+}

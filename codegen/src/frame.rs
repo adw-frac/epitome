@@ -287,13 +287,30 @@ fn adjust(t: &Target, out: &mut Vec<MInst>, dst: u8, src: u8, amount: i64, scrat
 }
 
 /// Integer `v` in register `reg`, for frame sizes: by one of the
-/// description's constant instructions if it holds it, else by one for the
-/// high part and an add-immediate (`"addi"`) for the low 12 bits.
+/// description's constant instructions if it holds it, else a chunk at a
+/// time where it has move-wide instructions (AArch64's `movz`, `movk`),
+/// else by one for the high part and an add-immediate (`"addi"`) for the
+/// low 12 bits.
 fn constant(t: &Target, out: &mut Vec<MInst>, reg: u8, v: i64) -> Result<(), String> {
     let r = |n: u8| MOp::Reg(Reg::P(n));
     let wide = |ci: &usize| t.instrs[*ci].operands[0].bits == 64;
     if let Some(&ci) = t.constants.iter().filter(|ci| wide(ci)).find(|&&ci| t.instrs[ci].fits(&[None, Some(v)])) {
         out.push(MInst::new(ci, vec![r(reg), MOp::Imm(v)]));
+        return Ok(());
+    }
+    if let Some((movz, movk, chunk)) = crate::isel::move_wide_of(t, true) {
+        let mask = (1u64 << chunk) - 1;
+        let chunks: Vec<(i64, i64)> = (0..64u32.div_ceil(chunk))
+            .map(|k| ((((v as u64) >> (chunk * k)) & mask) as i64, (chunk * k) as i64))
+            .filter(|&(c, _)| c != 0)
+            .collect();
+        let Some((first, rest)) = chunks.split_first() else {
+            return Err(format!("no way to make the frame size {v}"));
+        };
+        out.push(MInst::new(movz, vec![r(reg), MOp::Imm(first.0), MOp::Imm(first.1)]));
+        for &(c, sh) in rest {
+            out.push(MInst::new(movk, vec![r(reg), r(reg), MOp::Imm(c), MOp::Imm(sh)]));
+        }
         return Ok(());
     }
     let add = t.role("addi").ok_or("no \"addi\" instruction")?;
