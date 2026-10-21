@@ -1,0 +1,18 @@
+ExportedProgram:
+    class GraphModule(torch.nn.Module):
+        def forward(self, a: "f32[2, 3]", b: "f32[3, 4]", bias: "f32[4]"):
+            # File: export.py:33 in forward, code: return torch.matmul(a, b) + bias
+            matmul: "f32[2, 4]" = torch.ops.aten.matmul.default(a, b);  a = b = None
+            add: "f32[2, 4]" = torch.ops.aten.add.Tensor(matmul, bias);  matmul = bias = None
+            return (add,)
+    
+Graph signature:
+    # inputs
+    a: USER_INPUT
+    b: USER_INPUT
+    bias: USER_INPUT
+    
+    # outputs
+    add: USER_OUTPUT
+    
+Range constraints: {}
