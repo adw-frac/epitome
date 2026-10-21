@@ -149,6 +149,7 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     identity_bitcasts(&mut f);
     one_lane_vectors(cx, &mut f);
     vector_arguments(cx, &mut f);
+    wide_mask_bits(cx, &mut f);
     vector_int_bitcasts(cx, &mut f);
     bit_masks(cx, &mut f);
     bitcast_round_trips(cx, &mut f);
@@ -816,6 +817,136 @@ fn call_vectors(cx: &mut Ctx, f: &mut Function, b: BlockId, k: usize) -> usize {
             let n = after.len();
             f.blocks[b.index()].insts.splice(k + 1..k + 1, after);
             before.len() + n
+        }
+    }
+}
+
+/// Masks split across registers and the integers of their bits: a load
+/// or store of one of more than 16 lanes is of its integer (memory holds a
+/// mask as its bits, packed); and a bitcast between one of more than 64
+/// lanes and its integer is made 64 lanes at a time, through bytes (which
+/// split as masks' shuffles do not): the mask's lanes as bytes, each 64 of
+/// them compared with zero again and taken as the `i64` of their bits, as
+/// smaller masks are; and the other way, each `i64` as a mask, as bytes,
+/// joined and compared. (Lane counts not a multiple of 64 are left.)
+fn wide_mask_bits(cx: &mut Ctx, f: &mut Function) {
+    let i1 = cx.m.types.int(1);
+    let i8t = cx.m.types.int(8);
+    let mask_len = |cx: &Ctx, ty: TypeId| match cx.m.types.get(ty) {
+        Type::Vector { len, elem, scalable: false } if *elem == i1 => Some(*len),
+        _ => None,
+    };
+    if !f.locals.iter().any(|l| mask_len(cx, l.ty).is_some_and(|n| n > 16)) {
+        return;
+    }
+    let vec = |cx: &mut Ctx, len: u32, elem: TypeId| cx.m.types.intern(Type::Vector { scalable: false, len, elem });
+    let blocks: Vec<BlockId> = f.layout.clone();
+    // Loads and stores, of the integers.
+    for &b in &blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let mut s = Seq { f, new: Vec::new() };
+            match s.f.insts[i.index()].op.clone() {
+                Op::Store { volatile, atomic: None, value, ptr, align } => {
+                    let vt = cx.value_ty(s.f, value);
+                    if let Some(n) = mask_len(cx, vt).filter(|&n| n > 16) {
+                        let it = cx.m.types.int(n);
+                        let bits = s.cast(CastOp::BitCast, value, it);
+                        s.f.insts[i.index()].op = Op::Store { volatile, atomic: None, value: bits, ptr, align };
+                    }
+                }
+                Op::Load { volatile, atomic: None, ptr, align } => {
+                    let r = s.f.insts[i.index()].result.unwrap();
+                    let rt = s.f.locals[r.index()].ty;
+                    if let Some(n) = mask_len(cx, rt).filter(|&n| n > 16) {
+                        let it = cx.m.types.int(n);
+                        let ld = s.f.add_inst(Op::Load { volatile, atomic: None, ptr, align }, Some((None, it)));
+                        let lv = s.f.result(ld);
+                        s.f.insts[i.index()].op = Op::Cast {
+                            op: CastOp::BitCast,
+                            flags: IntFlags::NONE,
+                            fmf: FastMath::default(),
+                            value: lv,
+                        };
+                        s.new.push(ld);
+                    }
+                }
+                _ => {}
+            }
+            let new = std::mem::take(&mut s.new);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..k, new);
+            k += n + 1;
+        }
+    }
+    // Bitcasts, 64 lanes at a time.
+    for &b in &blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::Cast { op: CastOp::BitCast, value, .. } = f.insts[i.index()].op else {
+                k += 1;
+                continue;
+            };
+            let r = f.insts[i.index()].result.unwrap();
+            let (from, to) = (cx.value_ty(f, value), f.locals[r.index()].ty);
+            let wide = |n: Option<u32>| n.filter(|&n| n > 64 && n % 64 == 0);
+            let int = |cx: &Ctx, t: TypeId| matches!(cx.m.types.get(t), Type::Int(_));
+            let (fm, tm) = (wide(mask_len(cx, from)), wide(mask_len(cx, to)));
+            let mut s = Seq { f, new: Vec::new() };
+            let v = match (fm, tm) {
+                (Some(n), None) if int(cx, to) => {
+                    let bt = vec(cx, n, i8t);
+                    let bytes = s.cast(CastOp::SExt, value, bt);
+                    let (c64, m64, i64t) = (vec(cx, 64, i8t), vec(cx, 64, i1), cx.m.types.int(64));
+                    let zero = Value::Const(cx.m.consts.intern(Constant { ty: c64, kind: ConstKind::Zero }));
+                    let p = Value::Const(cx.m.consts.intern(Constant { ty: bt, kind: ConstKind::Poison }));
+                    let mut acc = cx.int(to, 0);
+                    for c in 0..n / 64 {
+                        let lanes: Vec<u32> = (c * 64..c * 64 + 64).collect();
+                        let chunk = shuffle_lanes(cx, &mut s, bytes, p, &lanes, c64);
+                        let m = s.op(Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: chunk, rhs: zero }, m64);
+                        let bits = s.cast(CastOp::BitCast, m, i64t);
+                        let w = s.cast(CastOp::ZExt, bits, to);
+                        let sh = cx.int(to, (c * 64) as i64);
+                        let placed = s.bin(BinOp::Shl, w, sh, to);
+                        acc = s.bin(BinOp::Or, acc, placed, to);
+                    }
+                    Some(acc)
+                }
+                (None, Some(n)) if int(cx, from) => {
+                    let (c64, m64, i64t) = (vec(cx, 64, i8t), vec(cx, 64, i1), cx.m.types.int(64));
+                    let mut level: Vec<Value> = Vec::new();
+                    for c in 0..n / 64 {
+                        let sh = cx.int(from, (c * 64) as i64);
+                        let moved = s.bin(BinOp::LShr, value, sh, from);
+                        let bits = s.cast(CastOp::Trunc, moved, i64t);
+                        let m = s.cast(CastOp::BitCast, bits, m64);
+                        level.push(s.cast(CastOp::SExt, m, c64));
+                    }
+                    let mut len = 64;
+                    while level.len() > 1 {
+                        let jt = vec(cx, 2 * len, i8t);
+                        let lanes: Vec<u32> = (0..2 * len).collect();
+                        level = level.chunks(2).map(|p| shuffle_lanes(cx, &mut s, p[0], p[1], &lanes, jt)).collect();
+                        len *= 2;
+                    }
+                    let bt = vec(cx, n, i8t);
+                    let zero = Value::Const(cx.m.consts.intern(Constant { ty: bt, kind: ConstKind::Zero }));
+                    Some(s.op(Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: level[0], rhs: zero }, to))
+                }
+                _ => None,
+            };
+            let Some(v) = v else {
+                k += 1;
+                continue;
+            };
+            let new = std::mem::take(&mut s.new);
+            f.replace_uses(Value::Local(r), v);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
         }
     }
 }

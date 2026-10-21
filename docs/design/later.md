@@ -30,6 +30,10 @@ these are for after.
 - **Masks to integers** (`bitcast <16 x i1> to i16`): `umov` and a shift
   per lane. Better: `and` with a lane-weight vector and `addv` (the
   movemask idiom).
+- **Masks of more than 64 lanes and their integers** (`prepare.rs`,
+  `wide_mask_bits`): through bytes, a sign extension, shuffles of 64
+  bytes and a comparison with zero again for each 64 lanes. Better: the
+  movemask idiom on the mask's own parts.
 - **Vector floating-point reductions** (`fmax`, `fmin`): a scalar `fmaxnm`
   per lane. Better: `fmaxnmp`/`fmaxnmv`.
 - **Vector saturating conversions** (`fptosi.sat` of vectors): a scalar

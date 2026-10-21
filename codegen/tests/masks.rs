@@ -87,3 +87,39 @@ int main(void) {
     let want = format!("{:x} {:x} {:x} {:x}\n{picks}", bits(8), bits(16), bits(32), bits(64));
     assert_eq!(got, want);
 }
+
+/// Masks split across registers, up to 128 lanes (`prepare::wide_mask_bits`):
+/// selects, reductions, bitcasts to and from `i128` and `i64`, loads and
+/// stores of them, built by us and by clang from `tests/masks/wide.ll`, each
+/// linked with `wide_main.c`: the two must print the same.
+#[test]
+fn wide_masks_as_clangs() {
+    let ok = cfg!(target_arch = "aarch64")
+        && cfg!(target_os = "macos")
+        && Command::new("clang").arg("--version").output().is_ok_and(|o| o.status.success());
+    if !ok {
+        eprintln!("needs clang on an AArch64 Mac; skipping");
+        return;
+    }
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/masks");
+    let tmp = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("masks-wide");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let ll = dir.join("wide.ll");
+    let t = Target::aarch64();
+    let mut m = epitome_ir::parse_module(&std::fs::read_to_string(&ll).unwrap()).unwrap();
+    let ours = tmp.join("ours.o");
+    std::fs::write(&ours, compile(&t, &mut m, &Options::default()).unwrap().object_file(&t).unwrap()).unwrap();
+    let theirs = tmp.join("theirs.o");
+    let st = Command::new("clang").arg("-O1").arg("-c").arg(&ll).arg("-o").arg(&theirs).status().unwrap();
+    assert!(st.success());
+    let mut out = Vec::new();
+    for (name, obj) in [("ours", &ours), ("theirs", &theirs)] {
+        let exe = tmp.join(name);
+        let st = Command::new("clang").arg(obj).arg(dir.join("wide_main.c")).arg("-o").arg(&exe).status().unwrap();
+        assert!(st.success());
+        let o = Command::new(&exe).output().unwrap();
+        assert!(o.status.success());
+        out.push(String::from_utf8_lossy(&o.stdout).into_owned());
+    }
+    assert_eq!(out[0], out[1], "our build of wide.ll differs from clang's");
+}
