@@ -18,12 +18,16 @@
 //! With `--sme`, matrix products go to the SME kernels of
 //! `mlir/targets/aarch64-sme.mlir` (`linalg-to-kernels`, after `bufferize`),
 //! and the code generator targets `apple-m4`; without it, they are loops.
+//! Element-wise work and reductions are vectorized for NEON
+//! (`linalg-vectorize=4`), and `exp` is arithmetic rather than a call
+//! (`math-polynomial-approximation`), either way.
 //! `--dump` writes each stage's MLIR and the LLVM IR next to the model.
 //!
 //! ```sh
 //! python examples/llm/export.py --model HuggingFaceTB/SmolLM2-135M target/smollm2   # torch-mlir's Python
 //! cargo run --release --example llm -- target/smollm2 --sme
 //! target/smollm2/llm "Once upon a time, there was a little dog called"
+//! target/smollm2/llm --bench 5   # time forward passes
 //! ```
 //!
 //! On an AArch64 Mac, with `rustc` to build the driver.
@@ -77,6 +81,11 @@ fn build(dir: &Path, dump: bool, sme: bool) -> Result<PathBuf, String> {
     // Each linalg operation a function of its own: registers allocated
     // far better than in one huge function, and a profiler tells them apart.
     passes.insert(at, "outline-linalg");
+    // Element-wise work and reductions on NEON's four lanes, and exp as
+    // arithmetic, so that it is vectorized too.
+    passes.insert(at + 1, "linalg-vectorize=4");
+    let at = passes.iter().position(|&p| p == "to-llvm").unwrap();
+    passes.insert(at, "math-polynomial-approximation");
     for (k, pass) in passes.iter().enumerate() {
         let start = Instant::now();
         m = epitome_mlir::run_pass(pass, &m).map_err(|e| format!("{pass}: {e}"))?;

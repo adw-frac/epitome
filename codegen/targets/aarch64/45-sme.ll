@@ -131,3 +131,238 @@ define void @sme.st1w.za0h.expand(ptr %p, i32 %slice) {
   call void @ST1WZA0HW12(ptr %p)
   ret void
 }
+
+; ---------------------------------------------------------------------------
+; Four tiles at once: za0.s to za3.s hold a 64 x 16 block (rows 0-15, 16-31,
+; 32-47, 48-63). For each k, a column of 64 elements is four vectors loaded
+; from one address with "mul vl" offsets (z0-z3), the row of 16 one more
+; (z4), and four outer products into the four tiles do not wait for each
+; other.
+
+declare void @llvm.epitome.sme.fmopa4.za.s(ptr, ptr)
+declare void @llvm.epitome.sme.ld1w.za1h.s(ptr, i32)
+declare void @llvm.epitome.sme.ld1w.za2h.s(ptr, i32)
+declare void @llvm.epitome.sme.ld1w.za3h.s(ptr, i32)
+declare void @llvm.epitome.sme.st1w.za1h.s(ptr, i32)
+declare void @llvm.epitome.sme.st1w.za2h.s(ptr, i32)
+declare void @llvm.epitome.sme.st1w.za3h.s(ptr, i32)
+
+define void @LD1WZ1P0VL1(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000001 101000 a:5 00001" "asm"="ld1w {lb}z1.s{rb}, p0/z, [{a}, #1, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ2P0VL2(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000010 101000 a:5 00010" "asm"="ld1w {lb}z2.s{rb}, p0/z, [{a}, #2, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ3P0VL3(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000011 101000 a:5 00011" "asm"="ld1w {lb}z3.s{rb}, p0/z, [{a}, #3, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ4P1(ptr "reg"="xsp" %b) "feature"="sme" "enc"="1010010101000000 101001 b:5 00100" "asm"="ld1w {lb}z4.s{rb}, p1/z, [{b}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMOPAZA0Z4() "feature"="sme" "enc"="10000000100001000010000000000000" "asm"="fmopa za0.s, p0/m, p1/m, z0.s, z4.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMOPAZA1Z4() "feature"="sme" "enc"="10000000100001000010000000100001" "asm"="fmopa za1.s, p0/m, p1/m, z1.s, z4.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMOPAZA2Z4() "feature"="sme" "enc"="10000000100001000010000001000010" "asm"="fmopa za2.s, p0/m, p1/m, z2.s, z4.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMOPAZA3Z4() "feature"="sme" "enc"="10000000100001000010000001100011" "asm"="fmopa za3.s, p0/m, p1/m, z3.s, z4.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZA1HW12(ptr "reg"="xsp" %p) "feature"="sme" "enc"="1110000010011111000001 p:5 00100" "asm"="ld1w {lb}za1h.s[w12, 0]{rb}, p1/z, [{p}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZA2HW12(ptr "reg"="xsp" %p) "feature"="sme" "enc"="1110000010011111000001 p:5 01000" "asm"="ld1w {lb}za2h.s[w12, 0]{rb}, p1/z, [{p}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZA3HW12(ptr "reg"="xsp" %p) "feature"="sme" "enc"="1110000010011111000001 p:5 01100" "asm"="ld1w {lb}za3h.s[w12, 0]{rb}, p1/z, [{p}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1WZA1HW12(ptr "reg"="xsp" %p) "feature"="sme" "enc"="1110000010111111000001 p:5 00100" "asm"="st1w {lb}za1h.s[w12, 0]{rb}, p1, [{p}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1WZA2HW12(ptr "reg"="xsp" %p) "feature"="sme" "enc"="1110000010111111000001 p:5 01000" "asm"="st1w {lb}za2h.s[w12, 0]{rb}, p1, [{p}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1WZA3HW12(ptr "reg"="xsp" %p) "feature"="sme" "enc"="1110000010111111000001 p:5 01100" "asm"="st1w {lb}za3h.s[w12, 0]{rb}, p1, [{p}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+; za0.s-za3.s += a x b: a column of 64 elements at a (all lanes), a row at b
+; (the first lanes, p1).
+define void @sme.fmopa4(ptr "reg"="xsp" %a, ptr "reg"="xsp" %b) "feature"="sme" "recipe"="sme.fmopa4.expand" {
+  call void @llvm.epitome.sme.fmopa4.za.s(ptr %a, ptr %b)
+  ret void
+}
+
+define void @sme.fmopa4.expand(ptr %a, ptr %b) {
+  call void @LD1WZ0P0(ptr %a)
+  call void @LD1WZ1P0VL1(ptr %a)
+  call void @LD1WZ2P0VL2(ptr %a)
+  call void @LD1WZ3P0VL3(ptr %a)
+  call void @LD1WZ4P1(ptr %b)
+  call void @FMOPAZA0Z4()
+  call void @FMOPAZA1Z4()
+  call void @FMOPAZA2Z4()
+  call void @FMOPAZA3Z4()
+  ret void
+}
+
+define void @sme.ld1w.za1h(ptr "reg"="xsp" %p, i32 "reg"="w" %slice) "feature"="sme" "recipe"="sme.ld1w.za1h.expand" {
+  call void @llvm.epitome.sme.ld1w.za1h.s(ptr %p, i32 %slice)
+  ret void
+}
+
+define void @sme.ld1w.za1h.expand(ptr %p, i32 %slice) {
+  call void @MOVW12(i32 %slice)
+  call void @LD1WZA1HW12(ptr %p)
+  ret void
+}
+
+define void @sme.st1w.za1h(ptr "reg"="xsp" %p, i32 "reg"="w" %slice) "feature"="sme" "recipe"="sme.st1w.za1h.expand" {
+  call void @llvm.epitome.sme.st1w.za1h.s(ptr %p, i32 %slice)
+  ret void
+}
+
+define void @sme.st1w.za1h.expand(ptr %p, i32 %slice) {
+  call void @MOVW12(i32 %slice)
+  call void @ST1WZA1HW12(ptr %p)
+  ret void
+}
+
+define void @sme.ld1w.za2h(ptr "reg"="xsp" %p, i32 "reg"="w" %slice) "feature"="sme" "recipe"="sme.ld1w.za2h.expand" {
+  call void @llvm.epitome.sme.ld1w.za2h.s(ptr %p, i32 %slice)
+  ret void
+}
+
+define void @sme.ld1w.za2h.expand(ptr %p, i32 %slice) {
+  call void @MOVW12(i32 %slice)
+  call void @LD1WZA2HW12(ptr %p)
+  ret void
+}
+
+define void @sme.st1w.za2h(ptr "reg"="xsp" %p, i32 "reg"="w" %slice) "feature"="sme" "recipe"="sme.st1w.za2h.expand" {
+  call void @llvm.epitome.sme.st1w.za2h.s(ptr %p, i32 %slice)
+  ret void
+}
+
+define void @sme.st1w.za2h.expand(ptr %p, i32 %slice) {
+  call void @MOVW12(i32 %slice)
+  call void @ST1WZA2HW12(ptr %p)
+  ret void
+}
+
+define void @sme.ld1w.za3h(ptr "reg"="xsp" %p, i32 "reg"="w" %slice) "feature"="sme" "recipe"="sme.ld1w.za3h.expand" {
+  call void @llvm.epitome.sme.ld1w.za3h.s(ptr %p, i32 %slice)
+  ret void
+}
+
+define void @sme.ld1w.za3h.expand(ptr %p, i32 %slice) {
+  call void @MOVW12(i32 %slice)
+  call void @LD1WZA3HW12(ptr %p)
+  ret void
+}
+
+define void @sme.st1w.za3h(ptr "reg"="xsp" %p, i32 "reg"="w" %slice) "feature"="sme" "recipe"="sme.st1w.za3h.expand" {
+  call void @llvm.epitome.sme.st1w.za3h.s(ptr %p, i32 %slice)
+  ret void
+}
+
+define void @sme.st1w.za3h.expand(ptr %p, i32 %slice) {
+  call void @MOVW12(i32 %slice)
+  call void @ST1WZA3HW12(ptr %p)
+  ret void
+}
+
+; ---------------------------------------------------------------------------
+; Four tiles side by side: za0.s to za3.s hold a 16 x 64 block (columns 0-15,
+; 16-31, 32-47, 48-63). For each k, a column of 16 elements (z0) by a row of
+; 64 loaded as four vectors from one address (z4-z7): 256 contiguous bytes
+; of the row, so that a matrix streamed from memory has four lines in
+; flight, not one.
+
+declare void @llvm.epitome.sme.fmopa4w.za.s(ptr, ptr)
+
+define void @LD1WZ4P0(ptr "reg"="xsp" %b) "feature"="sme" "enc"="1010010101000000 101000 b:5 00100" "asm"="ld1w {lb}z4.s{rb}, p0/z, [{b}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ5P0VL1(ptr "reg"="xsp" %b) "feature"="sme" "enc"="1010010101000001 101000 b:5 00101" "asm"="ld1w {lb}z5.s{rb}, p0/z, [{b}, #1, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ6P0VL2(ptr "reg"="xsp" %b) "feature"="sme" "enc"="1010010101000010 101000 b:5 00110" "asm"="ld1w {lb}z6.s{rb}, p0/z, [{b}, #2, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ7P0VL3(ptr "reg"="xsp" %b) "feature"="sme" "enc"="1010010101000011 101000 b:5 00111" "asm"="ld1w {lb}z7.s{rb}, p0/z, [{b}, #3, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMOPAZA1Z0Z5() "feature"="sme" "enc"="10000000100001010010000000000001" "asm"="fmopa za1.s, p0/m, p1/m, z0.s, z5.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMOPAZA2Z0Z6() "feature"="sme" "enc"="10000000100001100010000000000010" "asm"="fmopa za2.s, p0/m, p1/m, z0.s, z6.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMOPAZA3Z0Z7() "feature"="sme" "enc"="10000000100001110010000000000011" "asm"="fmopa za3.s, p0/m, p1/m, z0.s, z7.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+; za0.s-za3.s += a x b: a column of 16 at a, a row of 64 at b (all lanes:
+; p1 must be all true).
+define void @sme.fmopa4w(ptr "reg"="xsp" %a, ptr "reg"="xsp" %b) "feature"="sme" "recipe"="sme.fmopa4w.expand" {
+  call void @llvm.epitome.sme.fmopa4w.za.s(ptr %a, ptr %b)
+  ret void
+}
+
+define void @sme.fmopa4w.expand(ptr %a, ptr %b) {
+  call void @LD1WZ0P0(ptr %a)
+  call void @LD1WZ4P0(ptr %b)
+  call void @LD1WZ5P0VL1(ptr %b)
+  call void @LD1WZ6P0VL2(ptr %b)
+  call void @LD1WZ7P0VL3(ptr %b)
+  call void @FMOPAZA0Z4()
+  call void @FMOPAZA1Z0Z5()
+  call void @FMOPAZA2Z0Z6()
+  call void @FMOPAZA3Z0Z7()
+  ret void
+}

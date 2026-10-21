@@ -87,6 +87,10 @@ struct Kernel {
     /// `batch_matmul`: a matrix product for each index of the first
     /// dimension, each done as a `matmul`.
     batch: bool,
+    /// The function does every column of a block of rows, its last
+    /// argument the number of columns (rather than one tile, its last
+    /// argument the tile's width).
+    whole_rows: bool,
 }
 
 fn load(name: &str) -> Result<&'static Set, String> {
@@ -150,6 +154,7 @@ fn load(name: &str) -> Result<&'static Set, String> {
             tile,
             function,
             batch,
+            whole_rows: m.op_attr(op, "whole_rows").is_some(),
         });
     }
     let set: &'static Set = Box::leak(Box::new(Set { m, kernels }));
@@ -185,16 +190,19 @@ fn func(
                 map.insert(a, n);
             }
             for &op in &src.blocks[b.index()].ops {
-                let kernel = (src.op_name(op) == "linalg.generic")
-                    .then(|| set.kernels.iter().find(|k| matches(src, op, &set.m, k)))
-                    .flatten();
-                let done = match kernel {
-                    Some(k) if k.batch => batched(src, op, out, nb, parent, set, k, imported, map)?,
-                    Some(k) => {
+                // The kernels that compute it, in the order of the file.
+                let ks: Vec<&Kernel> = if src.op_name(op) == "linalg.generic" {
+                    set.kernels.iter().filter(|k| matches(src, op, &set.m, k)).collect()
+                } else {
+                    Vec::new()
+                };
+                let done = match ks.first() {
+                    Some(k) if k.batch => batched(src, op, out, nb, parent, set, &ks, imported, map)?,
+                    Some(_) => {
                         let o = &src.ops[op.index()];
                         let operands = [o.operands[0], o.operands[1], o.operands[2]].map(|v| map[&v]);
                         let props = dict(src, o.properties);
-                        tiles(src, op, operands, &props, out, nb, parent, set, k, imported, map)?
+                        tiles(src, op, operands, &props, out, nb, parent, set, &ks, imported, map)?
                     }
                     None => false,
                 };
@@ -280,12 +288,13 @@ fn batched(
     block: BlockId,
     module_block: BlockId,
     set: &Set,
-    k: &Kernel,
+    ks: &[&Kernel],
     imported: &mut HashMap<String, String>,
     map: &mut HashMap<ValueId, ValueId>,
 ) -> Result<bool, String> {
     let o = &src.ops[op.index()];
     let operands = [o.operands[0], o.operands[1], o.operands[2]].map(|v| map[&v]);
+    let fewest = ks.iter().map(|k| k.tile.0).min().unwrap_or(u64::MAX);
     let mut shapes = Vec::new();
     for &v in &operands {
         let ty = out.value_type(v);
@@ -293,7 +302,7 @@ fn batched(
         shapes.push((shape, elem, l));
     }
     let batch = shapes[0].0[0];
-    if shapes.iter().any(|s| s.0.len() != 3 || s.0[0] != batch) || shapes[0].0[1] < k.tile.0 {
+    if shapes.iter().any(|s| s.0.len() != 3 || s.0[0] != batch) || shapes[0].0[1] < fewest {
         return Ok(false);
     }
     // A matmul's maps and iterators, for the rows past the last whole tile.
@@ -306,8 +315,11 @@ fn batched(
     let red = out.dialect_attr("linalg.iterator_type", Some("<reduction>"));
     let iters = out.array_attr(vec![par, par, red]);
     let segments = out.dense_array_attr("i32", &[2, 1]);
-    let props =
-        vec![("indexing_maps".to_string(), maps), ("iterator_types".to_string(), iters), ("operandSegmentSizes".to_string(), segments)];
+    let props = vec![
+        ("indexing_maps".to_string(), maps),
+        ("iterator_types".to_string(), iters),
+        ("operandSegmentSizes".to_string(), segments),
+    ];
     for i in 0..batch {
         // Each operand's matrix i, a rank-reduced view.
         let mut views = [operands[0]; 3];
@@ -328,7 +340,7 @@ fn batched(
                 .build(out, Some(block));
             views[j] = out.result(s);
         }
-        if !tiles(src, op, views, &props, out, block, module_block, set, k, imported, map)? {
+        if !tiles(src, op, views, &props, out, block, module_block, set, ks, imported, map)? {
             return Err("a batch_matmul whose matrices do not suit the kernel".into());
         }
     }
@@ -349,11 +361,10 @@ fn tiles(
     block: BlockId,
     module_block: BlockId,
     set: &Set,
-    k: &Kernel,
+    ks: &[&Kernel],
     imported: &mut HashMap<String, String>,
     map: &mut HashMap<ValueId, ValueId>,
 ) -> Result<bool, String> {
-    let o = &src.ops[op.index()];
     let [a, b, c] = operands;
     let (Some((sa, elem)), Some((sb, _)), Some((sc, _))) =
         (out.shaped(out.value_type(a)), out.shaped(out.value_type(b)), out.shaped(out.value_type(c)))
@@ -366,6 +377,10 @@ fn tiles(
     else {
         return Ok(false);
     };
+    // The first kernel with a tile no taller than C; rows past its last
+    // whole tile go to the next.
+    let Some(ki) = ks.iter().position(|k| k.tile.0 <= m) else { return Ok(false) };
+    let k = ks[ki];
     // The kernel reads rows of B and C: their elements must be contiguous.
     let full = m / k.tile.0 * k.tile.0;
     if full == 0 || kk == 0 || n == 0 || lb.0[1] != 1 || lc.0[1] != 1 || sc != [m, n] {
@@ -446,6 +461,7 @@ fn tiles(
     let (pa, pb, pc) = (pointer(out, at), pointer(out, b), pointer(out, c));
     let (ldc, lda, ldb) = (c64(out, lc.0[0] as i64), c64(out, m as i64), c64(out, lb.0[0] as i64));
     let (kv, offb, offc) = (c64(out, kk as i64), c64(out, lb.1 as i64), c64(out, lc.1 as i64));
+    let nv = c64(out, n as i64);
 
     // for i in 0..full by tile rows, for j in 0..n by tile columns.
     let zero = cidx(out, 0);
@@ -476,6 +492,41 @@ fn tiles(
     let r1 = out.region_of(outer, 0);
     let ob = out.add_block(r1, &[index]);
     let i = out.blocks[ob.index()].args[0];
+    if k.whole_rows {
+        // One call for each block of rows, for all its columns.
+        let at_ob = |out: &mut Module, spec: OpSpec| -> ValueId {
+            let op = spec.build(out, Some(ob));
+            out.result(op)
+        };
+        let i64i = at_ob(out, OpSpec::new("arith.index_cast").operands(&[i]).results(&[i64t]));
+        let rowc = int(out, ob, "llvm.mul", i64i, ldc);
+        let offs = int(out, ob, "llvm.add", rowc, offc);
+        let tc = gep(out, ob, pc, offs);
+        let ta = gep(out, ob, pa, i64i);
+        let tb = gep(out, ob, pb, offb);
+        let callee = out.symbol_attr(&fname);
+        OpSpec::new("func.call")
+            .operands(&[tc, ldc, ta, lda, tb, ldb, kv, nv])
+            .prop("callee", callee)
+            .build(out, Some(ob));
+        OpSpec::new("scf.yield").build(out, Some(ob));
+        return rest_rows(
+            src,
+            op,
+            [a, b, c],
+            props,
+            out,
+            block,
+            module_block,
+            set,
+            &ks[ki + 1..],
+            imported,
+            map,
+            full,
+            at,
+        )
+        .map(|()| true);
+    }
     let inner = OpSpec::new("scf.for").operands(&[zero, nend, cols]).regions(1).build(out, Some(ob));
     OpSpec::new("scf.yield").build(out, Some(ob));
     let r2 = out.region_of(inner, 0);
@@ -505,7 +556,33 @@ fn tiles(
         .build(out, Some(ib));
     OpSpec::new("scf.yield").build(out, Some(ib));
 
-    // Rows past the last whole tile, as the original operation on views.
+    rest_rows(src, op, [a, b, c], props, out, block, module_block, set, &ks[ki + 1..], imported, map, full, at)?;
+    Ok(true)
+}
+
+/// Rows of C past `full`, the last whole tile's end: by the kernels left,
+/// else as the original operation on views; then the packed A freed.
+#[allow(clippy::too_many_arguments)]
+fn rest_rows(
+    src: &Module,
+    op: OpId,
+    [a, b, c]: [ValueId; 3],
+    props: &[(String, AttrId)],
+    out: &mut Module,
+    block: BlockId,
+    module_block: BlockId,
+    set: &Set,
+    ks: &[&Kernel],
+    imported: &mut HashMap<String, String>,
+    map: &mut HashMap<ValueId, ValueId>,
+    full: u64,
+    at: ValueId,
+) -> Result<(), String> {
+    let o = &src.ops[op.index()];
+    let (sa, elem) = out.shaped(out.value_type(a)).ok_or("an operand of unknown shape")?;
+    let (sc, _) = out.shaped(out.value_type(c)).ok_or("an operand of unknown shape")?;
+    let (m, kk, n) = (sa[0], sa[1], sc[1]);
+    let lc = layout(out, out.value_type(c)).ok_or("an operand of unknown layout")?;
     if full < m {
         let rest = m - full;
         let view = |out: &mut Module, v: ValueId, (strides, offset): &(Vec<u64>, u64), cols: u64| -> ValueId {
@@ -528,14 +605,16 @@ fn tiles(
         };
         let va = view(out, a, &layout(out, out.value_type(a)).unwrap(), kk);
         let vc = view(out, c, &lc, n);
-        let mut spec = OpSpec::new("linalg.generic").operands(&[va, b, vc]).regions(1).loc(o.loc);
-        for (key, v) in props {
-            spec = spec.prop(key, *v);
+        if !tiles(src, op, [va, b, vc], props, out, block, module_block, set, ks, imported, map)? {
+            let mut spec = OpSpec::new("linalg.generic").operands(&[va, b, vc]).regions(1).loc(o.loc);
+            for (key, v) in props {
+                spec = spec.prop(key, *v);
+            }
+            let g = spec.build(out, Some(block));
+            let region = out.region_of(g, 0);
+            out.clone_region_into(src, o.regions[0], region, map)?;
         }
-        let g = spec.build(out, Some(block));
-        let region = out.region_of(g, 0);
-        out.clone_region_into(src, o.regions[0], region, map)?;
     }
     OpSpec::new("memref.dealloc").operands(&[at]).build(out, Some(block));
-    Ok(true)
+    Ok(())
 }

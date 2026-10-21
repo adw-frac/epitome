@@ -345,6 +345,10 @@ fn lower_func(
 /// A loop's body, given its induction variable.
 type LoopBody<'b, 'a> = dyn FnMut(&mut Lower<'a>, ValueId) -> Result<(), String> + 'b;
 
+/// A loop's body, given its induction variable and the values carried from
+/// the iteration before; it gives the values for the next.
+type CarryingBody<'b, 'a> = dyn FnMut(&mut Lower<'a>, ValueId, &[ValueId]) -> Result<Vec<ValueId>, String> + 'b;
+
 /// A loop nest's innermost body, given the induction variables.
 type NestBody<'b, 'a> = dyn FnMut(&mut Lower<'a>, &[ValueId]) -> Result<(), String> + 'b;
 
@@ -458,6 +462,16 @@ impl<'a> Lower<'a> {
             .unwrap())
     }
 
+    /// A vector load's or store's properties: unordered, and aligned only
+    /// as its elements are.
+    fn access_props(&mut self) -> Vec<(&'static str, AttrId)> {
+        let i64t = self.out.int_type(64);
+        let ordering = self.out.int_attr(0, i64t);
+        let i32t = self.out.int_type(32);
+        let align = self.out.int_attr(4, i32t);
+        vec![("alignment", align), ("ordering", ordering)]
+    }
+
     fn load(&mut self, ptr: ValueId, indices: &[ValueId]) -> Result<ValueId, String> {
         let elem = self.layouts.get(&ptr).ok_or("a memref of unknown layout")?.elem;
         let p = self.address(ptr, indices)?;
@@ -478,20 +492,41 @@ impl<'a> Lower<'a> {
     /// induction variable: a header block that tests it, the body, and a
     /// branch back. Afterwards, operations go into the block after it.
     fn for_loop(&mut self, lb: ValueId, ub: ValueId, step: ValueId, body: &mut LoopBody<'_, 'a>) -> Result<(), String> {
+        self.carrying_loop(lb, ub, step, &[], &mut |l, iv, _| body(l, iv).map(|()| Vec::new()))?;
+        Ok(())
+    }
+
+    /// `for_loop`, carrying values from one iteration to the next: they
+    /// start as `init`, `body` is given them and gives the next ones, and
+    /// the loop gives the last.
+    fn carrying_loop(
+        &mut self,
+        lb: ValueId,
+        ub: ValueId,
+        step: ValueId,
+        init: &[ValueId],
+        body: &mut CarryingBody<'_, 'a>,
+    ) -> Result<Vec<ValueId>, String> {
         let i64t = self.out.int_type(64);
-        let header = self.out.add_block(self.region, &[i64t]);
+        let mut types = vec![i64t];
+        types.extend(init.iter().map(|&v| self.out.value_type(v)));
+        let header = self.out.add_block(self.region, &types);
         let entry = self.out.add_block(self.region, &[]);
-        OpSpec::new("llvm.br").operands(&[lb]).successors(&[header]).build(self.out, Some(self.block));
+        let mut operands = vec![lb];
+        operands.extend_from_slice(init);
+        OpSpec::new("llvm.br").operands(&operands).successors(&[header]).build(self.out, Some(self.block));
         self.block = header;
-        let iv = self.out.blocks[header.index()].args[0];
+        let args = self.out.blocks[header.index()].args.clone();
+        let iv = args[0];
         let pred = self.out.int_attr(2, i64t); // slt
         let i1 = self.out.int_type(1);
         let more = self.emit("llvm.icmp", &[iv, ub], &[i1], vec![("predicate", pred)]).unwrap();
         // The block after the loop comes after the body's blocks, made last.
         self.block = entry;
-        body(self, iv)?;
-        let next = self.int_op("llvm.add", iv, step);
-        OpSpec::new("llvm.br").operands(&[next]).successors(&[header]).build(self.out, Some(self.block));
+        let next = body(self, iv, &args[1..])?;
+        let mut operands = vec![self.int_op("llvm.add", iv, step)];
+        operands.extend(next);
+        OpSpec::new("llvm.br").operands(&operands).successors(&[header]).build(self.out, Some(self.block));
         let exit = self.out.add_block(self.region, &[]);
         let segments = self.out.dense_array_attr("i32", &[1, 0, 0]);
         OpSpec::new("llvm.cond_br")
@@ -500,7 +535,7 @@ impl<'a> Lower<'a> {
             .prop("operandSegmentSizes", segments)
             .build(self.out, Some(header));
         self.block = exit;
-        Ok(())
+        Ok(args[1..].to_vec())
     }
 
     /// Loops over every index of `shape`, outermost first.
@@ -710,22 +745,89 @@ impl<'a> Lower<'a> {
             }
             "scf.for" => {
                 let body = src.regions[o.regions[0].index()].blocks[0];
-                if o.operands.len() != 3 || !o.results.is_empty() {
-                    return Err("loops that carry values are not supported".into());
-                }
-                let iv_src = src.blocks[body.index()].args[0];
+                let bargs = src.blocks[body.index()].args.clone();
                 let ops = src.blocks[body.index()].ops.clone();
-                self.for_loop(args[0], args[1], args[2], &mut |l, iv| {
-                    l.map.insert(iv_src, iv);
+                let results = self.carrying_loop(args[0], args[1], args[2], &args[3..], &mut |l, iv, carried| {
+                    l.map.insert(bargs[0], iv);
+                    for (&a, &c) in bargs[1..].iter().zip(carried) {
+                        l.map.insert(a, c);
+                    }
                     for &inner in &ops {
                         if l.src.op_name(inner) == "scf.yield" {
-                            break;
+                            return l.src.ops[inner.index()].operands.iter().map(|&v| l.operand(v)).collect();
                         }
                         l.op(inner).map_err(|e| format!("{}: {e}", l.src.op_name(inner)))?;
                     }
-                    Ok(())
+                    Ok(Vec::new())
                 })?;
+                for (&r, &n) in o.results.iter().zip(&results) {
+                    self.map.insert(r, n);
+                }
                 None
+            }
+            "vector.load" => {
+                let ty = result_ty(self).unwrap();
+                let p = self.address(args[0], &args[1..])?;
+                let props = self.access_props();
+                self.emit("llvm.load", &[p], &[ty], props)
+            }
+            "vector.store" => {
+                let p = self.address(args[1], &args[2..])?;
+                let props = self.access_props();
+                self.emit("llvm.store", &[args[0], p], &[], props);
+                None
+            }
+            "vector.broadcast" => {
+                // Into lane 0 of a vector, then lane 0 everywhere, as a splat
+                // is written in LLVM IR.
+                let ty = result_ty(self).unwrap();
+                let Type::Vector { dims, .. } = self.out.ty(ty).clone() else { return Err("not to a vector".into()) };
+                let poison = self.emit("llvm.mlir.poison", &[], &[ty], vec![]).unwrap();
+                let zero = self.i64_const(0);
+                let one = self.emit("llvm.insertelement", &[poison, args[0], zero], &[ty], vec![]).unwrap();
+                let mask = self.out.dense_array_attr("i32", &vec![0; dims[0].0 as usize]);
+                self.emit("llvm.shufflevector", &[one, poison], &[ty], vec![("mask", mask)])
+            }
+            "vector.reduction" => {
+                // The lanes combined in pairs: (a + b) + (c + d).
+                let ty = result_ty(self).unwrap();
+                let Type::Vector { dims, .. } = self.out.ty(self.out.value_type(args[0])).clone() else {
+                    return Err("not of a vector".into());
+                };
+                let kind = match src.op_attr(op, "kind").map(|a| src.attr(a)) {
+                    Some(Attr::Dialect { body: Some(b), .. }) => b.trim_matches(|c| c == '<' || c == '>').to_string(),
+                    _ => return Err("no kind".into()),
+                };
+                let combine = match kind.as_str() {
+                    "add" => "llvm.fadd",
+                    "mul" => "llvm.fmul",
+                    "maximumf" => "llvm.intr.maximum",
+                    "minimumf" => "llvm.intr.minimum",
+                    "maxnumf" => "llvm.intr.maxnum",
+                    "minnumf" => "llvm.intr.minnum",
+                    _ => return Err(format!("a reduction of kind {kind} is not supported yet")),
+                };
+                let mut lanes = Vec::new();
+                for k in 0..dims[0].0 {
+                    let i = self.i64_const(k as i64);
+                    lanes.push(self.emit("llvm.extractelement", &[args[0], i], &[ty], vec![]).unwrap());
+                }
+                while lanes.len() > 1 {
+                    let fm = self.fastmath();
+                    lanes = lanes
+                        .chunks(2)
+                        .map(|p| match p {
+                            [a, b] => self.emit(combine, &[*a, *b], &[ty], vec![("fastmathFlags", fm)]).unwrap(),
+                            [a] => *a,
+                            _ => unreachable!(),
+                        })
+                        .collect();
+                }
+                Some(lanes[0])
+            }
+            "arith.bitcast" => {
+                let ty = result_ty(self).unwrap();
+                self.emit("llvm.bitcast", &args, &[ty], vec![])
             }
             "math.rsqrt" => {
                 let ty = result_ty(self).unwrap();

@@ -5,6 +5,7 @@
 //! ```sh
 //! target/smollm2/llm "Once upon a time, there was a little dog called"
 //! target/smollm2/llm --ids "..."   # the token ids too
+//! target/smollm2/llm --bench 10     # forward passes for 10 s, timed
 //! ```
 //!
 //! The model is one function, written by Epitome into `model.o`:
@@ -31,6 +32,14 @@ fn main() {
     if show_ids {
         args.remove(0);
     }
+    let bench = match args.first().map(String::as_str) {
+        Some("--bench") => {
+            args.remove(0);
+            let secs = if args.is_empty() { 5.0 } else { args.remove(0).parse().unwrap_or(5.0) };
+            Some(secs)
+        }
+        _ => None,
+    };
     let prompt = if args.is_empty() { "Once upon a time".to_string() } else { args.join(" ") };
     let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf())).unwrap_or_default();
     let (bpe, config) = match Bpe::load(&dir).and_then(|b| Ok((b, Config::load(&dir)?))) {
@@ -52,6 +61,19 @@ fn main() {
         *w = id as i64;
     }
     let mut logits = vec![0f32; win * vocab];
+    if let Some(secs) = bench {
+        // The same window again and again, for profiling.
+        let start = Instant::now();
+        let mut n = 0;
+        while start.elapsed().as_secs_f64() < secs {
+            // SAFETY: as below.
+            unsafe { forward(window.as_ptr(), logits.as_mut_ptr()) };
+            n += 1;
+        }
+        let ms = start.elapsed().as_secs_f64() * 1e3 / n as f64;
+        println!("{n} forward passes, {ms:.2} ms each");
+        return;
+    }
 
     let mut out = std::io::stdout().lock();
     out.write_all(prompt.as_bytes()).unwrap();

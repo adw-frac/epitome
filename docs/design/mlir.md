@@ -410,6 +410,7 @@ upstream writes it, generalizing its named operations first:
 | `linalg-generalize-named-ops` | the same | `linalg.generic` for `matmul`, `batch_matmul`, `transpose`, `broadcast`, `map` and `conv_2d_nchw_fchw` |
 | `bufferize` | `one-shot-bufferize{bufferize-function-boundaries}`, `buffer-results-to-out-params` | `memref.alloc`, `memref.global`, `memref.subview`, `memref.copy`, `memref.dealloc`; results become arguments |
 | `linalg-to-loops` | `convert-linalg-to-loops` | `scf.for`, `memref.load`, `memref.store`, `affine.apply` |
+| `math-polynomial-approximation` | upstream's polynomial approximations (`populateMathPolynomialApproximationPatterns`) | `math.exp` of `f32` (or vectors of them) as `math.fma`, `arith` and `arith.bitcast` |
 | `to-llvm` | `lower-affine`, `convert-scf-to-cf`, `convert-to-llvm{use-bare-ptr-memref-call-conv}` | `llvm.func`, `llvm.br`, `llvm.getelementptr`, calls to `malloc` and `free` |
 
 ```sh
@@ -504,12 +505,42 @@ tokens. What it needed was scale:
   named after what it does (`forward.17.matmul`): the optimiser's time on
   the model falls from 8.8 s to 2.2 s, and a profiler can tell them apart.
 
-It runs at 2 tokens a second with SME, for about 17 GFLOP a window. A
-profile shows most of the time in the SME kernel, inlined into each call:
-reading the weights' columns a row at a time (a stride of a whole row of
-the weight per k) and one tile of ZA at a time, not the arithmetic, is
-what is slow. That is the next work: kernels that read the weights in
-their own layout, and all four tiles of ZA.
+A window is about 17 GFLOP, nearly all of it matrix products, so the aim
+is that little else runs. On an M4 Pro, a forward pass of the window
+takes 33 ms (about 520 GFLOP/s, 30 tokens a second), with PyTorch's
+tokens:
+
+| Step | ms a window |
+| --- | --- |
+| the 16-row SME kernel for `matmul`, the rest scalar loops | 625 |
+| weights as bytes, not one constant per element | 500 |
+| the SME kernel for `batch_matmul` too (attention) | 115 |
+| `outline-linalg` keeping scalar constants (`x^2` a multiply, not `powf`) | 96 |
+| the kernel 64 columns at a time, so that a weight streams in contiguous 256-byte rows (section 5.8) | 63 |
+| `linalg-vectorize=4`, with `exp` as arithmetic (`math-polynomial-approximation`) | 41 |
+| results nothing uses dropped (the argmax of softmax's `max`) | 37 |
+| vector constants made once outside loops; `exp` with fused multiply-adds | 33 |
+
+`linalg-vectorize=<width>` (`mlir/src/linalg_vectorize.rs`) lowers a
+`linalg.generic` on buffers to loops whose innermost one takes `width`
+elements at a time, with `vector.load`, `vector.store`,
+`vector.broadcast` and the body on `vector<width x f32>`, when the
+innermost loop is the last, contiguous dimension of each operand it
+indexes. A reduction along it carries a vector of partial results in the
+loop (`scf.for` with `iter_args`) and combines the lanes at the end
+(`vector.reduction`). Upstream vectorizes to n-dimensional vectors and
+unrolls them to the native width later; this goes to the native width at
+once. What it cannot vectorize, it leaves for `linalg-to-loops`.
+`linalg-fold-constants` also drops the results of a `linalg.generic` that
+nothing uses, and the work in its body for them, as upstream's
+canonicalization does.
+
+The kernel is now about 75% of the time. In a microbenchmark it reaches
+1.0 to 1.2 TFLOP/s on weights streamed from memory (30 to 37 GB/s), and
+more if a weight is first packed into 64-column panels, each contiguous:
+the LM head, whose rows are 196 KB apart, gains half again. What is left
+outside it: transposing A for the kernel, the logits' fill and copy, and
+the attention's small transposes.
 
 ### 5.8 Target kernels: matrix products on SME
 
@@ -557,6 +588,17 @@ covers only code that is legal in it (integer arithmetic and SME), and the
 frame saves `d8`-`d15`, which `smstart` zeroes (the entries say
 `"clobbers"`). A tile of 32-bit elements is 16 x 16: M4's streaming vector
 length is 512 bits.
+
+`__epitome_sme_matmul_f32_64` does 64 rows at a time with all four
+tiles of ZA. For each 64 columns of C it takes the four blocks of 16 rows
+in turn, each with the tiles side by side (16 x 64 of C): for each k, a
+column of 16 from AT and a row of 64 from B, which is 256 contiguous bytes
+(`ld1w` of `z4` to `z7`, with `#1, mul vl` to `#3, mul vl`), then four
+`fmopa`s (the recipe `sme.fmopa4w`). Streaming a weight from memory, that
+keeps four cache lines in flight for each k rather than one; prefetching
+(`prfm`) made it slower. Columns past the last 64 are done 16 at a time
+with the tiles one above another. Rows past the last 64 go to the 16-row
+kernel, then loops.
 
 On TinyStories-1M, `--sme` (`examples/llm.rs`) takes generation
 from 2.1 to 32 tokens a second, with the same tokens. `mlir/tests/sme.rs`

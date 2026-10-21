@@ -135,6 +135,7 @@ define double @FNEGD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 000010 10000 n
 declare double @llvm.fabs.f64(double)
 declare double @llvm.sqrt.f64(double)
 declare double @llvm.fmuladd.f64(double, double, double)
+declare double @llvm.fma.f64(double, double, double)
 
 define double @FABSD(double "reg"="d" %n) "enc"="0 0 0 11110 01 1 000001 10000 n:5 d:5" "asm"="fabs {d}, {n}" {
   %r = call double @llvm.fabs.f64(double %n)
@@ -250,6 +251,12 @@ define float @FRINTIS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 001111 10000 n
 
 define double @FMADDD(double "reg"="d" %n, double "reg"="d" %m, double "reg"="d" %a) "enc"="0 0 0 11111 01 0 m:5 0 a:5 n:5 d:5" "asm"="fmadd {d}, {n}, {m}, {a}" {
   %r = call double @llvm.fmuladd.f64(double %n, double %m, double %a)
+  ret double %r
+}
+
+; The same, for a fused multiply-add asked for as one.
+define double @FMADDD.fma(double "reg"="d" %n, double "reg"="d" %m, double "reg"="d" %a) "enc"="0 0 0 11111 01 0 m:5 0 a:5 n:5 d:5" "asm"="fmadd {d}, {n}, {m}, {a}" "nodecode" {
+  %r = call double @llvm.fma.f64(double %n, double %m, double %a)
   ret double %r
 }
 
@@ -410,6 +417,7 @@ define float @FNEGS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 000010 10000 n:5
 declare float @llvm.fabs.f32(float)
 declare float @llvm.sqrt.f32(float)
 declare float @llvm.fmuladd.f32(float, float, float)
+declare float @llvm.fma.f32(float, float, float)
 
 define float @FABSS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 000001 10000 n:5 d:5" "asm"="fabs {d}, {n}" {
   %r = call float @llvm.fabs.f32(float %n)
@@ -423,6 +431,12 @@ define float @FSQRTS(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 000011 10000 n:
 
 define float @FMADDS(float "reg"="s" %n, float "reg"="s" %m, float "reg"="s" %a) "enc"="0 0 0 11111 00 0 m:5 0 a:5 n:5 d:5" "asm"="fmadd {d}, {n}, {m}, {a}" {
   %r = call float @llvm.fmuladd.f32(float %n, float %m, float %a)
+  ret float %r
+}
+
+; The same, for a fused multiply-add asked for as one.
+define float @FMADDS.fma(float "reg"="s" %n, float "reg"="s" %m, float "reg"="s" %a) "enc"="0 0 0 11111 00 0 m:5 0 a:5 n:5 d:5" "asm"="fmadd {d}, {n}, {m}, {a}" "nodecode" {
+  %r = call float @llvm.fma.f32(float %n, float %m, float %a)
   ret float %r
 }
 

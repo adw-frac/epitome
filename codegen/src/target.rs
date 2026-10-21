@@ -1630,7 +1630,8 @@ impl Target {
             });
             // Nor those with no value, which only change the machine's
             // state (SME's ZA and predicates): nothing to evaluate.
-            let void = matches!(m.types.get(f.ty), Type::Function { ret, .. } if matches!(m.types.get(*ret), Type::Void));
+            let void =
+                matches!(m.types.get(f.ty), Type::Function { ret, .. } if matches!(m.types.get(*ret), Type::Void));
             if through_vectors || touches_memory || void {
                 continue;
             }

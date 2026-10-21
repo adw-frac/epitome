@@ -1323,6 +1323,31 @@ define <4 x float> @FADDv4s(<4 x float> "reg"="q" %n, <4 x float> "reg"="q" %m) 
   ret <4 x float> %r
 }
 
+declare <4 x float> @llvm.maximum.v4f32(<4 x float>, <4 x float>)
+declare <4 x float> @llvm.minimum.v4f32(<4 x float>, <4 x float>)
+declare <4 x float> @llvm.maxnum.v4f32(<4 x float>, <4 x float>)
+declare <4 x float> @llvm.minnum.v4f32(<4 x float>, <4 x float>)
+
+define <4 x float> @FMAXv4s(<4 x float> "reg"="q" %n, <4 x float> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 0 0 1 m:5 11110 1 n:5 d:5" "asm"="fmax {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x float> @llvm.maximum.v4f32(<4 x float> %n, <4 x float> %m)
+  ret <4 x float> %r
+}
+
+define <4 x float> @FMINv4s(<4 x float> "reg"="q" %n, <4 x float> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 1 0 1 m:5 11110 1 n:5 d:5" "asm"="fmin {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x float> @llvm.minimum.v4f32(<4 x float> %n, <4 x float> %m)
+  ret <4 x float> %r
+}
+
+define <4 x float> @FMAXNMv4s(<4 x float> "reg"="q" %n, <4 x float> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 0 0 1 m:5 11000 1 n:5 d:5" "asm"="fmaxnm {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x float> @llvm.maxnum.v4f32(<4 x float> %n, <4 x float> %m)
+  ret <4 x float> %r
+}
+
+define <4 x float> @FMINNMv4s(<4 x float> "reg"="q" %n, <4 x float> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 1 0 1 m:5 11000 1 n:5 d:5" "asm"="fminnm {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x float> @llvm.minnum.v4f32(<4 x float> %n, <4 x float> %m)
+  ret <4 x float> %r
+}
+
 define <4 x float> @FSUBv4s(<4 x float> "reg"="q" %n, <4 x float> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 1 0 1 m:5 11010 1 n:5 d:5" "asm"="fsub {d:4s}, {n:4s}, {m:4s}" {
   %r = fsub <4 x float> %n, %m
   ret <4 x float> %r
@@ -1342,6 +1367,13 @@ declare <4 x float> @llvm.fmuladd.v4f32(<4 x float>, <4 x float>, <4 x float>)
 
 define <4 x float> @FMLAv4s(<4 x float> "reg"="q" %n, <4 x float> "reg"="q" %m, <4 x float> "reg"="q" "tied" %a) "feature"="neon" "enc"="0 1 0 01110 0 0 1 m:5 11001 1 n:5 d:5" "asm"="fmla {d:4s}, {n:4s}, {m:4s}" {
   %r = call <4 x float> @llvm.fmuladd.v4f32(<4 x float> %n, <4 x float> %m, <4 x float> %a)
+  ret <4 x float> %r
+}
+
+declare <4 x float> @llvm.fma.v4f32(<4 x float>, <4 x float>, <4 x float>)
+
+define <4 x float> @FMLAv4s.fma(<4 x float> "reg"="q" %n, <4 x float> "reg"="q" %m, <4 x float> "reg"="q" "tied" %a) "feature"="neon" "enc"="0 1 0 01110 0 0 1 m:5 11001 1 n:5 d:5" "asm"="fmla {d:4s}, {n:4s}, {m:4s}" "nodecode" {
+  %r = call <4 x float> @llvm.fma.v4f32(<4 x float> %n, <4 x float> %m, <4 x float> %a)
   ret <4 x float> %r
 }
 

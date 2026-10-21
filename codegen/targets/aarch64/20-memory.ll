@@ -440,6 +440,26 @@ define void @STLRP(ptr "reg"="x" %t, ptr "reg"="xsp" %n) "enc"="11 001000 1 0 0 
   ret void
 }
 
+; Prefetches for reading (llvm.prefetch's first argument 0), by locality:
+; 3 into L1, 2 into L2, 0 streaming. prfm never faults, so a prefetch past
+; the end of an array is harmless.
+declare void @llvm.prefetch.p0(ptr, i32, i32, i32)
+
+define void @PRFMPLDL1KEEP(ptr "reg"="xsp" %p) "enc"="1111100110 000000000000 p:5 00000" "asm"="prfm pldl1keep, [{p}]" {
+  call void @llvm.prefetch.p0(ptr %p, i32 0, i32 3, i32 1)
+  ret void
+}
+
+define void @PRFMPLDL2KEEP(ptr "reg"="xsp" %p) "enc"="1111100110 000000000000 p:5 00010" "asm"="prfm pldl2keep, [{p}]" {
+  call void @llvm.prefetch.p0(ptr %p, i32 0, i32 2, i32 1)
+  ret void
+}
+
+define void @PRFMPLDL1STRM(ptr "reg"="xsp" %p) "enc"="1111100110 000000000000 p:5 00001" "asm"="prfm pldl1strm, [{p}]" {
+  call void @llvm.prefetch.p0(ptr %p, i32 0, i32 0, i32 1)
+  ret void
+}
+
 define void @DMBISH() "enc"="11010101000000110011 1011 1 01 11111" "asm"="dmb ish" {
   fence seq_cst
   ret void

@@ -1,6 +1,7 @@
 //! Matrix products on SME: a `linalg.matmul` on tensors, of sizes that are
-//! not whole tiles, lowered with `linalg-to-kernels=aarch64-sme` and compiled
-//! for `apple-m4`. The code must use the SME kernel (smstart, fmopa), and,
+//! not whole tiles (70 rows: 64 on the four-tile kernel, 6 left to loops; 50
+//! columns: the last block 2 wide), lowered with
+//! `linalg-to-kernels=aarch64-sme` and compiled for `apple-m4`. The code must use the SME kernel (smstart, fmopa), and,
 //! on a Mac with SME, a Rust driver linked with it must get the same product
 //! as a plain one.
 
@@ -78,8 +79,9 @@ fn matmul_on_sme_kernels() {
         if pass == "linalg-to-kernels=aarch64-sme" {
             let text = m.to_string();
             assert!(text.contains("\"func.call\""), "no call to the kernel:\n{text}");
-            assert!(text.contains("sym_name = \"__epitome_sme_matmul_f32\""));
-            // The 6 rows past the last whole tile are left to linalg.
+            // 64 rows on the four-tile kernel; the 6 past them, too few for
+            // the 16-row one, are left to linalg.
+            assert!(text.contains("sym_name = \"__epitome_sme_matmul_f32_64\""), "{text}");
             assert!(text.contains("memref<6x50xf32, strided<[50, 1], offset: 3200>>"), "{text}");
         }
     }
@@ -89,7 +91,7 @@ fn matmul_on_sme_kernels() {
     let t = Target::aarch64();
     let opts = Options { mcpu: Some("apple-m4".to_string()), ..Options::default() };
     let compiled = compile(&t, &mut ir, &opts).unwrap();
-    for word in ["smstart", "fmopa za0.s", "ld1w {za0h.s[w12, 0]}", "st1w {za0h.s[w12, 0]}", "smstop"] {
+    for word in ["smstart", "fmopa za0.s", "fmopa za3.s", "ld1w {za3h.s[w12, 0]}", "st1w {za3h.s[w12, 0]}", "smstop"] {
         assert!(compiled.asm.contains(word), "no {word} in:\n{}", compiled.asm);
     }
 

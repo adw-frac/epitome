@@ -130,6 +130,10 @@ pub struct Sel<'a, 'b> {
     /// `move_wide_of` for 32 and 64 bits.
     move_wide: [Option<(usize, usize, u32)>; 2],
     hoisted_addr: HashMap<ConstId, VReg>,
+    /// Vector constants made once in the entry block, for use in loops, and
+    /// those made in each block, for later uses there.
+    hoisted_vectors: HashMap<(ConstId, Class), VReg>,
+    block_vectors: HashMap<(usize, ConstId, Class), VReg>,
     /// The registers holding each part of a small struct parameter.
     agg_params: HashMap<LocalId, Vec<VReg>>,
     /// Where a variadic function's variable arguments start, from the
@@ -314,6 +318,8 @@ impl<'a, 'b> Sel<'a, 'b> {
             block_addrs: HashMap::new(),
             move_wide: [move_wide_of(t, false), move_wide_of(t, true)],
             hoisted_addr: HashMap::new(),
+            hoisted_vectors: HashMap::new(),
+            block_vectors: HashMap::new(),
             agg_params: HashMap::new(),
             va_offset: 0,
             va_areas: None,
@@ -1231,10 +1237,35 @@ impl<'a, 'b> Sel<'a, 'b> {
         self.cur != 0 && self.in_loop.get(self.cur).copied().unwrap_or(false)
     }
 
+    /// A register holding vector constant `c`: made once in the entry block
+    /// for a loop, as an integer constant is (a vector takes two
+    /// instructions or more, and NEON has registers to spare for a loop's
+    /// constants), or once in its block.
+    fn vector_const(&mut self, c: ConstId, class: Class) -> Result<Reg, String> {
+        if let Some(&r) = self.hoisted_vectors.get(&(c, class)).filter(|_| self.hoisting()) {
+            return Ok(Reg::V(r));
+        }
+        if self.hoisting() && epitome_ir::chop::allow(|| "hoist a vector constant out of the loop".to_string()) {
+            let r = self.in_entry(|s| s.make_vector_const(c, class))?;
+            if let Reg::V(x) = r {
+                self.hoisted_vectors.insert((c, class), x);
+            }
+            return Ok(r);
+        }
+        if let Some(&r) = self.block_vectors.get(&(self.cur, c, class)) {
+            return Ok(Reg::V(r));
+        }
+        let r = self.make_vector_const(c, class)?;
+        if let Reg::V(x) = r {
+            self.block_vectors.insert((self.cur, c, class), x);
+        }
+        Ok(r)
+    }
+
     /// A vector constant: zero with `movi`; a splat by duplicating the lane
     /// from an integer register; otherwise zero, then each nonzero lane
     /// inserted.
-    fn vector_const(&mut self, c: ConstId, class: Class) -> Result<Reg, String> {
+    fn make_vector_const(&mut self, c: ConstId, class: Class) -> Result<Reg, String> {
         let k = self.cx.m.constant(c).clone();
         let Type::Vector { len, elem, .. } = self.cx.m.types.get(k.ty).clone() else {
             return self.err("a vector constant of a scalar type");

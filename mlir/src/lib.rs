@@ -20,6 +20,8 @@ pub mod linalg_generalize;
 pub mod linalg_kernels;
 pub mod linalg_outline;
 pub mod linalg_to_loops;
+pub mod linalg_vectorize;
+pub mod math_approx;
 pub mod parser;
 pub mod printer;
 pub mod to_llvm;
@@ -39,7 +41,9 @@ pub const PASSES: &[&str] = &[
     "bufferize",
     "linalg-to-kernels=<target>",
     "outline-linalg",
+    "linalg-vectorize=<width>",
     "linalg-to-loops",
+    "math-polynomial-approximation",
     "to-llvm",
 ];
 
@@ -67,6 +71,12 @@ pub fn run_pass(name: &str, m: &Module) -> Result<Module, String> {
         "linalg-fold-constants" => linalg_fold::run(m),
         "outline-linalg" => linalg_outline::run(m),
         _ if name.starts_with("linalg-to-kernels=") => linalg_kernels::run(m, &name["linalg-to-kernels=".len()..]),
+        _ if name.starts_with("linalg-vectorize=") => {
+            let width =
+                name["linalg-vectorize=".len()..].parse().map_err(|_| format!("{name}: a width is expected"))?;
+            linalg_vectorize::run(m, width)
+        }
+        "math-polynomial-approximation" => math_approx::run(m),
         "torch-to-linalg" => torch_to_linalg::run(m),
         "bufferize" => bufferize::run(m),
         "linalg-to-loops" => linalg_to_loops::run(m),

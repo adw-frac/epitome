@@ -8,6 +8,11 @@
 //! without this every call transposes all of them (SmolLM2-135M's half a
 //! gigabyte). Runs on tensors, after `linalg-generalize-named-ops`.
 //!
+//! Results of a `linalg.generic` that nothing uses are dropped too, with
+//! their outputs and the work in the body for them, as upstream's
+//! canonicalization does: torch-mlir's `max` along a dimension works out
+//! where each maximum is as well, which softmax never reads.
+//!
 //! An operation is folded when it has one input, a constant
 //! (`arith.constant` of `dense_resource`), an output from `tensor.empty`, a
 //! body that yields the input's element, an identity map for the output and
@@ -29,8 +34,10 @@ pub fn run(src: &Module) -> Result<Module, String> {
     let mut made = 0usize;
     let mut map = HashMap::new();
     let mut blobs = Vec::new();
+    let used: HashSet<ValueId> = src.ops.iter().flat_map(|o| o.operands.iter().copied()).collect();
+    let mut cx = Cx { resources: &resources, used: &used, made: &mut made, blobs: &mut blobs };
     for top in src.top_ops().collect::<Vec<_>>() {
-        copy(src, top, &mut out, None, &mut map, &resources, &mut made, &mut blobs)?;
+        copy(src, top, &mut out, None, &mut map, &mut cx)?;
     }
     // The new blobs, before the file's own resources.
     let at = out.items.iter().position(|i| matches!(i, Item::Resources(_))).unwrap_or(out.items.len());
@@ -41,17 +48,31 @@ pub fn run(src: &Module) -> Result<Module, String> {
     Ok(out)
 }
 
-#[allow(clippy::too_many_arguments)]
+/// What folding needs as it goes.
+struct Cx<'a> {
+    resources: &'a Resources<'a>,
+    /// Every value some operation uses.
+    used: &'a HashSet<ValueId>,
+    /// Blobs made so far, for their names.
+    made: &'a mut usize,
+    blobs: &'a mut Vec<Item>,
+}
+
 fn copy(
     src: &Module,
     op: OpId,
     out: &mut Module,
     block: Option<BlockId>,
     map: &mut HashMap<ValueId, ValueId>,
-    resources: &Resources,
-    made: &mut usize,
-    blobs: &mut Vec<Item>,
+    cx: &mut Cx<'_>,
 ) -> Result<(), String> {
+    if src.op_name(op) == "linalg.generic"
+        && let Some(block) = block
+        && drop_dead_results(src, op, out, block, map, cx.used)?
+    {
+        return Ok(());
+    }
+    let (resources, made) = (cx.resources, &mut *cx.made);
     if src.op_name(op) == "linalg.generic"
         && let Some(block) = block
         && let Some((key, ty, align, bytes)) = fold(src, op, resources, made)?
@@ -60,7 +81,7 @@ fn copy(
         let c = OpSpec::new("arith.constant").results(&[ty]).prop("value", attr).build(out, Some(block));
         let v = out.result(c);
         map.insert(src.ops[op.index()].results[0], v);
-        blobs.push(Item::Blob { key, align, bytes: Arc::new(bytes) });
+        cx.blobs.push(Item::Blob { key, align, bytes: Arc::new(bytes) });
         return Ok(());
     }
     let o = &src.ops[op.index()];
@@ -105,7 +126,7 @@ fn copy(
                 if !src.ops[inner.index()].successors.is_empty() {
                     return Err("branches between blocks are not supported here".into());
                 }
-                copy(src, inner, out, Some(nb), map, resources, made, blobs)?;
+                copy(src, inner, out, Some(nb), map, cx)?;
             }
         }
     }
@@ -117,6 +138,112 @@ fn dict(m: &Module, d: Option<AttrId>) -> Vec<(String, AttrId)> {
         Some(Attr::Dict(es)) => es.clone(),
         _ => Vec::new(),
     }
+}
+
+/// `op` without the results nothing uses, if it has any and some are used:
+/// their outputs, maps and block arguments gone, and the body only what the
+/// other results need. Whether it was written so.
+fn drop_dead_results(
+    src: &Module,
+    op: OpId,
+    out: &mut Module,
+    block: BlockId,
+    map: &mut HashMap<ValueId, ValueId>,
+    used: &HashSet<ValueId>,
+) -> Result<bool, String> {
+    let o = &src.ops[op.index()];
+    let live: Vec<bool> = o.results.iter().map(|r| used.contains(r)).collect();
+    if live.iter().all(|&l| l) || !live.iter().any(|&l| l) {
+        return Ok(false);
+    }
+    let n_ins = crate::bufferize::inputs_of(src, op);
+    let body = src.regions[o.regions[0].index()].blocks[0];
+    let bargs = &src.blocks[body.index()].args;
+    let ops = &src.blocks[body.index()].ops;
+    let &yield_op = ops.last().ok_or("an empty body")?;
+    // The body's operations the live results need, from the last back.
+    let mut needed: HashSet<ValueId> =
+        src.ops[yield_op.index()].operands.iter().zip(&live).filter(|&(_, &l)| l).map(|(&v, _)| v).collect();
+    let mut keep = vec![false; ops.len()];
+    for (k, &p) in ops.iter().enumerate().rev() {
+        let po = &src.ops[p.index()];
+        if p == yield_op {
+            keep[k] = true;
+        } else if po.results.iter().any(|r| needed.contains(r)) {
+            if !po.regions.is_empty() {
+                return Ok(false);
+            }
+            keep[k] = true;
+            needed.extend(po.operands.iter().copied());
+        }
+    }
+    // A dead output's element must not be needed.
+    let dead_args: Vec<ValueId> = (0..live.len()).filter(|&k| !live[k]).map(|k| bargs[n_ins + k]).collect();
+    if dead_args.iter().any(|a| needed.contains(a)) {
+        return Ok(false);
+    }
+    let Some(Attr::Array(ms)) = src.op_attr(op, "indexing_maps").map(|a| src.attr(src.resolve_attr(a))) else {
+        return Ok(false);
+    };
+    let ms = ms.clone();
+    let keep_operand = |k: usize| k < n_ins || live[k - n_ins];
+    let operands: Vec<ValueId> = o
+        .operands
+        .iter()
+        .enumerate()
+        .filter(|&(k, _)| keep_operand(k))
+        .map(|(_, v)| map.get(v).copied().ok_or("an operand from outside"))
+        .collect::<Result<_, _>>()?;
+    let maps: Vec<AttrId> = ms.iter().enumerate().filter(|&(k, _)| keep_operand(k)).map(|(_, &m)| m).collect();
+    let results: Vec<TypeId> =
+        o.results.iter().zip(&live).filter(|&(_, &l)| l).map(|(&r, _)| src.value_type(r)).collect();
+    let mut spec = OpSpec::new("linalg.generic").operands(&operands).results(&results).regions(1).loc(o.loc);
+    for (k, v) in dict(src, o.properties) {
+        spec = match k.as_str() {
+            "indexing_maps" => {
+                let a = out.array_attr(maps.clone());
+                spec.prop(&k, a)
+            }
+            "operandSegmentSizes" => {
+                let a = out.dense_array_attr("i32", &[n_ins as i64, results.len() as i64]);
+                spec.prop(&k, a)
+            }
+            _ => spec.prop(&k, v),
+        };
+    }
+    for (k, v) in dict(src, o.attrs) {
+        spec = spec.attr(&k, v);
+    }
+    let new = spec.build(out, Some(block));
+    let mut live_results = o.results.iter().zip(&live).filter(|&(_, &l)| l).map(|(&r, _)| r);
+    for &n in &out.ops[new.index()].results.clone() {
+        map.insert(live_results.next().unwrap(), n);
+    }
+    let region = out.region_of(new, 0);
+    let kept_args: Vec<ValueId> = bargs.iter().enumerate().filter(|&(k, _)| keep_operand(k)).map(|(_, &a)| a).collect();
+    let types: Vec<TypeId> = kept_args.iter().map(|&a| src.value_type(a)).collect();
+    let nb = out.add_block(region, &types);
+    for (&a, &n) in kept_args.iter().zip(&out.blocks[nb.index()].args.clone()) {
+        map.insert(a, n);
+    }
+    for (k, &p) in ops.iter().enumerate() {
+        if !keep[k] {
+            continue;
+        }
+        if p == yield_op {
+            let ys = src.ops[p.index()]
+                .operands
+                .iter()
+                .zip(&live)
+                .filter(|&(_, &l)| l)
+                .map(|(v, _)| map.get(v).copied().ok_or("a yield of an unknown value"))
+                .collect::<Result<Vec<_>, _>>()?;
+            OpSpec::new("linalg.yield").operands(&ys).build(out, Some(nb));
+        } else {
+            out.clone_op(src, p, Some(nb), map)?;
+        }
+    }
+    Ok(true)
 }
 
 /// The op that defines `v`, if an op does.
@@ -249,6 +376,33 @@ fn drop_unused_constants(m: &mut Module) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_result_nothing_uses() {
+        // The maximum of each row and where it is; only the maximum is used.
+        let src = r#""builtin.module"() ({
+  "func.func"() <{function_type = (tensor<4x8xf32>, tensor<4xf32>, tensor<4xi64>) -> tensor<4xf32>, sym_name = "m"}> ({
+  ^bb0(%x: tensor<4x8xf32>, %a: tensor<4xf32>, %b: tensor<4xi64>):
+    %r:2 = "linalg.generic"(%x, %a, %b) <{indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0)>, affine_map<(d0, d1) -> (d0)>], iterator_types = [#linalg.iterator_type<parallel>, #linalg.iterator_type<reduction>], operandSegmentSizes = array<i32: 1, 2>}> ({
+    ^bb0(%p: f32, %q: f32, %i: i64):
+      %0 = "linalg.index"() <{dim = 1 : i64}> : () -> index
+      %1 = "arith.index_cast"(%0) : (index) -> i64
+      %2 = "arith.maximumf"(%p, %q) <{fastmath = #arith.fastmath<none>}> : (f32, f32) -> f32
+      %3 = "arith.cmpf"(%p, %q) <{fastmath = #arith.fastmath<none>, predicate = 2 : i64}> : (f32, f32) -> i1
+      %4 = "arith.select"(%3, %1, %i) : (i1, i64, i64) -> i64
+      "linalg.yield"(%2, %4) : (f32, i64) -> ()
+    }) : (tensor<4x8xf32>, tensor<4xf32>, tensor<4xi64>) -> (tensor<4xf32>, tensor<4xi64>)
+    "func.return"(%r#0) : (tensor<4xf32>) -> ()
+  }) : () -> ()
+}) : () -> ()
+"#;
+        let text = super::run(&crate::parse_module(src).unwrap()).unwrap().to_string();
+        for gone in ["linalg.index", "arith.select", "arith.cmpf", "-> (tensor<4xf32>, tensor<4xi64>)"] {
+            assert!(!text.contains(gone), "{gone} is still there:\n{text}");
+        }
+        assert!(text.contains("operandSegmentSizes = array<i32: 1, 1>"), "{text}");
+        crate::parse_module(&text).unwrap();
+    }
+
     #[test]
     fn a_transpose_of_a_constant() {
         // 2 x 3 of 1..6, transposed: 3 x 2 of 1 4 2 5 3 6.
