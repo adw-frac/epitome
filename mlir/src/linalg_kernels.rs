@@ -476,7 +476,8 @@ fn tiles(
             continue;
         }
         if let (Some(w), Some(p)) = (&k.weights, k.pack_b) {
-            if !k.whole_rows || n % p != 0 || kk % 32 != 0 {
+            let k_multiple = if w == "bf16" { 32 } else { 64 };
+            if !k.whole_rows || n % p != 0 || kk % k_multiple != 0 {
                 continue;
             }
             match pack(out, b, p, w, module_block, block, cx)? {
@@ -580,6 +581,10 @@ fn tiles(
         Some(p) if k.whole_rows && n % p == 0 => pack(out, b, p, "f32", module_block, block, cx)?,
         _ => None,
     };
+    let (packed, scales) = match packed {
+        Some((v, s)) => (Some(v), s),
+        None => (None, None),
+    };
     // A packed panel's size in words.
     let bits = match k.weights.as_deref() {
         Some("bf16") => 16,
@@ -589,6 +594,7 @@ fn tiles(
     let (pat, pc) = (pointer(out, at), pointer(out, c));
     let pa = if k.transpose_a { pointer(out, a) } else { pat };
     let pb = pointer(out, packed.unwrap_or(b));
+    let scale_ptr = scales.map(|sc| pointer(out, sc));
     let ldc = c64(out, lc.0[0] as i64);
     let (lda, offa) = if k.transpose_a {
         (c64(out, la.0[0] as i64), c64(out, la.1 as i64))
@@ -658,6 +664,7 @@ fn tiles(
         }
         args.extend([tb, ldb, kv, nv]);
         args.extend(panel);
+        args.extend(scale_ptr);
         OpSpec::new("func.call").operands(&args).prop("callee", callee).build(out, Some(ob));
         OpSpec::new("scf.yield").build(out, Some(ob));
         return rest_rows(src, op, [a, b, c], props, out, block, module_block, cx, &ks[ki + 1..], map, full, at)
@@ -770,7 +777,7 @@ fn pack(
     module_block: BlockId,
     block: BlockId,
     cx: &mut Cx<'_>,
-) -> Result<Option<ValueId>, String> {
+) -> Result<Option<(ValueId, Option<ValueId>)>, String> {
     let ValueDef::Result { op: get, .. } = out.values[b.index()].def else { return Ok(None) };
     if out.op_name(get) != "memref.get_global" {
         return Ok(None);
@@ -804,6 +811,7 @@ fn pack(
                 return Ok(None);
             }
             let (rows, cols, w) = (kk as usize, n as usize, panel as usize);
+            let mut scale_blob: Option<Vec<u8>> = None;
             let f = |r: usize, c: usize| f32::from_le_bytes(data[(r * cols + c) * 4..][..4].try_into().unwrap());
             let bytes = match format {
                 "f32" => {
@@ -815,6 +823,29 @@ fn pack(
                             bytes[to..to + w * 4].copy_from_slice(&data[from..from + w * 4]);
                         }
                     }
+                    bytes
+                }
+                "i8" if rows % 4 == 0 => {
+                    // Each column's scale: its largest magnitude over 127.
+                    let mut scale = vec![0f32; cols];
+                    for (c, s) in scale.iter_mut().enumerate() {
+                        *s = (0..rows).map(|r| f(r, c).abs()).fold(0.0, f32::max) / 127.0;
+                    }
+                    let q = |r: usize, c: usize| -> u8 {
+                        if scale[c] == 0.0 { 0 } else { (f(r, c) / scale[c]).round().clamp(-127.0, 127.0) as i8 as u8 }
+                    };
+                    let mut bytes = Vec::with_capacity(data.len() / 4);
+                    for p in 0..cols / w {
+                        for r in (0..rows).step_by(4) {
+                            for c in p * w..(p + 1) * w {
+                                bytes.extend([q(r, c), q(r + 1, c), q(r + 2, c), q(r + 3, c)]);
+                            }
+                        }
+                    }
+                    // The kernel's row scales are a row's largest magnitude,
+                    // not over 127: the column's take that too.
+                    let scales: Vec<u8> = scale.iter().flat_map(|s| (s / 127.0).to_le_bytes()).collect();
+                    scale_blob = Some(scales);
                     bytes
                 }
                 "bf16" if rows % 2 == 0 => {
@@ -862,26 +893,62 @@ fn pack(
             ops.pop();
             let at = ops.iter().position(|&o| o == global).unwrap() + 1;
             ops.insert(at, g);
+            if let Some(scales) = scale_blob {
+                // The columns' scales, a global of f32 after the panels'.
+                let f32t = out.float_type("f32");
+                let len = scales.len() as u64 / 4;
+                let skey = format!("{new_key}.scales");
+                cx.blobs.push(Item::Blob { key: skey.clone(), align: 64, bytes: std::sync::Arc::new(scales) });
+                let tensor = out.tensor_type(&[len], f32t);
+                let value = out.intern_attr(Attr::Builtin {
+                    keyword: "dense_resource",
+                    body: format!("<{skey}>"),
+                    ty: Some(tensor),
+                });
+                let mty = out.memref_type(&[len], f32t, None);
+                let mty_attr = out.type_attr(mty);
+                let sym = out.string_attr(&format!("{new_name}_scales"));
+                let mut spec = OpSpec::new("memref.global");
+                for (k, v) in dict(out, out.ops[global.index()].properties) {
+                    spec = match k.as_str() {
+                        "initial_value" => spec.prop(&k, value),
+                        "sym_name" => spec.prop(&k, sym),
+                        "type" => spec.prop(&k, mty_attr),
+                        _ => spec.prop(&k, v),
+                    };
+                }
+                let g = spec.build(out, Some(module_block));
+                let ops = &mut out.blocks[module_block.index()].ops;
+                ops.pop();
+                let at = ops.iter().position(|&o| o == global).unwrap() + 1;
+                ops.insert(at, g);
+            }
             cx.packed.insert(cache, new_name.clone());
             new_name
         }
     };
     // Of the packed global's type: B's, though not its layout, or bytes.
-    let gty = out.blocks[module_block.index()]
-        .ops
-        .iter()
-        .find(|&&g| {
-            out.op_name(g) == "memref.global"
-                && out.op_attr(g, "sym_name").and_then(|a| out.string_of(a)).as_deref() == Some(&new_name)
-        })
-        .and_then(|&g| match out.op_attr(g, "type").map(|a| out.attr(a)) {
-            Some(Attr::Type(t)) => Some(*t),
-            _ => None,
-        })
-        .unwrap_or(ty);
-    let sym = out.symbol_attr(&new_name);
-    let g = OpSpec::new("memref.get_global").results(&[gty]).prop("name", sym).build(out, Some(block));
-    Ok(Some(out.result(g)))
+    // Each global got by its own type: B's, though not its layout, or bytes;
+    // and the columns' scales, if there are any.
+    let get = |out: &mut Module, name: &str| -> Option<ValueId> {
+        let gty = out.blocks[module_block.index()]
+            .ops
+            .iter()
+            .find(|&&g| {
+                out.op_name(g) == "memref.global"
+                    && out.op_attr(g, "sym_name").and_then(|a| out.string_of(a)).as_deref() == Some(name)
+            })
+            .and_then(|&g| match out.op_attr(g, "type").map(|a| out.attr(a)) {
+                Some(Attr::Type(t)) => Some(*t),
+                _ => None,
+            })?;
+        let sym = out.symbol_attr(name);
+        let g = OpSpec::new("memref.get_global").results(&[gty]).prop("name", sym).build(out, Some(block));
+        Some(out.result(g))
+    };
+    let packed = get(out, &new_name).ok_or("the packed global is missing")?;
+    let scales = get(out, &format!("{new_name}_scales"));
+    Ok(Some((packed, scales)))
 }
 
 /// `x` rounded to BF16, to nearest with ties to even, as `bfcvt` does.

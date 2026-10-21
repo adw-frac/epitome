@@ -85,20 +85,25 @@ fn matmul_on_sme_kernels() {
             assert!(text.contains("memref<6x50xf32, strided<[50, 1], offset: 3200>>"), "{text}");
         }
     }
-    compile_and_run(&m, DRIVER, "sme");
+    compile_and_run(
+        &m,
+        DRIVER,
+        "sme",
+        &["fmopa za0.s", "fmopa za3.s", "ld1w {za3h.s[w12, 0]}", "st1w {za3h.s[w12, 0]}"],
+    );
 }
 
 /// Compiles `m` (in the `llvm` dialect) for `apple-m4`, checks it uses the
 /// SME kernel, and, on a Mac with SME, links it with `driver` and runs it,
 /// which must print "ok".
-fn compile_and_run(m: &epitome_mlir::Module, driver: &str, name: &str) {
+fn compile_and_run(m: &epitome_mlir::Module, driver: &str, name: &str, words: &[&str]) {
     let mut ir = epitome_mlir::translate::translate(m).unwrap();
     ir.triple = Some(b"arm64-apple-macosx14.0.0".to_vec());
     epitome_opt::pipeline::run(&mut ir, &epitome_opt::pipeline::Options::default());
     let t = Target::aarch64();
     let opts = Options { mcpu: Some("apple-m4".to_string()), ..Options::default() };
     let compiled = compile(&t, &mut ir, &opts).unwrap();
-    for word in ["smstart", "fmopa za0.s", "fmopa za3.s", "ld1w {za3h.s[w12, 0]}", "st1w {za3h.s[w12, 0]}", "smstop"] {
+    for word in ["smstart", "smstop"].iter().chain(words) {
         assert!(compiled.asm.contains(word), "no {word} in:\n{}", compiled.asm);
     }
 
@@ -224,7 +229,12 @@ fn constant_weights_packed_into_panels() {
         f32::from_le_bytes(packed[i..i + 4].try_into().unwrap())
     };
     assert_eq!(at(1, 3, 5), b[3 * n + 64 + 5]);
-    compile_and_run(&m, &constant_weights_driver(k, "x", 1e-5), "sme-packed");
+    compile_and_run(
+        &m,
+        &constant_weights_driver(k, "x", 1e-5),
+        "sme-packed",
+        &["fmopa za0.s", "fmopa za3.s", "ld1w {za3h.s[w12, 0]}", "st1w {za3h.s[w12, 0]}"],
+    );
 }
 
 /// The same in BF16 (`aarch64-sme:bf16`): B stored in BF16 pairs, A rounded
@@ -239,5 +249,22 @@ fn constant_weights_in_bf16() {
     let (_, f32_text) = constant_weights(k, "aarch64-sme");
     assert!(!f32_text.contains("bf16"), "{f32_text}");
     let round = "let b = x.to_bits(); f32::from_bits(((b + 0x7fff + ((b >> 16) & 1)) >> 16) << 16)";
-    compile_and_run(&m, &constant_weights_driver(k, round, 1e-5), "sme-bf16");
+    compile_and_run(
+        &m,
+        &constant_weights_driver(k, round, 1e-5),
+        "sme-bf16",
+        &["bfmopa za3.s", "bfcvtnt", "st1w {za0v.s[w12, 0]}"],
+    );
+}
+
+/// The same in int8 (`aarch64-sme:i8`): B quantised by column when
+/// compiling, A by row in the kernel, products summed in 32-bit integers by
+/// smopa; within the quantisation's error of the f32 product.
+#[test]
+fn constant_weights_in_int8() {
+    let k = 128;
+    let (m, text) = constant_weights(k, "aarch64-sme:i8");
+    assert!(text.contains("@__epitome_sme_matmul_i8_64"), "{text}");
+    assert!(text.contains("_panels64_i8_scales"), "{text}");
+    compile_and_run(&m, &constant_weights_driver(k, "x", 1e-2), "sme-i8", &["smopa za3.s", "fcvtzs", "st1b"]);
 }
