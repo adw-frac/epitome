@@ -93,8 +93,16 @@ impl Instr {
     }
 
     /// Decodes `word` as this instruction, tied operands included.
+    /// A symbol no field holds (a relocation marking the instruction, as
+    /// TLSDESC's call is marked) is 0.
     pub fn decode(&self, word: u32) -> Option<Env> {
-        let mut env = self.enc.decode(word, &self.operand_names())?;
+        let (held, marks): (Vec<&Operand>, Vec<&Operand>) =
+            self.operands.iter().filter(|o| !o.tied).partition(|o| o.kind != Kind::Sym || self.enc.mentions(&o.name));
+        let names: Vec<String> = held.iter().map(|o| o.name.clone()).collect();
+        let mut env = self.enc.decode(word, &names)?;
+        for o in marks {
+            env.insert(o.name.clone(), 0);
+        }
         let d = env.get("d").copied();
         for o in self.operands.iter().filter(|o| o.tied) {
             env.insert(o.name.clone(), d?);

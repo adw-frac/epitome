@@ -66,7 +66,8 @@
 //!   in, with `{s}` for the symbol (`:lo12:{s}`, `{s}@PAGEOFF`);
 //! - `use`: `call` (a branch to a symbol, resolved in place when the
 //!   symbol is in the same section), `got` (through the global offset
-//!   table: kept against the symbol), or `data8` (a pointer of 8 bytes in
+//!   table: kept against the symbol), `tls` (to a thread-local variable:
+//!   kept against the symbol, which ELF marks as one), or `data8` (a pointer of 8 bytes in
 //!   data; `dataN` for N bytes);
 //! - `target`: the address an instruction reaches, from its address `pc`
 //!   and the operand's value `v`, for disassembly (`(pc & -4096) + (v << 12)`).
@@ -120,6 +121,9 @@ pub enum RelocUse {
     Call,
     /// Through the global offset table.
     Got,
+    /// To a thread-local variable (kept against its symbol, which is
+    /// made a thread-local one).
+    Tls,
     /// A pointer in data, of this many bytes.
     Data(u8),
     /// In unwind tables (`.eh_frame`): ELF's 32-bit PC-relative address of
@@ -544,6 +548,7 @@ impl Machine {
                     Some("eh-unsigned") => RelocUse::EhUnsigned,
                     Some("got-pcrel32") => RelocUse::GotPcRel32,
                     Some("got") => RelocUse::Got,
+                    Some("tls") => RelocUse::Tls,
                     Some(d) if d.starts_with("data") => RelocUse::Data(
                         d.trim_start_matches("data").parse().map_err(|_| format!("relocation {name}: use {d}"))?,
                     ),

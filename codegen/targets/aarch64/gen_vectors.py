@@ -218,6 +218,25 @@ define {T} @INSf{es}({T} "reg"="q" "tied" %old, {ty} "reg"="{scls}" %n, i64 "imm
   ret {T} %r
 }}
 ''')
+    # The same for half a register (<2 x float>): the lanes are the
+    # register's low ones.
+    if not Q and ty == 'float':
+        o.append(f'''define {T} @DUPf{arr}({ty} "reg"="s" %n) "enc"="0 0 0 01110000 00100 0 0000 1 n:5 d:5" "asm"="dup {{d:{A}}}, {{n:.s}}[0]" {{
+  %i = insertelement {T} poison, {ty} %n, i64 0
+  %r = shufflevector {T} %i, {T} poison, <{n} x i32> zeroinitializer
+  ret {T} %r
+}}
+
+define {ty} @DUPes{arr}({T} "reg"="v" %n, i64 "imm" %idx) "enc"="01 0 11110000 imm5:5=idx*8+4 0 0000 1 n:5 d:5" "asm"="mov {{d}}, {{n:.s}}[{{idx}}]" {{
+  %r = extractelement {T} %n, i64 %idx
+  ret {ty} %r
+}}
+
+define {T} @INSfs{arr}({T} "reg"="v" "tied" %old, {ty} "reg"="s" %n, i64 "imm" %idx) "enc"="0 1 1 01110000 imm5:5=idx*8+4 0 0000 1 n:5 d:5" "asm"="mov {{d:.s}}[{{idx}}], {{n:.s}}[0]" {{
+  %r = insertelement {T} %old, {ty} %n, i64 %idx
+  ret {T} %r
+}}
+''')
 # widening and narrowing, half a register at a time
 for (src, dst, n, e, sxt) in [('8b','8h',8,8,'0001000'),('4h','4s',4,16,'0010000'),('2s','2d',2,32,'0100000')]:
     S = vt(n, it(e)); D = vt(n, it(2*e)); W = vt(2*n, it(e)); hi = ', '.join(f'i32 {k}' for k in range(n, 2*n)); lo = ', '.join(f'i32 {k}' for k in range(n))
@@ -648,7 +667,8 @@ for arr, n, ty, Q, sz in FLT:
     for name, intr, U, a_, op in [('FABS', 'fabs', 0, 1, '01111'), ('FRINTN', 'roundeven', 0, 0, '11000'),
                                   ('FRINTM', 'floor', 0, 0, '11001'), ('FRINTP', 'ceil', 0, 1, '11000'),
                                   ('FRINTZ', 'trunc', 0, 1, '11001'), ('FRINTA', 'round', 1, 0, '11000'),
-                                  ('FRINTX', 'rint', 1, 0, '11001'), ('FRINTI', 'nearbyint', 1, 1, '11001')]:
+                                  ('FRINTX', 'rint', 1, 0, '11001'), ('FRINTI', 'nearbyint', 1, 1, '11001'),
+                                  ('FSQRT', 'sqrt', 1, 1, '11111')]:
         f = f'llvm.{intr}.v{n}{suf}'
         o.append(f'''declare {T} @{f}({T})
 

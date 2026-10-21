@@ -46,6 +46,12 @@ fn neon_without_an_instruction() {
         "define <2 x i64> @p(<2 x i64> %x) {\n  %r = call <2 x i64> @llvm.ctpop.v2i64(<2 x i64> %x)\n  ret <2 x i64> %r\n}",
     );
     assert_eq!(a.matches("cnt").count(), 2, "{a}");
+    // 64-bit integers to floats: lane by lane, as narrowing the integers
+    // first would lose their high bits.
+    let a = asm(
+        "define <2 x float> @u(<2 x i64> %x) {\n  %r = uitofp <2 x i64> %x to <2 x float>\n  ret <2 x float> %r\n}",
+    );
+    assert!(a.matches("ucvtf s").count() == 2 && !a.contains("xtn"), "{a}");
 }
 
 #[test]

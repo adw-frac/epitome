@@ -2149,6 +2149,46 @@ impl<'a, 'b> Sel<'a, 'b> {
                     self.push(MInst::new(lo, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(d)), MOp::Sym(name)]));
                     return Ok(());
                 }
+                // A thread-local variable's address, as the thread pointer
+                // plus its offset (see `prepare::thread_locals`).
+                "llvm.epitome.tprel" => {
+                    let Value::Const(c) = args[0].value else { return self.err("llvm.epitome.tprel of a value") };
+                    let Some((g, 0)) = prepare::const_address(self.cx, c) else {
+                        return self.err("llvm.epitome.tprel of something not a variable");
+                    };
+                    let name = self.cx.m.global(g).name.clone().unwrap_or_default();
+                    let r = inst.result.ok_or("llvm.epitome.tprel without a result")?;
+                    let d = Reg::V(self.vreg_of(r));
+                    let sym = || MOp::Sym(name.clone());
+                    self.push(MInst::new(self.t.by_role("tprel.hi"), vec![MOp::Reg(d), sym()]));
+                    self.push(MInst::new(self.t.by_role("tprel.add"), vec![MOp::Reg(d), MOp::Reg(d), sym()]));
+                    self.push(MInst::new(self.t.by_role("tprel.lo"), vec![MOp::Reg(d), MOp::Reg(d), sym()]));
+                    return Ok(());
+                }
+                // An ELF thread-local variable's offset from the thread
+                // pointer, from its descriptor (see
+                // `prepare::thread_locals`): the sequence linkers know, in
+                // the first two argument registers, as a call.
+                "llvm.epitome.tlsdesc" => {
+                    let Value::Const(c) = args[0].value else { return self.err("llvm.epitome.tlsdesc of a value") };
+                    let Some((g, 0)) = prepare::const_address(self.cx, c) else {
+                        return self.err("llvm.epitome.tlsdesc of something not a variable");
+                    };
+                    let name = self.cx.m.global(g).name.clone().unwrap_or_default();
+                    let r = inst.result.ok_or("llvm.epitome.tlsdesc without a result")?;
+                    let (a0, a1) = (Reg::P(self.mf.abi.args[0]), Reg::P(self.mf.abi.args[1]));
+                    let sym = || MOp::Sym(name.clone());
+                    self.push(MInst::new(self.t.by_role("tlsdesc.hi"), vec![MOp::Reg(a0), sym()]));
+                    self.push(MInst::new(self.t.by_role("tlsdesc.ld"), vec![MOp::Reg(a1), MOp::Reg(a0), sym()]));
+                    self.push(MInst::new(self.t.by_role("tlsdesc.lo"), vec![MOp::Reg(a0), MOp::Reg(a0), sym()]));
+                    let mut call = MInst::new(self.t.by_role("tlsdesc.call"), vec![MOp::Reg(a1), sym()]);
+                    call.imp_uses = vec![self.mf.abi.args[0], self.mf.abi.args[1]];
+                    call.imp_defs = self.mf.abi.all_clobbers();
+                    self.push(call);
+                    let d = self.vreg_of(r);
+                    self.push(MInst::copy(Reg::V(d), a0));
+                    return Ok(());
+                }
                 s if s.starts_with("llvm.va_copy") => {
                     let dst = self.reg_for(args[0].value, self.int_class(true))?;
                     let src = self.reg_for(args[1].value, self.int_class(true))?;

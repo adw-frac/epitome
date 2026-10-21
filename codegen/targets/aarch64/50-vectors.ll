@@ -1400,6 +1400,22 @@ define <2 x i32> @FCVTZUv2s(<2 x float> "reg"="v" %n) "feature"="neon" "enc"="0 
   ret <2 x i32> %r
 }
 
+define <2 x float> @DUPf2s(float "reg"="s" %n) "feature"="neon" "enc"="0 0 0 01110000 00100 0 0000 1 n:5 d:5" "asm"="dup {d:2s}, {n:.s}[0]" {
+  %i = insertelement <2 x float> poison, float %n, i64 0
+  %r = shufflevector <2 x float> %i, <2 x float> poison, <2 x i32> zeroinitializer
+  ret <2 x float> %r
+}
+
+define float @DUPes2s(<2 x float> "reg"="v" %n, i64 "imm" %idx) "feature"="neon" "enc"="01 0 11110000 imm5:5=idx*8+4 0 0000 1 n:5 d:5" "asm"="mov {d}, {n:.s}[{idx}]" {
+  %r = extractelement <2 x float> %n, i64 %idx
+  ret float %r
+}
+
+define <2 x float> @INSfs2s(<2 x float> "reg"="v" "tied" %old, float "reg"="s" %n, i64 "imm" %idx) "feature"="neon" "enc"="0 1 1 01110000 imm5:5=idx*8+4 0 0000 1 n:5 d:5" "asm"="mov {d:.s}[{idx}], {n:.s}[0]" {
+  %r = insertelement <2 x float> %old, float %n, i64 %idx
+  ret <2 x float> %r
+}
+
 define <8 x i16> @SXTL8h(<8 x i8> "reg"="v" %n) "feature"="neon" "enc"="0 0 0 011110 0001000 10100 1 n:5 d:5" "asm"="sxtl {d:8h}, {n:8b}" {
   %r = sext <8 x i8> %n to <8 x i16>
   ret <8 x i16> %r
@@ -3694,6 +3710,13 @@ define <4 x float> @FRINTIv4s(<4 x float> "reg"="q" %n) "feature"="neon" "enc"="
   ret <4 x float> %r
 }
 
+declare <4 x float> @llvm.sqrt.v4f32(<4 x float>)
+
+define <4 x float> @FSQRTv4s(<4 x float> "reg"="q" %n) "feature"="neon" "enc"="0 1 1 01110 1 0 10000 11111 10 n:5 d:5" "asm"="fsqrt {d:4s}, {n:4s}" {
+  %r = call <4 x float> @llvm.sqrt.v4f32(<4 x float> %n)
+  ret <4 x float> %r
+}
+
 declare <2 x double> @llvm.fabs.v2f64(<2 x double>)
 
 define <2 x double> @FABSv2d(<2 x double> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110 1 1 10000 01111 10 n:5 d:5" "asm"="fabs {d:2d}, {n:2d}" {
@@ -3750,6 +3773,13 @@ define <2 x double> @FRINTIv2d(<2 x double> "reg"="q" %n) "feature"="neon" "enc"
   ret <2 x double> %r
 }
 
+declare <2 x double> @llvm.sqrt.v2f64(<2 x double>)
+
+define <2 x double> @FSQRTv2d(<2 x double> "reg"="q" %n) "feature"="neon" "enc"="0 1 1 01110 1 1 10000 11111 10 n:5 d:5" "asm"="fsqrt {d:2d}, {n:2d}" {
+  %r = call <2 x double> @llvm.sqrt.v2f64(<2 x double> %n)
+  ret <2 x double> %r
+}
+
 declare <2 x float> @llvm.fabs.v2f32(<2 x float>)
 
 define <2 x float> @FABSv2s(<2 x float> "reg"="v" %n) "feature"="neon" "enc"="0 0 0 01110 1 0 10000 01111 10 n:5 d:5" "asm"="fabs {d:2s}, {n:2s}" {
@@ -3803,6 +3833,13 @@ declare <2 x float> @llvm.nearbyint.v2f32(<2 x float>)
 
 define <2 x float> @FRINTIv2s(<2 x float> "reg"="v" %n) "feature"="neon" "enc"="0 0 1 01110 1 0 10000 11001 10 n:5 d:5" "asm"="frinti {d:2s}, {n:2s}" {
   %r = call <2 x float> @llvm.nearbyint.v2f32(<2 x float> %n)
+  ret <2 x float> %r
+}
+
+declare <2 x float> @llvm.sqrt.v2f32(<2 x float>)
+
+define <2 x float> @FSQRTv2s(<2 x float> "reg"="v" %n) "feature"="neon" "enc"="0 0 1 01110 1 0 10000 11111 10 n:5 d:5" "asm"="fsqrt {d:2s}, {n:2s}" {
+  %r = call <2 x float> @llvm.sqrt.v2f32(<2 x float> %n)
   ret <2 x float> %r
 }
 

@@ -100,14 +100,18 @@ pub fn collect_globals(cx: &Ctx, abi: &Abi) -> Result<Vec<GlobalData>, String> {
         data(cx, abi, v.ty, init, &mut items)?;
         let zero = items.iter().all(|i| matches!(i, Item::Zero(_)));
         let global = !matches!(gl.props.linkage, Linkage::Private | Linkage::Internal);
+        // ELF's: the initial value, in the thread-local section, which
+        // the loader copies for each thread. (Zeros too: there is no
+        // .tbss yet.)
+        if gl.props.thread_local.is_some() && abi.syntax == Syntax::Elf {
+            out.push(GlobalData { symbol: abi.symbol(&name), global, section: SectionKind::ThreadData, align, items });
+            continue;
+        }
         if gl.props.thread_local.is_some() {
             // Mach-O's: the initial value, under a name of its own, and
             // the descriptor the variable's symbol names (the function
             // the loader makes give its address in each thread, a word it
             // keeps, and where the initial value is).
-            if abi.syntax != Syntax::MachO {
-                return Err(format!("@{name}: thread-local variables are not supported for ELF yet"));
-            }
             let symbol = abi.symbol(&name);
             let init = format!("{symbol}$tlv$init");
             out.push(GlobalData {

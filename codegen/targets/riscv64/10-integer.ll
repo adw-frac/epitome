@@ -338,6 +338,28 @@ define ptr @ADDIsym(ptr "reg"="x" %n, ptr "sym" %s) "enc"="imm:12=s n:5 000 d:5 
   ret ptr %n
 }
 
+; A thread-local variable's address: the thread pointer plus its offset
+; (see `prepare::thread_locals`).
+define ptr @LUItprel(ptr "sym" %s) "enc"="imm20:20=s>>12 d:5 0110111" "asm"="lui {d}, {s}" "reloc"="tprel_hi20" "role"="tprel.hi" "nomatch" "nodecode" {
+  ret ptr %s
+}
+
+define ptr @ADDtprel(ptr "reg"="x" %n, ptr "sym" %s) "enc"="0000000 00100 n:5 000 d:5 0110011" "asm"="add {d}, {n}, tp, {s}" "reloc"="tprel_add" "role"="tprel.add" "nomatch" "nodecode" {
+  ret ptr %n
+}
+
+define ptr @ADDItprel(ptr "reg"="x" %n, ptr "sym" %s) "enc"="imm:12=s n:5 000 d:5 0010011" "asm"="addi {d}, {n}, {s}" "reloc"="tprel_lo12_i" "role"="tprel.lo" "nomatch" "nodecode" {
+  ret ptr %n
+}
+
+; The thread pointer (llvm.thread.pointer).
+define ptr @MVtp() "enc"="000000000000 00100 000 d:5 0010011" "asm"="mv {d}, tp" "role"="thread.pointer" "nodecode" {
+  %p = call ptr @llvm.thread.pointer.p0()
+  ret ptr %p
+}
+
+declare ptr @llvm.thread.pointer.p0()
+
 ; Loads and stores, at a signed 12-bit offset from a register.
 
 define i8 @LBU(ptr "reg"="x" %n, i64 "imm" %off) "enc"="off:s12 n:5 100 d:5 0000011" "asm"="lbu {d}, {off}({n})" "role"="load.b" "zext"="8" {

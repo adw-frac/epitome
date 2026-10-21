@@ -100,7 +100,7 @@
 ; ===========================================================================
 ; Relocations, from the RISC-V ELF psABI.
 
-!target.relocs = !{!1200, !1201, !1202, !1203, !1210, !1211, !1212, !1213, !1214, !1215, !1216, !1217, !1218, !1219}
+!target.relocs = !{!1200, !1201, !1202, !1203, !1210, !1211, !1212, !1213, !1214, !1215, !1216, !1217, !1218, !1219, !1220, !1221, !1222, !1223}
 !1200 = !{!"name", !"jal", !"elf", !"17", !"elf-name", !"R_RISCV_JAL", !"use", !"call", !"target", !"pc + v"}
 !1201 = !{!"name", !"hi20", !"elf", !"26", !"elf-name", !"R_RISCV_HI20", !"elf-syntax", !"%hi({s})", !"target", !"v << 12"}
 !1202 = !{!"name", !"lo12_i", !"elf", !"27", !"elf-name", !"R_RISCV_LO12_I", !"elf-syntax", !"%lo({s})"}
@@ -109,6 +109,13 @@
 !1211 = !{!"name", !"abs32", !"elf", !"1", !"elf-name", !"R_RISCV_32"}
 ; How .eh_frame says where a function is.
 !1219 = !{!"name", !"pcrel32", !"elf", !"57", !"elf-name", !"R_RISCV_32_PCREL", !"use", !"eh-pcrel"}
+; A thread-local variable's offset from the thread pointer, in a program
+; (the local-exec model, as the rest of this code is a program's): its
+; high part, the add of tp that marks the sequence, and its low part.
+!1220 = !{!"name", !"tprel_hi20", !"elf", !"29", !"elf-name", !"R_RISCV_TPREL_HI20", !"elf-syntax", !"%tprel_hi({s})", !"use", !"tls", !"target", !"v << 12"}
+!1221 = !{!"name", !"tprel_add", !"elf", !"32", !"elf-name", !"R_RISCV_TPREL_ADD", !"elf-syntax", !"%tprel_add({s})", !"use", !"tls"}
+!1222 = !{!"name", !"tprel_lo12_i", !"elf", !"30", !"elf-name", !"R_RISCV_TPREL_LO12_I", !"elf-syntax", !"%tprel_lo({s})", !"use", !"tls"}
+!1223 = !{!"name", !"tprel_lo12_s", !"elf", !"31", !"elf-name", !"R_RISCV_TPREL_LO12_S"}
 
 ; DWARF's numbers for the registers, in unwind tables: x0-x31 are 0-31,
 ; f0-f31 32-63.

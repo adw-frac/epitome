@@ -28,6 +28,8 @@ void to_int(int *, const float *, int);
 int count_lt(const signed char *, signed char, int);
 void rgb_gray(unsigned char *, const unsigned char *, int);
 void select_i64(long *, const long *, const long *, int);
+void u64_to_f32(float *, const unsigned long *, int);
+void f32_to_i64(long *, const float *, int);
 
 #define N 1000
 static int ia[N], ib[N], ic[N];
@@ -111,6 +113,10 @@ int main(void) {
     rgb_gray(uc, ua, n);
     HASH(uc, N);
     select_i64(lc, la, lb, n);
+    HASH(lc, N);
+    u64_to_f32(fc, (const unsigned long *)la, n);
+    HASH((const unsigned *)fc, N);
+    f32_to_i64(lc, fa, n);
     HASH(lc, N);
     printf("\n");
   }

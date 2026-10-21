@@ -15,6 +15,7 @@ const BASE: u64 = 0x10000;
 const MEM: usize = 64 << 20;
 const STUBS: u64 = 0x1000;
 const RETURN: u64 = 0x800;
+const SHF_TLS: u64 = 0x400;
 const LIBC: &[&str] = &[
     "printf",
     "putchar",
@@ -42,6 +43,9 @@ pub struct Machine {
     /// The address `lr` reserved, until an `sc` (there is one hart, so
     /// nothing else breaks a reservation).
     reserved: Option<u64>,
+    /// Where the thread-local sections start: the one thread's block, and
+    /// what `tp` points at (the psABI's TLS variant I, with no TCB here).
+    tls: u64,
 }
 
 fn sext(v: u64, bits: u32) -> i64 {
@@ -64,23 +68,28 @@ impl Machine {
             entry: 0,
             stubs: HashMap::new(),
             reserved: None,
+            tls: 0,
         };
         let files: Vec<ElfFile> = objects.iter().map(|b| elf::read(b)).collect::<Result<_, _>>()?;
-        // Lay out every allocated section.
+        // Lay out every allocated section: the thread-local ones first,
+        // together, as the one thread's block.
         let mut at = BASE;
+        m.tls = BASE;
         let mut base: HashMap<(usize, usize), u64> = HashMap::new();
-        for (fi, f) in files.iter().enumerate() {
-            for (si, s) in f.sections.iter().enumerate() {
-                // Unwind tables: nothing here unwinds.
-                if s.flags & elf::SHF_ALLOC == 0 || s.name == ".eh_frame" {
-                    continue;
+        for tls in [true, false] {
+            for (fi, f) in files.iter().enumerate() {
+                for (si, s) in f.sections.iter().enumerate() {
+                    // Unwind tables: nothing here unwinds.
+                    if s.flags & elf::SHF_ALLOC == 0 || s.name == ".eh_frame" || (s.flags & SHF_TLS != 0) != tls {
+                        continue;
+                    }
+                    at = at.next_multiple_of(s.align.max(1));
+                    base.insert((fi, si), at);
+                    if s.sh_type != elf::SHT_NOBITS {
+                        m.mem[at as usize..at as usize + s.data.len()].copy_from_slice(&s.data);
+                    }
+                    at += s.size;
                 }
-                at = at.next_multiple_of(s.align.max(1));
-                base.insert((fi, si), at);
-                if s.sh_type != elf::SHT_NOBITS {
-                    m.mem[at as usize..at as usize + s.data.len()].copy_from_slice(&s.data);
-                }
-                at += s.size;
             }
         }
         // Global symbols, then the C library's stubs for the rest.
@@ -134,6 +143,23 @@ impl Machine {
                             let lo = target as u32 & 0xfff;
                             m.write32(p, (insn & 0x000f_ffff) | (lo << 20));
                         }
+                        // R_RISCV_TPREL_*: the offset from tp, as lui's
+                        // high part, an I or S immediate's low part, and
+                        // the add of tp that marks the sequence.
+                        29 => {
+                            let off = target.wrapping_sub(m.tls);
+                            let hi = (off.wrapping_add(0x800) >> 12) as u32 & 0xfffff;
+                            m.write32(p, (insn & 0xfff) | (hi << 12));
+                        }
+                        30 => {
+                            let lo = target.wrapping_sub(m.tls) as u32 & 0xfff;
+                            m.write32(p, (insn & 0x000f_ffff) | (lo << 20));
+                        }
+                        31 => {
+                            let lo = target.wrapping_sub(m.tls) as u32 & 0xfff;
+                            m.write32(p, (insn & 0x01ff_f07f) | ((lo >> 5) << 25) | ((lo & 31) << 7));
+                        }
+                        32 => {}
                         t => return Err(format!("relocation type {t} is not supported")),
                     }
                 }
@@ -204,6 +230,7 @@ impl Machine {
     pub fn run(&mut self, max_steps: u64) -> Result<i32, String> {
         self.x[2] = (MEM as u64 - 4096) & !15;
         self.x[1] = RETURN;
+        self.x[4] = self.tls;
         self.pc = self.entry;
         for _ in 0..max_steps {
             if self.pc == RETURN {

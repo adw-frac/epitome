@@ -41,6 +41,9 @@ short) has to do to work like LLVM. They are split into two halves:
   matches rules, and the combiner pass.
 - [Code generation: what is left](backend-plan.md): the gap to clang,
   measured, and the plan for allocation, scheduling and machine passes.
+- [Correct, but not yet good](later.md): code generation that gives the
+  right answers the long way (through memory, lane by lane), and what
+  would be better.
 
 ## Clean-room rules
 

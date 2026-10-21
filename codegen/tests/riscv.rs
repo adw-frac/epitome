@@ -150,9 +150,10 @@ fn programs_run_on_riscv() {
     let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("riscv");
     std::fs::create_dir_all(&tmp).unwrap();
     let mut failures = Vec::new();
-    for name in
-        ["atomics", "basic", "bits", "divs", "loops", "calls", "floats", "structs", "tails", "vectors", "vla", "wide"]
-    {
+    for name in [
+        "atomics", "basic", "bits", "divs", "loops", "calls", "floats", "structs", "tails", "tls", "vectors", "vla",
+        "wide",
+    ] {
         match check_program(&t, &dir, &tmp, name) {
             Ok(r) => r.iter().for_each(|l| println!("ok {l}")),
             Err(e) => failures.push(e),

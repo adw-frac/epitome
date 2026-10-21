@@ -632,6 +632,44 @@ fn truncs_to_masks(cx: &mut Ctx, f: &mut Function) {
     }
 }
 
+/// Shuffles in the form patterns have them: an operand the mask does not
+/// use is `poison`, and a mask of the second operand's lanes only is one
+/// of the first's (the operands swapped).
+fn canonical_shuffles(cx: &mut Ctx, f: &mut Function) {
+    for i in f.insts_in_order().collect::<Vec<_>>() {
+        let Op::ShuffleVector { a, b, mask } = f.insts[i.index()].op else { continue };
+        let Some(lanes) = crate::target::mask_lanes(cx.m, mask) else { continue };
+        let aty = cx.value_ty(f, a);
+        let Type::Vector { len, .. } = *cx.m.types.get(aty) else { continue };
+        let n = len as i32;
+        let uses_a = lanes.iter().any(|&l| l >= 0 && l < n);
+        let uses_b = lanes.iter().any(|&l| l >= n);
+        let poison = Value::Const(cx.m.consts.intern(Constant { ty: aty, kind: ConstKind::Poison }));
+        let is_poison = |v: Value| matches!(v, Value::Const(c) if matches!(cx.m.constant(c).kind, ConstKind::Poison | ConstKind::Undef));
+        if uses_a && !uses_b && !is_poison(b) {
+            f.insts[i.index()].op = Op::ShuffleVector { a, b: poison, mask };
+        } else if uses_b && !uses_a {
+            let mty = cx.m.constant(mask).ty;
+            let i32t = cx.m.types.int(32);
+            let es: Vec<ConstId> = lanes
+                .iter()
+                .map(|&l| {
+                    if l < 0 {
+                        cx.m.consts.intern(Constant { ty: i32t, kind: ConstKind::Poison })
+                    } else {
+                        cx.m.consts.intern(Constant {
+                            ty: i32t,
+                            kind: ConstKind::Int(epitome_ir::apint::ApInt::from_i64(32, i64::from(l - n))),
+                        })
+                    }
+                })
+                .collect();
+            let m2 = cx.m.consts.intern(Constant { ty: mty, kind: ConstKind::Vector(es) });
+            f.insts[i.index()].op = Op::ShuffleVector { a: b, b: poison, mask: m2 };
+        }
+    }
+}
+
 /// A select of whole vectors by one boolean: by a mask of it in every
 /// lane (a splat of one boolean, which `fix_masks` makes right at any
 /// width), lane by lane.
@@ -805,21 +843,61 @@ fn rewrite_vector_ops(cx: &mut Ctx, f: &mut Function) {
                     let zero = Value::Const(cx.m.consts.intern(Constant { ty: t, kind: ConstKind::Zero }));
                     f.insts[i.index()].op = Op::ICmp { pred: ICmpPred::Ne, samesign, lhs: f.result(x), rhs: zero };
                 }
+                // Integers to narrower floats: lane by lane (narrowed
+                // integers would lose high bits, and doubles in between
+                // round twice).
+                Op::Cast { op: op @ (CastOp::UIToFP | CastOp::SIToFP), value, flags, fmf }
+                    if vec_info(cx, cx.value_ty(f, value))
+                        .zip(vec_info(cx, f.locals[f.insts[i.index()].result.unwrap().index()].ty))
+                        .is_some_and(|((_, _, a), (_, _, b))| a > b) =>
+                {
+                    let r = f.insts[i.index()].result.unwrap();
+                    let rt = f.locals[r.index()].ty;
+                    let from = cx.value_ty(f, value);
+                    let (len, from_elem, fb) = vec_info(cx, from).unwrap();
+                    let (_, elem, _) = vec_info(cx, rt).unwrap();
+                    let i64t = cx.m.types.int(64);
+                    let mut bld = Builder { f, new: Vec::new() };
+                    let mut acc = poison(cx, rt);
+                    // From a register's worth of lanes at a time (a wider
+                    // vector is split later, its shuffles with it).
+                    let per = (cx.vector_bits() / fb).clamp(1, len);
+                    for c in 0..len / per {
+                        let lanes: Vec<i32> = (c * per..(c + 1) * per).map(|l| l as i32).collect();
+                        let piece = if per == len {
+                            value
+                        } else {
+                            let pt = vec_ty(cx, per, from_elem);
+                            let p = poison(cx, from);
+                            shuffle(&mut bld, cx, value, p, &lanes, pt)
+                        };
+                        for (k2, &l) in lanes.iter().enumerate() {
+                            let at = cx.int(i64t, k2 as i64);
+                            let x = bld.op(Op::ExtractElement { vector: piece, index: at }, Some(from_elem));
+                            let m = bld.op(Op::Cast { op, flags, fmf, value: x }, Some(elem));
+                            let idx = cx.int(i64t, l as i64);
+                            acc = bld.op(Op::InsertElement { vector: acc, element: m, index: idx }, Some(rt));
+                        }
+                    }
+                    let lane_insts = std::mem::take(&mut bld.new);
+                    f.replace_uses(Value::Local(r), acc);
+                    let n = lane_insts.len();
+                    f.blocks[b.index()].insts.splice(k..=k, lane_insts);
+                    k += n;
+                    continue;
+                }
+                // Integers to wider floats: extended first (exactly).
                 Op::Cast { op: op @ (CastOp::UIToFP | CastOp::SIToFP), value, .. }
                     if vec_info(cx, cx.value_ty(f, value))
                         .zip(vec_info(cx, f.locals[f.insts[i.index()].result.unwrap().index()].ty))
-                        .is_some_and(|((_, _, a), (_, _, b))| a != b) =>
+                        .is_some_and(|((_, _, a), (_, _, b))| a < b) =>
                 {
                     let from = cx.value_ty(f, value);
                     let to = f.locals[f.insts[i.index()].result.unwrap().index()].ty;
-                    let ((len, _, a), (_, _, bits)) = (vec_info(cx, from).unwrap(), vec_info(cx, to).unwrap());
+                    let ((len, _, _), (_, _, bits)) = (vec_info(cx, from).unwrap(), vec_info(cx, to).unwrap());
                     let et = cx.m.types.int(bits);
                     let wide = cx.m.types.intern(Type::Vector { scalable: false, len, elem: et });
-                    let ext = match (op, a < bits) {
-                        (_, false) => CastOp::Trunc,
-                        (CastOp::UIToFP, true) => CastOp::ZExt,
-                        _ => CastOp::SExt,
-                    };
+                    let ext = if op == CastOp::UIToFP { CastOp::ZExt } else { CastOp::SExt };
                     let x = f.add_inst(
                         Op::Cast { op: ext, flags: IntFlags::NONE, fmf: FastMath::default(), value },
                         Some((None, wide)),
@@ -837,24 +915,43 @@ fn rewrite_vector_ops(cx: &mut Ctx, f: &mut Function) {
                     let r = f.insts[i.index()].result.unwrap();
                     let to = f.locals[r.index()].ty;
                     let ((len, _, bits), (_, _, b)) = (vec_info(cx, from).unwrap(), vec_info(cx, to).unwrap());
-                    let et = cx.m.types.int(bits);
-                    let wide = cx.m.types.intern(Type::Vector { scalable: false, len, elem: et });
-                    // Converted at the float's width, then narrowed or
-                    // extended: the original's result, from a new one.
-                    let conv = f.add_inst(
-                        Op::Cast { op, flags: IntFlags::NONE, fmf: FastMath::default(), value },
-                        Some((None, wide)),
-                    );
-                    new.push(conv);
-                    let ext = if b < bits {
-                        CastOp::Trunc
-                    } else if op == CastOp::FPToUI {
-                        CastOp::ZExt
+                    // To wider integers: the floats extended first (exactly),
+                    // then converted at the integers' width (a narrow
+                    // conversion would lose the high bits).
+                    if b > bits && b == 64 {
+                        let double = cx.m.types.intern(Type::Double);
+                        let wide = cx.m.types.intern(Type::Vector { scalable: false, len, elem: double });
+                        let x = f.add_inst(
+                            Op::Cast { op: CastOp::FPExt, flags: IntFlags::NONE, fmf: FastMath::default(), value },
+                            Some((None, wide)),
+                        );
+                        new.push(x);
+                        f.insts[i.index()].op =
+                            Op::Cast { op, flags: IntFlags::NONE, fmf: FastMath::default(), value: f.result(x) };
                     } else {
-                        CastOp::SExt
-                    };
-                    f.insts[i.index()].op =
-                        Op::Cast { op: ext, flags: IntFlags::NONE, fmf: FastMath::default(), value: f.result(conv) };
+                        let et = cx.m.types.int(bits);
+                        let wide = cx.m.types.intern(Type::Vector { scalable: false, len, elem: et });
+                        // Converted at the float's width, then narrowed or
+                        // extended: the original's result, from a new one.
+                        let conv = f.add_inst(
+                            Op::Cast { op, flags: IntFlags::NONE, fmf: FastMath::default(), value },
+                            Some((None, wide)),
+                        );
+                        new.push(conv);
+                        let ext = if b < bits {
+                            CastOp::Trunc
+                        } else if op == CastOp::FPToUI {
+                            CastOp::ZExt
+                        } else {
+                            CastOp::SExt
+                        };
+                        f.insts[i.index()].op = Op::Cast {
+                            op: ext,
+                            flags: IntFlags::NONE,
+                            fmf: FastMath::default(),
+                            value: f.result(conv),
+                        };
+                    }
                 }
                 _ => {}
             }
@@ -1207,6 +1304,7 @@ fn fix_masks(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
 
 pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     pointer_vectors(cx, f)?;
+    canonical_shuffles(cx, f);
     scalar_selects(cx, f);
     truncs_to_masks(cx, f);
     vector_fcmps(cx, f);

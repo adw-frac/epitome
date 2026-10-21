@@ -298,6 +298,7 @@ impl<'t> Assembler<'t> {
         label: &dyn Fn(&str) -> Option<u64>,
     ) -> Result<(usize, u32, Option<String>), String> {
         let m = mnemonic(line);
+
         let cands: Vec<&Template> = self
             .by_mnemonic
             .get(m)
@@ -343,6 +344,7 @@ impl<'t> Assembler<'t> {
             // The values must encode, and decode back as themselves.
             let Some(word) = ins.enc.encode(&r.env) else { continue };
             let Some(back) = ins.decode(word) else { continue };
+
             if r.env.iter().any(|(n, v)| back.get(n).is_some_and(|b| b != v)) {
                 continue;
             }
@@ -376,6 +378,7 @@ impl<'t> Assembler<'t> {
         let mut by_kind: HashMap<SectionKind, usize> = HashMap::new();
         let mut cur: Option<usize> = None;
         let mut discard = false;
+        let mut held: Option<String> = None;
         let mut labels: HashMap<String, (usize, u64)> = HashMap::new();
         let mut defined: Vec<String> = Vec::new();
         let mut sets: Vec<(String, String, i64)> = Vec::new();
@@ -629,6 +632,9 @@ impl<'t> Assembler<'t> {
                         min_os = (num(1).unwrap_or(11), num(2).unwrap_or(0), num(3).unwrap_or(0));
                     }
                     "subsections_via_symbols" => {}
+                    // Read with the instruction after it, as one template
+                    // (`.tlsdesccall {s}` then `blr {n}`).
+                    "tlsdesccall" => held = Some(normalise(line)),
                     _ => return Err(err(n, format!("the directive .{name} is not supported"))),
                 }
                 continue;
@@ -641,7 +647,11 @@ impl<'t> Assembler<'t> {
             if sec.kind == SectionKind::Bss {
                 return Err(err(n, "an instruction in .bss".into()));
             }
-            later.push(Later::Instr { section: s, offset: sec.data.len() as u64, line: n, text: normalise(line) });
+            let text = match held.take() {
+                Some(h) => format!("{h}\n\t{}", normalise(line)),
+                None => normalise(line),
+            };
+            later.push(Later::Instr { section: s, offset: sec.data.len() as u64, line: n, text });
             sec.data.extend_from_slice(&[0; 4]);
         }
 
@@ -789,7 +799,7 @@ fn section_kind(args: &str, syntax: Syntax) -> Option<Option<SectionKind>> {
         "__DATA,__const" | ".data.rel.ro" => SectionKind::RelRo,
         "__TEXT,__gcc_except_tab" | ".gcc_except_table" => SectionKind::ExceptTable,
         "__DATA,__thread_vars" => SectionKind::ThreadVars,
-        "__DATA,__thread_data" => SectionKind::ThreadData,
+        "__DATA,__thread_data" | ".tdata" => SectionKind::ThreadData,
         ".note.GNU-stack" => return Some(None),
         _ => return None,
     }))

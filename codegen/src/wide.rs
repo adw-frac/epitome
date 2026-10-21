@@ -440,6 +440,36 @@ fn rewrite(
                     };
                     Ok(true)
                 }
+                // To floating point: the runtime's (`__floattidf`).
+                (CastOp::SIToFP | CastOp::UIToFP, Some(fb), None) => {
+                    let signed = cop == CastOp::SIToFP;
+                    let (lo, hi) = pair_of(cx, ty, parts, value)?;
+                    let hi = normal(cx, s, ty, hi, fb, signed);
+                    let r = result.unwrap();
+                    let rt = s.f.locals[r.index()].ty;
+                    let f = match cx.m.types.get(rt) {
+                        Type::Double => "df",
+                        Type::Float => "sf",
+                        _ => return Err("wide integers: a conversion to this type is not supported yet".into()),
+                    };
+                    let name = format!("__float{}ti{f}", if signed { "" } else { "un" });
+                    let v = runtime_to_scalar(cx, s, ty, &name, (lo, hi), rt);
+                    s.f.insts[i.index()].op = Op::Freeze(v);
+                    Ok(true)
+                }
+                // From floating point: the runtime's (`__fixdfti`).
+                (CastOp::FPToSI | CastOp::FPToUI, None, Some(_)) => {
+                    let ft = cx.value_ty(s.f, value);
+                    let f = match cx.m.types.get(ft) {
+                        Type::Double => "df",
+                        Type::Float => "sf",
+                        _ => return Err("wide integers: a conversion from this type is not supported yet".into()),
+                    };
+                    let name = format!("__fix{}{f}ti", if cop == CastOp::FPToSI { "" } else { "uns" });
+                    let p = runtime_from_scalar(cx, s, ty, &name, value, ft);
+                    set(parts, bits_of, p);
+                    Ok(false)
+                }
                 (c, _, _) => Err(format!("wide integers: a {c:?} cast is not supported yet")),
             }
         }
@@ -656,6 +686,55 @@ fn runtime(cx: &mut Ctx, s: &mut B, ty: &Types, name: &str, args: &[Pair]) -> Pa
             fn_ty,
             callee,
             args: call_args,
+            fn_attrs: vec![],
+            bundles: vec![],
+        })),
+        ty.pair,
+    );
+    let lo = s.op(Op::ExtractValue { aggregate: r, indices: vec![0] }, ty.i64);
+    let hi = s.op(Op::ExtractValue { aggregate: r, indices: vec![1] }, ty.i64);
+    (lo, hi)
+}
+
+/// A runtime call of one wide argument returning a scalar of type `ret`.
+fn runtime_to_scalar(cx: &mut Ctx, s: &mut B, ty: &Types, name: &str, (lo, hi): Pair, ret: TypeId) -> Value {
+    let callee = crate::legalize::declare(cx, name, ret, &[ty.pair]);
+    let fn_ty = cx.m.types.intern(Type::Function { ret, params: vec![ty.pair], varargs: false });
+    let undef = Value::Const(cx.m.consts.intern(Constant { ty: ty.pair, kind: ConstKind::Undef }));
+    let a = s.op(Op::InsertValue { aggregate: undef, element: lo, indices: vec![0] }, ty.pair);
+    let a = s.op(Op::InsertValue { aggregate: a, element: hi, indices: vec![1] }, ty.pair);
+    s.op(
+        Op::Call(Box::new(Call {
+            tail: TailKind::None,
+            fmf: FastMath::default(),
+            cconv: CallConv::default(),
+            ret_attrs: vec![],
+            addrspace: None,
+            fn_ty,
+            callee,
+            args: vec![CallArg { value: a, attrs: vec![Attr::Word(WIDE.into())] }],
+            fn_attrs: vec![],
+            bundles: vec![],
+        })),
+        ret,
+    )
+}
+
+/// A runtime call of one scalar argument (of type `arg_ty`) returning a
+/// wide value, as its halves.
+fn runtime_from_scalar(cx: &mut Ctx, s: &mut B, ty: &Types, name: &str, arg: Value, arg_ty: TypeId) -> Pair {
+    let callee = crate::legalize::declare(cx, name, ty.pair, &[arg_ty]);
+    let fn_ty = cx.m.types.intern(Type::Function { ret: ty.pair, params: vec![arg_ty], varargs: false });
+    let r = s.op(
+        Op::Call(Box::new(Call {
+            tail: TailKind::None,
+            fmf: FastMath::default(),
+            cconv: CallConv::default(),
+            ret_attrs: vec![Attr::Word(WIDE.into())],
+            addrspace: None,
+            fn_ty,
+            callee,
+            args: vec![CallArg { value: arg, attrs: vec![] }],
             fn_attrs: vec![],
             bundles: vec![],
         })),

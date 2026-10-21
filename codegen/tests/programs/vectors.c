@@ -28,3 +28,6 @@ void to_int(int *c, const float *a, int n) { for (int i = 0; i < n; i++) c[i] = 
 int count_lt(const signed char *a, signed char k, int n) { int c = 0; for (int i = 0; i < n; i++) c += a[i] < k; return c; }
 void rgb_gray(unsigned char *g, const unsigned char *rgb, int n) { for (int i = 0; i < n; i++) g[i] = (unsigned char)((rgb[3 * i] * 77 + rgb[3 * i + 1] * 150 + rgb[3 * i + 2] * 29) >> 8); }
 void select_i64(long *c, const long *a, const long *b, int n) { for (int i = 0; i < n; i++) c[i] = a[i] < b[i] ? a[i] : b[i] * 2; }
+// Conversions between lanes of different widths, of values beyond 32 bits.
+void u64_to_f32(float *c, const unsigned long *a, int n) { for (int i = 0; i < n; i++) c[i] = (float)(a[i] * 0x9E3779B97F4A7C15ul); }
+void f32_to_i64(long *c, const float *a, int n) { for (int i = 0; i < n; i++) c[i] = (long)(a[i] * 1e9f); }

@@ -108,7 +108,7 @@
 ; From Arm's ELF for the Arm 64-bit Architecture, and Apple's
 ; <mach-o/arm64/reloc.h>.
 
-!target.relocs = !{!1200, !1201, !1202, !1203, !1204, !1205, !1210, !1211, !1212, !1213, !1214, !1215, !1216, !1217, !1218, !1219, !1220, !1221, !1222, !1223, !1224, !1225, !1226, !1227, !1228, !1229, !1230, !1231}
+!target.relocs = !{!1200, !1201, !1202, !1203, !1204, !1205, !1210, !1211, !1212, !1213, !1214, !1215, !1216, !1217, !1218, !1219, !1220, !1221, !1222, !1223, !1224, !1225, !1226, !1227, !1228, !1229, !1230, !1231, !1232, !1233, !1234, !1235}
 !1200 = !{!"name", !"call26", !"elf", !"283", !"elf-name", !"R_AARCH64_CALL26", !"macho", !"2", !"macho-name", !"ARM64_RELOC_BRANCH26", !"macho-pcrel", !"yes", !"macho-length", !"2", !"use", !"call", !"target", !"pc + v"}
 !1201 = !{!"name", !"adrp", !"elf", !"275", !"elf-name", !"R_AARCH64_ADR_PREL_PG_HI21", !"macho", !"3", !"macho-name", !"ARM64_RELOC_PAGE21", !"macho-pcrel", !"yes", !"macho-length", !"2", !"elf-syntax", !"{s}", !"macho-syntax", !"{s}@PAGE", !"target", !"(pc & -4096) + (v << 12)"}
 !1202 = !{!"name", !"add_lo12", !"elf", !"277", !"elf-name", !"R_AARCH64_ADD_ABS_LO12_NC", !"macho", !"4", !"macho-name", !"ARM64_RELOC_PAGEOFF12", !"macho-length", !"2", !"elf-syntax", !":lo12:{s}", !"macho-syntax", !"{s}@PAGEOFF"}
@@ -140,6 +140,14 @@
 ; A thread-local variable's descriptor (Mach-O).
 !1230 = !{!"name", !"adrp_tlv", !"macho", !"8", !"macho-name", !"ARM64_RELOC_TLVP_LOAD_PAGE21", !"macho-pcrel", !"yes", !"macho-length", !"2", !"macho-syntax", !"{s}@TLVPPAGE", !"use", !"got", !"target", !"(pc & -4096) + (v << 12)"}
 !1231 = !{!"name", !"ld64_tlv_lo12", !"macho", !"9", !"macho-name", !"ARM64_RELOC_TLVP_LOAD_PAGEOFF12", !"macho-length", !"2", !"macho-syntax", !"{s}@TLVPPAGEOFF", !"use", !"got"}
+; A thread-local variable's descriptor (ELF's TLSDESC): its page, the
+; resolver in its first word, its address, and the call of the resolver,
+; which returns the variable's offset from the thread pointer. A linker
+; may rewrite the four in place, so they are always the same sequence.
+!1232 = !{!"name", !"tlsdesc_adr_page21", !"elf", !"562", !"elf-name", !"R_AARCH64_TLSDESC_ADR_PAGE21", !"elf-syntax", !":tlsdesc:{s}", !"use", !"tls", !"target", !"(pc & -4096) + (v << 12)"}
+!1233 = !{!"name", !"tlsdesc_ld64_lo12", !"elf", !"563", !"elf-name", !"R_AARCH64_TLSDESC_LD64_LO12", !"elf-syntax", !":tlsdesc_lo12:{s}", !"use", !"tls"}
+!1234 = !{!"name", !"tlsdesc_add_lo12", !"elf", !"564", !"elf-name", !"R_AARCH64_TLSDESC_ADD_LO12", !"elf-syntax", !":tlsdesc_lo12:{s}", !"use", !"tls"}
+!1235 = !{!"name", !"tlsdesc_call", !"elf", !"569", !"elf-name", !"R_AARCH64_TLSDESC_CALL", !"use", !"tls"}
 
 ; ===========================================================================
 ; DWARF's numbers for the registers, in unwind tables: each file's from

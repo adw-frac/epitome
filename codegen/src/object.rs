@@ -406,7 +406,7 @@ pub fn resolve(t: &Target, obj: &mut Object, pending: Vec<Pending>, macho: bool)
             continue;
         }
         let (target, addend) = match def.section {
-            Some(s) if !macho && !def.global && usage != RelocUse::Got => {
+            Some(s) if !macho && !def.global && !matches!(usage, RelocUse::Got | RelocUse::Tls) => {
                 (RelocTarget::Section(s), p.addend + def.value as i64)
             }
             _ => (RelocTarget::Symbol(sym), p.addend),

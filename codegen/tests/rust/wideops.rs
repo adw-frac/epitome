@@ -1,7 +1,8 @@
 // Signed 128-bit operations on edge values: multiplication with overflow
 // checks (llvm.smul.with.overflow.i128), saturating additions and
 // subtractions (llvm.sadd.sat, llvm.usub.sat and the rest), and three-way
-// comparisons (llvm.scmp and llvm.ucmp of i128).
+// comparisons (llvm.scmp and llvm.ucmp of i128); conversions to and
+// from floating point.
 use std::cmp::Ordering;
 use std::hint::black_box;
 
@@ -41,6 +42,15 @@ fn main() {
             mix(c(a.cmp(&b)));
             mix(c(ua.cmp(&ub)) << 8);
         }
+        // To and from floating point (the runtime's __floattidf and
+        // __fixdfti, and saturating as Rust's `as` does).
+        let a = black_box(a);
+        let (d, f) = (a as f64, (a as u128) as f32);
+        mix(d.to_bits() as u128);
+        mix(f.to_bits() as u128);
+        mix((d * 0.75) as i128 as u128);
+        mix((f64::from(f) * 1.5) as u128);
+        mix((d * 1e10) as i128 as u128);
     }
     println!("hash {h:x}, {overflows} overflows");
 }

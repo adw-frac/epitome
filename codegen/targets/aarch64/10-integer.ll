@@ -600,6 +600,35 @@ define ptr @LDRtlv(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="11 111 0 01 01 imm12
   ret ptr %v
 }
 
+; An ELF thread-local variable's offset from the thread pointer, from its
+; descriptor (TLSDESC): always in x0 and x1, as linkers rewrite the
+; sequence knowing those (see `prepare::thread_locals`). The call keeps
+; more registers than a call need, but is taken as one.
+define ptr @ADRPtlsdesc(ptr "sym" %s) "enc"="1 immlo:2=s&3 10000 immhi:s19=s>>2 d:5" "asm"="adrp {d}, {s}" "reloc"="tlsdesc_adr_page21" "format"="elf" "role"="tlsdesc.hi" "nomatch" "nodecode" {
+  ret ptr %s
+}
+
+define ptr @LDRtlsdesc(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="11 111 0 01 01 imm12:12=s/8 n:5 d:5" "asm"="ldr {d}, [{n}, {s}]" "reloc"="tlsdesc_ld64_lo12" "format"="elf" "role"="tlsdesc.ld" "nomatch" "nodecode" {
+  %v = load ptr, ptr %n
+  ret ptr %v
+}
+
+define ptr @ADDtlsdesc(ptr "reg"="xsp" %n, ptr "sym" %s) "enc"="1 0 0 100010 0 imm12:12=s n:5 d:5" "asm"="add {d}, {n}, {s}" "reloc"="tlsdesc_add_lo12" "format"="elf" "dclass"="xsp" "role"="tlsdesc.lo" "nomatch" "nodecode" {
+  ret ptr %n
+}
+
+define void @BLRtlsdesc(ptr "reg"="x" %n, ptr "sym" %s) "enc"="1101011 0 0 01 11111 0000 0 0 n:5 00000" "asm"=".tlsdesccall {s}\0A\09blr {n}" "reloc"="tlsdesc_call" "format"="elf" "role"="tlsdesc.call" "nomatch" "nodecode" {
+  ret void
+}
+
+; The thread pointer (llvm.thread.pointer).
+define ptr @MRStpidr() "enc"="1101010100 1 1 1 011 1101 0000 010 d:5" "asm"="mrs {d}, TPIDR_EL0" "role"="thread.pointer" "nodecode" {
+  %p = call ptr @llvm.thread.pointer.p0()
+  ret ptr %p
+}
+
+declare ptr @llvm.thread.pointer.p0()
+
 ; ===========================================================================
 ; Address arithmetic: getelementptr i8 is adding to a pointer.
 

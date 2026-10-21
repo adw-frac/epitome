@@ -141,6 +141,7 @@ impl Ctx<'_> {
 pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, String> {
     let mut f = f.clone();
     thread_locals(cx, &mut f);
+    const_exprs(cx, &mut f);
     half_as_int(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     identity_bitcasts(&mut f);
     one_lane_vectors(cx, &mut f);
@@ -437,12 +438,24 @@ fn split_struct_phis(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
 /// address (`llvm.epitome.tlv`), then a call of the descriptor's first
 /// word with it, which returns the variable's address in this thread. (The
 /// call keeps more registers than a call need, but is taken as one.)
+///
+/// For ELF, by its descriptors where the machine has them (`tlsdesc.*`):
+/// the thread pointer plus the variable's offset from it, which a call
+/// through the descriptor gives (`llvm.epitome.tlsdesc`). That is right
+/// whatever the variable's model says (a linker makes it cheaper in a
+/// program).
+///
+/// Where the machine has neither, but has offsets from the thread pointer
+/// (`tprel.*`, as RISC-V's code is a program's): the variable's address
+/// as that sum (`llvm.epitome.tprel`).
 fn thread_locals(cx: &mut Ctx, f: &mut Function) {
     let darwin = cx.m.triple.as_deref().is_some_and(|t| {
         let t = String::from_utf8_lossy(t);
         t.contains("apple") || t.contains("darwin") || t.contains("macos")
     });
-    if !darwin || cx.t.role("tlv.hi").is_none() {
+    let elf = !darwin && cx.t.role("tlsdesc.call").is_some();
+    let tprel = !darwin && !elf && cx.t.role("tprel.hi").is_some();
+    if !elf && !tprel && (!darwin || cx.t.role("tlv.hi").is_none()) {
         return;
     }
     let ptr = cx.m.types.ptr(0);
@@ -462,6 +475,31 @@ fn thread_locals(cx: &mut Ctx, f: &mut Function) {
             let var = call.args[0].value;
             let r = f.insts[i.index()].result.unwrap();
             let mut s = Seq { f, new: Vec::new() };
+            if tprel {
+                let addr = call_intrinsic(cx, &mut s, "llvm.epitome.tprel", vec![var], ptr);
+                s.f.replace_uses(Value::Local(r), addr);
+                let new = std::mem::take(&mut s.new);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
+            if elf {
+                let i64t = cx.m.types.int(64);
+                let off = call_intrinsic(cx, &mut s, "llvm.epitome.tlsdesc", vec![var], i64t);
+                let tp = call_intrinsic(cx, &mut s, "llvm.thread.pointer.p0", vec![], ptr);
+                let i8t = cx.m.types.int(8);
+                let addr = s.op(
+                    Op::Gep { flags: Default::default(), inrange: None, source_ty: i8t, ptr: tp, indices: vec![off] },
+                    ptr,
+                );
+                s.f.replace_uses(Value::Local(r), addr);
+                let new = std::mem::take(&mut s.new);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
             let desc = call_intrinsic(cx, &mut s, "llvm.epitome.tlv", vec![var], ptr);
             let get = s.op(Op::Load { volatile: false, atomic: None, ptr: desc, align: Some(8) }, ptr);
             let fn_ty = cx.m.types.intern(Type::Function { ret: ptr, params: vec![ptr], varargs: false });
@@ -843,6 +881,109 @@ fn one_lane_vectors(cx: &mut Ctx, f: &mut Function) {
             let n = new.len();
             f.blocks[b.index()].insts.splice(k..=k, new);
             k += n;
+        }
+    }
+}
+
+/// Whether constant `c` has arithmetic in it (`add (i64 ptrtoint (ptr @g
+/// to i64), i64 1)`), which selection does not take as a constant; an
+/// address (a global, plus offsets, cast) it does.
+fn has_arithmetic(cx: &Ctx, c: ConstId) -> bool {
+    match &cx.m.constant(c).kind {
+        ConstKind::Expr(ConstExpr::Binary { .. }) => true,
+        ConstKind::Expr(ConstExpr::Cast { value, .. }) => has_arithmetic(cx, *value),
+        ConstKind::Expr(ConstExpr::Gep { ptr, indices, .. }) => {
+            has_arithmetic(cx, *ptr) || indices.iter().any(|&i| has_arithmetic(cx, i))
+        }
+        _ => false,
+    }
+}
+
+/// Constant `c` computed by instructions in `s` (its arithmetic; what is
+/// left, addresses and numbers, stays constant).
+fn materialize(cx: &mut Ctx, s: &mut Seq, c: ConstId) -> Value {
+    if !has_arithmetic(cx, c) {
+        return Value::Const(c);
+    }
+    let k = cx.m.constant(c).clone();
+    match k.kind {
+        ConstKind::Expr(ConstExpr::Binary { op, flags, lhs, rhs }) => {
+            let (l, r) = (materialize(cx, s, lhs), materialize(cx, s, rhs));
+            s.op(Op::Binary { op, flags, fmf: FastMath::default(), lhs: l, rhs: r }, k.ty)
+        }
+        ConstKind::Expr(ConstExpr::Cast { op, value }) => {
+            let v = materialize(cx, s, value);
+            s.cast(op, v, k.ty)
+        }
+        ConstKind::Expr(ConstExpr::Gep { flags, inrange, source_ty, ptr, indices }) => {
+            let p = materialize(cx, s, ptr);
+            let idx: Vec<Value> = indices.iter().map(|&i| materialize(cx, s, i)).collect();
+            s.op(Op::Gep { flags, inrange, source_ty, ptr: p, indices: idx }, k.ty)
+        }
+        _ => Value::Const(c),
+    }
+}
+
+/// Constant expressions with arithmetic, as instructions just before the
+/// instruction using them (for a phi, at the end of the block the value
+/// comes from).
+fn const_exprs(cx: &mut Ctx, f: &mut Function) {
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let mut needs = false;
+            f.insts[i.index()].op.for_each_value(|v| {
+                needs |= matches!(v, Value::Const(c) if has_arithmetic(cx, *c));
+            });
+            if !needs {
+                k += 1;
+                continue;
+            }
+            if let Op::Phi { fmf, incoming } = f.insts[i.index()].op.clone() {
+                let mut inc = Vec::new();
+                for (v, pred) in incoming {
+                    let v = match v {
+                        Value::Const(c) if has_arithmetic(cx, c) => {
+                            let mut s = Seq { f, new: Vec::new() };
+                            let x = materialize(cx, &mut s, c);
+                            let new = std::mem::take(&mut s.new);
+                            let n = f.blocks[pred.index()].insts.len();
+                            f.blocks[pred.index()].insts.splice(n - 1..n - 1, new);
+                            x
+                        }
+                        v => v,
+                    };
+                    inc.push((v, pred));
+                }
+                f.insts[i.index()].op = Op::Phi { fmf, incoming: inc };
+                k += 1;
+                continue;
+            }
+            let mut op = f.insts[i.index()].op.clone();
+            let mut s = Seq { f, new: Vec::new() };
+            let mut done: Vec<(ConstId, Value)> = Vec::new();
+            op.for_each_value_mut(|v| {
+                if let Value::Const(c) = *v
+                    && has_arithmetic(cx, c)
+                {
+                    let x = match done.iter().find(|(d, _)| *d == c) {
+                        Some(&(_, x)) => x,
+                        None => {
+                            let x = materialize(cx, &mut s, c);
+                            done.push((c, x));
+                            x
+                        }
+                    };
+                    *v = x;
+                }
+            });
+            s.f.insts[i.index()].op = op;
+            let new = std::mem::take(&mut s.new);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..k, new);
+            k += n + 1;
         }
     }
 }
@@ -2335,6 +2476,46 @@ fn lanewise_call(cx: &mut Ctx, s: &mut Seq, name: &str, args: Vec<Value>, ty: Ty
     v
 }
 
+/// A conversion of float `x` to an integer of type `ty` (`bits` wide, up to
+/// 128) that saturates (`llvm.fptosi.sat`): the limits outside the range,
+/// NaN as 0, else the plain conversion (defined there).
+fn saturating_convert(cx: &mut Ctx, s: &mut Seq, x: Value, ty: TypeId, bits: u32, signed: bool) -> Value {
+    let i1 = cx.m.types.int(1);
+    let fty = cx.value_ty(s.f, x);
+    let fc = |cx: &mut Ctx, v: f64| {
+        let b = match cx.m.types.get(fty) {
+            Type::Float => u128::from((v as f32).to_bits()),
+            _ => u128::from(v.to_bits()),
+        };
+        Value::Const(cx.m.consts.intern(Constant { ty: fty, kind: ConstKind::Float(b) }))
+    };
+    let fcmp = |s: &mut Seq, pred, l, r| s.op(Op::FCmp { pred, fmf: FastMath::default(), lhs: l, rhs: r }, i1);
+    let sel =
+        |s: &mut Seq, c, t, e| s.op(Op::Select { fmf: FastMath::default(), cond: c, then_value: t, else_value: e }, ty);
+    let big = |cx: &mut Ctx, a: ApInt| Value::Const(cx.m.consts.intern(Constant { ty, kind: ConstKind::Int(a) }));
+    let (min, max, lo_bound, hi_bound) = if signed {
+        let h = 2f64.powi(bits as i32 - 1);
+        let max = signed_max(bits);
+        // 2^(bits - 1), the sign bit alone.
+        let min_hex = format!("{:x}", 1u32 << ((bits - 1) % 4)) + &"0".repeat(((bits - 1) / 4) as usize);
+        let min = ApInt::parse_hex(bits, &min_hex, false).unwrap();
+        (big(cx, min), big(cx, max), -h, h)
+    } else {
+        (cx.int(ty, 0), cx.int(ty, -1), -1.0, 2f64.powi(bits as i32))
+    };
+    let (lo_c, hi_c) = (fc(cx, lo_bound), fc(cx, hi_bound));
+    let plain = s.cast(if signed { CastOp::FPToSI } else { CastOp::FPToUI }, x, ty);
+    // Signed: below -2^(w-1) the minimum; unsigned: at -1 or below, 0
+    // (between -1 and 0 the conversion gives 0).
+    let below = fcmp(s, if signed { FCmpPred::Olt } else { FCmpPred::Ole }, x, lo_c);
+    let v = sel(s, below, min, plain);
+    let above = fcmp(s, FCmpPred::Oge, x, hi_c);
+    let v = sel(s, above, max, v);
+    let nan = fcmp(s, FCmpPred::Uno, x, x);
+    let zero = cx.int(ty, 0);
+    sel(s, nan, zero, v)
+}
+
 /// The largest signed value of `bits` bits, 2^(bits - 1) - 1.
 fn signed_max(bits: u32) -> ApInt {
     let ones = bits - 1;
@@ -2409,11 +2590,26 @@ fn wide_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 continue;
             };
             let aty = cx.value_ty(f, a0);
+            let rty = f.locals[r.index()].ty;
+            // A saturating conversion to a wide integer, as conversions and
+            // selects of it, which wide.rs splits.
+            if (name.starts_with("llvm.fptosi.sat.") || name.starts_with("llvm.fptoui.sat."))
+                && let Type::Int(bits) = *cx.m.types.get(rty)
+                && bits > 64
+            {
+                let mut s = Seq { f, new: Vec::new() };
+                let v = saturating_convert(cx, &mut s, a0, rty, bits, name.starts_with("llvm.fptosi"));
+                s.f.replace_uses(Value::Local(r), v);
+                let new = std::mem::take(&mut s.new);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
             if !matches!(cx.m.types.get(aty), Type::Int(b) if *b > 64) {
                 k += 1;
                 continue;
             }
-            let rty = f.locals[r.index()].ty;
             // `llvm.scmp`, `llvm.usub.sat`: the name without its types.
             let is_type =
                 |p: &&str| p.strip_prefix('i').is_some_and(|d| !d.is_empty() && d.bytes().all(|c| c.is_ascii_digit()));
@@ -2889,38 +3085,7 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 && scalar
                 && !cx.selects_intrinsic(&name)
             {
-                let signed = base == "llvm.fptosi";
-                let x = args[0];
-                let fty = cx.value_ty(s.f, x);
-                let fc = |cx: &mut Ctx, v: f64| {
-                    let b = match cx.m.types.get(fty) {
-                        Type::Float => u128::from((v as f32).to_bits()),
-                        _ => u128::from(v.to_bits()),
-                    };
-                    Value::Const(cx.m.consts.intern(Constant { ty: fty, kind: ConstKind::Float(b) }))
-                };
-                let fcmp =
-                    |s: &mut Seq, pred, l, r| s.op(Op::FCmp { pred, fmf: FastMath::default(), lhs: l, rhs: r }, i1);
-                let sel = |s: &mut Seq, c, t, e| {
-                    s.op(Op::Select { fmf: FastMath::default(), cond: c, then_value: t, else_value: e }, ty)
-                };
-                let (min, max, lo_bound, hi_bound) = if signed {
-                    let h = 2f64.powi(bits as i32 - 1);
-                    (cx.int(ty, i64::MIN >> (64 - bits)), cx.int(ty, i64::MAX >> (64 - bits)), -h, h)
-                } else {
-                    (cx.int(ty, 0), cx.int(ty, -1), -1.0, 2f64.powi(bits as i32))
-                };
-                let (lo_c, hi_c) = (fc(cx, lo_bound), fc(cx, hi_bound));
-                let plain = s.cast(if signed { CastOp::FPToSI } else { CastOp::FPToUI }, x, ty);
-                // Signed: below -2^(w-1) the minimum; unsigned: at -1 or
-                // below, 0 (between -1 and 0 the conversion gives 0).
-                let below = fcmp(&mut s, if signed { FCmpPred::Olt } else { FCmpPred::Ole }, x, lo_c);
-                let v = sel(&mut s, below, min, plain);
-                let above = fcmp(&mut s, FCmpPred::Oge, x, hi_c);
-                let v = sel(&mut s, above, max, v);
-                let nan = fcmp(&mut s, FCmpPred::Uno, x, x);
-                let zero = cx.int(ty, 0);
-                let v = sel(&mut s, nan, zero, v);
+                let v = saturating_convert(cx, &mut s, args[0], ty, bits, base == "llvm.fptosi");
                 let new = std::mem::take(&mut s.new);
                 f.replace_uses(Value::Local(r), v);
                 let n = new.len();
@@ -2946,6 +3111,39 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                     let y = call_intrinsic(cx, &mut s, &format!("{base}.i{eb}"), a, elem);
                     v = s.op(Op::InsertElement { vector: v, element: y, index: idx }, ty);
                 }
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), v);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
+            // Any other intrinsic of floating-point vectors (of up to a
+            // register's width; wider ones are split first) without an
+            // instruction: lane by lane, by its scalar form
+            // (`llvm.exp.v2f64` by `.f64`). (Integer ones are expanded
+            // later, as vectors: compare and select for `umin`.)
+            if !name.starts_with("llvm.vector.")
+                && !name.starts_with("llvm.experimental.")
+                && !name.starts_with("llvm.masked.")
+                && !name.starts_with("llvm.aarch64.")
+                && let Type::Vector { len, elem, scalable: false } = *cx.m.types.get(ty)
+                && len > 1
+                && matches!(cx.m.types.get(elem), Type::Float | Type::Double)
+                && cx.size_of(ty).is_ok_and(|b| b <= 16)
+                && !cx.selects_intrinsic(&name)
+            {
+                let lane_name: String = name
+                    .split('.')
+                    .map(|p| match p.strip_prefix('v') {
+                        Some(rest) if rest.starts_with(|c: char| c.is_ascii_digit()) => {
+                            rest.trim_start_matches(|c: char| c.is_ascii_digit()).to_string()
+                        }
+                        _ => p.to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(".");
+                let v = lanewise_call(cx, &mut s, &lane_name, args.clone(), ty);
                 let new = std::mem::take(&mut s.new);
                 f.replace_uses(Value::Local(r), v);
                 let n = new.len();

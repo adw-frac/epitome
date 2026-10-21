@@ -16,7 +16,7 @@
 //! symbols, then the object's own), then global ones, defined and
 //! undefined.
 
-use crate::machine::Machine;
+use crate::machine::{Machine, RelocUse};
 use crate::object::{Object, RelocTarget, SectionKind, SymbolKind};
 
 pub const ET_REL: u16 = 1;
@@ -41,6 +41,7 @@ pub const STT_OBJECT: u8 = 1;
 pub const STT_FUNC: u8 = 2;
 pub const STT_SECTION: u8 = 3;
 pub const STT_FILE: u8 = 4;
+pub const STT_TLS: u8 = 6;
 
 pub fn section_name(kind: SectionKind) -> &'static str {
     match kind {
@@ -51,7 +52,7 @@ pub fn section_name(kind: SectionKind) -> &'static str {
         SectionKind::RelRo => ".data.rel.ro",
         SectionKind::EhFrame => ".eh_frame",
         SectionKind::ExceptTable => ".gcc_except_table",
-        // (Not made yet: thread-local variables are Mach-O's only.)
+        // (ThreadVars, Mach-O's descriptors, are not made for ELF.)
         SectionKind::ThreadVars | SectionKind::ThreadData => ".tdata",
     }
 }
@@ -130,12 +131,31 @@ pub fn write(obj: &Object, m: &Machine) -> Result<Vec<u8>, String> {
         }
         if s.size() > 0 {
             let name = strtab.add(if s.kind == SectionKind::Text { "$x" } else { "$d" });
-            syms.push(sym(name, STB_LOCAL, STT_NOTYPE, index_of(k), 0, 0));
+            // (In a thread-local section, a thread-local symbol too.)
+            let ty =
+                if matches!(s.kind, SectionKind::ThreadData | SectionKind::ThreadVars) { STT_TLS } else { STT_NOTYPE };
+            syms.push(sym(name, STB_LOCAL, ty, index_of(k), 0, 0));
         }
     }
     let mut sym_index = vec![0u32; obj.symbols.len()];
-    let elf_sym = |s: &crate::object::Symbol, strtab: &mut Strings| {
+    // Thread-local variables: those in a thread-local section, and those
+    // others define that thread-local relocations refer to.
+    let mut tls = vec![false; obj.symbols.len()];
+    for (k, s) in obj.symbols.iter().enumerate() {
+        tls[k] = s
+            .section
+            .is_some_and(|x| matches!(obj.sections[x].kind, SectionKind::ThreadData | SectionKind::ThreadVars));
+    }
+    for r in obj.sections.iter().flat_map(|x| &x.relocs) {
+        if let RelocTarget::Symbol(k) = r.target
+            && m.relocs[r.kind.0 as usize].usage == RelocUse::Tls
+        {
+            tls[k] = true;
+        }
+    }
+    let elf_sym = |k: usize, s: &crate::object::Symbol, strtab: &mut Strings| {
         let ty = match s.kind {
+            _ if tls[k] => STT_TLS,
             SymbolKind::Func => STT_FUNC,
             SymbolKind::Object => STT_OBJECT,
             SymbolKind::NoType => STT_NOTYPE,
@@ -148,7 +168,7 @@ pub fn write(obj: &Object, m: &Machine) -> Result<Vec<u8>, String> {
         for (k, s) in obj.symbols.iter().enumerate() {
             if s.global == global {
                 sym_index[k] = syms.len() as u32;
-                syms.push(elf_sym(s, &mut strtab));
+                syms.push(elf_sym(k, s, &mut strtab));
             }
         }
     }

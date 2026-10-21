@@ -499,6 +499,12 @@ pub fn reads_back(t: &Target, img: &Image, asm: &str, aliases: &[(&str, &str)]) 
             if let Some(last) = lines.last_mut() {
                 last.1 = true;
             }
+        } else if let Some(more) = l.strip_prefix('\t') {
+            // An instruction written on two lines (`.tlsdesccall x`, then
+            // `blr x1`): its last is the instruction, as written.
+            if let Some(last) = lines.last_mut() {
+                last.0 = more.to_string();
+            }
         } else if let Some((_, rest)) = l.split_once(": ")
             && let Some((_, text)) = rest.split_once('\t')
         {

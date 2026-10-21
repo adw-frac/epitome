@@ -411,6 +411,11 @@ impl Encoding {
     /// Recovers the values of `operands` from `word`, or `None` if `word`
     /// is not this encoding. Operands in `free` (such as symbols, whose
     /// fields hold zero until linking) may be left out.
+    /// Whether some field holds operand `name`.
+    pub fn mentions(&self, name: &str) -> bool {
+        self.fields.iter().any(|f| f.names.iter().any(|n| n == name))
+    }
+
     pub fn decode(&self, word: u32, operands: &[String]) -> Option<Env> {
         if word & self.mask != self.value {
             return None;
