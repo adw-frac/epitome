@@ -141,11 +141,13 @@ impl Ctx<'_> {
 pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, String> {
     let mut f = f.clone();
     thread_locals(cx, &mut f);
+    half_as_int(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
+    identity_bitcasts(&mut f);
     one_lane_vectors(cx, &mut f);
-    bit_masks(cx, &mut f);
-    variable_lanes(cx, &mut f);
     vector_int_bitcasts(cx, &mut f);
+    bit_masks(cx, &mut f);
     bitcast_round_trips(cx, &mut f);
+    variable_lanes(cx, &mut f);
     memset_patterns(cx, &mut f);
     crate::atomics::expand_atomics(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     expand_overflow(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
@@ -491,14 +493,24 @@ fn thread_locals(cx: &mut Ctx, f: &mut Function) {
 /// as (the steps above make such pairs: `<1 x i64>` through `<8 x i8>` to
 /// `i64` and back).
 fn bitcast_round_trips(cx: &mut Ctx, f: &mut Function) {
-    let order: Vec<InstId> = f.insts_in_order().collect();
-    for i in order {
-        let Op::Cast { op: CastOp::BitCast, value: Value::Local(x), .. } = f.insts[i.index()].op else { continue };
-        let LocalDef::Inst(d) = f.locals[x.index()].def else { continue };
-        let Op::Cast { op: CastOp::BitCast, value: orig, .. } = f.insts[d.index()].op else { continue };
-        let r = f.insts[i.index()].result.unwrap();
-        if cx.value_ty(f, orig) == f.locals[r.index()].ty {
-            f.replace_uses(Value::Local(r), orig);
+    // Until none is left: folding one can make another.
+    let mut folded: Vec<InstId> = Vec::new();
+    loop {
+        let mut changed = false;
+        let order: Vec<InstId> = f.insts_in_order().collect();
+        for i in order {
+            let Op::Cast { op: CastOp::BitCast, value: Value::Local(x), .. } = f.insts[i.index()].op else { continue };
+            let LocalDef::Inst(d) = f.locals[x.index()].def else { continue };
+            let Op::Cast { op: CastOp::BitCast, value: orig, .. } = f.insts[d.index()].op else { continue };
+            let r = f.insts[i.index()].result.unwrap();
+            if cx.value_ty(f, orig) == f.locals[r.index()].ty && !folded.contains(&i) {
+                f.replace_uses(Value::Local(r), orig);
+                folded.push(i);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
         }
     }
     // Bitcasts no longer used, until none is (a chain goes link by link).
@@ -722,6 +734,22 @@ fn variable_lanes(cx: &mut Ctx, f: &mut Function) {
     f.blocks[entry.index()].insts.splice(0..0, slots);
 }
 
+/// The element of a one-lane vector `v`, as type `e`: a constant's, or a
+/// bitcast.
+fn one_lane_elem(cx: &mut Ctx, s: &mut Seq, v: Value, e: TypeId) -> Value {
+    match v {
+        Value::Const(c) => {
+            let kind = match cx.m.constant(c).kind.clone() {
+                ConstKind::Vector(es) => cx.m.constant(es[0]).kind.clone(),
+                ConstKind::Splat(x) => cx.m.constant(x).kind.clone(),
+                k => k,
+            };
+            Value::Const(cx.m.consts.intern(Constant { ty: e, kind }))
+        }
+        v => s.cast(CastOp::BitCast, v, e),
+    }
+}
+
 /// Vectors of one lane (`<1 x i64>`, as NEON's `vget_lane_u64` has them)
 /// stay vectors where the convention passes them (in a d register), but
 /// what is done with them is done to their element: taking out or putting
@@ -742,7 +770,7 @@ fn one_lane_vectors(cx: &mut Ctx, f: &mut Function) {
                 && let Some(e) = one(cx, cx.value_ty(f, value))
             {
                 let mut s = Seq { f, new: Vec::new() };
-                let x = s.cast(CastOp::BitCast, value, e);
+                let x = one_lane_elem(cx, &mut s, value, e);
                 s.op_void(Op::Store { volatile, atomic: None, value: x, ptr, align });
                 let new = std::mem::take(&mut s.new);
                 let n = new.len();
@@ -762,7 +790,7 @@ fn one_lane_vectors(cx: &mut Ctx, f: &mut Function) {
                     s.cast(CastOp::BitCast, x, ty)
                 }
                 Op::ExtractElement { vector, .. } if one(cx, cx.value_ty(s.f, vector)).is_some() => {
-                    s.cast(CastOp::BitCast, vector, ty)
+                    one_lane_elem(cx, &mut s, vector, ty)
                 }
                 Op::InsertElement { element, .. } if one(cx, ty).is_some() => s.cast(CastOp::BitCast, element, ty),
                 // A shuffle of one-lane vectors into a wider one (a splat):
@@ -795,8 +823,13 @@ fn one_lane_vectors(cx: &mut Ctx, f: &mut Function) {
                     }
                     s.op(Op::ShuffleVector { a: w, b: poison, mask }, ty)
                 }
+                Op::FNeg { fmf, value } if let Some(e) = one(cx, ty) => {
+                    let a = one_lane_elem(cx, &mut s, value, e);
+                    let x = s.op(Op::FNeg { fmf, value: a }, e);
+                    s.cast(CastOp::BitCast, x, ty)
+                }
                 Op::Binary { op, flags, fmf, lhs, rhs } if let Some(e) = one(cx, ty) => {
-                    let (a, c) = (s.cast(CastOp::BitCast, lhs, e), s.cast(CastOp::BitCast, rhs, e));
+                    let (a, c) = (one_lane_elem(cx, &mut s, lhs, e), one_lane_elem(cx, &mut s, rhs, e));
                     let x = s.op(Op::Binary { op, flags, fmf, lhs: a, rhs: c }, e);
                     s.cast(CastOp::BitCast, x, ty)
                 }
@@ -814,20 +847,173 @@ fn one_lane_vectors(cx: &mut Ctx, f: &mut Function) {
     }
 }
 
-/// Bitcasts between integers and vectors of their width, in forms the
-/// description has: a 64-bit vector and `i64` through `<8 x i8>` (`fmov`);
-/// a 128-bit one and `i128` through memory, stored as one type to a stack
-/// slot and loaded back as the other. (Not vectors of `i1`, whose bits
-/// memory packs, nor 32-bit ones, which are widened later.)
+/// A bitcast to its operand's own type is the operand.
+fn identity_bitcasts(f: &mut Function) {
+    for i in f.insts_in_order().collect::<Vec<_>>() {
+        if let Op::Cast { op: CastOp::BitCast, value, .. } = f.insts[i.index()].op
+            && let Some(r) = f.insts[i.index()].result
+        {
+            let from = match value {
+                Value::Local(x) => Some(f.locals[x.index()].ty),
+                _ => None,
+            };
+            if from == Some(f.locals[r.index()].ty) {
+                f.replace_uses(Value::Local(r), value);
+            }
+        }
+    }
+}
+
+/// Values of `half` (and vectors of them) as `i16`s of their bits, where
+/// all that is done with them is move bits about: loads, stores, bitcasts,
+/// lanes, phis and selects, and `fneg`, an `xor` of the sign bit. (There is
+/// no `half` register class yet; arithmetic on `half` is an error.)
+fn half_as_int(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
+    let half = cx.m.types.intern(Type::Half);
+    let i16t = cx.m.types.int(16);
+    let as_int = |cx: &mut Ctx, ty: TypeId| -> Option<TypeId> {
+        match *cx.m.types.get(ty) {
+            Type::Half => Some(i16t),
+            Type::Vector { len, elem, scalable } if elem == half => {
+                Some(cx.m.types.intern(Type::Vector { len, elem: i16t, scalable }))
+            }
+            _ => None,
+        }
+    };
+    let has_half = |cx: &mut Ctx, ty: TypeId| as_int(cx, ty).is_some();
+    if !f.locals.iter().map(|l| l.ty).collect::<Vec<_>>().into_iter().any(|t| has_half(cx, t)) {
+        return Ok(());
+    }
+    if f.params.iter().any(|p| has_half(cx, f.locals[p.local.index()].ty)) {
+        return Err("parameters of type half are not supported yet".into());
+    }
+    // Only operations on bits.
+    for i in f.insts_in_order() {
+        let op = &f.insts[i.index()].op;
+        let res_half = f.insts[i.index()].result.is_some_and(|r| has_half(cx, f.locals[r.index()].ty));
+        let mut uses_half = false;
+        op.for_each_value(|v| uses_half |= has_half(cx, cx.value_ty(f, *v)));
+        if !(res_half || uses_half) {
+            continue;
+        }
+        let bits_only = matches!(
+            op,
+            Op::Load { .. }
+                | Op::Store { .. }
+                | Op::Cast { op: CastOp::BitCast, .. }
+                | Op::FNeg { .. }
+                | Op::Phi { .. }
+                | Op::Select { .. }
+                | Op::Freeze(_)
+                | Op::ExtractElement { .. }
+                | Op::InsertElement { .. }
+                | Op::ShuffleVector { .. }
+        );
+        if !bits_only {
+            return Err("arithmetic on half is not supported yet".into());
+        }
+    }
+    // Constants of half: integers of their bits.
+    let int_const = |cx: &mut Ctx, c: ConstId| -> Option<ConstId> {
+        let k = cx.m.constant(c).clone();
+        let t = as_int(cx, k.ty)?;
+        let lane = |k: &ConstKind| -> ConstKind {
+            match k {
+                ConstKind::Float(b) => ConstKind::Int(ApInt::from_u64(16, *b as u64)),
+                other => other.clone(),
+            }
+        };
+        let kind = match &k.kind {
+            ConstKind::Vector(es) => {
+                let es: Vec<ConstId> = es
+                    .iter()
+                    .map(|&e| {
+                        let ek = cx.m.constant(e).kind.clone();
+                        let kind = lane(&ek);
+                        cx.m.consts.intern(Constant { ty: i16t, kind })
+                    })
+                    .collect();
+                ConstKind::Vector(es)
+            }
+            ConstKind::Splat(e) => {
+                let ek = cx.m.constant(*e).kind.clone();
+                let kind = lane(&ek);
+                ConstKind::Splat(cx.m.consts.intern(Constant { ty: i16t, kind }))
+            }
+            other => lane(other),
+        };
+        Some(cx.m.consts.intern(Constant { ty: t, kind }))
+    };
+    for k in 0..f.locals.len() {
+        if let Some(t) = as_int(cx, f.locals[k].ty) {
+            f.locals[k].ty = t;
+        }
+    }
+    for i in f.insts_in_order().collect::<Vec<_>>() {
+        let mut op = f.insts[i.index()].op.clone();
+        op.for_each_value_mut(|v| {
+            if let Value::Const(c) = *v
+                && let Some(n) = int_const(cx, c)
+            {
+                *v = Value::Const(n);
+            }
+        });
+        // fneg: the sign bit flipped.
+        if let Op::FNeg { value, .. } = op
+            && let Some(r) = f.insts[i.index()].result
+            && matches!(cx.m.types.get(f.locals[r.index()].ty), Type::Int(16))
+                | matches!(cx.m.types.get(f.locals[r.index()].ty), Type::Vector { elem, .. } if *elem == i16t)
+        {
+            let ty = f.locals[r.index()].ty;
+            let sign = cx.m.consts.intern(Constant { ty: i16t, kind: ConstKind::Int(ApInt::from_u64(16, 0x8000)) });
+            let c = if ty == i16t { sign } else { cx.m.consts.intern(Constant { ty, kind: ConstKind::Splat(sign) }) };
+            op = Op::Binary {
+                op: BinOp::Xor,
+                flags: IntFlags::NONE,
+                fmf: FastMath::default(),
+                lhs: value,
+                rhs: Value::Const(c),
+            };
+        }
+        // (A bitcast to or from half may now be between one type, which
+        // `identity_bitcasts` takes away.)
+        f.insts[i.index()].op = op;
+    }
+    Ok(())
+}
+
+/// Bitcasts, in forms the code generator has: between registers where
+/// both types are ones a register holds whole (integers and floating point
+/// of up to 64 bits; vectors of 64 or 128 bits of lanes of a byte or more;
+/// a mask and the integer of its bits), and a 64-bit vector and `i64`
+/// through `<8 x i8>` (`fmov`). Any other (a vector narrower than a
+/// register or wider than one, `i128` and a vector, vectors of one lane) is
+/// through memory: stored as one type to a stack slot and loaded back as
+/// the other, the passes after splitting each access as they do. A mask on
+/// either side goes through the integer of its bits, which memory does not
+/// hold as it does a mask's lanes.
 fn vector_int_bitcasts(cx: &mut Ctx, f: &mut Function) {
     let i8t = cx.m.types.int(8);
     let v8i8 = cx.m.types.intern(Type::Vector { len: 8, elem: i8t, scalable: false });
     let ptr = cx.m.types.ptr(0);
-    let vector = |cx: &Ctx, ty: TypeId| match cx.m.types.get(ty) {
-        Type::Vector { scalable: false, elem, .. } => !matches!(cx.m.types.get(*elem), Type::Int(1)),
+    let i1 = cx.m.types.int(1);
+    let mask_lanes = |cx: &Ctx, ty: TypeId| match cx.m.types.get(ty) {
+        Type::Vector { len, elem, scalable: false } if *elem == i1 => Some(*len),
+        _ => None,
+    };
+    // Held whole by a register (vectors only where there are vector
+    // registers).
+    let has_vectors = cx.vector_bits() > 0;
+    let register = |cx: &Ctx, ty: TypeId| match cx.m.types.get(ty) {
+        Type::Int(b) => *b <= 64,
+        Type::Float | Type::Double | Type::Ptr(_) => true,
+        Type::Vector { len, elem, scalable: false } => {
+            let eb = cx.size_of(*elem).unwrap_or(0) * 8;
+            has_vectors && *len > 1 && len.is_power_of_two() && eb >= 8 && matches!(len * eb as u32, 64 | 128)
+        }
         _ => false,
     };
-    let int = |cx: &Ctx, ty: TypeId| matches!(cx.m.types.get(ty), Type::Int(_));
+    let is_int = |cx: &Ctx, ty: TypeId| matches!(cx.m.types.get(ty), Type::Int(_));
     let Some(&entry) = f.layout.first() else { return };
     let mut slots = Vec::new();
     let blocks: Vec<BlockId> = f.layout.clone();
@@ -841,22 +1027,56 @@ fn vector_int_bitcasts(cx: &mut Ctx, f: &mut Function) {
             };
             let r = f.insts[i.index()].result.unwrap();
             let (from, to) = (cx.value_ty(f, value), f.locals[r.index()].ty);
-            if !(vector(cx, from) && int(cx, to) || int(cx, from) && vector(cx, to)) {
+            if from == to {
                 k += 1;
                 continue;
             }
+            // A vector of one lane and its element: as they are (what
+            // `one_lane_vectors` left at the edges); to anything else, by
+            // its element.
+            let elem_of = |cx: &Ctx, ty: TypeId| match cx.m.types.get(ty) {
+                Type::Vector { len: 1, elem, scalable: false } => Some(*elem),
+                _ => None,
+            };
+            if elem_of(cx, from) == Some(to) || elem_of(cx, to) == Some(from) {
+                k += 1;
+                continue;
+            }
+            if let Some(e) = elem_of(cx, from).or(elem_of(cx, to)) {
+                let mut s = Seq { f, new: Vec::new() };
+                let x = s.cast(CastOp::BitCast, value, e);
+                let v = s.cast(CastOp::BitCast, x, to);
+                s.f.replace_uses(Value::Local(r), v);
+                let new = std::mem::take(&mut s.new);
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                continue;
+            }
+            let fm = mask_lanes(cx, from);
+            let tm = mask_lanes(cx, to);
+            // A mask and the integer of its bits, and registers both: as
+            // they are; a 64-bit vector and i64, through <8 x i8>.
+            let both_regs = register(cx, from) && register(cx, to);
             let size = cx.size_of(to).unwrap_or(0);
-            if size != 8 && size != 16 {
-                k += 1;
-                continue;
-            }
+            let is_vec = |cx: &Ctx, ty: TypeId| matches!(cx.m.types.get(ty), Type::Vector { .. });
+            let vec_and_int = (is_int(cx, from) && is_vec(cx, to)) || (is_vec(cx, from) && is_int(cx, to));
+            let direct = (fm.is_some() && is_int(cx, to)) || (tm.is_some() && is_int(cx, from)) || both_regs;
             let mut s = Seq { f, new: Vec::new() };
-            let v = if size == 8 {
-                if from == v8i8 || to == v8i8 {
+            let v = if direct {
+                if both_regs && vec_and_int && size == 8 && from != v8i8 && to != v8i8 && fm.is_none() && tm.is_none() {
+                    let x = s.cast(CastOp::BitCast, value, v8i8);
+                    s.cast(CastOp::BitCast, x, to)
+                } else {
                     k += 1;
                     continue;
                 }
-                let x = s.cast(CastOp::BitCast, value, v8i8);
+            } else if let Some(n) = fm {
+                // From a mask: its bits as an integer first.
+                let it = cx.m.types.int(n);
+                let x = s.cast(CastOp::BitCast, value, it);
+                s.cast(CastOp::BitCast, x, to)
+            } else if let Some(n) = tm {
+                let it = cx.m.types.int(n);
+                let x = s.cast(CastOp::BitCast, value, it);
                 s.cast(CastOp::BitCast, x, to)
             } else {
                 let align = Some(size.next_power_of_two().clamp(1, 16));
@@ -871,9 +1091,9 @@ fn vector_int_bitcasts(cx: &mut Ctx, f: &mut Function) {
             };
             s.f.replace_uses(Value::Local(r), v);
             let new = std::mem::take(&mut s.new);
-            let n = new.len();
+            // The new bitcasts are looked at in turn (a mask's integer to
+            // a vector may itself go through memory).
             f.blocks[b.index()].insts.splice(k..=k, new);
-            k += n;
         }
     }
     // The slots, first in the entry block, as fixed allocas are.

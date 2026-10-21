@@ -114,6 +114,62 @@ pub fn scalarize(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                 _ => None,
             });
             let lanes: Option<Vec<Value>> = match op {
+                // Loads and stores of one: of each lane, in turn.
+                Op::Load { volatile, atomic: None, ptr, align } if res_wide.is_some() => {
+                    let (len, e) = res_wide.unwrap();
+                    let size = cx.size_of(e)? as i64;
+                    let (i8t, i64t, pt) = (cx.m.types.int(8), cx.m.types.int(64), cx.m.types.ptr(0));
+                    Some(
+                        (0..len)
+                            .map(|l| {
+                                let at = if l == 0 {
+                                    ptr
+                                } else {
+                                    let off = cx.int(i64t, i64::from(l) * size);
+                                    s.op(
+                                        Op::Gep {
+                                            flags: GepFlags::default(),
+                                            inrange: None,
+                                            source_ty: i8t,
+                                            ptr,
+                                            indices: vec![off],
+                                        },
+                                        pt,
+                                    )
+                                };
+                                let a = align.map(|a| a.min(size as u64));
+                                s.op(Op::Load { volatile, atomic: None, ptr: at, align: a }, e)
+                            })
+                            .collect(),
+                    )
+                }
+                Op::Store { volatile, atomic: None, value, ptr, align } => {
+                    let ls = lanes_of(cx, &mut s, &split, value)?;
+                    let e = cx.value_ty(s.f, ls[0]);
+                    let size = cx.size_of(e)? as i64;
+                    let (i8t, i64t, pt) = (cx.m.types.int(8), cx.m.types.int(64), cx.m.types.ptr(0));
+                    for (l, x) in ls.into_iter().enumerate() {
+                        let at = if l == 0 {
+                            ptr
+                        } else {
+                            let off = cx.int(i64t, l as i64 * size);
+                            s.op(
+                                Op::Gep {
+                                    flags: GepFlags::default(),
+                                    inrange: None,
+                                    source_ty: i8t,
+                                    ptr,
+                                    indices: vec![off],
+                                },
+                                pt,
+                            )
+                        };
+                        let a = align.map(|a| a.min(size as u64));
+                        s.op_void(Op::Store { volatile, atomic: None, value: x, ptr: at, align: a });
+                    }
+                    out.extend(std::mem::take(&mut s.new));
+                    continue;
+                }
                 Op::InsertElement { vector, element, index } => {
                     let mut ls = lanes_of(cx, &mut s, &split, vector)?;
                     let k = cx.const_int(index).ok_or("a lane of a wide vector chosen by a variable")?;

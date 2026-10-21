@@ -980,6 +980,75 @@ fn mask_width(cx: &Ctx, f: &Function, v: Value, seen: &mut Vec<LocalId>) -> Opti
     w
 }
 
+/// A constant mask combined with a mask (`xor <8 x i1> %m, <i1 true,
+/// ...>`): a comparison of integer lanes, of the width the other mask's
+/// comparison gives it, so that its lanes are as wide as the other's (all
+/// ones or zeros a lane).
+fn mask_constants(cx: &mut Ctx, f: &mut Function) {
+    let i1 = cx.m.types.int(1);
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::Binary { op, flags, fmf, lhs, rhs } = f.insts[i.index()].op else {
+                k += 1;
+                continue;
+            };
+            let ty = f.locals[f.insts[i.index()].result.unwrap().index()].ty;
+            let Type::Vector { len, elem, scalable: false } = *cx.m.types.get(ty) else {
+                k += 1;
+                continue;
+            };
+            let (other, c) = match (lhs, rhs) {
+                (Value::Local(_), Value::Const(c)) => (lhs, c),
+                (Value::Const(c), Value::Local(_)) => (rhs, c),
+                _ => {
+                    k += 1;
+                    continue;
+                }
+            };
+            if elem != i1 || matches!(cx.m.constant(c).kind, ConstKind::Zero | ConstKind::Undef | ConstKind::Poison) {
+                k += 1;
+                continue;
+            }
+            let w = mask_width(cx, f, other, &mut Vec::new()).unwrap_or((128 / len).clamp(8, 64));
+            let e = cx.m.types.int(w);
+            let it = vec_ty(cx, len, e);
+            let lanes: Vec<bool> = match cx.m.constant(c).kind.clone() {
+                ConstKind::Vector(es) => {
+                    es.iter().map(|&x| matches!(&cx.m.constant(x).kind, ConstKind::Int(a) if !a.is_zero())).collect()
+                }
+                ConstKind::Splat(x) => {
+                    vec![matches!(&cx.m.constant(x).kind, ConstKind::Int(a) if !a.is_zero()); len as usize]
+                }
+                _ => {
+                    k += 1;
+                    continue;
+                }
+            };
+            let es: Vec<ConstId> = lanes
+                .iter()
+                .map(|&t| {
+                    cx.m.consts.intern(Constant {
+                        ty: e,
+                        kind: ConstKind::Int(epitome_ir::apint::ApInt::from_i64(w, if t { -1 } else { 0 })),
+                    })
+                })
+                .collect();
+            let ints = Value::Const(cx.m.consts.intern(Constant { ty: it, kind: ConstKind::Vector(es) }));
+            let zero = Value::Const(cx.m.consts.intern(Constant { ty: it, kind: ConstKind::Zero }));
+            let cmp =
+                f.add_inst(Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: ints, rhs: zero }, Some((None, ty)));
+            let m = f.result(cmp);
+            let (l, r) = if lhs == other { (other, m) } else { (m, other) };
+            f.insts[i.index()].op = Op::Binary { op, flags, fmf, lhs: l, rhs: r };
+            f.blocks[b.index()].insts.insert(k, cmp);
+            k += 2;
+        }
+    }
+}
+
 /// Is `i` a splat of one boolean: `shufflevector (insertelement poison, i1
 /// %c, 0), poison, zeroinitializer`?
 fn is_bool_splat(cx: &Ctx, f: &Function, i: InstId) -> bool {
@@ -1144,6 +1213,7 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     rewrite_vector_ops(cx, f);
     fix_masks(cx, f)?;
     crate::prepare::bool_vector_casts(cx, f);
+    mask_constants(cx, f);
     widen_masks(cx, f);
     chain_casts(cx, f);
     let mut parts: HashMap<LocalId, Vec<Value>> = HashMap::new();

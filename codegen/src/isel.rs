@@ -1228,9 +1228,17 @@ impl<'a, 'b> Sel<'a, 'b> {
         let Type::Vector { len, elem, .. } = self.cx.m.types.get(k.ty).clone() else {
             return self.err("a vector constant of a scalar type");
         };
-        let ebits = self.bits(elem).max(8);
+        // A mask's lanes are all ones or all zeros, as wide as the
+        // register's lanes (its width over their number).
+        let mask = self.bits(elem) == 1;
+        let ebits = if mask {
+            (self.t.machine.classes[class.0 as usize].bits / len).clamp(8, 64)
+        } else {
+            self.bits(elem).max(8)
+        };
         let lane = |m: &epitome_ir::Module, e: ConstId| -> i64 {
             match &m.constant(e).kind {
+                ConstKind::Int(a) if mask => -((a.low_u64() & 1) as i64),
                 ConstKind::Int(a) => a.low_u64() as i64,
                 ConstKind::Float(raw) => *raw as i64,
                 _ => 0,
