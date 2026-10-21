@@ -652,6 +652,19 @@ define {T} @{name}v{arr}({T} "reg"="{c}" %n) "enc"="0 {Q} {U} 01110 {a_} {sz} 10
   ret {T} %r
 }}
 ''')
+# Minimum and maximum of floating-point lanes (as the scalar ones).
+for arr, n, ty, Q, sz in FLT:
+    T = vt(n, ty); c = cls(Q); suf = 'f32' if ty == 'float' else 'f64'
+    for name, intr, a_, op in [('FMAXNM', 'maxnum', 0, '110001'), ('FMINNM', 'minnum', 1, '110001'),
+                               ('FMAX', 'maximum', 0, '111101'), ('FMIN', 'minimum', 1, '111101')]:
+        f = f'llvm.{intr}.v{n}{suf}'
+        o.append(f'''declare {T} @{f}({T}, {T})
+
+define {T} @{name}v{arr}({T} "reg"="{c}" %n, {T} "reg"="{c}" %m) "enc"="0 {Q} 0 01110 {a_} {sz} 1 m:5 {op} n:5 d:5" "asm"="{name.lower()} {{d:{arr}}}, {{n:{arr}}}, {{m:{arr}}}" {{
+  %r = call {T} @{f}({T} %n, {T} %m)
+  ret {T} %r
+}}
+''')
 # tbl: each lane of the indices picks a byte of the 16-byte table (one
 # register), or zero past it.
 for arr, n, Q in [('16b', 16, 1), ('8b', 8, 0)]:

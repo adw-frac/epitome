@@ -640,3 +640,62 @@ define i32 @FCVTZUWSsat(float "reg"="s" %n) "enc"="0 0 0 11110 00 1 11 001 00000
   %r = call i32 @llvm.fptoui.sat.i32.f32(float %n)
   ret i32 %r
 }
+
+; Minimum and maximum: fminnm and fmaxnm take a number over a NaN
+; (llvm.minnum, llvm.maxnum); fmin and fmax give the NaN (llvm.minimum,
+; llvm.maximum). Each orders -0 below +0.
+declare double @llvm.maxnum.f64(double, double)
+
+define double @FMAXNMD(double "reg"="d" %n, double "reg"="d" %m) "enc"="0 0 0 11110 01 1 m:5 0110 10 n:5 d:5" "asm"="fmaxnm {d}, {n}, {m}" {
+  %r = call double @llvm.maxnum.f64(double %n, double %m)
+  ret double %r
+}
+
+declare double @llvm.minnum.f64(double, double)
+
+define double @FMINNMD(double "reg"="d" %n, double "reg"="d" %m) "enc"="0 0 0 11110 01 1 m:5 0111 10 n:5 d:5" "asm"="fminnm {d}, {n}, {m}" {
+  %r = call double @llvm.minnum.f64(double %n, double %m)
+  ret double %r
+}
+
+declare double @llvm.maximum.f64(double, double)
+
+define double @FMAXD(double "reg"="d" %n, double "reg"="d" %m) "enc"="0 0 0 11110 01 1 m:5 0100 10 n:5 d:5" "asm"="fmax {d}, {n}, {m}" {
+  %r = call double @llvm.maximum.f64(double %n, double %m)
+  ret double %r
+}
+
+declare double @llvm.minimum.f64(double, double)
+
+define double @FMIND(double "reg"="d" %n, double "reg"="d" %m) "enc"="0 0 0 11110 01 1 m:5 0101 10 n:5 d:5" "asm"="fmin {d}, {n}, {m}" {
+  %r = call double @llvm.minimum.f64(double %n, double %m)
+  ret double %r
+}
+
+declare float @llvm.maxnum.f32(float, float)
+
+define float @FMAXNMS(float "reg"="s" %n, float "reg"="s" %m) "enc"="0 0 0 11110 00 1 m:5 0110 10 n:5 d:5" "asm"="fmaxnm {d}, {n}, {m}" {
+  %r = call float @llvm.maxnum.f32(float %n, float %m)
+  ret float %r
+}
+
+declare float @llvm.minnum.f32(float, float)
+
+define float @FMINNMS(float "reg"="s" %n, float "reg"="s" %m) "enc"="0 0 0 11110 00 1 m:5 0111 10 n:5 d:5" "asm"="fminnm {d}, {n}, {m}" {
+  %r = call float @llvm.minnum.f32(float %n, float %m)
+  ret float %r
+}
+
+declare float @llvm.maximum.f32(float, float)
+
+define float @FMAXS(float "reg"="s" %n, float "reg"="s" %m) "enc"="0 0 0 11110 00 1 m:5 0100 10 n:5 d:5" "asm"="fmax {d}, {n}, {m}" {
+  %r = call float @llvm.maximum.f32(float %n, float %m)
+  ret float %r
+}
+
+declare float @llvm.minimum.f32(float, float)
+
+define float @FMINS(float "reg"="s" %n, float "reg"="s" %m) "enc"="0 0 0 11110 00 1 m:5 0101 10 n:5 d:5" "asm"="fmin {d}, {n}, {m}" {
+  %r = call float @llvm.minimum.f32(float %n, float %m)
+  ret float %r
+}

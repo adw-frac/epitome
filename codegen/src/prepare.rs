@@ -162,6 +162,9 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     bool_memory(cx, &mut f);
     expand_small_mem_ops(cx, &mut f);
     crate::legalize::legalize_vectors(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
+    // Lanes of masks legalisation leaves (it handles those of split masks,
+    // at their comparisons' widths; before it, this would get in its way).
+    mask_lanes(cx, &mut f);
     // Element-wise intrinsics split into scalars expand as scalars do.
     expand_intrinsics(cx, &mut f);
     sink_addresses(&mut f);
@@ -483,6 +486,68 @@ fn bitcast_round_trips(cx: &mut Ctx, f: &mut Function) {
         let r = f.insts[i.index()].result.unwrap();
         if cx.value_ty(f, orig) == f.locals[r.index()].ty {
             f.replace_uses(Value::Local(r), orig);
+        }
+    }
+}
+
+/// Lanes of masks (`<N x i1>`), taken out or put in, through integer
+/// lanes: the mask sign-extended (all ones or zeros a lane), the lane
+/// taken and truncated; or put in sign-extended, and the vector compared
+/// with zero to be a mask again.
+fn mask_lanes(cx: &mut Ctx, f: &mut Function) {
+    let i1 = cx.m.types.int(1);
+    let wide = |cx: &mut Ctx, ty: TypeId| -> Option<(TypeId, TypeId)> {
+        let Type::Vector { len, elem, scalable: false } = *cx.m.types.get(ty) else { return None };
+        if elem != i1 {
+            return None;
+        }
+        let w = (128 / len).clamp(8, 64);
+        let e = cx.m.types.int(w);
+        Some((cx.m.types.intern(Type::Vector { len, elem: e, scalable: false }), e))
+    };
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Some(r) = f.insts[i.index()].result else {
+                k += 1;
+                continue;
+            };
+            let op = f.insts[i.index()].op.clone();
+            let mty = match &op {
+                Op::ExtractElement { vector, .. } => cx.value_ty(f, *vector),
+                Op::InsertElement { .. } => f.locals[r.index()].ty,
+                _ => {
+                    k += 1;
+                    continue;
+                }
+            };
+            let Some((wt, e)) = wide(cx, mty) else {
+                k += 1;
+                continue;
+            };
+            let mut s = Seq { f, new: Vec::new() };
+            let v = match op {
+                Op::ExtractElement { vector, index } => {
+                    let w = s.cast(CastOp::SExt, vector, wt);
+                    let x = s.op(Op::ExtractElement { vector: w, index }, e);
+                    s.cast(CastOp::Trunc, x, i1)
+                }
+                Op::InsertElement { vector, element, index } => {
+                    let w = s.cast(CastOp::SExt, vector, wt);
+                    let x = s.cast(CastOp::SExt, element, e);
+                    let w = s.op(Op::InsertElement { vector: w, element: x, index }, wt);
+                    let zero = Value::Const(cx.m.consts.intern(Constant { ty: wt, kind: ConstKind::Zero }));
+                    s.op(Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: w, rhs: zero }, mty)
+                }
+                _ => unreachable!(),
+            };
+            s.f.replace_uses(Value::Local(r), v);
+            let new = std::mem::take(&mut s.new);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
         }
     }
 }
@@ -1851,6 +1916,78 @@ pub(crate) fn replace_pair(cx: &mut Ctx, s: &mut Seq, r: LocalId, sty: TypeId, a
     }
 }
 
+/// The C library function an intrinsic (`llvm.log2`) is, if it is one.
+fn libm_base(base: &str) -> Option<&'static str> {
+    Some(match base.strip_prefix("llvm.")? {
+        "sin" => "sin",
+        "cos" => "cos",
+        "tan" => "tan",
+        "asin" => "asin",
+        "acos" => "acos",
+        "atan" => "atan",
+        "atan2" => "atan2",
+        "sinh" => "sinh",
+        "cosh" => "cosh",
+        "tanh" => "tanh",
+        "exp" => "exp",
+        "exp2" => "exp2",
+        "exp10" => "exp10",
+        "log" => "log",
+        "log2" => "log2",
+        "log10" => "log10",
+        "pow" => "pow",
+        "fma" => "fma",
+        "powi" => "powi",
+        "ldexp" => "ldexp",
+        _ => return None,
+    })
+}
+
+/// The C library's name for function `c` (`log2`) at floating-point type
+/// `ty` (or its lanes'): `log2` for double, `log2f` for float. `powi` is
+/// the runtime's (`__powidf2`, `__powisf2`).
+fn libm_name(cx: &Ctx, c: &str, ty: TypeId) -> Option<String> {
+    let elem = match cx.m.types.get(ty) {
+        Type::Vector { elem, .. } => *elem,
+        _ => ty,
+    };
+    let float = match cx.m.types.get(elem) {
+        Type::Double => false,
+        Type::Float => true,
+        _ => return None,
+    };
+    Some(match (c, float) {
+        ("powi", false) => "__powidf2".into(),
+        ("powi", true) => "__powisf2".into(),
+        (c, false) => c.into(),
+        (c, true) => format!("{c}f"),
+    })
+}
+
+/// A call of `name` with `args`, of result type `ty`; of a vector type,
+/// one for each lane (vector arguments taken lane by lane, the others as
+/// they are).
+fn lanewise_call(cx: &mut Ctx, s: &mut Seq, name: &str, args: Vec<Value>, ty: TypeId) -> Value {
+    let Type::Vector { len, elem, .. } = *cx.m.types.get(ty) else {
+        return call_intrinsic(cx, s, name, args, ty);
+    };
+    let i64t = cx.m.types.int(64);
+    let mut v = Value::Const(cx.m.consts.intern(Constant { ty, kind: ConstKind::Poison }));
+    for lane in 0..len {
+        let idx = cx.int(i64t, lane as i64);
+        let mut a = Vec::new();
+        for &x in &args {
+            match *cx.m.types.get(cx.value_ty(s.f, x)) {
+                Type::Vector { elem: e, .. } => a.push(s.op(Op::ExtractElement { vector: x, index: idx }, e)),
+                _ => a.push(x),
+            }
+        }
+        let y = call_intrinsic(cx, s, name, a, elem);
+        v = s.op(Op::InsertElement { vector: v, element: y, index: idx }, ty);
+    }
+    v
+}
+
 /// The largest signed value of `bits` bits, 2^(bits - 1) - 1.
 fn signed_max(bits: u32) -> ApInt {
     let ones = bits - 1;
@@ -2167,6 +2304,20 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 if let Op::Call(c) = &mut s.f.insts[i.index()].op {
                     c.args[1].value = no;
                 }
+            }
+            // Mathematical functions without an instruction: the C
+            // library's (lane by lane, for vectors), as LLVM calls them.
+            if let Some(c) = libm_base(&base)
+                && !cx.selects_intrinsic(&name)
+                && let Some(lib) = libm_name(cx, c, ty)
+            {
+                let v = lanewise_call(cx, &mut s, &lib, args.clone(), ty);
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), v);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
             }
             // The sign of one, the rest of the other: as integers.
             if base == "llvm.copysign" && !cx.selects_intrinsic(&name) {
@@ -2958,7 +3109,12 @@ fn legalize_fp(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         }
                     }
                 }
-                Op::Binary { op: BinOp::FRem, .. } => return Err("frem is not supported yet".into()),
+                // The C library's remainder, which is frem's.
+                Op::Binary { op: BinOp::FRem, lhs, rhs, .. } => {
+                    let ty = s.f.locals[res.unwrap().index()].ty;
+                    let name = libm_name(cx, "fmod", ty).ok_or("frem of this type is not supported")?;
+                    replace = Some(lanewise_call(cx, &mut s, &name, vec![lhs, rhs], ty));
+                }
                 _ => {}
             }
             let new = std::mem::take(&mut s.new);

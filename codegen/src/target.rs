@@ -679,10 +679,15 @@ impl Target {
     /// result of head bits `hb` (lanes and their type), of a first operand
     /// of `src_bits` bits, or (if `of_insert`) one an `insertelement` makes
     /// (a splat of a scalar)?
-    pub fn has_shuffle(&self, lanes: &[i32], hb: u32, src_bits: u32, of_insert: bool) -> bool {
+    /// (`hb` `None`, a mask's: masks take their comparison's lane width
+    /// later, so any pattern of the mask will do.)
+    pub fn has_shuffle(&self, lanes: &[i32], hb: Option<u32>, src_bits: u32, of_insert: bool) -> bool {
         let Some(id) = self.find_mask(lanes) else { return false };
+        if hb.is_none() {
+            return self.patterns.iter().any(|p| matches!(&p.tree, Tree::Op(Head::Shuffle(k, _), _) if *k == id));
+        }
         self.patterns.iter().any(|p| match &p.tree {
-            Tree::Op(Head::Shuffle(k, b), kids) if *k == id && *b == hb => match kids.first() {
+            Tree::Op(Head::Shuffle(k, b), kids) if *k == id && Some(*b) == hb => match kids.first() {
                 Some(Tree::Op(Head::InsertElement(_), _)) => of_insert,
                 Some(Tree::Leaf(q)) => p.params.get(*q).is_some_and(|x| x.bits == src_bits),
                 _ => true,

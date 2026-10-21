@@ -1018,7 +1018,16 @@ impl<'a, 'b> Sel<'a, 'b> {
     }
 
     fn describe(&self, i: InstId) -> String {
-        format!("{:?}", self.f.insts[i.index()].op)
+        let f = self.f;
+        let ty = |t: TypeId| crate::legalize::mangle(self.cx, t);
+        let mut ops = Vec::new();
+        f.insts[i.index()].op.for_each_value(|v| {
+            if let Value::Local(x) = v {
+                ops.push(format!("{} {}", ty(f.locals[x.index()].ty), epitome_ir::printer::local_name(f, *x)));
+            }
+        });
+        let res = f.insts[i.index()].result.map_or(String::new(), |r| format!(" : {}", ty(f.locals[r.index()].ty)));
+        format!("{}{res} ({}) {:?}", epitome_ir::printer::inst_name(f, i), ops.join(", "), f.insts[i.index()].op)
     }
 
     // -----------------------------------------------------------------------
@@ -1544,10 +1553,18 @@ impl<'a, 'b> Sel<'a, 'b> {
     /// to: made by the first to ask, the landing pad or a use of it in a
     /// block placed before it.
     fn landing_regs(&mut self, r: LocalId) -> Vec<u32> {
+        let n = self.mf.abi.eh_regs.len();
+        self.early_regs(r, n)
+    }
+
+    /// The `n` registers the parts of aggregate `r` (a landing pad's, or a
+    /// call's result) are copied to: made by the first to ask, the
+    /// instruction or a use of it in a block placed before it.
+    fn early_regs(&mut self, r: LocalId, n: usize) -> Vec<u32> {
         if let Some(regs) = self.agg_params.get(&r) {
             return regs.clone();
         }
-        let regs: Vec<u32> = (0..self.mf.abi.eh_regs.len()).map(|_| self.ivreg(true)).collect();
+        let regs: Vec<u32> = (0..n).map(|_| self.ivreg(true)).collect();
         self.agg_params.insert(r, regs.clone());
         regs
     }
@@ -1558,9 +1575,18 @@ impl<'a, 'b> Sel<'a, 'b> {
     fn parts(&mut self, v: Value, n: usize) -> Result<Vec<Reg>, String> {
         if let Value::Local(x) = v
             && let LocalDef::Inst(d) = self.f.locals[x.index()].def
-            && matches!(self.f.insts[d.index()].op, Op::LandingPad { .. })
         {
-            return Ok(self.landing_regs(x).into_iter().map(Reg::V).collect());
+            match &self.f.insts[d.index()].op {
+                Op::LandingPad { .. } => return Ok(self.landing_regs(x).into_iter().map(Reg::V).collect()),
+                // A call's result, in its result registers.
+                Op::Call(c) | Op::Invoke { call: c, .. }
+                    if inline_asm(self.cx.m, c).is_none()
+                        && let Some(k) = self.result_parts(self.f.locals[x.index()].ty) =>
+                {
+                    return Ok(self.early_regs(x, k).into_iter().map(Reg::V).collect());
+                }
+                _ => {}
+            }
         }
         if let Value::Local(x) = v
             && let Some(regs) = self.agg_params.get(&x)
@@ -1568,6 +1594,9 @@ impl<'a, 'b> Sel<'a, 'b> {
             return Ok(regs.iter().map(|&r| Reg::V(r)).collect());
         }
         let mut found: Vec<Option<Value>> = vec![None; n];
+        // Registers the chain ends in (a call's results), for the parts
+        // no insertvalue above them set.
+        let mut base: Option<Vec<u32>> = None;
         let mut cur = v;
         loop {
             match cur {
@@ -1582,6 +1611,21 @@ impl<'a, 'b> Sel<'a, 'b> {
                                 found[k] = Some(*element);
                             }
                             cur = *aggregate;
+                        }
+                        Op::LandingPad { .. } => {
+                            base = Some(self.landing_regs(x));
+                            break;
+                        }
+                        Op::Call(c) | Op::Invoke { call: c, .. }
+                            if inline_asm(self.cx.m, c).is_none()
+                                && let Some(k) = self.result_parts(self.f.locals[x.index()].ty) =>
+                        {
+                            base = Some(self.early_regs(x, k));
+                            break;
+                        }
+                        _ if self.agg_params.contains_key(&x) => {
+                            base = self.agg_params.get(&x).cloned();
+                            break;
                         }
                         op => return self.err(format!("a struct value made by {op:?}")),
                     }
@@ -1600,10 +1644,11 @@ impl<'a, 'b> Sel<'a, 'b> {
             }
         }
         let mut regs = Vec::new();
-        for part in found {
-            regs.push(match part {
-                Some(p) => self.reg_for(p, self.int_class(true))?,
-                None => self.int_reg(0, true, true)?,
+        for (k, part) in found.into_iter().enumerate() {
+            regs.push(match (part, base.as_ref().and_then(|b| b.get(k))) {
+                (Some(p), _) => self.reg_for(p, self.int_class(true))?,
+                (None, Some(&r)) => Reg::V(r),
+                (None, None) => self.int_reg(0, true, true)?,
             });
         }
         Ok(regs)
@@ -2187,13 +2232,10 @@ impl<'a, 'b> Sel<'a, 'b> {
         {
             // A small aggregate ([2 x i64], an i128): one register a part.
             if let Some(n) = self.result_parts(self.f.locals[r.index()].ty) {
-                let mut regs = Vec::new();
-                for from in self.mf.abi.results(n) {
-                    let d = self.ivreg(true);
+                let regs = self.early_regs(r, n);
+                for (from, d) in self.mf.abi.results(n).into_iter().zip(regs) {
                     self.push(MInst::copy(Reg::V(d), Reg::P(from)));
-                    regs.push(d);
                 }
-                self.agg_params.insert(r, regs);
                 return Ok(());
             }
             let d = self.vreg_of(r);

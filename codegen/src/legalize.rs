@@ -87,7 +87,7 @@ fn vec_ty(cx: &mut Ctx, len: u32, elem: TypeId) -> TypeId {
 }
 
 /// The LLVM name of a type in an intrinsic's name: `v4i32`, `v2f64`.
-fn mangle(cx: &Ctx, ty: TypeId) -> String {
+pub(crate) fn mangle(cx: &Ctx, ty: TypeId) -> String {
     match cx.m.types.get(ty) {
         Type::Vector { len, elem, .. } => format!("v{len}{}", mangle(cx, *elem)),
         Type::Int(b) => format!("i{b}"),
@@ -473,7 +473,10 @@ fn pointer_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
 fn native_shuffle(cx: &Ctx, f: &Function, i: InstId) -> bool {
     let Op::ShuffleVector { a, mask, .. } = &f.insts[i.index()].op else { return false };
     let Some(r) = f.insts[i.index()].result else { return false };
-    let hb = crate::target::head_bits(cx.m, f.locals[r.index()].ty);
+    let rty = f.locals[r.index()].ty;
+    let of_masks =
+        matches!(cx.m.types.get(rty), Type::Vector { elem, .. } if matches!(cx.m.types.get(*elem), Type::Int(1)));
+    let hb = (!of_masks).then(|| crate::target::head_bits(cx.m, rty));
     let of_insert = matches!(a, Value::Local(x) if matches!(f.locals[x.index()].def,
         LocalDef::Inst(d) if matches!(f.insts[d.index()].op, Op::InsertElement { .. })));
     let src_bits = crate::target::type_bits(cx.m, cx.value_ty(f, *a));
@@ -1063,72 +1066,126 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                     if parts.contains_key(&x) && res_ty.is_some_and(|t| matches!(cx.m.types.get(t), Type::Int(_))) =>
                 {
                     let ty = res_ty.unwrap();
-                    let mut acc: Option<Value> = None;
-                    let mut at = 0u32;
-                    for p in parts[&x].clone() {
-                        let pty = cx.value_ty(bld.f, p);
-                        let k = match cx.m.types.get(pty) {
-                            Type::Vector { len, .. } => *len,
-                            _ => 1,
-                        };
-                        let bits = if k == 1 && !is_vec(cx, pty) {
-                            p
-                        } else {
-                            let kt = cx.m.types.int(k);
-                            bld.op(
-                                Op::Cast {
-                                    op: CastOp::BitCast,
-                                    flags: IntFlags::NONE,
-                                    fmf: FastMath::default(),
-                                    value: p,
-                                },
-                                Some(kt),
-                            )
-                        };
-                        let z = bld.op(
-                            Op::Cast { op: CastOp::ZExt, flags: IntFlags::NONE, fmf: FastMath::default(), value: bits },
-                            Some(ty),
-                        );
-                        let z = if at == 0 {
-                            z
-                        } else {
-                            let sh = Value::Const(cx.m.consts.intern(Constant {
-                                ty,
-                                kind: ConstKind::Int(epitome_ir::apint::ApInt::from_i64(
-                                    match cx.m.types.get(ty) {
-                                        Type::Int(b) => *b,
-                                        _ => 64,
-                                    },
-                                    at as i64,
-                                )),
-                            }));
-                            bld.op(
-                                Op::Binary {
-                                    op: BinOp::Shl,
-                                    flags: IntFlags::NONE,
-                                    fmf: FastMath::default(),
-                                    lhs: z,
-                                    rhs: sh,
-                                },
-                                Some(ty),
-                            )
-                        };
-                        acc = Some(match acc {
-                            None => z,
-                            Some(a) => bld.op(
+                    // Only compared with zero (whether any lane is set):
+                    // the parts or-ed, then the unsigned maximum of the
+                    // lanes, as integers, is the answer, 1 or 0.
+                    let r = res.unwrap();
+                    let mut only_zero_tests = true;
+                    for j in bld.f.insts_in_order() {
+                        let op = &bld.f.insts[j.index()].op;
+                        let mut uses = false;
+                        op.for_each_value(|v| uses |= *v == Value::Local(r));
+                        if uses {
+                            only_zero_tests &= matches!(op, Op::ICmp { pred: ICmpPred::Eq | ICmpPred::Ne, lhs: Value::Local(l), rhs: Value::Const(c), .. }
+                                if *l == r && matches!(cx.m.constant(*c).kind, ConstKind::Zero)
+                                    || matches!(&cx.m.constant(*c).kind, ConstKind::Int(a) if a.is_zero()));
+                        }
+                    }
+                    let ps = parts[&x].clone();
+                    let pt = cx.value_ty(bld.f, ps[0]);
+                    if only_zero_tests && let Type::Vector { len, .. } = *cx.m.types.get(pt) {
+                        let mut acc = ps[0];
+                        for &p in &ps[1..] {
+                            acc = bld.op(
                                 Op::Binary {
                                     op: BinOp::Or,
                                     flags: IntFlags::NONE,
                                     fmf: FastMath::default(),
-                                    lhs: a,
-                                    rhs: z,
+                                    lhs: acc,
+                                    rhs: p,
+                                },
+                                Some(pt),
+                            );
+                        }
+                        let w = (cx.vector_bits() / len).max(8);
+                        let e = cx.m.types.int(w);
+                        let it = vec_ty(cx, len, e);
+                        let wide = bld.op(
+                            Op::Cast { op: CastOp::SExt, flags: IntFlags::NONE, fmf: FastMath::default(), value: acc },
+                            Some(it),
+                        );
+                        let callee = declare(cx, &format!("llvm.vector.reduce.umax.{}", mangle(cx, it)), e, &[it]);
+                        let m = call_value(&mut bld, cx, callee, vec![wide], e, it);
+                        let zero = Value::Const(cx.m.consts.intern(Constant { ty: e, kind: ConstKind::Zero }));
+                        let i1 = cx.m.types.int(1);
+                        let any = bld.op(Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: m, rhs: zero }, Some(i1));
+                        replace = Some(bld.op(
+                            Op::Cast { op: CastOp::ZExt, flags: IntFlags::NONE, fmf: FastMath::default(), value: any },
+                            Some(ty),
+                        ));
+                    } else {
+                        let mut acc: Option<Value> = None;
+                        let mut at = 0u32;
+                        for p in parts[&x].clone() {
+                            let pty = cx.value_ty(bld.f, p);
+                            let k = match cx.m.types.get(pty) {
+                                Type::Vector { len, .. } => *len,
+                                _ => 1,
+                            };
+                            let bits = if k == 1 && !is_vec(cx, pty) {
+                                p
+                            } else {
+                                let kt = cx.m.types.int(k);
+                                bld.op(
+                                    Op::Cast {
+                                        op: CastOp::BitCast,
+                                        flags: IntFlags::NONE,
+                                        fmf: FastMath::default(),
+                                        value: p,
+                                    },
+                                    Some(kt),
+                                )
+                            };
+                            let z = bld.op(
+                                Op::Cast {
+                                    op: CastOp::ZExt,
+                                    flags: IntFlags::NONE,
+                                    fmf: FastMath::default(),
+                                    value: bits,
                                 },
                                 Some(ty),
-                            ),
-                        });
-                        at += k;
+                            );
+                            let z = if at == 0 {
+                                z
+                            } else {
+                                let sh = Value::Const(cx.m.consts.intern(Constant {
+                                    ty,
+                                    kind: ConstKind::Int(epitome_ir::apint::ApInt::from_i64(
+                                        match cx.m.types.get(ty) {
+                                            Type::Int(b) => *b,
+                                            _ => 64,
+                                        },
+                                        at as i64,
+                                    )),
+                                }));
+                                bld.op(
+                                    Op::Binary {
+                                        op: BinOp::Shl,
+                                        flags: IntFlags::NONE,
+                                        fmf: FastMath::default(),
+                                        lhs: z,
+                                        rhs: sh,
+                                    },
+                                    Some(ty),
+                                )
+                            };
+                            acc = Some(match acc {
+                                None => z,
+                                Some(a) => bld.op(
+                                    Op::Binary {
+                                        op: BinOp::Or,
+                                        flags: IntFlags::NONE,
+                                        fmf: FastMath::default(),
+                                        lhs: a,
+                                        rhs: z,
+                                    },
+                                    Some(ty),
+                                ),
+                            });
+                            at += k;
+                        }
+                        replace = acc;
                     }
-                    replace = acc;
                 }
                 Op::Cast { op, flags, fmf, value } => {
                     let from_ty = cx.value_ty(bld.f, value);
@@ -1348,21 +1405,60 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         // Combine the parts, then reduce one.
                         let opname = rest.split('.').next().unwrap_or("");
                         let vt = cx.value_ty(bld.f, args[0]);
-                        let n = split_count(cx, vt).ok_or("a reduction of a legal vector")?;
-                        let (vlen, elem, eb) = vec_info(cx, vt).unwrap();
-                        let pt = part(cx, vlen, elem, eb);
-                        let vs = parts_of(cx, &parts, bld.f, args[0], n, pt)?;
+                        // A mask is split as the comparison that made it was.
+                        let (vs, pt) = match args[0] {
+                            Value::Local(x) if split_count(cx, vt).is_none() && parts.contains_key(&x) => {
+                                let vs = parts[&x].clone();
+                                let pt = cx.value_ty(bld.f, vs[0]);
+                                (vs, pt)
+                            }
+                            _ => {
+                                let n = split_count(cx, vt).ok_or("a reduction of a legal vector")?;
+                                let (vlen, elem, eb) = vec_info(cx, vt).unwrap();
+                                let pt = part(cx, vlen, elem, eb);
+                                (parts_of(cx, &parts, bld.f, args[0], n, pt)?, pt)
+                            }
+                        };
                         let mut acc = vs[0];
                         for &v in &vs[1..] {
                             acc = combine(&mut bld, cx, opname, acc, v, pt)?;
                         }
                         let r = res_ty.unwrap();
-                        replace = Some(if is_vec(cx, pt) {
-                            let callee =
-                                declare(cx, &format!("llvm.vector.reduce.{opname}.{}", mangle(cx, pt)), r, &[pt]);
-                            call_value(&mut bld, cx, callee, vec![acc], r, pt)
-                        } else {
-                            acc
+                        let mask_lanes = match cx.m.types.get(pt) {
+                            Type::Vector { len, elem, .. } if matches!(cx.m.types.get(*elem), Type::Int(1)) => {
+                                Some(*len)
+                            }
+                            _ => None,
+                        };
+                        replace = Some(match mask_lanes {
+                            // A mask's: as integer lanes, all ones or zeros,
+                            // the unsigned maximum (any set) or minimum (all).
+                            Some(len) if matches!(opname, "or" | "and") => {
+                                let w = (cx.vector_bits() / len).max(8);
+                                let e = cx.m.types.int(w);
+                                let it = vec_ty(cx, len, e);
+                                let wide = bld.op(
+                                    Op::Cast {
+                                        op: CastOp::SExt,
+                                        flags: IntFlags::NONE,
+                                        fmf: FastMath::default(),
+                                        value: acc,
+                                    },
+                                    Some(it),
+                                );
+                                let red = if opname == "or" { "umax" } else { "umin" };
+                                let callee =
+                                    declare(cx, &format!("llvm.vector.reduce.{red}.{}", mangle(cx, it)), e, &[it]);
+                                let x = call_value(&mut bld, cx, callee, vec![wide], e, it);
+                                let zero = Value::Const(cx.m.consts.intern(Constant { ty: e, kind: ConstKind::Zero }));
+                                bld.op(Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: x, rhs: zero }, Some(r))
+                            }
+                            _ if is_vec(cx, pt) => {
+                                let callee =
+                                    declare(cx, &format!("llvm.vector.reduce.{opname}.{}", mangle(cx, pt)), r, &[pt]);
+                                call_value(&mut bld, cx, callee, vec![acc], r, pt)
+                            }
+                            _ => acc,
                         });
                     } else if name.starts_with("llvm.experimental.vector.partial.reduce.add.") {
                         let acc_ty = res_ty.unwrap();

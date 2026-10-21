@@ -3796,6 +3796,90 @@ define <2 x float> @FRINTIv2s(<2 x float> "reg"="v" %n) "feature"="neon" "enc"="
   ret <2 x float> %r
 }
 
+declare <4 x float> @llvm.maxnum.v4f32(<4 x float>, <4 x float>)
+
+define <4 x float> @FMAXNMv4s(<4 x float> "reg"="q" %n, <4 x float> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 0 0 1 m:5 110001 n:5 d:5" "asm"="fmaxnm {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x float> @llvm.maxnum.v4f32(<4 x float> %n, <4 x float> %m)
+  ret <4 x float> %r
+}
+
+declare <4 x float> @llvm.minnum.v4f32(<4 x float>, <4 x float>)
+
+define <4 x float> @FMINNMv4s(<4 x float> "reg"="q" %n, <4 x float> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 1 0 1 m:5 110001 n:5 d:5" "asm"="fminnm {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x float> @llvm.minnum.v4f32(<4 x float> %n, <4 x float> %m)
+  ret <4 x float> %r
+}
+
+declare <4 x float> @llvm.maximum.v4f32(<4 x float>, <4 x float>)
+
+define <4 x float> @FMAXv4s(<4 x float> "reg"="q" %n, <4 x float> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 0 0 1 m:5 111101 n:5 d:5" "asm"="fmax {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x float> @llvm.maximum.v4f32(<4 x float> %n, <4 x float> %m)
+  ret <4 x float> %r
+}
+
+declare <4 x float> @llvm.minimum.v4f32(<4 x float>, <4 x float>)
+
+define <4 x float> @FMINv4s(<4 x float> "reg"="q" %n, <4 x float> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 1 0 1 m:5 111101 n:5 d:5" "asm"="fmin {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x float> @llvm.minimum.v4f32(<4 x float> %n, <4 x float> %m)
+  ret <4 x float> %r
+}
+
+declare <2 x double> @llvm.maxnum.v2f64(<2 x double>, <2 x double>)
+
+define <2 x double> @FMAXNMv2d(<2 x double> "reg"="q" %n, <2 x double> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 0 1 1 m:5 110001 n:5 d:5" "asm"="fmaxnm {d:2d}, {n:2d}, {m:2d}" {
+  %r = call <2 x double> @llvm.maxnum.v2f64(<2 x double> %n, <2 x double> %m)
+  ret <2 x double> %r
+}
+
+declare <2 x double> @llvm.minnum.v2f64(<2 x double>, <2 x double>)
+
+define <2 x double> @FMINNMv2d(<2 x double> "reg"="q" %n, <2 x double> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 1 1 1 m:5 110001 n:5 d:5" "asm"="fminnm {d:2d}, {n:2d}, {m:2d}" {
+  %r = call <2 x double> @llvm.minnum.v2f64(<2 x double> %n, <2 x double> %m)
+  ret <2 x double> %r
+}
+
+declare <2 x double> @llvm.maximum.v2f64(<2 x double>, <2 x double>)
+
+define <2 x double> @FMAXv2d(<2 x double> "reg"="q" %n, <2 x double> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 0 1 1 m:5 111101 n:5 d:5" "asm"="fmax {d:2d}, {n:2d}, {m:2d}" {
+  %r = call <2 x double> @llvm.maximum.v2f64(<2 x double> %n, <2 x double> %m)
+  ret <2 x double> %r
+}
+
+declare <2 x double> @llvm.minimum.v2f64(<2 x double>, <2 x double>)
+
+define <2 x double> @FMINv2d(<2 x double> "reg"="q" %n, <2 x double> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 1 1 1 m:5 111101 n:5 d:5" "asm"="fmin {d:2d}, {n:2d}, {m:2d}" {
+  %r = call <2 x double> @llvm.minimum.v2f64(<2 x double> %n, <2 x double> %m)
+  ret <2 x double> %r
+}
+
+declare <2 x float> @llvm.maxnum.v2f32(<2 x float>, <2 x float>)
+
+define <2 x float> @FMAXNMv2s(<2 x float> "reg"="v" %n, <2 x float> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 0 0 1 m:5 110001 n:5 d:5" "asm"="fmaxnm {d:2s}, {n:2s}, {m:2s}" {
+  %r = call <2 x float> @llvm.maxnum.v2f32(<2 x float> %n, <2 x float> %m)
+  ret <2 x float> %r
+}
+
+declare <2 x float> @llvm.minnum.v2f32(<2 x float>, <2 x float>)
+
+define <2 x float> @FMINNMv2s(<2 x float> "reg"="v" %n, <2 x float> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 1 0 1 m:5 110001 n:5 d:5" "asm"="fminnm {d:2s}, {n:2s}, {m:2s}" {
+  %r = call <2 x float> @llvm.minnum.v2f32(<2 x float> %n, <2 x float> %m)
+  ret <2 x float> %r
+}
+
+declare <2 x float> @llvm.maximum.v2f32(<2 x float>, <2 x float>)
+
+define <2 x float> @FMAXv2s(<2 x float> "reg"="v" %n, <2 x float> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 0 0 1 m:5 111101 n:5 d:5" "asm"="fmax {d:2s}, {n:2s}, {m:2s}" {
+  %r = call <2 x float> @llvm.maximum.v2f32(<2 x float> %n, <2 x float> %m)
+  ret <2 x float> %r
+}
+
+declare <2 x float> @llvm.minimum.v2f32(<2 x float>, <2 x float>)
+
+define <2 x float> @FMINv2s(<2 x float> "reg"="v" %n, <2 x float> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 1 0 1 m:5 111101 n:5 d:5" "asm"="fmin {d:2s}, {n:2s}, {m:2s}" {
+  %r = call <2 x float> @llvm.minimum.v2f32(<2 x float> %n, <2 x float> %m)
+  ret <2 x float> %r
+}
+
 declare <16 x i8> @llvm.aarch64.neon.tbl1.v16i8(<16 x i8>, <16 x i8>)
 
 define <16 x i8> @TBL1v16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "feature"="neon" "enc"="0 1 001110 000 m:5 0 00 0 00 n:5 d:5" "asm"="tbl {d:16b}, {lb}{n:16b}{rb}, {m:16b}" {
