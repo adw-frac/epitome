@@ -1,0 +1,133 @@
+; The Scalable Matrix Extension (SME): enough to multiply matrices of f32
+; with outer products into the ZA array, a tile at a time.
+;
+; In streaming mode, between smstart and smstop, the machine has its own
+; vector length (SVL: 512 bits on Apple's M4, so a tile of 32-bit elements
+; is 16 x 16), and the Z and P registers and the ZA array. Epitome does not
+; allocate Z or P registers: these entries name fixed ones in their
+; encodings, and a recipe joins the instructions that use them, so that
+; nothing else comes between. ZA's tile za0.s is the one used.
+;
+; - smstart and smstop zero every vector register, so they clobber d0-d31:
+;   the frame saves the callee-saved d8-d15 of a function that uses them,
+;   and no floating-point value stays in a register across them.
+; - In streaming mode, Advanced SIMD and floating-point instructions are not
+;   allowed (without FEAT_SME_FA64), so code between smstart and smstop is
+;   integer arithmetic, loads and stores of integers, and these entries.
+; - A slice of ZA is chosen by w12 (w12 to w15 can choose one) plus an
+;   immediate; the recipes set w12 just before each use, and say so with
+;   "clobbers".
+;
+; The intrinsics are Epitome's own (llvm.epitome.sme.*), as LLVM's
+; llvm.aarch64.sme.* take scalable vectors and predicates as values, which
+; Epitome does not allocate. Encodings are checked against clang's assembler
+; (-march=armv9-a+sme).
+
+declare void @llvm.epitome.sme.start()
+declare void @llvm.epitome.sme.stop()
+declare void @llvm.epitome.sme.zero.za()
+declare void @llvm.epitome.sme.ptrue.p0.s()
+declare void @llvm.epitome.sme.whilelt.p1.s(i64)
+declare void @llvm.epitome.sme.fmopa.za0.s(ptr, ptr)
+declare void @llvm.epitome.sme.ld1w.za0h.s(ptr, i32)
+declare void @llvm.epitome.sme.st1w.za0h.s(ptr, i32)
+
+; Streaming mode and ZA on, and off: PSTATE.SM and PSTATE.ZA together.
+define void @SMSTART() "feature"="sme" "enc"="11010101000000110100011101111111" "asm"="smstart" "clobbers"="d0-d31" {
+  call void @llvm.epitome.sme.start()
+  ret void
+}
+
+define void @SMSTOP() "feature"="sme" "enc"="11010101000000110100011001111111" "asm"="smstop" "clobbers"="d0-d31" {
+  call void @llvm.epitome.sme.stop()
+  ret void
+}
+
+; All of ZA to zero.
+define void @ZEROZA() "feature"="sme" "enc"="11000000000010000000000011111111" "asm"="zero {lb}za{rb}" {
+  call void @llvm.epitome.sme.zero.za()
+  ret void
+}
+
+; Predicates: p0 all 32-bit lanes; p1 the first n of them, for a tile's
+; columns (n may be less than a tile is wide, at the edge of a matrix).
+define void @PTRUEP0S() "feature"="sme" "enc"="00100101100110001110001111100000" "asm"="ptrue p0.s" {
+  call void @llvm.epitome.sme.ptrue.p0.s()
+  ret void
+}
+
+define void @WHILELTP1S(i64 "reg"="x" %n) "feature"="sme" "enc"="00100101 10 1 n:5 000101 11111 0 0001" "asm"="whilelt p1.s, xzr, {n}" {
+  call void @llvm.epitome.sme.whilelt.p1.s(i64 %n)
+  ret void
+}
+
+; The pieces of the recipes below: they use the registers the recipes
+; leave them, so they are not chosen alone.
+declare void @llvm.epitome.sme.piece()
+
+define void @LD1WZ0P0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000000 101000 a:5 00000" "asm"="ld1w {lb}z0.s{rb}, p0/z, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ1P1(ptr "reg"="xsp" %b) "feature"="sme" "enc"="1010010101000000 101001 b:5 00001" "asm"="ld1w {lb}z1.s{rb}, p1/z, [{b}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMOPAZA0S() "feature"="sme" "enc"="10000000100000010010000000000000" "asm"="fmopa za0.s, p0/m, p1/m, z0.s, z1.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MOVW12(i32 "reg"="w" %s) "feature"="sme" "enc"="00101010000 s:5 00000011111 01100" "asm"="mov w12, {s}" "clobbers"="x12" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZA0HW12(ptr "reg"="xsp" %p) "feature"="sme" "enc"="1110000010011111000001 p:5 00000" "asm"="ld1w {lb}za0h.s[w12, 0]{rb}, p1/z, [{p}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1WZA0HW12(ptr "reg"="xsp" %p) "feature"="sme" "enc"="1110000010111111000001 p:5 00000" "asm"="st1w {lb}za0h.s[w12, 0]{rb}, p1, [{p}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+; za0.s += a x b, the outer product of a column of 32-bit floats at a (all
+; lanes, p0) and a row at b (the first lanes, p1).
+define void @sme.fmopa(ptr "reg"="xsp" %a, ptr "reg"="xsp" %b) "feature"="sme" "recipe"="sme.fmopa.expand" {
+  call void @llvm.epitome.sme.fmopa.za0.s(ptr %a, ptr %b)
+  ret void
+}
+
+define void @sme.fmopa.expand(ptr %a, ptr %b) {
+  call void @LD1WZ0P0(ptr %a)
+  call void @LD1WZ1P1(ptr %b)
+  call void @FMOPAZA0S()
+  ret void
+}
+
+; Row `slice` of za0.s from memory at p, and to it: the first lanes (p1).
+define void @sme.ld1w.za0h(ptr "reg"="xsp" %p, i32 "reg"="w" %slice) "feature"="sme" "recipe"="sme.ld1w.za0h.expand" {
+  call void @llvm.epitome.sme.ld1w.za0h.s(ptr %p, i32 %slice)
+  ret void
+}
+
+define void @sme.ld1w.za0h.expand(ptr %p, i32 %slice) {
+  call void @MOVW12(i32 %slice)
+  call void @LD1WZA0HW12(ptr %p)
+  ret void
+}
+
+define void @sme.st1w.za0h(ptr "reg"="xsp" %p, i32 "reg"="w" %slice) "feature"="sme" "recipe"="sme.st1w.za0h.expand" {
+  call void @llvm.epitome.sme.st1w.za0h.s(ptr %p, i32 %slice)
+  ret void
+}
+
+define void @sme.st1w.za0h.expand(ptr %p, i32 %slice) {
+  call void @MOVW12(i32 %slice)
+  call void @ST1WZA0HW12(ptr %p)
+  ret void
+}

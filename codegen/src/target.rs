@@ -74,6 +74,10 @@ pub struct Instr {
     pub second_result: bool,
     /// The features it needs (see `features.rs`).
     pub features: Vec<String>,
+    /// Registers it overwrites that are not its operands (`"clobbers"`,
+    /// as a convention lists registers): the allocator keeps values out of
+    /// them across it, and the frame saves those a function must keep.
+    pub clobbers: Vec<u8>,
     /// Operands `(base, offset)` whose address it uses is `base + offset`,
     /// the offset an immediate: a load or store whose body starts
     /// `getelementptr i8, ptr %base, i64 %offset`, or an add of an
@@ -391,6 +395,7 @@ pub const AARCH64_FILES: &[(&str, &str)] = &[
     ("30-bits.ll", include_str!("../targets/aarch64/30-bits.ll")),
     ("40-float.ll", include_str!("../targets/aarch64/40-float.ll")),
     ("45-crypto.ll", include_str!("../targets/aarch64/45-crypto.ll")),
+    ("45-sme.ll", include_str!("../targets/aarch64/45-sme.ll")),
     ("50-vectors.ll", include_str!("../targets/aarch64/50-vectors.ll")),
     ("60-recipes.ll", include_str!("../targets/aarch64/60-recipes.ll")),
     ("70-abi.ll", include_str!("../targets/aarch64/70-abi.ll")),
@@ -921,6 +926,13 @@ impl Target {
                     .flatten()
                     .map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect())
                     .unwrap_or_default(),
+                clobbers: match attr(&f.fn_attrs, "clobbers").flatten() {
+                    Some(list) => {
+                        let names: Vec<String> = list.split(',').map(|s| s.trim().to_string()).collect();
+                        self.machine.regs(&names).map_err(|e| format!("@{name}: \"clobbers\": {e}"))?
+                    }
+                    None => Vec::new(),
+                },
                 base_offset: base_offset_of(m, f, has_result),
                 address_of: has_result && base_offset_of(m, f, has_result).is_some() && returns_first(f),
                 func: g,
@@ -1431,6 +1443,7 @@ impl Target {
             is.insert(p.local, Is::Src(Src::Param(i)));
         }
         let mut emit = Vec::new();
+        let void = matches!(m.types.get(f.ty), Type::Function { ret, .. } if matches!(m.types.get(*ret), Type::Void));
         let insts: Vec<InstId> = f.blocks[f.entry().index()].insts.clone();
         let src_of = |is: &HashMap<LocalId, Is>, v: Value| -> Result<Is, String> {
             match v {
@@ -1486,15 +1499,20 @@ impl Target {
                     };
                     result = Some(k);
                 }
+                // A recipe for an operation with no result, such as a call
+                // to an intrinsic that only changes the machine's state.
+                Op::Ret(None) if void => {}
                 op => return Err(format!("unsupported in an expansion: {op:?}")),
             }
         }
         // The returned temporary is the pattern's result.
-        let r = result.ok_or("expansion without a result")?;
-        for e in &mut emit {
-            for a in &mut e.args {
-                if *a == Src::Temp(r) {
-                    *a = Src::Result;
+        if !void {
+            let r = result.ok_or("expansion without a result")?;
+            for e in &mut emit {
+                for a in &mut e.args {
+                    if *a == Src::Temp(r) {
+                        *a = Src::Result;
+                    }
                 }
             }
         }
@@ -1610,7 +1628,10 @@ impl Target {
                     Op::AtomicRmw { .. } | Op::CmpXchg { .. } | Op::Load { .. } | Op::Store { .. }
                 )
             });
-            if through_vectors || touches_memory {
+            // Nor those with no value, which only change the machine's
+            // state (SME's ZA and predicates): nothing to evaluate.
+            let void = matches!(m.types.get(f.ty), Type::Function { ret, .. } if matches!(m.types.get(*ret), Type::Void));
+            if through_vectors || touches_memory || void {
                 continue;
             }
             let want = self.body_tree(f, &HashMap::new(), 0)?.ok_or("recipe without a value")?;

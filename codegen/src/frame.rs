@@ -28,8 +28,9 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
             let (defs, _) = inst.defs_uses(t);
             let written =
                 defs.iter().filter_map(|&k| if let MOp::Reg(Reg::P(r)) = inst.ops[k] { Some(r) } else { None });
-            // And those inline assembly clobbers.
-            let clobbered = if matches!(inst.op, Opcode::Asm { .. }) { inst.imp_defs.clone() } else { vec![] };
+            // And those inline assembly and instructions clobber (a call's
+            // clobbers are the caller-saved registers, so add nothing).
+            let clobbered = inst.imp_defs.clone();
             for r in written.chain(clobbered) {
                 if callee_saved.contains(&r) && !saved.contains(&r) {
                     saved.push(r);
