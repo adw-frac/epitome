@@ -69,6 +69,14 @@ and run their output with `clang` when it is installed.
   RISC-V RV64 (`codegen/targets/riscv64/`). See `docs/design/isel.md`,
   `docs/design/targets.md` and `docs/design/objects.md`.
 
+- `mlir` (`epitome-mlir`): MLIR. A parser and printer for the generic
+  form of any dialect and the custom forms torch-mlir writes; passes that
+  lower a PyTorch model, as torch-mlir imports it, in upstream's stages
+  (`torch` to `linalg`, buffers, loops and the `llvm` dialect); and the
+  translation of the `llvm` dialect to LLVM IR. `epitome-mlir-opt` runs
+  passes and prints MLIR; `epitome-mlir-translate` writes LLVM IR. See
+  `docs/design/mlir.md` and the specification in `docs/mlir`.
+
 ## Running
 
 ```sh
@@ -112,6 +120,26 @@ cargo run --release -p epitome-codegen --bin epitome-llc -- --mcpu=apple-m1 --ma
 # finds a description there by the object's ELF machine).
 export EPITOME_TARGET_PATH=$PWD/codegen/targets
 cargo run --release -p epitome-codegen --bin epitome-objdump -- -d file.o
+```
+
+```sh
+# A PyTorch model, as torch-mlir imports it, lowered stage by stage and
+# printed as MLIR, then compiled with Epitome alone.
+cargo run --release -p epitome-mlir --bin epitome-mlir-opt -- \
+    docs/mlir/examples/pytorch/mlp.torch.mlir --pass=torch-to-linalg,bufferize
+cargo run --release -p epitome-mlir --bin epitome-mlir-translate -- \
+    docs/mlir/examples/pytorch/mlp.torch.mlir --pass=torch-to-llvm -o mlp.ll
+cargo run --release -p epitome-codegen --bin epitome-llc -- mlp.ll -o mlp.o
+```
+
+```sh
+# A language model from Hugging Face (TinyStories-1M), exported from
+# PyTorch as MLIR, compiled through every stage by Epitome into a Mach-O
+# executable with a Rust driver, writing a story (needs torch-mlir's Python
+# environment with transformers for the export, and an AArch64 Mac).
+python examples/tinystories/export.py target/tinystories
+cargo run --release --example tinystories
+target/tinystories/tinystories "Once upon a time, there was a little dog called"
 ```
 
 `epitome-opt --help` lists the options. `opt/tests/examples` has small
