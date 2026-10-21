@@ -25,14 +25,18 @@
 // function works out C[64, n] += AT[k, 64]^T B[k, n] for every column, in
 // one stretch of streaming mode: 64 columns at a time (the tiles side by
 // side, four 16-row blocks in turn), then 16 at a time (the tiles one above
-// another). Its arguments are as above,
-// but the last is the number of columns, n ("whole_rows").
+// another). Its arguments are as above, but the last is the number of
+// columns, n ("whole_rows"), and one more follows: how far apart, in
+// elements, B's panels of 64 columns are. That is 64 for B as it is; when B
+// is a constant, the pass may pack it into panels ("pack_b = 64"), each
+// k x 64 and contiguous, which then lie 64 k apart with rows 64 apart (ldb),
+// so that a weight streams from memory in one run.
 "epitome.kernel"() <{op = "matmul", element = f32,
     indexing_maps = [affine_map<(d0, d1, d2) -> (d0, d2)>, affine_map<(d0, d1, d2) -> (d2, d1)>,
                      affine_map<(d0, d1, d2) -> (d0, d1)>],
     iterator_types = ["parallel", "parallel", "reduction"],
     body = ["arith.mulf", "arith.addf"],
-    tile = array<i64: 64, 16>, whole_rows,
+    tile = array<i64: 64, 16>, whole_rows, pack_b = 64,
     function = @__epitome_sme_matmul_f32_64}> : () -> ()
 
 "epitome.kernel"() <{op = "batch_matmul", element = f32,
@@ -40,10 +44,10 @@
                      affine_map<(d0, d1, d2, d3) -> (d0, d1, d2)>],
     iterator_types = ["parallel", "parallel", "parallel", "reduction"],
     body = ["arith.mulf", "arith.addf"],
-    tile = array<i64: 64, 16>, whole_rows,
+    tile = array<i64: 64, 16>, whole_rows, pack_b = 64,
     function = @__epitome_sme_matmul_f32_64}> : () -> ()
 
-func.func private @__epitome_sme_matmul_f32_64(%c: !llvm.ptr, %ldc: i64, %at: !llvm.ptr, %lda: i64, %b: !llvm.ptr, %ldb: i64, %k: i64, %n: i64) attributes {llvm.no_inline} {
+func.func private @__epitome_sme_matmul_f32_64(%c: !llvm.ptr, %ldc: i64, %at: !llvm.ptr, %lda: i64, %b: !llvm.ptr, %ldb: i64, %k: i64, %n: i64, %panel: i64) attributes {llvm.no_inline} {
   "llvm.call_intrinsic"() <{intrin = "llvm.epitome.sme.start"}> : () -> ()
   "llvm.call_intrinsic"() <{intrin = "llvm.epitome.sme.ptrue.p0.s"}> : () -> ()
   %c0 = arith.constant 0 : index
@@ -64,7 +68,10 @@ func.func private @__epitome_sme_matmul_f32_64(%c: !llvm.ptr, %ldc: i64, %at: !l
   ^bb0(%wj: index):
     %wjj = arith.index_cast %wj : index to i64
     %wcj = "llvm.getelementptr"(%c, %wjj) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-    %wbj = "llvm.getelementptr"(%b, %wjj) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+    %six = "llvm.mlir.constant"() <{value = 6 : i64}> : () -> i64
+    %wpn = "llvm.lshr"(%wjj, %six) : (i64, i64) -> i64
+    %wpo = "llvm.mul"(%wpn, %panel) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+    %wbj = "llvm.getelementptr"(%b, %wpo) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
     "scf.for"(%c0, %c4, %c1) ({
     ^bb0(%wq: index):
       %wqq = arith.index_cast %wq : index to i64

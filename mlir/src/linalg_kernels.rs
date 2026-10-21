@@ -34,7 +34,8 @@ const BUILT_IN: &[(&str, &str)] = &[("aarch64-sme", include_str!("../targets/aar
 pub fn run(src: &Module, kernels: &str) -> Result<Module, String> {
     let set = load(kernels)?;
     let mut out = src.empty_like();
-    let mut imported: HashMap<String, String> = HashMap::new();
+    let mut cx =
+        Cx { set, imported: HashMap::new(), resources: src.resources(), packed: HashMap::new(), blobs: Vec::new() };
     for top in src.top_ops().collect::<Vec<_>>() {
         if src.op_name(top) != "builtin.module" {
             return Err(format!("{}: expected a builtin.module", src.op_name(top)));
@@ -52,7 +53,7 @@ pub fn run(src: &Module, kernels: &str) -> Result<Module, String> {
             for &b in &src.regions[r.index()].blocks {
                 for &op in &src.blocks[b.index()].ops {
                     if src.op_name(op) == "func.func" {
-                        func(src, op, &mut out, block, set, &mut imported, &mut map)?;
+                        func(src, op, &mut out, block, &mut cx, &mut map)?;
                     } else {
                         out.clone_op(src, op, Some(block), &mut map)?;
                     }
@@ -60,7 +61,66 @@ pub fn run(src: &Module, kernels: &str) -> Result<Module, String> {
             }
         }
     }
+    // The packed weights' blobs, before the file's own resources; the
+    // weights no call reads any longer, gone.
+    let at = out.items.iter().position(|i| matches!(i, Item::Resources(_))).unwrap_or(out.items.len());
+    for (k, b) in cx.blobs.into_iter().enumerate() {
+        out.items.insert(at + k, b);
+    }
+    drop_unused_globals(&mut out);
     Ok(out)
+}
+
+/// What the pass carries from one operation to the next.
+struct Cx<'a> {
+    set: &'static Set,
+    /// The kernels' functions copied into the module so far.
+    imported: HashMap<String, String>,
+    /// The blobs of the module being lowered, for packing constants.
+    resources: Resources<'a>,
+    /// Constants packed so far: the global of each, by (global, panel), and
+    /// the new blobs.
+    packed: HashMap<(String, u64), String>,
+    blobs: Vec<Item>,
+}
+
+/// Removes `memref.get_global`s whose result nothing uses, then the
+/// constant `memref.global`s nothing gets.
+fn drop_unused_globals(m: &mut Module) {
+    let used: std::collections::HashSet<ValueId> = m.ops.iter().flat_map(|o| o.operands.iter().copied()).collect();
+    for b in 0..m.blocks.len() {
+        let ops = std::mem::take(&mut m.blocks[b].ops);
+        let kept = ops
+            .into_iter()
+            .filter(|&op| {
+                let o = &m.ops[op.index()];
+                !(m.name(o.name) == "memref.get_global" && !used.contains(&o.results[0]))
+            })
+            .collect();
+        m.blocks[b].ops = kept;
+    }
+    let mut got = std::collections::HashSet::new();
+    for b in &m.blocks {
+        for &op in &b.ops {
+            if m.op_name(op) == "memref.get_global"
+                && let Some(Attr::SymbolRef(p)) = m.op_attr(op, "name").map(|a| m.attr(a))
+            {
+                got.insert(p[0].clone());
+            }
+        }
+    }
+    for b in 0..m.blocks.len() {
+        let ops = std::mem::take(&mut m.blocks[b].ops);
+        let kept = ops
+            .into_iter()
+            .filter(|&op| {
+                m.op_name(op) != "memref.global"
+                    || m.op_attr(op, "constant").is_none()
+                    || m.op_attr(op, "sym_name").and_then(|a| m.string_of(a)).is_some_and(|n| got.contains(&n))
+            })
+            .collect();
+        m.blocks[b].ops = kept;
+    }
 }
 
 fn dict(m: &Module, d: Option<AttrId>) -> Vec<(String, AttrId)> {
@@ -91,6 +151,10 @@ struct Kernel {
     /// argument the number of columns (rather than one tile, its last
     /// argument the tile's width).
     whole_rows: bool,
+    /// The function takes one more argument, how far apart B's panels of
+    /// this many columns are, and B may be a constant packed into such
+    /// panels, each k rows of them, contiguous.
+    pack_b: Option<u64>,
 }
 
 fn load(name: &str) -> Result<&'static Set, String> {
@@ -155,6 +219,7 @@ fn load(name: &str) -> Result<&'static Set, String> {
             function,
             batch,
             whole_rows: m.op_attr(op, "whole_rows").is_some(),
+            pack_b: m.op_attr(op, "pack_b").and_then(|a| m.int_of(a)).map(|p| p as u64),
         });
     }
     let set: &'static Set = Box::leak(Box::new(Set { m, kernels }));
@@ -168,10 +233,10 @@ fn func(
     f: OpId,
     out: &mut Module,
     parent: BlockId,
-    set: &Set,
-    imported: &mut HashMap<String, String>,
+    cx: &mut Cx<'_>,
     map: &mut HashMap<ValueId, ValueId>,
 ) -> Result<(), String> {
+    let set = cx.set;
     let o = &src.ops[f.index()];
     let mut spec = OpSpec::new("func.func").regions(o.regions.len()).loc(o.loc);
     for (k, v) in dict(src, o.properties) {
@@ -197,12 +262,12 @@ fn func(
                     Vec::new()
                 };
                 let done = match ks.first() {
-                    Some(k) if k.batch => batched(src, op, out, nb, parent, set, &ks, imported, map)?,
+                    Some(k) if k.batch => batched(src, op, out, nb, parent, cx, &ks, map)?,
                     Some(_) => {
                         let o = &src.ops[op.index()];
                         let operands = [o.operands[0], o.operands[1], o.operands[2]].map(|v| map[&v]);
                         let props = dict(src, o.properties);
-                        tiles(src, op, operands, &props, out, nb, parent, set, &ks, imported, map)?
+                        tiles(src, op, operands, &props, out, nb, parent, cx, &ks, map)?
                     }
                     None => false,
                 };
@@ -287,9 +352,8 @@ fn batched(
     out: &mut Module,
     block: BlockId,
     module_block: BlockId,
-    set: &Set,
+    cx: &mut Cx<'_>,
     ks: &[&Kernel],
-    imported: &mut HashMap<String, String>,
     map: &mut HashMap<ValueId, ValueId>,
 ) -> Result<bool, String> {
     let o = &src.ops[op.index()];
@@ -340,7 +404,7 @@ fn batched(
                 .build(out, Some(block));
             views[j] = out.result(s);
         }
-        if !tiles(src, op, views, &props, out, block, module_block, set, ks, imported, map)? {
+        if !tiles(src, op, views, &props, out, block, module_block, cx, ks, map)? {
             return Err("a batch_matmul whose matrices do not suit the kernel".into());
         }
     }
@@ -360,11 +424,11 @@ fn tiles(
     out: &mut Module,
     block: BlockId,
     module_block: BlockId,
-    set: &Set,
+    cx: &mut Cx<'_>,
     ks: &[&Kernel],
-    imported: &mut HashMap<String, String>,
     map: &mut HashMap<ValueId, ValueId>,
 ) -> Result<bool, String> {
+    let set = cx.set;
     let [a, b, c] = operands;
     let (Some((sa, elem)), Some((sb, _)), Some((sc, _))) =
         (out.shaped(out.value_type(a)), out.shaped(out.value_type(b)), out.shaped(out.value_type(c)))
@@ -388,7 +452,7 @@ fn tiles(
     }
 
     // The kernel's function, once in the module.
-    let fname = match imported.get(&k.function) {
+    let fname = match cx.imported.get(&k.function) {
         Some(n) => n.clone(),
         None => {
             let f = set
@@ -403,7 +467,7 @@ fn tiles(
             let ops = &mut out.blocks[module_block.index()].ops;
             let new = ops.pop().unwrap();
             ops.insert(0, new);
-            imported.insert(k.function.clone(), k.function.clone());
+            cx.imported.insert(k.function.clone(), k.function.clone());
             k.function.clone()
         }
     };
@@ -458,9 +522,21 @@ fn tiles(
         let i = add(out, OpSpec::new("arith.index_cast").operands(&[i]).results(&[i64t]));
         add(out, OpSpec::new("llvm.inttoptr").operands(&[i]).results(&[ptr]))
     };
-    let (pa, pb, pc) = (pointer(out, at), pointer(out, b), pointer(out, c));
-    let (ldc, lda, ldb) = (c64(out, lc.0[0] as i64), c64(out, m as i64), c64(out, lb.0[0] as i64));
-    let (kv, offb, offc) = (c64(out, kk as i64), c64(out, lb.1 as i64), c64(out, lc.1 as i64));
+    // B packed into panels, if the kernel takes it so and B is a constant
+    // whose columns are whole panels; else as it is.
+    let packed = match k.pack_b {
+        Some(p) if k.whole_rows && n % p == 0 => pack(out, b, p, module_block, block, cx)?,
+        _ => None,
+    };
+    let (pa, pc) = (pointer(out, at), pointer(out, c));
+    let pb = pointer(out, packed.unwrap_or(b));
+    let (ldc, lda) = (c64(out, lc.0[0] as i64), c64(out, m as i64));
+    let (ldb, offb, panel) = match (packed, k.pack_b) {
+        (Some(_), Some(p)) => (c64(out, p as i64), c64(out, 0), Some(c64(out, (p * kk) as i64))),
+        (None, Some(p)) => (c64(out, lb.0[0] as i64), c64(out, lb.1 as i64), Some(c64(out, p as i64))),
+        _ => (c64(out, lb.0[0] as i64), c64(out, lb.1 as i64), None),
+    };
+    let (kv, offc) = (c64(out, kk as i64), c64(out, lc.1 as i64));
     let nv = c64(out, n as i64);
 
     // for i in 0..full by tile rows, for j in 0..n by tile columns.
@@ -505,27 +581,12 @@ fn tiles(
         let ta = gep(out, ob, pa, i64i);
         let tb = gep(out, ob, pb, offb);
         let callee = out.symbol_attr(&fname);
-        OpSpec::new("func.call")
-            .operands(&[tc, ldc, ta, lda, tb, ldb, kv, nv])
-            .prop("callee", callee)
-            .build(out, Some(ob));
+        let mut args = vec![tc, ldc, ta, lda, tb, ldb, kv, nv];
+        args.extend(panel);
+        OpSpec::new("func.call").operands(&args).prop("callee", callee).build(out, Some(ob));
         OpSpec::new("scf.yield").build(out, Some(ob));
-        return rest_rows(
-            src,
-            op,
-            [a, b, c],
-            props,
-            out,
-            block,
-            module_block,
-            set,
-            &ks[ki + 1..],
-            imported,
-            map,
-            full,
-            at,
-        )
-        .map(|()| true);
+        return rest_rows(src, op, [a, b, c], props, out, block, module_block, cx, &ks[ki + 1..], map, full, at)
+            .map(|()| true);
     }
     let inner = OpSpec::new("scf.for").operands(&[zero, nend, cols]).regions(1).build(out, Some(ob));
     OpSpec::new("scf.yield").build(out, Some(ob));
@@ -550,13 +611,12 @@ fn tiles(
     let offs = int(out, ib, "llvm.add", i64j, offb);
     let tb = gep(out, ib, pb, offs);
     let callee = out.symbol_attr(&fname);
-    OpSpec::new("func.call")
-        .operands(&[tc, ldc, ta, lda, tb, ldb, kv, width])
-        .prop("callee", callee)
-        .build(out, Some(ib));
+    let mut args = vec![tc, ldc, ta, lda, tb, ldb, kv, width];
+    args.extend(panel);
+    OpSpec::new("func.call").operands(&args).prop("callee", callee).build(out, Some(ib));
     OpSpec::new("scf.yield").build(out, Some(ib));
 
-    rest_rows(src, op, [a, b, c], props, out, block, module_block, set, &ks[ki + 1..], imported, map, full, at)?;
+    rest_rows(src, op, [a, b, c], props, out, block, module_block, cx, &ks[ki + 1..], map, full, at)?;
     Ok(true)
 }
 
@@ -571,9 +631,8 @@ fn rest_rows(
     out: &mut Module,
     block: BlockId,
     module_block: BlockId,
-    set: &Set,
+    cx: &mut Cx<'_>,
     ks: &[&Kernel],
-    imported: &mut HashMap<String, String>,
     map: &mut HashMap<ValueId, ValueId>,
     full: u64,
     at: ValueId,
@@ -605,7 +664,7 @@ fn rest_rows(
         };
         let va = view(out, a, &layout(out, out.value_type(a)).unwrap(), kk);
         let vc = view(out, c, &lc, n);
-        if !tiles(src, op, [va, b, vc], props, out, block, module_block, set, ks, imported, map)? {
+        if !tiles(src, op, [va, b, vc], props, out, block, module_block, cx, ks, map)? {
             let mut spec = OpSpec::new("linalg.generic").operands(&[va, b, vc]).regions(1).loc(o.loc);
             for (key, v) in props {
                 spec = spec.prop(key, *v);
@@ -617,4 +676,91 @@ fn rest_rows(
     }
     OpSpec::new("memref.dealloc").operands(&[at]).build(out, Some(block));
     Ok(())
+}
+
+/// `b`, if it is a constant (a `memref.get_global` of a constant global
+/// of `dense_resource` data, row-major), packed into panels of `panel`
+/// columns: panel p holds columns `p panel` to `(p + 1) panel - 1`, k rows
+/// of `panel` elements, the panels one after another. A new global, made
+/// once for each constant and width, got at the end of `block`.
+fn pack(
+    out: &mut Module,
+    b: ValueId,
+    panel: u64,
+    module_block: BlockId,
+    block: BlockId,
+    cx: &mut Cx<'_>,
+) -> Result<Option<ValueId>, String> {
+    let ValueDef::Result { op: get, .. } = out.values[b.index()].def else { return Ok(None) };
+    if out.op_name(get) != "memref.get_global" {
+        return Ok(None);
+    }
+    let Some(Attr::SymbolRef(p)) = out.op_attr(get, "name").map(|a| out.attr(a)).cloned() else { return Ok(None) };
+    let name = p[0].clone();
+    let ty = out.value_type(b);
+    let Some((shape, elem)) = out.shaped(ty) else { return Ok(None) };
+    if strided_layout(out, ty).is_some() || shape.len() != 2 || !matches!(out.ty(elem), Type::Float("f32")) {
+        return Ok(None);
+    }
+    let (kk, n) = (shape[0], shape[1]);
+    let new_name = match cx.packed.get(&(name.clone(), panel)) {
+        Some(g) => g.clone(),
+        None => {
+            // The global, constant, and its data.
+            let global = out.blocks[module_block.index()].ops.iter().copied().find(|&g| {
+                out.op_name(g) == "memref.global"
+                    && out.op_attr(g, "sym_name").and_then(|a| out.string_of(a)).as_deref() == Some(&name)
+            });
+            let Some(global) = global.filter(|&g| out.op_attr(g, "constant").is_some()) else { return Ok(None) };
+            let key = match out.op_attr(global, "initial_value").map(|a| out.attr(out.resolve_attr(a))) {
+                Some(Attr::Builtin { keyword: "dense_resource", body, .. }) => {
+                    body[1..body.len() - 1].trim().to_string()
+                }
+                _ => return Ok(None),
+            };
+            let Some(data) = cx.resources.get(&key) else { return Ok(None) };
+            if data.len() as u64 != kk * n * 4 {
+                return Ok(None);
+            }
+            let mut bytes = vec![0u8; data.len()];
+            let (rows, cols, w) = (kk as usize, n as usize, panel as usize);
+            for p in 0..cols / w {
+                for r in 0..rows {
+                    let from = (r * cols + p * w) * 4;
+                    let to = ((p * rows + r) * w) * 4;
+                    bytes[to..to + w * 4].copy_from_slice(&data[from..from + w * 4]);
+                }
+            }
+            let new_key = format!("{key}.panels{panel}");
+            let new_name = format!("{name}_panels{panel}");
+            cx.blobs.push(Item::Blob { key: new_key.clone(), align: 64, bytes: std::sync::Arc::new(bytes) });
+            // The same global, of the packed data, after the original.
+            let tensor = out.tensor_type(&shape, elem);
+            let value = out.intern_attr(Attr::Builtin {
+                keyword: "dense_resource",
+                body: format!("<{new_key}>"),
+                ty: Some(tensor),
+            });
+            let sym = out.string_attr(&new_name);
+            let mut spec = OpSpec::new("memref.global");
+            for (k, v) in dict(out, out.ops[global.index()].properties) {
+                spec = match k.as_str() {
+                    "initial_value" => spec.prop(&k, value),
+                    "sym_name" => spec.prop(&k, sym),
+                    _ => spec.prop(&k, v),
+                };
+            }
+            let g = spec.build(out, Some(module_block));
+            let ops = &mut out.blocks[module_block.index()].ops;
+            ops.pop();
+            let at = ops.iter().position(|&o| o == global).unwrap() + 1;
+            ops.insert(at, g);
+            cx.packed.insert((name.clone(), panel), new_name.clone());
+            new_name
+        }
+    };
+    // The packed data has B's type, though not its layout.
+    let sym = out.symbol_attr(&new_name);
+    let g = OpSpec::new("memref.get_global").results(&[ty]).prop("name", sym).build(out, Some(block));
+    Ok(Some(out.result(g)))
 }
