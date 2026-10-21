@@ -149,7 +149,9 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     crate::atomics::expand_atomics(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     expand_overflow(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     wide_intrinsics(cx, &mut f);
+    crate::wide_vectors::scalarize(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     crate::wide::split_wide(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
+    crate::aggregates::scalarize(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     split_struct_selects(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     split_struct_phis(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     check(cx, &f, fname)?;
@@ -2305,6 +2307,31 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                     c.args[1].value = no;
                 }
             }
+            // The first set lane of a mask: of the mask as an integer, its
+            // trailing zeros (all the lanes, if none is set).
+            if name.starts_with("llvm.experimental.cttz.elts.")
+                && let Type::Vector { len, .. } = *cx.m.types.get(cx.value_ty(s.f, args[0]))
+            {
+                let it = cx.m.types.int(len);
+                let bits = s.cast(CastOp::BitCast, args[0], it);
+                let no = cx.int(i1, 0);
+                let n = call_intrinsic(cx, &mut s, &format!("llvm.cttz.i{len}"), vec![bits, no], it);
+                let rb = match cx.m.types.get(ty) {
+                    Type::Int(b) => *b,
+                    _ => 64,
+                };
+                let v = match rb.cmp(&len) {
+                    std::cmp::Ordering::Greater => s.cast(CastOp::ZExt, n, ty),
+                    std::cmp::Ordering::Less => s.cast(CastOp::Trunc, n, ty),
+                    std::cmp::Ordering::Equal => n,
+                };
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), v);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
             // Mathematical functions without an instruction: the C
             // library's (lane by lane, for vectors), as LLVM calls them.
             if let Some(c) = libm_base(&base)
@@ -3335,6 +3362,18 @@ pub fn const_address(cx: &Ctx, c: ConstId) -> Option<(GlobalId, i64)> {
         ConstKind::Global(g) => Some((*g, 0)),
         ConstKind::Expr(e) => match e {
             ConstExpr::Cast { value, .. } => const_address(cx, *value),
+            // `getelementptr (i8, ptr null, i64 ptrtoint (ptr @g))`: @g's
+            // address, as an offset from null.
+            ConstExpr::Gep { ptr: base, indices, source_ty, .. }
+                if matches!(cx.m.constant(*base).kind, ConstKind::Null | ConstKind::Zero)
+                    && indices.len() == 1
+                    && cx.size_of(*source_ty).ok() == Some(1) =>
+            {
+                match &cx.m.constant(indices[0]).kind {
+                    ConstKind::Expr(ConstExpr::Cast { op: CastOp::PtrToInt, value, .. }) => const_address(cx, *value),
+                    _ => None,
+                }
+            }
             ConstExpr::Gep { ptr: base, indices, source_ty, .. } => {
                 let (g, mut off) = const_address(cx, *base)?;
                 let mut ty = *source_ty;

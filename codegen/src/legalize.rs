@@ -298,7 +298,16 @@ fn pointer_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         Type::Vector { scalable: false, len, elem } if elem == ptr => Some(vec_ty(cx, len, i64t)),
         _ => None,
     };
-    if !f.locals.iter().any(|l| matches!(cx.m.types.get(l.ty), Type::Vector { elem, .. } if *elem == ptr)) {
+    let ptr_vec = |cx: &Ctx, ty: TypeId| matches!(cx.m.types.get(ty), Type::Vector { elem, .. } if *elem == ptr);
+    // (Or constants of them: a store of `<ptr @a, ptr null>`.)
+    let any_const = f.insts_in_order().any(|i| {
+        let mut found = false;
+        f.insts[i.index()].op.for_each_value(|v| {
+            found |= matches!(*v, Value::Const(c) if ptr_vec(cx, cx.m.constant(c).ty));
+        });
+        found
+    });
+    if !any_const && !f.locals.iter().any(|l| ptr_vec(cx, l.ty)) {
         return Ok(());
     }
     for k in 0..f.locals.len() {
@@ -311,24 +320,52 @@ fn pointer_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         let mut k = 0;
         while k < f.blocks[b.index()].insts.len() {
             let i = f.blocks[b.index()].insts[k];
-            // Constants of pointer vectors: null, zero and poison only.
+            // Constants of pointer vectors: lane by lane, null as 0, poison
+            // and undef as they are; a lane holding a global's address is
+            // put in by instructions (not into a phi's operand, which has
+            // nowhere before it for them).
             let mut op = f.insts[i.index()].op.clone();
+            let is_phi = op.is_phi();
             let mut bad = false;
+            let mut built: Vec<(usize, TypeId, Vec<Option<ConstId>>)> = Vec::new();
+            let mut slot = 0usize;
             op.for_each_value_mut(|v| {
+                slot += 1;
                 if let Value::Const(c) = *v {
                     let k = cx.m.constant(c).clone();
                     if let Some(t) = as_int(cx, k.ty) {
+                        let lane = |cx: &mut Ctx, e: ConstId| -> Option<ConstId> {
+                            match cx.m.constant(e).kind {
+                                ConstKind::Null | ConstKind::Zero => {
+                                    Some(cx.m.consts.intern(Constant { ty: i64t, kind: ConstKind::Zero }))
+                                }
+                                ConstKind::Poison => {
+                                    Some(cx.m.consts.intern(Constant { ty: i64t, kind: ConstKind::Poison }))
+                                }
+                                ConstKind::Undef => {
+                                    Some(cx.m.consts.intern(Constant { ty: i64t, kind: ConstKind::Undef }))
+                                }
+                                _ => None,
+                            }
+                        };
                         let kind = match k.kind {
                             ConstKind::Zero | ConstKind::Null => ConstKind::Zero,
-                            ConstKind::Vector(es)
-                                if es
-                                    .iter()
-                                    .all(|&e| matches!(cx.m.constant(e).kind, ConstKind::Null | ConstKind::Zero)) =>
-                            {
-                                ConstKind::Zero
-                            }
                             ConstKind::Poison => ConstKind::Poison,
                             ConstKind::Undef => ConstKind::Undef,
+                            ConstKind::Vector(es) => {
+                                let lanes: Vec<Option<ConstId>> = es.iter().map(|&e| lane(cx, e)).collect();
+                                if lanes.iter().all(Option::is_some) {
+                                    ConstKind::Vector(lanes.into_iter().flatten().collect())
+                                } else if is_phi {
+                                    bad = true;
+                                    return;
+                                } else {
+                                    // The known lanes now; the globals' below.
+                                    built.push((slot, t, lanes.clone()));
+                                    let zero = cx.m.consts.intern(Constant { ty: i64t, kind: ConstKind::Zero });
+                                    ConstKind::Vector(lanes.into_iter().map(|l| l.unwrap_or(zero)).collect())
+                                }
+                            }
                             _ => {
                                 bad = true;
                                 return;
@@ -340,6 +377,66 @@ fn pointer_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
             });
             if bad {
                 return Err("a vector of pointers to globals".into());
+            }
+            // Each lane holding a global's address: put in, before.
+            let mut lanes_new = Vec::new();
+            for (at, t, lanes) in built {
+                let Value::Const(orig) = ({
+                    let mut n = 0;
+                    let mut found = None;
+                    f.insts[i.index()].op.for_each_value(|v| {
+                        n += 1;
+                        if n == at {
+                            found = Some(*v);
+                        }
+                    });
+                    found.unwrap()
+                }) else {
+                    unreachable!()
+                };
+                let ConstKind::Vector(es) = cx.m.constant(orig).kind.clone() else { unreachable!() };
+                let mut n = 0;
+                let mut cur = Value::Const(cx.m.consts.intern(Constant { ty: t, kind: ConstKind::Zero }));
+                op.for_each_value(|v| {
+                    n += 1;
+                    if n == at {
+                        cur = *v;
+                    }
+                });
+                for (l, e) in es.iter().enumerate() {
+                    if lanes[l].is_some() {
+                        continue;
+                    }
+                    let addr = f.add_inst(
+                        Op::Cast {
+                            op: CastOp::PtrToInt,
+                            flags: IntFlags::NONE,
+                            fmf: FastMath::default(),
+                            value: Value::Const(*e),
+                        },
+                        Some((None, i64t)),
+                    );
+                    lanes_new.push(addr);
+                    let idx = cx.int(i64t, l as i64);
+                    let ins = f.add_inst(
+                        Op::InsertElement { vector: cur, element: f.result(addr), index: idx },
+                        Some((None, t)),
+                    );
+                    lanes_new.push(ins);
+                    cur = f.result(ins);
+                }
+                let mut n = 0;
+                op.for_each_value_mut(|v| {
+                    n += 1;
+                    if n == at {
+                        *v = cur;
+                    }
+                });
+            }
+            if !lanes_new.is_empty() {
+                let m = lanes_new.len();
+                f.blocks[b.index()].insts.splice(k..k, lanes_new);
+                k += m;
             }
             let res = f.insts[i.index()].result;
             let res_ty = res.map(|r| f.locals[r.index()].ty);
@@ -481,6 +578,147 @@ fn native_shuffle(cx: &Ctx, f: &Function, i: InstId) -> bool {
         LocalDef::Inst(d) if matches!(f.insts[d.index()].op, Op::InsertElement { .. })));
     let src_bits = crate::target::type_bits(cx.m, cx.value_ty(f, *a));
     crate::target::mask_lanes(cx.m, *mask).is_some_and(|lanes| cx.t.has_shuffle(&lanes, hb, src_bits, of_insert))
+}
+
+/// A select of whole vectors by one boolean: by a mask of it in every
+/// lane (a splat of one boolean, which `fix_masks` makes right at any
+/// width), lane by lane.
+fn scalar_selects(cx: &mut Ctx, f: &mut Function) {
+    let i1 = cx.m.types.int(1);
+    let i32t = cx.m.types.int(32);
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::Select { fmf, cond, then_value, else_value } = f.insts[i.index()].op else {
+                k += 1;
+                continue;
+            };
+            let ty = f.locals[f.insts[i.index()].result.unwrap().index()].ty;
+            let Type::Vector { len, scalable: false, .. } = *cx.m.types.get(ty) else {
+                k += 1;
+                continue;
+            };
+            if cx.value_ty(f, cond) != i1 {
+                k += 1;
+                continue;
+            }
+            let mt = vec_ty(cx, len, i1);
+            let poison = Value::Const(cx.m.consts.intern(Constant { ty: mt, kind: ConstKind::Poison }));
+            let zero = cx.int(i32t, 0);
+            let mut bld = Builder { f, new: Vec::new() };
+            let one = bld.op(Op::InsertElement { vector: poison, element: cond, index: zero }, Some(mt));
+            let lanes = vec_ty(cx, len, i32t);
+            let mask = cx.m.consts.intern(Constant { ty: lanes, kind: ConstKind::Zero });
+            let all = bld.op(Op::ShuffleVector { a: one, b: poison, mask }, Some(mt));
+            let new = bld.new;
+            let n = new.len();
+            f.insts[i.index()].op = Op::Select { fmf, cond: all, then_value, else_value };
+            f.blocks[b.index()].insts.splice(k..k, new);
+            k += n + 1;
+        }
+    }
+}
+
+/// Vector floating-point comparisons as the ordered ones instructions make
+/// (Advanced SIMD's fcmeq, fcmgt and fcmge, and their mirror images): an
+/// unordered one is not the opposite ordered one (`une` is not `oeq`),
+/// `ord` is each operand equal to itself, `one` less or greater, `ueq`
+/// not `one`; `true` and `false` are constants.
+fn vector_fcmps(cx: &mut Ctx, f: &mut Function) {
+    use FCmpPred::*;
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::FCmp { pred, fmf, lhs, rhs } = f.insts[i.index()].op else {
+                k += 1;
+                continue;
+            };
+            let r = f.insts[i.index()].result.unwrap();
+            let mt = f.locals[r.index()].ty;
+            if !is_vec(cx, mt) || matches!(pred, Oeq | Ogt | Oge | Olt | Ole) {
+                k += 1;
+                continue;
+            }
+            // Masks negated as integers of the compared lanes' width:
+            // extended, inverted, compared with zero.
+            let (len, _, eb) = vec_info(cx, cx.value_ty(f, lhs)).unwrap();
+            let it = {
+                let e = cx.m.types.int(eb);
+                vec_ty(cx, len, e)
+            };
+            let all = Value::Const({
+                let e = cx.m.types.int(eb);
+                let t =
+                    cx.m.consts
+                        .intern(Constant { ty: e, kind: ConstKind::Int(epitome_ir::apint::ApInt::from_i64(eb, -1)) });
+                cx.m.consts.intern(Constant { ty: it, kind: ConstKind::Splat(t) })
+            });
+            let izero = Value::Const(cx.m.consts.intern(Constant { ty: it, kind: ConstKind::Zero }));
+            let mut bld = Builder { f, new: Vec::new() };
+            let not = |bld: &mut Builder, m: Value| {
+                let w = bld.op(
+                    Op::Cast { op: CastOp::SExt, flags: IntFlags::NONE, fmf: FastMath::default(), value: m },
+                    Some(it),
+                );
+                let x = bld.op(
+                    Op::Binary { op: BinOp::Xor, flags: IntFlags::NONE, fmf: FastMath::default(), lhs: w, rhs: all },
+                    Some(it),
+                );
+                bld.op(Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: x, rhs: izero }, Some(mt))
+            };
+            let cmp = |bld: &mut Builder, p: FCmpPred, l: Value, r: Value| {
+                bld.op(Op::FCmp { pred: p, fmf, lhs: l, rhs: r }, Some(mt))
+            };
+            let bin = |bld: &mut Builder, op: BinOp, l: Value, r: Value| {
+                bld.op(Op::Binary { op, flags: IntFlags::NONE, fmf: FastMath::default(), lhs: l, rhs: r }, Some(mt))
+            };
+            let v = match pred {
+                True => {
+                    let f = cmp(&mut bld, Oeq, lhs, lhs);
+                    let g = not(&mut bld, f);
+                    bin(&mut bld, BinOp::Or, f, g)
+                }
+                False => Value::Const(cx.m.consts.intern(Constant { ty: mt, kind: ConstKind::Zero })),
+                Ord => {
+                    let a = cmp(&mut bld, Oeq, lhs, lhs);
+                    let c = cmp(&mut bld, Oeq, rhs, rhs);
+                    bin(&mut bld, BinOp::And, a, c)
+                }
+                One | Ueq => {
+                    let a = cmp(&mut bld, Olt, lhs, rhs);
+                    let c = cmp(&mut bld, Ogt, lhs, rhs);
+                    let o = bin(&mut bld, BinOp::Or, a, c);
+                    if pred == One { o } else { not(&mut bld, o) }
+                }
+                Uno => {
+                    let a = cmp(&mut bld, Oeq, lhs, lhs);
+                    let c = cmp(&mut bld, Oeq, rhs, rhs);
+                    let o = bin(&mut bld, BinOp::And, a, c);
+                    not(&mut bld, o)
+                }
+                _ => {
+                    let opposite = match pred {
+                        Une => Oeq,
+                        Ult => Oge,
+                        Ule => Ogt,
+                        Ugt => Ole,
+                        _ => Olt, // Uge
+                    };
+                    let o = cmp(&mut bld, opposite, lhs, rhs);
+                    not(&mut bld, o)
+                }
+            };
+            let new = bld.new;
+            f.replace_uses(Value::Local(r), v);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
 }
 
 /// Vector operations rewritten into a form instructions more often have:
@@ -848,6 +1086,8 @@ fn fix_masks(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
 
 pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     pointer_vectors(cx, f)?;
+    scalar_selects(cx, f);
+    vector_fcmps(cx, f);
     rewrite_vector_ops(cx, f);
     fix_masks(cx, f)?;
     crate::prepare::bool_vector_casts(cx, f);

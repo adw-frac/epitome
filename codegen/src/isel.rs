@@ -440,7 +440,12 @@ impl<'a, 'b> Sel<'a, 'b> {
         let res_hbits = inst.result.map(|r| self.hbits(f.locals[r.index()].ty)).unwrap_or(0);
         let v = Term::V;
         Some(match &inst.op {
-            Op::FCmp { pred, lhs, rhs, .. } => (Head::FCmp(*pred, self.vbits(*lhs)), vec![v(*lhs), v(*rhs)]),
+            // (A vector's by its lanes and their type: <2 x double> and
+            // <4 x float> are both 128 bits.)
+            Op::FCmp { pred, lhs, rhs, .. } => {
+                let b = if self.is_vector(self.ty_of(*lhs)) { self.vhbits(*lhs) } else { self.vbits(*lhs) };
+                (Head::FCmp(*pred, b), vec![v(*lhs), v(*rhs)])
+            }
             Op::FNeg { value, .. } => (Head::FNeg(res_hbits), vec![v(*value)]),
             Op::Binary { op, lhs, rhs, .. } => {
                 let b = if res_hbits & crate::target::VEC != 0 { res_hbits } else { bin_bits(*op, res_bits) };

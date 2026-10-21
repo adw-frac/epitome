@@ -999,7 +999,11 @@ impl Target {
                 mk(Head::Select(wide_bits(res_hbits)), vec![ev(*cond)?, ev(*then_value)?, ev(*else_value)?])
             }
             Op::Cast { op, value, .. } => mk(Head::Cast(*op, hb(*value), wide_bits(res_hbits)), vec![ev(*value)?]),
-            Op::FCmp { pred, lhs, rhs, .. } => mk(Head::FCmp(*pred, ty_bits(*lhs)), vec![ev(*lhs)?, ev(*rhs)?]),
+            // (A vector's by its lanes and their type, as isel.rs keys it.)
+            Op::FCmp { pred, lhs, rhs, .. } => {
+                let b = if hb(*lhs) & VEC != 0 { hb(*lhs) } else { ty_bits(*lhs) };
+                mk(Head::FCmp(*pred, b), vec![ev(*lhs)?, ev(*rhs)?])
+            }
             Op::FNeg { value, .. } => mk(Head::FNeg(res_hbits), vec![ev(*value)?]),
             Op::Load { ptr, atomic, .. } if acquires(atomic) => mk(Head::LoadAcq(res_hbits), vec![ev(*ptr)?]),
             Op::AtomicRmw { op, ptr, value, ordering, .. } => {

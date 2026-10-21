@@ -563,7 +563,7 @@ fn rewrite(
 }
 
 /// The blocks reachable from the entry, in reverse postorder.
-fn reverse_postorder(f: &Function) -> Vec<BlockId> {
+pub(crate) fn reverse_postorder(f: &Function) -> Vec<BlockId> {
     let mut seen = vec![false; f.blocks.len()];
     let mut post = Vec::new();
     let entry = f.layout[0];

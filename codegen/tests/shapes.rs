@@ -109,3 +109,57 @@ fn block_comments_in_inline_assembly() {
     );
     assert!(a.contains("/*x0*/"), "{a}");
 }
+
+#[test]
+fn double_vector_comparisons_are_of_doubles() {
+    // <2 x double> and <4 x float> are both 128 bits: the comparison is
+    // of the lanes' type.
+    let a = asm(
+        "define <2 x i64> @f(<2 x double> %a, <2 x double> %b) {\n  %m = fcmp ogt <2 x double> %a, %b\n  %r = sext <2 x i1> %m to <2 x i64>\n  ret <2 x i64> %r\n}",
+    );
+    assert!(a.contains("fcmgt v0.2d"), "{a}");
+    // Unordered ones: the opposite ordered one, inverted.
+    let a = asm(
+        "define <2 x i64> @g(<2 x double> %a, <2 x double> %b) {\n  %m = fcmp une <2 x double> %a, %b\n  %r = sext <2 x i1> %m to <2 x i64>\n  ret <2 x i64> %r\n}",
+    );
+    assert!(a.contains("fcmeq") && a.contains(".2d"), "{a}");
+}
+
+#[test]
+fn vectors_of_pointers_to_globals() {
+    let a = asm(
+        "@a = global i64 1\ndefine void @f(ptr %p) {\n  store <2 x ptr> <ptr @a, ptr null>, ptr %p, align 8\n  ret void\n}",
+    );
+    assert!(a.contains("_a@"), "{a}");
+}
+
+#[test]
+fn first_set_lanes_and_scalar_selects() {
+    let a = asm(
+        "declare i64 @llvm.experimental.cttz.elts.i64.v16i1(<16 x i1>, i1)\ndefine i64 @f(<16 x i8> %v) {\n  %m = icmp eq <16 x i8> %v, zeroinitializer\n  %r = call i64 @llvm.experimental.cttz.elts.i64.v16i1(<16 x i1> %m, i1 false)\n  ret i64 %r\n}",
+    );
+    assert!(a.contains("rbit") || a.contains("ctz") || a.contains("clz"), "{a}");
+    let a = asm(
+        "define <2 x double> @s(i1 %c, <2 x double> %a, <2 x double> %b) {\n  %r = select i1 %c, <2 x double> %a, <2 x double> %b\n  ret <2 x double> %r\n}",
+    );
+    assert!(a.contains("bsl"), "{a}");
+}
+
+#[test]
+fn wide_lanes_and_nested_aggregates() {
+    // Lanes of i128, one by one.
+    let a = asm(
+        "define i8 @w(i128 %m, <8 x i8> %k) {\n  %si = insertelement <8 x i128> poison, i128 %m, i64 0\n  %sp = shufflevector <8 x i128> %si, <8 x i128> poison, <8 x i32> zeroinitializer\n  %z = zext <8 x i8> %k to <8 x i128>\n  %b = shl <8 x i128> splat (i128 1), %z\n  %a = and <8 x i128> %b, %sp\n  %c = icmp ne <8 x i128> %a, zeroinitializer\n  %r = bitcast <8 x i1> %c to i8\n  ret i8 %r\n}",
+    );
+    assert!(!a.is_empty());
+    // A named struct with a struct inside: its leaves.
+    let a = asm(
+        "%In = type { ptr, i64 }\n%Out = type { %In, i32 }\ndefine i64 @n(ptr %p) {\n  %a = load volatile %Out, ptr %p, align 8\n  %i = extractvalue %Out %a, 0\n  %n = extractvalue %In %i, 1\n  ret i64 %n\n}",
+    );
+    assert!(a.contains("[x0, #8]") || a.contains("ldp"), "{a}");
+    // An address as an offset from null.
+    let a = asm(
+        "@g = global i64 1\ndefine ptr @z() {\n  ret ptr getelementptr (i8, ptr null, i64 ptrtoint (ptr @g to i64))\n}",
+    );
+    assert!(a.contains("_g@"), "{a}");
+}

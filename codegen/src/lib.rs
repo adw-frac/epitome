@@ -3,6 +3,7 @@
 //! assembly, binary and disassembly output. See `docs/design/isel.md`.
 
 pub mod abi;
+pub mod aggregates;
 pub mod asm;
 pub mod assembler;
 pub mod atomics;
@@ -27,6 +28,7 @@ pub mod regalloc;
 pub mod target;
 pub mod unwind;
 pub mod wide;
+pub mod wide_vectors;
 
 use epitome_ir::Module;
 use epitome_ir::layout::DataLayout;
