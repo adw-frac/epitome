@@ -296,6 +296,20 @@ fn data(cx: &Ctx, abi: &Abi, ty: TypeId, c: ConstId, out: &mut Vec<Item>) -> Res
     let k = m.constant(c);
     match (&k.kind, m.types.get(ty).clone()) {
         (ConstKind::Zero | ConstKind::Null | ConstKind::Undef | ConstKind::Poison, _) => out.push(Item::Zero(size)),
+        // Wider than a word: its words, low first (the machines here are
+        // little-endian).
+        (ConstKind::Int(a), Type::Int(bits)) if size > 8 && size % 8 == 0 => {
+            let words = a.words();
+            let top = if a.is_negative() { u64::MAX } else { 0 };
+            for k in 0..(size / 8) as usize {
+                let mut w = words.get(k).copied().unwrap_or(top);
+                // The last word's bits past the integer's are its sign's.
+                if (k as u32 + 1) * 64 > bits && bits % 64 != 0 && k as u32 * 64 < bits {
+                    w = sext(w, bits % 64) as u64;
+                }
+                out.push(Item::Int { size: 8, value: w, hex: false });
+            }
+        }
         (ConstKind::Int(a), Type::Int(bits)) => {
             if !matches!(size, 1 | 2 | 4 | 8) {
                 return Err(format!("an integer of {size} bytes in data"));

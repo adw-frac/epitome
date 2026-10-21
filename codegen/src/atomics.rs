@@ -25,6 +25,12 @@
 //!   with `fence rw, rw` before it too; a store releases with a fence
 //!   before it.
 //!
+//! - Atomics of widths the machine has none of (`i128`), or of memory not
+//!   aligned to their size, are calls of the C library's generic ones
+//!   (`__atomic_load`, `__atomic_store`, `__atomic_compare_exchange`, with
+//!   the size, the value through memory), as clang's are; a
+//!   read-modify-write is a loop of compare-and-swaps of them.
+//!
 //! What each emits is never paired with or moved past other memory
 //! accesses (`MInst::barrier`).
 
@@ -69,6 +75,9 @@ fn replace(f: &mut Function, blk: BlockId, k: usize, new: Vec<InstId>) -> Step {
 
 fn expand_one(cx: &mut Ctx, f: &mut Function, blk: BlockId, k: usize) -> Result<Step, String> {
     let i = f.blocks[blk.index()].insts[k];
+    if let Some(size) = library_size(cx, f, i) {
+        return library_atomic(cx, f, blk, k, size);
+    }
     match f.insts[i.index()].op.clone() {
         Op::CmpXchg { ptr, cmp, new, success, failure, align, .. } => {
             let r = f.insts[i.index()].result.ok_or("a cmpxchg without a result")?;
@@ -324,6 +333,142 @@ fn expand_one(cx: &mut Ctx, f: &mut Function, blk: BlockId, k: usize) -> Result<
         }
         _ => Ok(Step::Next(1)),
     }
+}
+
+/// The size in bytes of the atomic at `i`, if it is one for the C
+/// library's generic functions: a width the machine has no atomics of, or
+/// memory not aligned to its size.
+fn library_size(cx: &Ctx, f: &Function, i: InstId) -> Option<u64> {
+    let (ty, align) = match &f.insts[i.index()].op {
+        Op::CmpXchg { cmp, align, .. } => (cx.value_ty(f, *cmp), *align),
+        Op::AtomicRmw { elementwise: false, align, .. } | Op::Load { atomic: Some(_), align, .. } => {
+            (f.locals[f.insts[i.index()].result?.index()].ty, *align)
+        }
+        Op::Store { atomic: Some(_), value, align, .. } => (cx.value_ty(f, *value), *align),
+        _ => return None,
+    };
+    let bits = match cx.m.types.get(ty) {
+        Type::Int(b) => *b,
+        Type::Ptr(0) | Type::Double => 64,
+        Type::Float => 32,
+        Type::Half => 16,
+        _ => return None,
+    };
+    let bytes = u64::from(bits.div_ceil(8));
+    let odd = !matches!(bits, 8 | 16 | 32 | 64);
+    let misaligned = align.is_some_and(|a| a < bytes);
+    (bits % 8 == 0 && (odd || misaligned)).then_some(bytes)
+}
+
+/// C's number for ordering `o` (`__ATOMIC_RELAXED` 0 to `__ATOMIC_SEQ_CST` 5).
+fn c_order(o: Ordering) -> i64 {
+    match o {
+        Ordering::Acquire => 2,
+        Ordering::Release => 3,
+        Ordering::AcqRel => 4,
+        Ordering::SeqCst => 5,
+        _ => 0,
+    }
+}
+
+/// A stack slot of type `ty`, made at the function's entry.
+fn slot(cx: &mut Ctx, f: &mut Function, ty: TypeId) -> Value {
+    let ptr = cx.m.types.ptr(0);
+    let a = f
+        .add_inst(Op::Alloca { inalloca: false, ty, count: None, align: Some(16), addrspace: None }, Some((None, ptr)));
+    let entry = f.layout[0];
+    f.blocks[entry.index()].insts.insert(0, a);
+    f.result(a)
+}
+
+/// The atomic at `k` of `blk` (of `size` bytes), as the C library's
+/// generic functions do it (see the top of this file).
+fn library_atomic(cx: &mut Ctx, f: &mut Function, blk: BlockId, k: usize, size: u64) -> Result<Step, String> {
+    // (Its slots go at the entry, moving `k` if it is there.)
+    let i = f.blocks[blk.index()].insts[k];
+    let entry = f.layout[0];
+    let op = f.insts[i.index()].op.clone();
+    let (i64t, i32t, i1) = (cx.m.types.int(64), cx.m.types.int(32), cx.m.types.int(1));
+    let void = cx.m.types.intern(Type::Void);
+    let n = cx.int(i64t, size as i64);
+    let mut slots = 0;
+    let mut make = |cx: &mut Ctx, f: &mut Function, ty| {
+        slots += 1;
+        slot(cx, f, ty)
+    };
+    let (step, new) = match op {
+        Op::Load { ptr, atomic: Some(at), .. } => {
+            let r = f.insts[i.index()].result.unwrap();
+            let ty = f.locals[r.index()].ty;
+            let out = make(cx, f, ty);
+            let mut s = Seq { f, new: Vec::new() };
+            let o = cx.int(i32t, c_order(at.ordering));
+            call_intrinsic(cx, &mut s, "__atomic_load", vec![n, ptr, out, o], void);
+            let v = s.op(Op::Load { volatile: false, atomic: None, ptr: out, align: None }, ty);
+            s.f.replace_uses(Value::Local(r), v);
+            (None, s.new)
+        }
+        Op::Store { value, ptr, atomic: Some(at), .. } => {
+            let ty = cx.value_ty(f, value);
+            let from = make(cx, f, ty);
+            let mut s = Seq { f, new: Vec::new() };
+            s.op_void(Op::Store { volatile: false, atomic: None, value, ptr: from, align: None });
+            let o = cx.int(i32t, c_order(at.ordering));
+            call_intrinsic(cx, &mut s, "__atomic_store", vec![n, ptr, from, o], void);
+            (None, s.new)
+        }
+        Op::CmpXchg { ptr, cmp, new, success, failure, .. } => {
+            let r = f.insts[i.index()].result.unwrap();
+            let sty = f.locals[r.index()].ty;
+            let ty = cx.value_ty(f, cmp);
+            let (e, d) = (make(cx, f, ty), make(cx, f, ty));
+            let mut s = Seq { f, new: Vec::new() };
+            s.op_void(Op::Store { volatile: false, atomic: None, value: cmp, ptr: e, align: None });
+            s.op_void(Op::Store { volatile: false, atomic: None, value: new, ptr: d, align: None });
+            let (so, fo) = (cx.int(i32t, c_order(success)), cx.int(i32t, c_order(failure)));
+            let ok = call_intrinsic(cx, &mut s, "__atomic_compare_exchange", vec![n, ptr, e, d, so, fo], i1);
+            // Where it failed, the value it found is where the one expected was.
+            let old = s.op(Op::Load { volatile: false, atomic: None, ptr: e, align: None }, ty);
+            replace_pair(cx, &mut s, r, sty, old, ok);
+            (None, s.new)
+        }
+        Op::AtomicRmw { op, ptr, value, ordering, .. } => {
+            let r = f.insts[i.index()].result.unwrap();
+            let ty = f.locals[r.index()].ty;
+            let (e, d) = (make(cx, f, ty), make(cx, f, ty));
+            let k = if blk == entry { k + slots } else { k };
+            // The value seen (read plainly: a torn read is only a failed
+            // compare-and-swap); then a loop of compare-and-swaps of the
+            // new value made from it, until nothing came between.
+            let mut s = Seq { f, new: Vec::new() };
+            let first = s.op(Op::Load { volatile: false, atomic: None, ptr, align: Some(1) }, ty);
+            let pre = std::mem::take(&mut s.new);
+            let (lp, done) = open_loop(f, blk, k, pre);
+            let mut s = Seq { f, new: Vec::new() };
+            let phi = s.f.add_inst(Op::Phi { fmf: FastMath::default(), incoming: vec![] }, Some((None, ty)));
+            let seen = s.f.result(phi);
+            let next = combine(cx, &mut s, op, seen, value, ty)?;
+            s.op_void(Op::Store { volatile: false, atomic: None, value: seen, ptr: e, align: None });
+            s.op_void(Op::Store { volatile: false, atomic: None, value: next, ptr: d, align: None });
+            let so = cx.int(i32t, c_order(ordering));
+            let fo = cx.int(i32t, c_order(failure_of(ordering)));
+            let ok = call_intrinsic(cx, &mut s, "__atomic_compare_exchange", vec![n, ptr, e, d, so, fo], i1);
+            let cur = s.op(Op::Load { volatile: false, atomic: None, ptr: e, align: None }, ty);
+            let body = std::mem::take(&mut s.new);
+            f.insts[phi.index()].op = Op::Phi { fmf: FastMath::default(), incoming: vec![(first, blk), (cur, lp)] };
+            f.blocks[lp.index()].insts.push(phi);
+            f.blocks[lp.index()].insts.extend(body);
+            f.push_inst(lp, Op::CondBr { cond: ok, then_dest: done, else_dest: lp }, None);
+            f.replace_uses(Value::Local(r), seen);
+            (Some(done), Vec::new())
+        }
+        _ => unreachable!(),
+    };
+    if let Some(done) = step {
+        return Ok(Step::Split(done));
+    }
+    let k = if blk == entry { k + slots } else { k };
+    Ok(replace(f, blk, k, new))
 }
 
 /// Makes room for a loop at instruction `k` of `blk`, which goes: `blk`

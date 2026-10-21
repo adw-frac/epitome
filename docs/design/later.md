@@ -52,6 +52,11 @@ these are for after.
 
 ## Extra instructions
 
+- **128-bit atomics** (`atomics.rs`, `library_atomic`): calls of the C
+  library's generic functions, the values through stack slots, and a
+  loop of them for a read-modify-write. Better, as clang does on AArch64:
+  `ldp`/`stp` (FEAT_LSE2) and `casp` loops, or `ldaxp`/`stlxp`.
+
 - **Half precision** (`prepare.rs`, `half_as_int`, `half_arith`): halves
   live as the i16s of their bits in integer registers, and every
   operation moves them to a floating-point register, widens to float,
