@@ -388,3 +388,102 @@ define void @sme.st1w.za0v.expand(ptr %p, i32 %slice) {
   call void @ST1WZA0VW12P0(ptr %p)
   ret void
 }
+
+; ---------------------------------------------------------------------------
+; BF16: widening outer products, za.s += the sum over each pair of halves
+; of z0.h and z4.h (bfmopa, SME_B16F32), with every half active (ptrue
+; .h, which also makes every word active). A row of f32 becomes a row of
+; BF16 pairs with ld2w (even and odd elements apart), bfcvt and bfcvtnt
+; (rounding to nearest, into the bottom and top half of each word), and
+; goes into a horizontal slice of za0.s (mova), to be transposed a word at
+; a time.
+
+declare void @llvm.epitome.sme.ptrue.p0.h()
+declare void @llvm.epitome.sme.ptrue.p1.h()
+declare void @llvm.epitome.sme.bfmopa4w.za.s(ptr, ptr)
+declare void @llvm.epitome.sme.bf16.row.za0h(ptr, i32)
+
+define void @PTRUEP0H() "feature"="sme" "enc"="00100101010110001110001111100000" "asm"="ptrue p0.h" {
+  call void @llvm.epitome.sme.ptrue.p0.h()
+  ret void
+}
+
+define void @PTRUEP1H() "feature"="sme" "enc"="00100101010110001110001111100001" "asm"="ptrue p1.h" {
+  call void @llvm.epitome.sme.ptrue.p1.h()
+  ret void
+}
+
+define void @BFMOPAZA0Z0Z4() "feature"="sme" "enc"="10000001100001000010000000000000" "asm"="bfmopa za0.s, p0/m, p1/m, z0.h, z4.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @BFMOPAZA1Z0Z5() "feature"="sme" "enc"="10000001100001010010000000000001" "asm"="bfmopa za1.s, p0/m, p1/m, z0.h, z5.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @BFMOPAZA2Z0Z6() "feature"="sme" "enc"="10000001100001100010000000000010" "asm"="bfmopa za2.s, p0/m, p1/m, z0.h, z6.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @BFMOPAZA3Z0Z7() "feature"="sme" "enc"="10000001100001110010000000000011" "asm"="bfmopa za3.s, p0/m, p1/m, z0.h, z7.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD2WZ2Z3P0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010100100000111000 a:5 00010" "asm"="ld2w {lb} z2.s, z3.s {rb}, p0/z, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @BFCVTZ1Z2() "feature"="sme" "enc"="01100101100010101010000001000001" "asm"="bfcvt z1.h, p0/m, z2.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @BFCVTNTZ1Z3() "feature"="sme" "enc"="01100100100010101010000001100001" "asm"="bfcvtnt z1.h, p0/m, z3.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MOVAZA0HW12Z1() "feature"="sme" "enc"="11000000100000000000000000100000" "asm"="mova za0h.s[w12, 0], p0/m, z1.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+; za0.s-za3.s += a x b in BF16: at a, 16 pairs (a column of a block of 16
+; rows, two k each); at b, 64 pairs (a row of 64 columns, two k each).
+define void @sme.bfmopa4w(ptr "reg"="xsp" %a, ptr "reg"="xsp" %b) "feature"="sme" "recipe"="sme.bfmopa4w.expand" {
+  call void @llvm.epitome.sme.bfmopa4w.za.s(ptr %a, ptr %b)
+  ret void
+}
+
+define void @sme.bfmopa4w.expand(ptr %a, ptr %b) {
+  call void @LD1WZ0P0(ptr %a)
+  call void @LD1WZ4P0(ptr %b)
+  call void @LD1WZ5P0VL1(ptr %b)
+  call void @LD1WZ6P0VL2(ptr %b)
+  call void @LD1WZ7P0VL3(ptr %b)
+  call void @BFMOPAZA0Z0Z4()
+  call void @BFMOPAZA1Z0Z5()
+  call void @BFMOPAZA2Z0Z6()
+  call void @BFMOPAZA3Z0Z7()
+  ret void
+}
+
+; 32 f32 at p as 16 BF16 pairs, into horizontal slice %slice of za0.s.
+define void @sme.bf16.row(ptr "reg"="xsp" %p, i32 "reg"="w" %slice) "feature"="sme" "recipe"="sme.bf16.row.expand" {
+  call void @llvm.epitome.sme.bf16.row.za0h(ptr %p, i32 %slice)
+  ret void
+}
+
+define void @sme.bf16.row.expand(ptr %p, i32 %slice) {
+  call void @LD2WZ2Z3P0(ptr %p)
+  call void @BFCVTZ1Z2()
+  call void @BFCVTNTZ1Z3()
+  call void @MOVW12(i32 %slice)
+  call void @MOVAZA0HW12Z1()
+  ret void
+}

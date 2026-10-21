@@ -21,6 +21,9 @@
 //! Element-wise work and reductions are vectorized for NEON
 //! (`linalg-vectorize=4`), and `exp` is arithmetic rather than a call
 //! (`math-polynomial-approximation`), either way.
+//! `--weights=bf16` (with `--sme`) stores constant weights in that format,
+//! rounding them, for the kernels of that format; the program is then
+//! `llm-bf16`, and so on, so that the formats can be compared.
 //! `--dump` writes each stage's MLIR and the LLVM IR next to the model.
 //!
 //! ```sh
@@ -43,12 +46,13 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dump = args.iter().any(|a| a == "--dump");
     let sme = args.iter().any(|a| a == "--sme");
+    let weights = args.iter().find_map(|a| a.strip_prefix("--weights=")).map(str::to_string);
     let dir = args
         .iter()
         .find(|a| !a.starts_with("--"))
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("target/llm"));
-    match build(&dir, dump, sme) {
+    match build(&dir, dump, sme, weights.as_deref()) {
         Ok(exe) => {
             println!("built {}", exe.display());
             ExitCode::SUCCESS
@@ -60,7 +64,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn build(dir: &Path, dump: bool, sme: bool) -> Result<PathBuf, String> {
+fn build(dir: &Path, dump: bool, sme: bool, weights: Option<&str>) -> Result<PathBuf, String> {
     let step = |what: &str, start: Instant| println!("{what:<34} {:>6.2} s", start.elapsed().as_secs_f64());
 
     let path = dir.join("model.mlir");
@@ -72,10 +76,15 @@ fn build(dir: &Path, dump: bool, sme: bool) -> Result<PathBuf, String> {
     step("read MLIR (linalg on tensors)", start);
 
     // MLIR, stage by stage, to the llvm dialect.
+    let kernels = match weights {
+        Some(w) => format!("linalg-to-kernels=aarch64-sme:{w}"),
+        None => "linalg-to-kernels=aarch64-sme".to_string(),
+    };
+    let suffix = weights.map(|w| format!("-{w}")).unwrap_or_default();
     let mut passes: Vec<&str> = epitome_mlir::LINALG_TO_LLVM.to_vec();
     let mut at = passes.iter().position(|&p| p == "bufferize").unwrap() + 1;
     if sme {
-        passes.insert(at, "linalg-to-kernels=aarch64-sme");
+        passes.insert(at, kernels.as_str());
         at += 1;
     }
     // Each linalg operation a function of its own: registers allocated
@@ -115,14 +124,14 @@ fn build(dir: &Path, dump: bool, sme: bool) -> Result<PathBuf, String> {
     let t = Target::aarch64();
     let opts = Options { mcpu: sme.then(|| "apple-m4".to_string()), ..Options::default() };
     let compiled = compile(&t, &mut ir, &opts)?;
-    let object = dir.join("model.o");
+    let object = dir.join(format!("model{suffix}.o"));
     std::fs::write(&object, compiled.object_file(&t)?).map_err(|e| format!("{}: {e}", object.display()))?;
     step("compile to model.o (Mach-O)", start);
 
     // The driver, linked with the model.
     let start = Instant::now();
     let driver = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/llm/driver.rs");
-    let exe = dir.join("llm");
+    let exe = dir.join(format!("llm{suffix}"));
     let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
     let built = Command::new(&rustc)
         .args(["--edition", "2024", "-O", "-C"])

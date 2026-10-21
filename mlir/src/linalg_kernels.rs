@@ -30,12 +30,24 @@ use crate::ir::*;
 const BUILT_IN: &[(&str, &str)] = &[("aarch64-sme", include_str!("../targets/aarch64-sme.mlir"))];
 
 /// Lowers what `kernels` (a name in `mlir/targets`, or a path) has kernels
-/// for.
+/// for. `name:bf16` (or another format) also allows the kernels whose
+/// constant weights are stored in that format (`weights = "bf16"`), which
+/// round them, and so are used only when asked for.
 pub fn run(src: &Module, kernels: &str) -> Result<Module, String> {
-    let set = load(kernels)?;
+    let (name, weights) = match kernels.rsplit_once(':') {
+        Some((n, w)) if !w.contains('/') => (n, Some(w.to_string())),
+        _ => (kernels, None),
+    };
+    let set = load(name)?;
     let mut out = src.empty_like();
-    let mut cx =
-        Cx { set, imported: HashMap::new(), resources: src.resources(), packed: HashMap::new(), blobs: Vec::new() };
+    let mut cx = Cx {
+        set,
+        weights,
+        imported: HashMap::new(),
+        resources: src.resources(),
+        packed: HashMap::new(),
+        blobs: Vec::new(),
+    };
     for top in src.top_ops().collect::<Vec<_>>() {
         if src.op_name(top) != "builtin.module" {
             return Err(format!("{}: expected a builtin.module", src.op_name(top)));
@@ -74,13 +86,15 @@ pub fn run(src: &Module, kernels: &str) -> Result<Module, String> {
 /// What the pass carries from one operation to the next.
 struct Cx<'a> {
     set: &'static Set,
+    /// The format of constant weights allowed, beyond f32.
+    weights: Option<String>,
     /// The kernels' functions copied into the module so far.
     imported: HashMap<String, String>,
     /// The blobs of the module being lowered, for packing constants.
     resources: Resources<'a>,
-    /// Constants packed so far: the global of each, by (global, panel), and
-    /// the new blobs.
-    packed: HashMap<(String, u64), String>,
+    /// Constants packed so far: the global of each, by (global, panel,
+    /// format), and the new blobs.
+    packed: HashMap<(String, u64, String), String>,
     blobs: Vec<Item>,
 }
 
@@ -158,6 +172,9 @@ struct Kernel {
     /// The function takes A as it is, with a buffer of k x (the tile's rows)
     /// to transpose it into, rather than A transposed.
     transpose_a: bool,
+    /// B must be a constant, which the pass stores in this format (`bf16`)
+    /// in panels of `pack_b` columns.
+    weights: Option<String>,
 }
 
 fn load(name: &str) -> Result<&'static Set, String> {
@@ -224,6 +241,7 @@ fn load(name: &str) -> Result<&'static Set, String> {
             whole_rows: m.op_attr(op, "whole_rows").is_some(),
             pack_b: m.op_attr(op, "pack_b").and_then(|a| m.int_of(a)).map(|p| p as u64),
             transpose_a: m.op_attr(op, "transpose_a").is_some(),
+            weights: m.op_attr(op, "weights").and_then(|a| m.string_of(a)),
         });
     }
     let set: &'static Set = Box::leak(Box::new(Set { m, kernels }));
@@ -261,7 +279,11 @@ fn func(
             for &op in &src.blocks[b.index()].ops {
                 // The kernels that compute it, in the order of the file.
                 let ks: Vec<&Kernel> = if src.op_name(op) == "linalg.generic" {
-                    set.kernels.iter().filter(|k| matches(src, op, &set.m, k)).collect()
+                    set.kernels
+                        .iter()
+                        .filter(|k| k.weights.is_none() || k.weights == cx.weights)
+                        .filter(|k| matches(src, op, &set.m, k))
+                        .collect()
                 } else {
                     Vec::new()
                 };
@@ -445,9 +467,28 @@ fn tiles(
     else {
         return Ok(false);
     };
-    // The first kernel with a tile no taller than C; rows past its last
-    // whole tile go to the next.
-    let Some(ki) = ks.iter().position(|k| k.tile.0 <= m) else { return Ok(false) };
+    // The first kernel with a tile no taller than C (and, for one that
+    // stores constant weights in another format, B such a constant, in whole
+    // panels); rows past its last whole tile go to the next.
+    let mut chosen = None;
+    for (i, k) in ks.iter().enumerate() {
+        if k.tile.0 > m {
+            continue;
+        }
+        if let (Some(w), Some(p)) = (&k.weights, k.pack_b) {
+            if !k.whole_rows || n % p != 0 || kk % 32 != 0 {
+                continue;
+            }
+            match pack(out, b, p, w, module_block, block, cx)? {
+                Some(packed) => chosen = Some((i, Some(packed))),
+                None => continue,
+            }
+        } else {
+            chosen = Some((i, None));
+        }
+        break;
+    }
+    let Some((ki, early)) = chosen else { return Ok(false) };
     let k = ks[ki];
     // The kernel reads rows of B and C: their elements must be contiguous.
     let full = m / k.tile.0 * k.tile.0;
@@ -535,8 +576,15 @@ fn tiles(
     // B packed into panels, if the kernel takes it so and B is a constant
     // whose columns are whole panels; else as it is.
     let packed = match k.pack_b {
-        Some(p) if k.whole_rows && n % p == 0 => pack(out, b, p, module_block, block, cx)?,
+        _ if early.is_some() => early,
+        Some(p) if k.whole_rows && n % p == 0 => pack(out, b, p, "f32", module_block, block, cx)?,
         _ => None,
+    };
+    // A packed panel's size in words.
+    let bits = match k.weights.as_deref() {
+        Some("bf16") => 16,
+        Some(_) => 8,
+        None => 32,
     };
     let (pat, pc) = (pointer(out, at), pointer(out, c));
     let pa = if k.transpose_a { pointer(out, a) } else { pat };
@@ -548,7 +596,7 @@ fn tiles(
         (c64(out, m as i64), c64(out, 0))
     };
     let (ldb, offb, panel) = match (packed, k.pack_b) {
-        (Some(_), Some(p)) => (c64(out, p as i64), c64(out, 0), Some(c64(out, (p * kk) as i64))),
+        (Some(_), Some(p)) => (c64(out, p as i64), c64(out, 0), Some(c64(out, (p * kk * bits / 32) as i64))),
         (None, Some(p)) => (c64(out, lb.0[0] as i64), c64(out, lb.1 as i64), Some(c64(out, p as i64))),
         _ => (c64(out, lb.0[0] as i64), c64(out, lb.1 as i64), None),
     };
@@ -709,11 +757,16 @@ fn rest_rows(
 /// of `dense_resource` data, row-major), packed into panels of `panel`
 /// columns: panel p holds columns `p panel` to `(p + 1) panel - 1`, k rows
 /// of `panel` elements, the panels one after another. A new global, made
-/// once for each constant and width, got at the end of `block`.
+/// once for each constant, width and format, got at the end of `block`.
+///
+/// `format` is `f32`, as B is; or `bf16`, each word of a panel's row two
+/// rows of a column rounded to BF16 (row 2i in the bottom half, 2i + 1 in
+/// the top), so k/2 rows of words. Other formats are B as bytes.
 fn pack(
     out: &mut Module,
     b: ValueId,
     panel: u64,
+    format: &str,
     module_block: BlockId,
     block: BlockId,
     cx: &mut Cx<'_>,
@@ -730,7 +783,8 @@ fn pack(
         return Ok(None);
     }
     let (kk, n) = (shape[0], shape[1]);
-    let new_name = match cx.packed.get(&(name.clone(), panel)) {
+    let cache = (name.clone(), panel, format.to_string());
+    let new_name = match cx.packed.get(&cache) {
         Some(g) => g.clone(),
         None => {
             // The global, constant, and its data.
@@ -749,20 +803,45 @@ fn pack(
             if data.len() as u64 != kk * n * 4 {
                 return Ok(None);
             }
-            let mut bytes = vec![0u8; data.len()];
             let (rows, cols, w) = (kk as usize, n as usize, panel as usize);
-            for p in 0..cols / w {
-                for r in 0..rows {
-                    let from = (r * cols + p * w) * 4;
-                    let to = ((p * rows + r) * w) * 4;
-                    bytes[to..to + w * 4].copy_from_slice(&data[from..from + w * 4]);
+            let f = |r: usize, c: usize| f32::from_le_bytes(data[(r * cols + c) * 4..][..4].try_into().unwrap());
+            let bytes = match format {
+                "f32" => {
+                    let mut bytes = vec![0u8; data.len()];
+                    for p in 0..cols / w {
+                        for r in 0..rows {
+                            let from = (r * cols + p * w) * 4;
+                            let to = ((p * rows + r) * w) * 4;
+                            bytes[to..to + w * 4].copy_from_slice(&data[from..from + w * 4]);
+                        }
+                    }
+                    bytes
                 }
-            }
-            let new_key = format!("{key}.panels{panel}");
-            let new_name = format!("{name}_panels{panel}");
+                "bf16" if rows % 2 == 0 => {
+                    let mut bytes = Vec::with_capacity(data.len() / 2);
+                    for p in 0..cols / w {
+                        for r in (0..rows).step_by(2) {
+                            for c in p * w..(p + 1) * w {
+                                bytes.extend(bf16(f(r, c)).to_le_bytes());
+                                bytes.extend(bf16(f(r + 1, c)).to_le_bytes());
+                            }
+                        }
+                    }
+                    bytes
+                }
+                _ => return Ok(None),
+            };
+            let suffix = if format == "f32" { String::new() } else { format!("_{format}") };
+            let new_key = format!("{key}.panels{panel}{suffix}");
+            let new_name = format!("{name}_panels{panel}{suffix}");
+            // The same global, of the packed data, after the original: of B's
+            // type for f32, else of bytes.
+            let (shape, elem) =
+                if format == "f32" { (shape.clone(), elem) } else { (vec![bytes.len() as u64], out.int_type(8)) };
             cx.blobs.push(Item::Blob { key: new_key.clone(), align: 64, bytes: std::sync::Arc::new(bytes) });
-            // The same global, of the packed data, after the original.
             let tensor = out.tensor_type(&shape, elem);
+            let mty = out.memref_type(&shape, elem, None);
+            let mty_attr = out.type_attr(mty);
             let value = out.intern_attr(Attr::Builtin {
                 keyword: "dense_resource",
                 body: format!("<{new_key}>"),
@@ -774,6 +853,7 @@ fn pack(
                 spec = match k.as_str() {
                     "initial_value" => spec.prop(&k, value),
                     "sym_name" => spec.prop(&k, sym),
+                    "type" => spec.prop(&k, mty_attr),
                     _ => spec.prop(&k, v),
                 };
             }
@@ -782,12 +862,33 @@ fn pack(
             ops.pop();
             let at = ops.iter().position(|&o| o == global).unwrap() + 1;
             ops.insert(at, g);
-            cx.packed.insert((name.clone(), panel), new_name.clone());
+            cx.packed.insert(cache, new_name.clone());
             new_name
         }
     };
-    // The packed data has B's type, though not its layout.
+    // Of the packed global's type: B's, though not its layout, or bytes.
+    let gty = out.blocks[module_block.index()]
+        .ops
+        .iter()
+        .find(|&&g| {
+            out.op_name(g) == "memref.global"
+                && out.op_attr(g, "sym_name").and_then(|a| out.string_of(a)).as_deref() == Some(&new_name)
+        })
+        .and_then(|&g| match out.op_attr(g, "type").map(|a| out.attr(a)) {
+            Some(Attr::Type(t)) => Some(*t),
+            _ => None,
+        })
+        .unwrap_or(ty);
     let sym = out.symbol_attr(&new_name);
-    let g = OpSpec::new("memref.get_global").results(&[ty]).prop("name", sym).build(out, Some(block));
+    let g = OpSpec::new("memref.get_global").results(&[gty]).prop("name", sym).build(out, Some(block));
     Ok(Some(out.result(g)))
+}
+
+/// `x` rounded to BF16, to nearest with ties to even, as `bfcvt` does.
+fn bf16(x: f32) -> u16 {
+    let b = x.to_bits();
+    if x.is_nan() {
+        return ((b >> 16) | 0x40) as u16;
+    }
+    ((b + 0x7fff + ((b >> 16) & 1)) >> 16) as u16
 }
