@@ -66,6 +66,9 @@ fn func(
     for (k, v) in dict(src, o.properties) {
         spec = spec.prop(&k, v);
     }
+    for (k, v) in dict(src, o.attrs) {
+        spec = spec.attr(&k, v);
+    }
     let new = spec.build(out, Some(mblock));
     let mut count = 0;
     for (k, &r) in o.regions.iter().enumerate() {
@@ -148,8 +151,19 @@ fn outline(
 ) -> Result<(), String> {
     let o = &src.ops[op.index()];
     let mut params: Vec<ValueId> = o.operands.clone();
+    // Scalar constants the body uses are copied in, not passed: they stay
+    // constants (x to the constant power 2 is then a multiply).
+    let mut constants = Vec::new();
     for v in captured(src, op) {
-        if !params.contains(&v) {
+        let constant = match src.values[v.index()].def {
+            ValueDef::Result { op: c, .. } => {
+                src.op_name(c) == "arith.constant" && src.shaped(src.value_type(v)).is_none()
+            }
+            _ => false,
+        };
+        if constant {
+            constants.push(v);
+        } else if !params.contains(&v) {
             params.push(v);
         }
     }
@@ -161,16 +175,24 @@ fn outline(
     let fty = out.type_attr(fty);
     let sym = out.string_attr(&fname);
     let vis = out.string_attr("private");
+    // Kept a function, or the optimiser inlines it back, each being called
+    // once.
+    let unit = out.unit_attr();
     let f = OpSpec::new("func.func")
         .prop("function_type", fty)
         .prop("sym_name", sym)
         .prop("sym_visibility", vis)
+        .attr("llvm.no_inline", unit)
         .regions(1)
         .build(out, Some(mblock));
     let region = out.region_of(f, 0);
     let entry = out.add_block(region, &types);
     let mut inner: HashMap<ValueId, ValueId> =
         params.iter().copied().zip(out.blocks[entry.index()].args.clone()).collect();
+    for c in constants {
+        let ValueDef::Result { op: def, .. } = src.values[c.index()].def else { unreachable!() };
+        out.clone_op(src, def, Some(entry), &mut inner)?;
+    }
     out.clone_op(src, op, Some(entry), &mut inner)?;
     OpSpec::new("func.return").build(out, Some(entry));
 

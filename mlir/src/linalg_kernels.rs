@@ -84,6 +84,9 @@ struct Kernel {
     element: TypeId,
     tile: (u64, u64),
     function: String,
+    /// `batch_matmul`: a matrix product for each index of the first
+    /// dimension, each done as a `matmul`.
+    batch: bool,
 }
 
 fn load(name: &str) -> Result<&'static Set, String> {
@@ -134,9 +137,11 @@ fn load(name: &str) -> Result<&'static Set, String> {
             Attr::SymbolRef(p) => p[0].clone(),
             _ => return Err(format!("{name}: function is not a symbol")),
         };
-        if m.op_attr(op, "op").and_then(|a| m.string_of(a)).as_deref() != Some("matmul") {
-            return Err(format!("{name}: only matmul kernels are supported"));
-        }
+        let batch = match m.op_attr(op, "op").and_then(|a| m.string_of(a)).as_deref() {
+            Some("matmul") => false,
+            Some("batch_matmul") => true,
+            _ => return Err(format!("{name}: only matmul and batch_matmul kernels are supported")),
+        };
         kernels.push(Kernel {
             maps,
             iterators: strings(get("iterator_types")?),
@@ -144,6 +149,7 @@ fn load(name: &str) -> Result<&'static Set, String> {
             element,
             tile,
             function,
+            batch,
         });
     }
     let set: &'static Set = Box::leak(Box::new(Set { m, kernels }));
@@ -166,6 +172,9 @@ fn func(
     for (k, v) in dict(src, o.properties) {
         spec = spec.prop(&k, v);
     }
+    for (k, v) in dict(src, o.attrs) {
+        spec = spec.attr(&k, v);
+    }
     let new = spec.build(out, Some(parent));
     for (k, &r) in o.regions.iter().enumerate() {
         let region = out.region_of(new, k);
@@ -180,7 +189,13 @@ fn func(
                     .then(|| set.kernels.iter().find(|k| matches(src, op, &set.m, k)))
                     .flatten();
                 let done = match kernel {
-                    Some(k) => tiles(src, op, out, nb, parent, set, k, imported, map)?,
+                    Some(k) if k.batch => batched(src, op, out, nb, parent, set, k, imported, map)?,
+                    Some(k) => {
+                        let o = &src.ops[op.index()];
+                        let operands = [o.operands[0], o.operands[1], o.operands[2]].map(|v| map[&v]);
+                        let props = dict(src, o.properties);
+                        tiles(src, op, operands, &props, out, nb, parent, set, k, imported, map)?
+                    }
                     None => false,
                 };
                 if !done {
@@ -254,10 +269,11 @@ fn layout(m: &Module, ty: TypeId) -> Option<(Vec<u64>, u64)> {
     strided_layout(m, ty).or_else(|| m.shaped(ty).map(|(s, _)| (row_major_strides(&s), 0)))
 }
 
-/// `op` as tiles computed by kernel `k`; false (and nothing added) where
-/// its shapes do not suit the kernel.
+/// A `batch_matmul` as a `matmul` for each index of its first dimension,
+/// on views of its operands; false (and nothing added) where its shapes do
+/// not suit the kernel.
 #[allow(clippy::too_many_arguments)]
-fn tiles(
+fn batched(
     src: &Module,
     op: OpId,
     out: &mut Module,
@@ -269,7 +285,76 @@ fn tiles(
     map: &mut HashMap<ValueId, ValueId>,
 ) -> Result<bool, String> {
     let o = &src.ops[op.index()];
-    let [a, b, c] = [o.operands[0], o.operands[1], o.operands[2]].map(|v| map[&v]);
+    let operands = [o.operands[0], o.operands[1], o.operands[2]].map(|v| map[&v]);
+    let mut shapes = Vec::new();
+    for &v in &operands {
+        let ty = out.value_type(v);
+        let (Some((shape, elem)), Some(l)) = (out.shaped(ty), layout(out, ty)) else { return Ok(false) };
+        shapes.push((shape, elem, l));
+    }
+    let batch = shapes[0].0[0];
+    if shapes.iter().any(|s| s.0.len() != 3 || s.0[0] != batch) || shapes[0].0[1] < k.tile.0 {
+        return Ok(false);
+    }
+    // A matmul's maps and iterators, for the rows past the last whole tile.
+    let maps = ["(d0, d1, d2) -> (d0, d2)", "(d0, d1, d2) -> (d2, d1)", "(d0, d1, d2) -> (d0, d1)"]
+        .iter()
+        .map(|m| out.affine_map_attr(m))
+        .collect();
+    let maps = out.array_attr(maps);
+    let par = out.dialect_attr("linalg.iterator_type", Some("<parallel>"));
+    let red = out.dialect_attr("linalg.iterator_type", Some("<reduction>"));
+    let iters = out.array_attr(vec![par, par, red]);
+    let segments = out.dense_array_attr("i32", &[2, 1]);
+    let props =
+        vec![("indexing_maps".to_string(), maps), ("iterator_types".to_string(), iters), ("operandSegmentSizes".to_string(), segments)];
+    for i in 0..batch {
+        // Each operand's matrix i, a rank-reduced view.
+        let mut views = [operands[0]; 3];
+        for (j, (v, (shape, elem, (strides, offset)))) in operands.iter().zip(&shapes).enumerate() {
+            let layout = strided_attr(out, &strides[1..], offset + i * strides[0]);
+            let ty = out.memref_type(&shape[1..], *elem, Some(layout));
+            let segs = out.dense_array_attr("i32", &[1, 0, 0, 0]);
+            let offsets = out.dense_array_attr("i64", &[i as i64, 0, 0]);
+            let sizes = out.dense_array_attr("i64", &[1, shape[1] as i64, shape[2] as i64]);
+            let ones = out.dense_array_attr("i64", &[1, 1, 1]);
+            let s = OpSpec::new("memref.subview")
+                .operands(&[*v])
+                .results(&[ty])
+                .prop("operandSegmentSizes", segs)
+                .prop("static_offsets", offsets)
+                .prop("static_sizes", sizes)
+                .prop("static_strides", ones)
+                .build(out, Some(block));
+            views[j] = out.result(s);
+        }
+        if !tiles(src, op, views, &props, out, block, module_block, set, k, imported, map)? {
+            return Err("a batch_matmul whose matrices do not suit the kernel".into());
+        }
+    }
+    Ok(true)
+}
+
+/// A matmul of `operands` (A, B and C, already in `out`) as tiles computed
+/// by kernel `k`, with `props` for a `linalg.generic` of the rows past the
+/// last whole tile (whose body is `op`'s); false (and nothing added) where
+/// its shapes do not suit the kernel.
+#[allow(clippy::too_many_arguments)]
+fn tiles(
+    src: &Module,
+    op: OpId,
+    operands: [ValueId; 3],
+    props: &[(String, AttrId)],
+    out: &mut Module,
+    block: BlockId,
+    module_block: BlockId,
+    set: &Set,
+    k: &Kernel,
+    imported: &mut HashMap<String, String>,
+    map: &mut HashMap<ValueId, ValueId>,
+) -> Result<bool, String> {
+    let o = &src.ops[op.index()];
+    let [a, b, c] = operands;
     let (Some((sa, elem)), Some((sb, _)), Some((sc, _))) =
         (out.shaped(out.value_type(a)), out.shaped(out.value_type(b)), out.shaped(out.value_type(c)))
     else {
@@ -444,8 +529,8 @@ fn tiles(
         let va = view(out, a, &layout(out, out.value_type(a)).unwrap(), kk);
         let vc = view(out, c, &lc, n);
         let mut spec = OpSpec::new("linalg.generic").operands(&[va, b, vc]).regions(1).loc(o.loc);
-        for (key, v) in dict(src, o.properties) {
-            spec = spec.prop(&key, v);
+        for (key, v) in props {
+            spec = spec.prop(key, *v);
         }
         let g = spec.build(out, Some(block));
         let region = out.region_of(g, 0);

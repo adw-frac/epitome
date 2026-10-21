@@ -29,7 +29,17 @@
     tile = array<i64: 16, 16>,
     function = @__epitome_sme_matmul_f32}> : () -> ()
 
-func.func private @__epitome_sme_matmul_f32(%c: !llvm.ptr, %ldc: i64, %at: !llvm.ptr, %lda: i64, %b: !llvm.ptr, %ldb: i64, %k: i64, %cols: i64) {
+// The same for each matrix of a batch: the pass takes views of each.
+"epitome.kernel"() <{op = "batch_matmul", element = f32,
+    indexing_maps = [affine_map<(d0, d1, d2, d3) -> (d0, d1, d3)>, affine_map<(d0, d1, d2, d3) -> (d0, d3, d2)>,
+                     affine_map<(d0, d1, d2, d3) -> (d0, d1, d2)>],
+    iterator_types = ["parallel", "parallel", "parallel", "reduction"],
+    body = ["arith.mulf", "arith.addf"],
+    tile = array<i64: 16, 16>,
+    function = @__epitome_sme_matmul_f32}> : () -> ()
+
+// Not inlined: streaming mode, and the saves it needs, stay in it.
+func.func private @__epitome_sme_matmul_f32(%c: !llvm.ptr, %ldc: i64, %at: !llvm.ptr, %lda: i64, %b: !llvm.ptr, %ldb: i64, %k: i64, %cols: i64) attributes {llvm.no_inline} {
   // Streaming mode and ZA on; p0 all lanes, p1 the tile's columns.
   "llvm.call_intrinsic"() <{intrin = "llvm.epitome.sme.start"}> : () -> ()
   "llvm.call_intrinsic"() <{intrin = "llvm.epitome.sme.ptrue.p0.s"}> : () -> ()

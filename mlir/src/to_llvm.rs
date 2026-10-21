@@ -297,6 +297,13 @@ fn lower_func(
     for (k, v) in func_props(out, &name, fty) {
         spec = spec.prop(k, v);
     }
+    // Attributes for the llvm.func, as upstream passes them on: `llvm.`
+    // and the property's name (`{llvm.no_inline}`).
+    for (k, v) in dict(src, src.ops[f.index()].attrs) {
+        if let Some(prop) = k.strip_prefix("llvm.") {
+            spec = spec.prop(prop, v);
+        }
+    }
     let func = spec.build(out, parent);
     let o = &src.ops[f.index()];
     let Some(&region) = o.regions.first() else { return Ok(()) };
