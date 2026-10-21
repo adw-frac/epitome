@@ -811,5 +811,7 @@ bits undefined, and odd widths live in the next register width; operations
 that read every bit get their operands extended in place first.
 
 Exception handling works for Mach-O and ELF (see
-[objects.md](objects.md)). Not yet: scalable vectors, and vectors wider
-than a register passed or returned by value (`<4 x i64>` arguments).
+[objects.md](objects.md)). Vectors no register holds are passed and
+returned as LLVM's AArch64 backend passes them (`prepare::vector_abi`):
+lanes made a power of two, narrow lanes widened to fill 64 bits, and
+128-bit parts, each an argument of its own. Not yet: scalable vectors.

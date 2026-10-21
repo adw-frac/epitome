@@ -64,6 +64,11 @@ these are for after.
   `extractvalue`s) keeps the copies, a dead one included, where
   coalescing them would leave none. `aggregates.rs` leaves wide integers'
   `[2 x i64]` halves whole for this reason.
+- **Vector arguments no register holds** (`prepare.rs`,
+  `vector_arguments`): put together from their parts by shuffles at the
+  callee's entry and taken apart by shuffles at each call, where a split
+  vector's parts are already the registers; legalisation may not see
+  through them.
 - **Struct results and phis** of fields: copies between result registers
   and their vregs that coalescing could remove (`mov x2, x0; mov x0, x1;
   mov x1, x2`).

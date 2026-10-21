@@ -148,6 +148,7 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     half_as_int(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     identity_bitcasts(&mut f);
     one_lane_vectors(cx, &mut f);
+    vector_arguments(cx, &mut f);
     vector_int_bitcasts(cx, &mut f);
     bit_masks(cx, &mut f);
     bitcast_round_trips(cx, &mut f);
@@ -526,6 +527,295 @@ fn thread_locals(cx: &mut Ctx, f: &mut Function) {
             let n = new.len();
             f.blocks[b.index()].insts.splice(k..=k, new);
             k += n;
+        }
+    }
+}
+
+/// How a vector no register holds is passed and returned (as LLVM's
+/// AArch64 backend passes them, which clang's IR leaves to it): its lanes
+/// made a power of two (`<3 x float>` as `<4 x float>`), narrow lanes
+/// widened to fill 64 bits (`<2 x i8>` as `<2 x i32>`), and then, if wider
+/// than a register, 128-bit parts, each an argument of its own (returned
+/// together, as a struct of them). `None` for those a register holds.
+struct VectorAbi {
+    /// The vector, made a power of two and widened.
+    whole: TypeId,
+    lanes: u32,
+    promoted: bool,
+    part: TypeId,
+    parts: usize,
+}
+
+fn vector_abi(cx: &mut Ctx, ty: TypeId) -> Option<VectorAbi> {
+    let Type::Vector { scalable: false, len, elem } = *cx.m.types.get(ty) else { return None };
+    let eb = match cx.m.types.get(elem) {
+        Type::Int(b @ (8 | 16 | 32 | 64)) => *b,
+        Type::Float => 32,
+        Type::Double | Type::Ptr(0) => 64,
+        _ => return None,
+    };
+    if len.is_power_of_two() && matches!(len * eb, 64 | 128) {
+        return None;
+    }
+    let lanes = len.next_power_of_two();
+    let (elem, eb, promoted) = if lanes * eb < 64 {
+        let wider = 64 / lanes;
+        if !matches!(cx.m.types.get(elem), Type::Int(_)) || wider > 64 {
+            return None;
+        }
+        (cx.m.types.int(wider), wider, true)
+    } else {
+        (elem, eb, false)
+    };
+    let whole = cx.m.types.intern(Type::Vector { scalable: false, len: lanes, elem });
+    let bits = lanes * eb;
+    let (part, parts) = if bits <= 128 {
+        (whole, 1)
+    } else {
+        (cx.m.types.intern(Type::Vector { scalable: false, len: 128 / eb, elem }), (bits / 128) as usize)
+    };
+    Some(VectorAbi { whole, lanes, promoted, part, parts })
+}
+
+/// A shuffle of `a` and `b` taking `lanes`, of type `ty`.
+fn shuffle_lanes(cx: &mut Ctx, s: &mut Seq, a: Value, b: Value, lanes: &[u32], ty: TypeId) -> Value {
+    let i32t = cx.m.types.int(32);
+    let elems: Vec<ConstId> = lanes
+        .iter()
+        .map(|&l| cx.m.consts.intern(Constant { ty: i32t, kind: ConstKind::Int(ApInt::from_i64(32, l as i64)) }))
+        .collect();
+    let mty = cx.m.types.intern(Type::Vector { scalable: false, len: lanes.len() as u32, elem: i32t });
+    let mask = cx.m.consts.intern(Constant { ty: mty, kind: ConstKind::Vector(elems) });
+    s.op(Op::ShuffleVector { a, b, mask }, ty)
+}
+
+/// Vector `v` (of type `ty`) as its ABI parts.
+fn to_abi_parts(cx: &mut Ctx, s: &mut Seq, v: Value, ty: TypeId, a: &VectorAbi) -> Vec<Value> {
+    let Type::Vector { len, elem, .. } = *cx.m.types.get(ty) else { unreachable!() };
+    let mut w = v;
+    if a.lanes != len {
+        // The lanes added are any: the first's again.
+        let lanes: Vec<u32> = (0..a.lanes).map(|l| if l < len { l } else { 0 }).collect();
+        let wt = cx.m.types.intern(Type::Vector { scalable: false, len: a.lanes, elem });
+        let p = Value::Const(cx.m.consts.intern(Constant { ty, kind: ConstKind::Poison }));
+        w = shuffle_lanes(cx, s, v, p, &lanes, wt);
+    }
+    if a.promoted {
+        w = s.cast(CastOp::ZExt, w, a.whole);
+    }
+    if a.parts == 1 {
+        return vec![w];
+    }
+    let per = a.lanes / a.parts as u32;
+    let p = Value::Const(cx.m.consts.intern(Constant { ty: a.whole, kind: ConstKind::Poison }));
+    (0..a.parts as u32)
+        .map(|k| {
+            let lanes: Vec<u32> = (k * per..(k + 1) * per).collect();
+            shuffle_lanes(cx, s, w, p, &lanes, a.part)
+        })
+        .collect()
+}
+
+/// The vector of type `ty` its ABI parts make.
+fn from_abi_parts(cx: &mut Ctx, s: &mut Seq, parts: Vec<Value>, ty: TypeId, a: &VectorAbi) -> Value {
+    let Type::Vector { len, elem, .. } = *cx.m.types.get(ty) else { unreachable!() };
+    // Halves joined, then those, to the whole.
+    let mut level = parts;
+    while level.len() > 1 {
+        let n = cx.m.types.get(cx.value_ty(s.f, level[0])).clone();
+        let Type::Vector { len: l, elem: e, .. } = n else { unreachable!() };
+        let jt = cx.m.types.intern(Type::Vector { scalable: false, len: 2 * l, elem: e });
+        let lanes: Vec<u32> = (0..2 * l).collect();
+        level = level.chunks(2).map(|pair| shuffle_lanes(cx, s, pair[0], pair[1], &lanes, jt)).collect();
+    }
+    let mut v = level[0];
+    if a.promoted {
+        let nt = cx.m.types.intern(Type::Vector { scalable: false, len: a.lanes, elem });
+        v = s.cast(CastOp::Trunc, v, nt);
+    }
+    if a.lanes != len {
+        let vt = cx.value_ty(s.f, v);
+        let p = Value::Const(cx.m.consts.intern(Constant { ty: vt, kind: ConstKind::Poison }));
+        let lanes: Vec<u32> = (0..len).collect();
+        v = shuffle_lanes(cx, s, v, p, &lanes, ty);
+    }
+    v
+}
+
+/// The type a result of type `ty` is returned as: its part, or a struct of
+/// its parts.
+fn abi_result_ty(cx: &mut Ctx, a: &VectorAbi) -> TypeId {
+    if a.parts == 1 { a.part } else { cx.m.types.intern(Type::Struct { packed: false, fields: vec![a.part; a.parts] }) }
+}
+
+/// Vector parameters, arguments and results no register holds, in the
+/// form they are passed in (see `vector_abi`), where the convention has
+/// AArch64's vector registers: the function's own (taken apart at its
+/// entry and put together at its returns), and its calls' (other than
+/// intrinsics' and variable arguments).
+fn vector_arguments(cx: &mut Ctx, f: &mut Function) {
+    if !cx.hfa || cx.vector_bits() != 128 {
+        return;
+    }
+    let Type::Function { ret, varargs, .. } = cx.m.types.get(f.ty).clone() else { return };
+    let entry = f.layout[0];
+    // Parameters.
+    let mut new_params = Vec::new();
+    let mut new_tys = Vec::new();
+    let mut entry_new = Vec::new();
+    for p in f.params.clone() {
+        let ty = f.locals[p.local.index()].ty;
+        let Some(a) = vector_abi(cx, ty) else {
+            new_tys.push(ty);
+            new_params.push(p);
+            continue;
+        };
+        let mut parts = Vec::new();
+        for _ in 0..a.parts {
+            let l = f.add_local(None, a.part, LocalDef::Param(0));
+            parts.push(Value::Local(l));
+            new_tys.push(a.part);
+            new_params.push(Param { local: l, attrs: vec![] });
+        }
+        let mut s = Seq { f, new: Vec::new() };
+        let v = from_abi_parts(cx, &mut s, parts, ty, &a);
+        entry_new.extend(std::mem::take(&mut s.new));
+        f.replace_uses(Value::Local(p.local), v);
+    }
+    let changed =
+        new_params.len() != f.params.len() || new_params.iter().zip(&f.params).any(|(a, b)| a.local != b.local);
+    let ret_abi = vector_abi(cx, ret);
+    if changed || ret_abi.is_some() {
+        for (k, p) in new_params.iter().enumerate() {
+            f.locals[p.local.index()].def = LocalDef::Param(k as u32);
+        }
+        f.params = new_params;
+        let new_ret = match &ret_abi {
+            Some(a) => abi_result_ty(cx, a),
+            None => ret,
+        };
+        f.ty = cx.m.types.intern(Type::Function { ret: new_ret, params: new_tys, varargs });
+        let at = f.blocks[entry.index()].insts.iter().take_while(|&&i| f.insts[i.index()].op.is_phi()).count();
+        f.blocks[entry.index()].insts.splice(at..at, entry_new);
+    }
+    // Returns, and calls.
+    for b in f.layout.clone() {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            match f.insts[i.index()].op.clone() {
+                Op::Ret(Some(v)) if ret_abi.is_some() => {
+                    let a = ret_abi.as_ref().unwrap();
+                    let mut s = Seq { f, new: Vec::new() };
+                    let parts = to_abi_parts(cx, &mut s, v, ret, a);
+                    let r = if a.parts == 1 {
+                        parts[0]
+                    } else {
+                        let st = abi_result_ty(cx, a);
+                        let mut agg = Value::Const(cx.m.consts.intern(Constant { ty: st, kind: ConstKind::Poison }));
+                        for (n, p) in parts.into_iter().enumerate() {
+                            agg = s.op(Op::InsertValue { aggregate: agg, element: p, indices: vec![n as u32] }, st);
+                        }
+                        agg
+                    };
+                    let new = std::mem::take(&mut s.new);
+                    f.insts[i.index()].op = Op::Ret(Some(r));
+                    let n = new.len();
+                    f.blocks[b.index()].insts.splice(k..k, new);
+                    k += n + 1;
+                }
+                Op::Call(_) | Op::Invoke { .. } => {
+                    k += 1 + call_vectors(cx, f, b, k);
+                }
+                _ => k += 1,
+            }
+        }
+    }
+}
+
+/// The call at `k` in block `b`, its vector arguments and result passed as
+/// `vector_abi` says; how many instructions were added after it in `b`.
+fn call_vectors(cx: &mut Ctx, f: &mut Function, b: BlockId, k: usize) -> usize {
+    let i = f.blocks[b.index()].insts[k];
+    let call = f.insts[i.index()].op.call().unwrap().clone();
+    let asm = matches!(call.callee, Value::Const(c) if matches!(cx.m.constant(c).kind, ConstKind::InlineAsm(_)));
+    if asm || callee_name(cx.m, &call).is_some_and(|n| n.starts_with("llvm.")) {
+        return 0;
+    }
+    let Type::Function { ret, params, varargs } = cx.m.types.get(call.fn_ty).clone() else { return 0 };
+    let ret_abi = vector_abi(cx, ret);
+    let any_arg = params.iter().any(|&t| vector_abi(cx, t).is_some());
+    if !any_arg && ret_abi.is_none() {
+        return 0;
+    }
+    let mut s = Seq { f, new: Vec::new() };
+    let mut args = Vec::new();
+    let mut tys = Vec::new();
+    for (n, a) in call.args.iter().enumerate() {
+        let ty = cx.value_ty(s.f, a.value);
+        match (n < params.len()).then(|| vector_abi(cx, ty)).flatten() {
+            Some(abi) => {
+                for p in to_abi_parts(cx, &mut s, a.value, ty, &abi) {
+                    args.push(CallArg { value: p, attrs: vec![] });
+                    tys.push(abi.part);
+                }
+            }
+            None => {
+                if n < params.len() {
+                    tys.push(params[n]);
+                }
+                args.push(a.clone());
+            }
+        }
+    }
+    let before = std::mem::take(&mut s.new);
+    let new_ret = match &ret_abi {
+        Some(a) => abi_result_ty(cx, a),
+        None => ret,
+    };
+    let fn_ty = cx.m.types.intern(Type::Function { ret: new_ret, params: tys, varargs });
+    let mut new_call = call.clone();
+    new_call.args = args;
+    new_call.fn_ty = fn_ty;
+    if let Some(c) = f.insts[i.index()].op.call_mut() {
+        *c = new_call;
+    }
+    f.blocks[b.index()].insts.splice(k..k, before.iter().copied());
+    let k = k + before.len();
+    // The result, put together again after the call (an invoke's, on its
+    // normal edge, in a block of its own).
+    let (Some(a), Some(r)) = (ret_abi, f.insts[i.index()].result) else { return before.len() };
+    let orig_ty = f.locals[r.index()].ty;
+    let new_r = f.add_local(None, new_ret, LocalDef::Inst(i));
+    f.insts[i.index()].result = Some(new_r);
+    let mut s = Seq { f, new: Vec::new() };
+    let parts: Vec<Value> = if a.parts == 1 {
+        vec![Value::Local(new_r)]
+    } else {
+        (0..a.parts as u32)
+            .map(|n| s.op(Op::ExtractValue { aggregate: Value::Local(new_r), indices: vec![n] }, a.part))
+            .collect()
+    };
+    let v = from_abi_parts(cx, &mut s, parts, orig_ty, &a);
+    let after = std::mem::take(&mut s.new);
+    f.replace_uses(Value::Local(r), v);
+    match f.insts[i.index()].op.clone() {
+        Op::Invoke { normal, .. } => {
+            let e = f.add_block(None);
+            let at = f.layout.iter().position(|&x| x == b).unwrap();
+            f.layout.insert(at + 1, e);
+            f.blocks[e.index()].insts.extend(after);
+            f.push_inst(e, Op::Br(normal), None);
+            if let Op::Invoke { normal: nb, .. } = &mut f.insts[i.index()].op {
+                *nb = e;
+            }
+            f.retarget_phis(normal, b, e);
+            before.len()
+        }
+        _ => {
+            let n = after.len();
+            f.blocks[b.index()].insts.splice(k + 1..k + 1, after);
+            before.len() + n
         }
     }
 }
