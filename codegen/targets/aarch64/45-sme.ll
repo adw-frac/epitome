@@ -366,3 +366,25 @@ define void @sme.fmopa4w.expand(ptr %a, ptr %b) {
   call void @FMOPAZA3Z0Z7()
   ret void
 }
+
+; ---------------------------------------------------------------------------
+; A vertical slice of za0.s, a column of the tile, to memory: with a
+; horizontal load of each row before, it transposes a 16 x 16 block.
+
+declare void @llvm.epitome.sme.st1w.za0v.s(ptr, i32)
+
+define void @ST1WZA0VW12P0(ptr "reg"="xsp" %p) "feature"="sme" "enc"="1110000010111111100000 p:5 00000" "asm"="st1w {lb}za0v.s[w12, 0]{rb}, p0, [{p}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @sme.st1w.za0v(ptr "reg"="xsp" %p, i32 "reg"="w" %slice) "feature"="sme" "recipe"="sme.st1w.za0v.expand" {
+  call void @llvm.epitome.sme.st1w.za0v.s(ptr %p, i32 %slice)
+  ret void
+}
+
+define void @sme.st1w.za0v.expand(ptr %p, i32 %slice) {
+  call void @MOVW12(i32 %slice)
+  call void @ST1WZA0VW12P0(ptr %p)
+  ret void
+}

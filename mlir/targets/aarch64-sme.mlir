@@ -30,13 +30,16 @@
 // elements, B's panels of 64 columns are. That is 64 for B as it is; when B
 // is a constant, the pass may pack it into panels ("pack_b = 64"), each
 // k x 64 and contiguous, which then lie 64 k apart with rows 64 apart (ldb),
-// so that a weight streams from memory in one run.
+// so that a weight streams from memory in one run. The function takes A
+// as it is ("transpose_a"), not transposed: (c, ldc, a, lda, at, b, ldb, k,
+// n, panel), at a buffer of k x 64 elements for the function to transpose
+// A into, through ZA.
 "epitome.kernel"() <{op = "matmul", element = f32,
     indexing_maps = [affine_map<(d0, d1, d2) -> (d0, d2)>, affine_map<(d0, d1, d2) -> (d2, d1)>,
                      affine_map<(d0, d1, d2) -> (d0, d1)>],
     iterator_types = ["parallel", "parallel", "reduction"],
     body = ["arith.mulf", "arith.addf"],
-    tile = array<i64: 64, 16>, whole_rows, pack_b = 64,
+    tile = array<i64: 64, 16>, whole_rows, pack_b = 64, transpose_a,
     function = @__epitome_sme_matmul_f32_64}> : () -> ()
 
 "epitome.kernel"() <{op = "batch_matmul", element = f32,
@@ -44,10 +47,10 @@
                      affine_map<(d0, d1, d2, d3) -> (d0, d1, d2)>],
     iterator_types = ["parallel", "parallel", "parallel", "reduction"],
     body = ["arith.mulf", "arith.addf"],
-    tile = array<i64: 64, 16>, whole_rows, pack_b = 64,
+    tile = array<i64: 64, 16>, whole_rows, pack_b = 64, transpose_a,
     function = @__epitome_sme_matmul_f32_64}> : () -> ()
 
-func.func private @__epitome_sme_matmul_f32_64(%c: !llvm.ptr, %ldc: i64, %at: !llvm.ptr, %lda: i64, %b: !llvm.ptr, %ldb: i64, %k: i64, %n: i64, %panel: i64) attributes {llvm.no_inline} {
+func.func private @__epitome_sme_matmul_f32_64(%c: !llvm.ptr, %ldc: i64, %a: !llvm.ptr, %lda: i64, %at: !llvm.ptr, %b: !llvm.ptr, %ldb: i64, %k: i64, %n: i64, %panel: i64) attributes {llvm.no_inline} {
   "llvm.call_intrinsic"() <{intrin = "llvm.epitome.sme.start"}> : () -> ()
   "llvm.call_intrinsic"() <{intrin = "llvm.epitome.sme.ptrue.p0.s"}> : () -> ()
   %c0 = arith.constant 0 : index
@@ -61,6 +64,50 @@ func.func private @__epitome_sme_matmul_f32_64(%c: !llvm.ptr, %ldc: i64, %at: !l
   %c64 = arith.constant 64 : index
   %c4 = arith.constant 4 : index
   %all = arith.constant 16 : i64
+  // A transposed into AT (k x 64), a 16 x 16 block at a time through
+  // za0.s: its rows loaded as horizontal slices, stored as vertical ones,
+  // so that each k's column of A is a contiguous row of AT. The last block
+  // of k may be narrower; p1 masks its columns.
+  %ld64 = "llvm.mlir.constant"() <{value = 64 : i64}> : () -> i64
+  "scf.for"(%c0, %ki, %c16) ({
+  ^bb0(%tk: index):
+    %tkk = arith.index_cast %tk : index to i64
+    %tleft = arith.subi %ki, %tk : index
+    %twidth = arith.minsi %tleft, %c16 : index
+    %tw = arith.index_cast %twidth : index to i64
+    "llvm.call_intrinsic"(%tw) <{intrin = "llvm.epitome.sme.whilelt.p1.s"}> : (i64) -> ()
+    %ta = "llvm.getelementptr"(%a, %tkk) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+    %tto = "llvm.mul"(%tkk, %ld64) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+    %tt = "llvm.getelementptr"(%at, %tto) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+    "scf.for"(%c0, %c4, %c1) ({
+    ^bb0(%tq: index):
+      %tqq = arith.index_cast %tq : index to i64
+      %trow0 = "llvm.mul"(%tqq, %all) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+      %tro = "llvm.mul"(%trow0, %lda) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+      %tab = "llvm.getelementptr"(%ta, %tro) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+      %ttb = "llvm.getelementptr"(%tt, %trow0) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+      "scf.for"(%c0, %c16, %c1) ({
+      ^bb0(%tr: index):
+        %tri = arith.index_cast %tr : index to i64
+        %ts = arith.trunci %tri : i64 to i32
+        %tro2 = "llvm.mul"(%tri, %lda) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+        %tp = "llvm.getelementptr"(%tab, %tro2) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+        "llvm.call_intrinsic"(%tp, %ts) <{intrin = "llvm.epitome.sme.ld1w.za0h.s"}> : (!llvm.ptr, i32) -> ()
+        "scf.yield"() : () -> ()
+      }) : (index, index, index) -> ()
+      "scf.for"(%c0, %twidth, %c1) ({
+      ^bb0(%tr: index):
+        %tri = arith.index_cast %tr : index to i64
+        %ts = arith.trunci %tri : i64 to i32
+        %tro2 = "llvm.mul"(%tri, %ld64) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+        %tp = "llvm.getelementptr"(%ttb, %tro2) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+        "llvm.call_intrinsic"(%tp, %ts) <{intrin = "llvm.epitome.sme.st1w.za0v.s"}> : (!llvm.ptr, i32) -> ()
+        "scf.yield"() : () -> ()
+      }) : (index, index, index) -> ()
+      "scf.yield"() : () -> ()
+    }) : (index, index, index) -> ()
+    "scf.yield"() : () -> ()
+  }) : (index, index, index) -> ()
   "llvm.call_intrinsic"(%all) <{intrin = "llvm.epitome.sme.whilelt.p1.s"}> : (i64) -> ()
   %nrem = arith.remsi %ni, %c64 : index
   %nwide = arith.subi %ni, %nrem : index
@@ -103,7 +150,7 @@ func.func private @__epitome_sme_matmul_f32_64(%c: !llvm.ptr, %ldc: i64, %at: !l
       "scf.for"(%c0, %ki, %c1) ({
       ^bb0(%wi: index):
         %wii = arith.index_cast %wi : index to i64
-        %wao = "llvm.mul"(%wii, %lda) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+        %wao = "llvm.mul"(%wii, %ld64) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
         %wap = "llvm.getelementptr"(%wai, %wao) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
         %wbo = "llvm.mul"(%wii, %ldb) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
         %wbp = "llvm.getelementptr"(%wbj, %wbo) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
@@ -176,7 +223,7 @@ func.func private @__epitome_sme_matmul_f32_64(%c: !llvm.ptr, %ldc: i64, %at: !l
     "scf.for"(%c0, %ki, %c1) ({
     ^bb0(%i: index):
       %ii = arith.index_cast %i : index to i64
-      %ao = "llvm.mul"(%ii, %lda) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+      %ao = "llvm.mul"(%ii, %ld64) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
       %ap = "llvm.getelementptr"(%at, %ao) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
       %bo = "llvm.mul"(%ii, %ldb) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
       %bp = "llvm.getelementptr"(%bj, %bo) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr

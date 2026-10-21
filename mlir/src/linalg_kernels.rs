@@ -155,6 +155,9 @@ struct Kernel {
     /// this many columns are, and B may be a constant packed into such
     /// panels, each k rows of them, contiguous.
     pack_b: Option<u64>,
+    /// The function takes A as it is, with a buffer of k x (the tile's rows)
+    /// to transpose it into, rather than A transposed.
+    transpose_a: bool,
 }
 
 fn load(name: &str) -> Result<&'static Set, String> {
@@ -220,6 +223,7 @@ fn load(name: &str) -> Result<&'static Set, String> {
             batch,
             whole_rows: m.op_attr(op, "whole_rows").is_some(),
             pack_b: m.op_attr(op, "pack_b").and_then(|a| m.int_of(a)).map(|p| p as u64),
+            transpose_a: m.op_attr(op, "transpose_a").is_some(),
         });
     }
     let set: &'static Set = Box::leak(Box::new(Set { m, kernels }));
@@ -436,7 +440,7 @@ fn tiles(
         return Ok(false);
     };
     let (m, kk, n) = (sa[0], sa[1], sb[1]);
-    let (Some(_), Some(lb), Some(lc)) =
+    let (Some(la), Some(lb), Some(lc)) =
         (layout(out, out.value_type(a)), layout(out, out.value_type(b)), layout(out, out.value_type(c)))
     else {
         return Ok(false);
@@ -448,6 +452,10 @@ fn tiles(
     // The kernel reads rows of B and C: their elements must be contiguous.
     let full = m / k.tile.0 * k.tile.0;
     if full == 0 || kk == 0 || n == 0 || lb.0[1] != 1 || lc.0[1] != 1 || sc != [m, n] {
+        return Ok(false);
+    }
+    // A kernel that transposes A itself reads its rows too.
+    if k.transpose_a && (la.0[1] != 1 || !k.whole_rows) {
         return Ok(false);
     }
 
@@ -488,15 +496,17 @@ fn tiles(
         add(out, OpSpec::new("arith.constant").results(&[index]).prop("value", attr))
     };
 
-    // A transposed: AT[k, m] = A[m, k], packed.
-    let at_ty = out.memref_type(&[kk, m], elem, None);
+    // A transposed: AT[k, m] = A[m, k], packed; or, for a kernel that
+    // transposes A itself, a buffer for a block of rows of it.
+    let at_rows = if k.transpose_a { k.tile.0 } else { m };
+    let at_ty = out.memref_type(&[kk, at_rows], elem, None);
     let i64a = out.int_attr(64, i64t);
     let segments = out.dense_array_attr("i32", &[0, 0]);
     let at = add(
         out,
         OpSpec::new("memref.alloc").results(&[at_ty]).prop("alignment", i64a).prop("operandSegmentSizes", segments),
     );
-    {
+    if !k.transpose_a {
         let maps = [Map::parse("(d0, d1) -> (d1, d0)")?, Map::identity(2)];
         let maps: Vec<AttrId> = maps.iter().map(|m| out.affine_map_attr(&m.to_string())).collect();
         let maps = out.array_attr(maps);
@@ -528,9 +538,15 @@ fn tiles(
         Some(p) if k.whole_rows && n % p == 0 => pack(out, b, p, module_block, block, cx)?,
         _ => None,
     };
-    let (pa, pc) = (pointer(out, at), pointer(out, c));
+    let (pat, pc) = (pointer(out, at), pointer(out, c));
+    let pa = if k.transpose_a { pointer(out, a) } else { pat };
     let pb = pointer(out, packed.unwrap_or(b));
-    let (ldc, lda) = (c64(out, lc.0[0] as i64), c64(out, m as i64));
+    let ldc = c64(out, lc.0[0] as i64);
+    let (lda, offa) = if k.transpose_a {
+        (c64(out, la.0[0] as i64), c64(out, la.1 as i64))
+    } else {
+        (c64(out, m as i64), c64(out, 0))
+    };
     let (ldb, offb, panel) = match (packed, k.pack_b) {
         (Some(_), Some(p)) => (c64(out, p as i64), c64(out, 0), Some(c64(out, (p * kk) as i64))),
         (None, Some(p)) => (c64(out, lb.0[0] as i64), c64(out, lb.1 as i64), Some(c64(out, p as i64))),
@@ -578,10 +594,21 @@ fn tiles(
         let rowc = int(out, ob, "llvm.mul", i64i, ldc);
         let offs = int(out, ob, "llvm.add", rowc, offc);
         let tc = gep(out, ob, pc, offs);
-        let ta = gep(out, ob, pa, i64i);
+        // A's block of rows: its first row, or its first column of AT.
+        let ta = if k.transpose_a {
+            let rowa = int(out, ob, "llvm.mul", i64i, lda);
+            let offs = int(out, ob, "llvm.add", rowa, offa);
+            gep(out, ob, pa, offs)
+        } else {
+            gep(out, ob, pa, i64i)
+        };
         let tb = gep(out, ob, pb, offb);
         let callee = out.symbol_attr(&fname);
-        let mut args = vec![tc, ldc, ta, lda, tb, ldb, kv, nv];
+        let mut args = vec![tc, ldc, ta, lda];
+        if k.transpose_a {
+            args.push(pat);
+        }
+        args.extend([tb, ldb, kv, nv]);
         args.extend(panel);
         OpSpec::new("func.call").operands(&args).prop("callee", callee).build(out, Some(ob));
         OpSpec::new("scf.yield").build(out, Some(ob));
