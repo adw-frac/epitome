@@ -476,7 +476,7 @@ fn tiles(
             continue;
         }
         if let (Some(w), Some(p)) = (&k.weights, k.pack_b) {
-            let k_multiple = if w == "bf16" { 32 } else { 64 };
+            let k_multiple = if w == "i8" { 64 } else { 32 };
             if !k.whole_rows || n % p != 0 || kk % k_multiple != 0 {
                 continue;
             }
@@ -848,6 +848,32 @@ fn pack(
                     scale_blob = Some(scales);
                     bytes
                 }
+                "fp8" if rows % 2 == 0 => {
+                    // Each column scaled by a power of two, its largest
+                    // magnitude at most 448 (E4M3's largest), kept as the
+                    // BF16 exponent bias the kernel adds, twice (a word).
+                    let mut exps = vec![0i32; cols];
+                    let mut biases = Vec::with_capacity(cols * 4);
+                    for (c, e) in exps.iter_mut().enumerate() {
+                        let m = (0..rows).map(|r| f(r, c).abs()).fold(0.0, f32::max);
+                        *e = if m > 0.0 { (m / 448.0).log2().ceil() as i32 } else { 0 };
+                        let bias = (((120 + *e) as u16) << 7).to_le_bytes();
+                        biases.extend(bias);
+                        biases.extend(bias);
+                    }
+                    let mut bytes = Vec::with_capacity(data.len() / 4);
+                    for p in 0..cols / w {
+                        for r in (0..rows).step_by(2) {
+                            for c in p * w..(p + 1) * w {
+                                let scale = (-exps[c] as f32).exp2();
+                                bytes.push(e4m3(f(r, c) * scale));
+                                bytes.push(e4m3(f(r + 1, c) * scale));
+                            }
+                        }
+                    }
+                    scale_blob = Some(biases);
+                    bytes
+                }
                 "bf16" if rows % 2 == 0 => {
                     let mut bytes = Vec::with_capacity(data.len() / 2);
                     for p in 0..cols / w {
@@ -958,4 +984,40 @@ fn bf16(x: f32) -> u16 {
         return ((b >> 16) | 0x40) as u16;
     }
     ((b + 0x7fff + ((b >> 16) & 1)) >> 16) as u16
+}
+
+/// `x` as an E4M3 byte (sign, four bits of exponent biased by 7, three of
+/// mantissa), rounded to nearest, at most 448; never zero or subnormal (the
+/// kernel's conversion has no case for them), so magnitudes below 2^-6
+/// become 2^-6.
+fn e4m3(x: f32) -> u8 {
+    let sign = if x.is_sign_negative() { 0x80 } else { 0 };
+    let v = x.abs().clamp(1.0 / 64.0, 448.0);
+    let mut e = v.log2().floor() as i32;
+    let mut m = ((v / (e as f32).exp2() - 1.0) * 8.0).round() as i32;
+    if m == 8 {
+        e += 1;
+        m = 0;
+    }
+    // 448 is the largest: exponent 8, mantissa 6 (7 there is NaN).
+    if e > 8 || (e == 8 && m > 6) {
+        (e, m) = (8, 6);
+    }
+    sign | (((e + 7) as u8) << 3) | m as u8
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn e4m3_bytes() {
+        use super::e4m3;
+        assert_eq!(e4m3(1.0), 0x38);
+        assert_eq!(e4m3(-2.0), 0xC0);
+        assert_eq!(e4m3(1.125), 0x39);
+        assert_eq!(e4m3(448.0), 0x7E);
+        assert_eq!(e4m3(1000.0), 0x7E, "clamped to the largest");
+        assert_eq!(e4m3(1.0 / 64.0), 0x08, "the smallest normal");
+        assert_eq!(e4m3(0.0), 0x08, "no zero: the smallest normal");
+        assert_eq!(e4m3(1.97), 0x40, "rounds up into the next binade");
+    }
 }

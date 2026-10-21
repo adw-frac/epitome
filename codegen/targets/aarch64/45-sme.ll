@@ -808,3 +808,967 @@ define void @sme.i8.out.za3.expand(ptr %c, ptr %ws, ptr %am, i32 %slice) {
   call void @ST1WZ1P0(ptr %c)
   ret void
 }
+
+; ---------------------------------------------------------------------------
+; FP8 (E4M3) to BF16, 32 weights at a time: a byte t becomes
+; ((t & 0x80) << 8) | (((t & 0x7f) << 4) + bias), where bias, in z16-z19
+; for the four vectors of a row of a panel, is (120 + e) << 7 for a column
+; scaled by 2^e: the exponent moved from E4M3's bias (7) to BF16's (127),
+; plus the scale. What a table of (FP8 value, scale) to BF16 would hold,
+; worked out: SVE's gathers are not allowed in streaming mode on a machine
+; without FEAT_SME_FA64 (M4). Zero and subnormal codes are never stored.
+
+declare void @llvm.epitome.sme.fp8.bias(ptr)
+declare void @llvm.epitome.sme.fp8.dequant(ptr, ptr)
+
+define void @LSLZ2Z1H4() "feature"="sme" "enc"="00000100001101001001110000100010" "asm"="lsl z2.h, z1.h, #4" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ANDZ2H7F0() "feature"="sme" "enc"="00000101100000000110010011000010" "asm"="and z2.h, z2.h, #0x7f0" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LSLZ1H8() "feature"="sme" "enc"="00000100001110001001110000100001" "asm"="lsl z1.h, z1.h, #8" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ANDZ1H8000() "feature"="sme" "enc"="00000101100000000000110000000001" "asm"="and z1.h, z1.h, #0x8000" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ORRZ2Z1() "feature"="sme" "enc"="00000100011000010011000001000010" "asm"="orr z2.d, z2.d, z1.d" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1BZ1HVL0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010000100000101000 a:5 00001" "asm"="ld1b {lb}z1.h{rb}, p0/z, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1HZ2VL0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010010100000111000 a:5 00010" "asm"="st1h {lb}z2.h{rb}, p0, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1HZ16VL0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010010100000101000 a:5 10000" "asm"="ld1h {lb}z16.h{rb}, p0/z, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ADDZ2Z16H() "feature"="sme" "enc"="00000100011100000000000001000010" "asm"="add z2.h, z2.h, z16.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1BZ1HVL1(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010000100001101000 a:5 00001" "asm"="ld1b {lb}z1.h{rb}, p0/z, [{a}, #1, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1HZ2VL1(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010010100001111000 a:5 00010" "asm"="st1h {lb}z2.h{rb}, p0, [{a}, #1, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1HZ17VL1(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010010100001101000 a:5 10001" "asm"="ld1h {lb}z17.h{rb}, p0/z, [{a}, #1, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ADDZ2Z17H() "feature"="sme" "enc"="00000100011100010000000001000010" "asm"="add z2.h, z2.h, z17.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1BZ1HVL2(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010000100010101000 a:5 00001" "asm"="ld1b {lb}z1.h{rb}, p0/z, [{a}, #2, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1HZ2VL2(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010010100010111000 a:5 00010" "asm"="st1h {lb}z2.h{rb}, p0, [{a}, #2, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1HZ18VL2(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010010100010101000 a:5 10010" "asm"="ld1h {lb}z18.h{rb}, p0/z, [{a}, #2, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ADDZ2Z18H() "feature"="sme" "enc"="00000100011100100000000001000010" "asm"="add z2.h, z2.h, z18.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1BZ1HVL3(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010000100011101000 a:5 00001" "asm"="ld1b {lb}z1.h{rb}, p0/z, [{a}, #3, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1HZ2VL3(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010010100011111000 a:5 00010" "asm"="st1h {lb}z2.h{rb}, p0, [{a}, #3, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1HZ19VL3(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010010100011101000 a:5 10011" "asm"="ld1h {lb}z19.h{rb}, p0/z, [{a}, #3, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ADDZ2Z19H() "feature"="sme" "enc"="00000100011100110000000001000010" "asm"="add z2.h, z2.h, z19.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+; The biases of a panel's 64 columns, each twice (two rows of a pair), into
+; z16-z19.
+define void @sme.fp8.bias(ptr "reg"="xsp" %p) "feature"="sme" "recipe"="sme.fp8.bias.expand" {
+  call void @llvm.epitome.sme.fp8.bias(ptr %p)
+  ret void
+}
+
+define void @sme.fp8.bias.expand(ptr %p) {
+  call void @LD1HZ16VL0(ptr %p)
+  call void @LD1HZ17VL1(ptr %p)
+  call void @LD1HZ18VL2(ptr %p)
+  call void @LD1HZ19VL3(ptr %p)
+  ret void
+}
+
+; A row of a panel, 128 FP8 weights at src, as 128 BF16 at dst.
+define void @sme.fp8.dequant(ptr "reg"="xsp" %src, ptr "reg"="xsp" %dst) "feature"="sme" "recipe"="sme.fp8.dequant.expand" {
+  call void @llvm.epitome.sme.fp8.dequant(ptr %src, ptr %dst)
+  ret void
+}
+
+define void @sme.fp8.dequant.expand(ptr %src, ptr %dst) {
+  call void @LD1BZ1HVL0(ptr %src)
+  call void @LSLZ2Z1H4()
+  call void @ANDZ2H7F0()
+  call void @ADDZ2Z16H()
+  call void @LSLZ1H8()
+  call void @ANDZ1H8000()
+  call void @ORRZ2Z1()
+  call void @ST1HZ2VL0(ptr %dst)
+  call void @LD1BZ1HVL1(ptr %src)
+  call void @LSLZ2Z1H4()
+  call void @ANDZ2H7F0()
+  call void @ADDZ2Z17H()
+  call void @LSLZ1H8()
+  call void @ANDZ1H8000()
+  call void @ORRZ2Z1()
+  call void @ST1HZ2VL1(ptr %dst)
+  call void @LD1BZ1HVL2(ptr %src)
+  call void @LSLZ2Z1H4()
+  call void @ANDZ2H7F0()
+  call void @ADDZ2Z18H()
+  call void @LSLZ1H8()
+  call void @ANDZ1H8000()
+  call void @ORRZ2Z1()
+  call void @ST1HZ2VL2(ptr %dst)
+  call void @LD1BZ1HVL3(ptr %src)
+  call void @LSLZ2Z1H4()
+  call void @ANDZ2H7F0()
+  call void @ADDZ2Z19H()
+  call void @LSLZ1H8()
+  call void @ANDZ1H8000()
+  call void @ORRZ2Z1()
+  call void @ST1HZ2VL3(ptr %dst)
+  ret void
+}
+
+; ---------------------------------------------------------------------------
+; The FP8 conversion and int8's quantising and scaling again, four vectors
+; side by side in registers of their own (z20-z31) rather than one after
+; another through z1-z3: a streaming SVE instruction waits for the one
+; before it when that is its input, so a single chain runs at their latency.
+
+define void @LD1BZ20HVL0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010000100000101000 a:5 10100" "asm"="ld1b {lb}z20.h{rb}, p0/z, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LSLZ24Z20H4() "feature"="sme" "enc"="00000100001101001001111010011000" "asm"="lsl z24.h, z20.h, #4" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ANDZ24H7F0() "feature"="sme" "enc"="00000101100000000110010011011000" "asm"="and z24.h, z24.h, #0x7f0" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ADDZ24Z16H() "feature"="sme" "enc"="00000100011100000000001100011000" "asm"="add z24.h, z24.h, z16.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LSLZ20H8() "feature"="sme" "enc"="00000100001110001001111010010100" "asm"="lsl z20.h, z20.h, #8" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ANDZ20H8000() "feature"="sme" "enc"="00000101100000000000110000010100" "asm"="and z20.h, z20.h, #0x8000" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ORRZ24Z20() "feature"="sme" "enc"="00000100011101000011001100011000" "asm"="orr z24.d, z24.d, z20.d" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1HZ24VL0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010010100000111000 a:5 11000" "asm"="st1h {lb}z24.h{rb}, p0, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ24VL0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000000101000 a:5 11000" "asm"="ld1w {lb}z24.s{rb}, p0/z, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MOVAZ20ZA0H() "feature"="sme" "enc"="11000000100000100000000000010100" "asm"="mova z20.s, p0/m, za0h.s[w12, 0]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @SCVTFZ20() "feature"="sme" "enc"="01100101100101001010001010010100" "asm"="scvtf z20.s, p0/m, z20.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMULZ20Z24() "feature"="sme" "enc"="01100101100110000000101010010100" "asm"="fmul z20.s, z20.s, z24.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMULZ20Z3() "feature"="sme" "enc"="01100101100000110000101010010100" "asm"="fmul z20.s, z20.s, z3.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ28VL0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000000101000 a:5 11100" "asm"="ld1w {lb}z28.s{rb}, p0/z, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FADDZ20Z28() "feature"="sme" "enc"="01100101100111000000001010010100" "asm"="fadd z20.s, z20.s, z28.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1WZ20VL0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010101000000111000 a:5 10100" "asm"="st1w {lb}z20.s{rb}, p0, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MOVZ24ZERO() "feature"="sme" "enc"="00100101101110001100000000011000" "asm"="mov z24.s, #0" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ20VL0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000000101000 a:5 10100" "asm"="ld1w {lb}z20.s{rb}, p0/z, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FABSZ20() "feature"="sme" "enc"="00000100100111001010001010010100" "asm"="fabs z20.s, p0/m, z20.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMAXZ24Z20() "feature"="sme" "enc"="01100101100001101000001010011000" "asm"="fmax z24.s, p0/m, z24.s, z20.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMULZ20Z5() "feature"="sme" "enc"="01100101100001010000101010010100" "asm"="fmul z20.s, z20.s, z5.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FRINTNZ20() "feature"="sme" "enc"="01100101100000001010001010010100" "asm"="frintn z20.s, p0/m, z20.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FCVTZSZ20() "feature"="sme" "enc"="01100101100111001010001010010100" "asm"="fcvtzs z20.s, p0/m, z20.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1BZ20SVL0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010001000000111000 a:5 10100" "asm"="st1b {lb}z20.s{rb}, p0, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1BZ21HVL1(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010000100001101000 a:5 10101" "asm"="ld1b {lb}z21.h{rb}, p0/z, [{a}, #1, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LSLZ25Z21H4() "feature"="sme" "enc"="00000100001101001001111010111001" "asm"="lsl z25.h, z21.h, #4" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ANDZ25H7F0() "feature"="sme" "enc"="00000101100000000110010011011001" "asm"="and z25.h, z25.h, #0x7f0" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ADDZ25Z17H() "feature"="sme" "enc"="00000100011100010000001100111001" "asm"="add z25.h, z25.h, z17.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LSLZ21H8() "feature"="sme" "enc"="00000100001110001001111010110101" "asm"="lsl z21.h, z21.h, #8" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ANDZ21H8000() "feature"="sme" "enc"="00000101100000000000110000010101" "asm"="and z21.h, z21.h, #0x8000" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ORRZ25Z21() "feature"="sme" "enc"="00000100011101010011001100111001" "asm"="orr z25.d, z25.d, z21.d" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1HZ25VL1(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010010100001111000 a:5 11001" "asm"="st1h {lb}z25.h{rb}, p0, [{a}, #1, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ25VL1(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000001101000 a:5 11001" "asm"="ld1w {lb}z25.s{rb}, p0/z, [{a}, #1, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MOVAZ21ZA1H() "feature"="sme" "enc"="11000000100000100000000010010101" "asm"="mova z21.s, p0/m, za1h.s[w12, 0]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @SCVTFZ21() "feature"="sme" "enc"="01100101100101001010001010110101" "asm"="scvtf z21.s, p0/m, z21.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMULZ21Z25() "feature"="sme" "enc"="01100101100110010000101010110101" "asm"="fmul z21.s, z21.s, z25.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMULZ21Z3() "feature"="sme" "enc"="01100101100000110000101010110101" "asm"="fmul z21.s, z21.s, z3.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ29VL1(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000001101000 a:5 11101" "asm"="ld1w {lb}z29.s{rb}, p0/z, [{a}, #1, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FADDZ21Z29() "feature"="sme" "enc"="01100101100111010000001010110101" "asm"="fadd z21.s, z21.s, z29.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1WZ21VL1(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010101000001111000 a:5 10101" "asm"="st1w {lb}z21.s{rb}, p0, [{a}, #1, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MOVZ25ZERO() "feature"="sme" "enc"="00100101101110001100000000011001" "asm"="mov z25.s, #0" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ21VL1(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000001101000 a:5 10101" "asm"="ld1w {lb}z21.s{rb}, p0/z, [{a}, #1, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FABSZ21() "feature"="sme" "enc"="00000100100111001010001010110101" "asm"="fabs z21.s, p0/m, z21.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMAXZ25Z21() "feature"="sme" "enc"="01100101100001101000001010111001" "asm"="fmax z25.s, p0/m, z25.s, z21.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMULZ21Z5() "feature"="sme" "enc"="01100101100001010000101010110101" "asm"="fmul z21.s, z21.s, z5.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FRINTNZ21() "feature"="sme" "enc"="01100101100000001010001010110101" "asm"="frintn z21.s, p0/m, z21.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FCVTZSZ21() "feature"="sme" "enc"="01100101100111001010001010110101" "asm"="fcvtzs z21.s, p0/m, z21.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1BZ21SVL1(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010001000001111000 a:5 10101" "asm"="st1b {lb}z21.s{rb}, p0, [{a}, #1, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1BZ22HVL2(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010000100010101000 a:5 10110" "asm"="ld1b {lb}z22.h{rb}, p0/z, [{a}, #2, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LSLZ26Z22H4() "feature"="sme" "enc"="00000100001101001001111011011010" "asm"="lsl z26.h, z22.h, #4" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ANDZ26H7F0() "feature"="sme" "enc"="00000101100000000110010011011010" "asm"="and z26.h, z26.h, #0x7f0" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ADDZ26Z18H() "feature"="sme" "enc"="00000100011100100000001101011010" "asm"="add z26.h, z26.h, z18.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LSLZ22H8() "feature"="sme" "enc"="00000100001110001001111011010110" "asm"="lsl z22.h, z22.h, #8" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ANDZ22H8000() "feature"="sme" "enc"="00000101100000000000110000010110" "asm"="and z22.h, z22.h, #0x8000" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ORRZ26Z22() "feature"="sme" "enc"="00000100011101100011001101011010" "asm"="orr z26.d, z26.d, z22.d" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1HZ26VL2(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010010100010111000 a:5 11010" "asm"="st1h {lb}z26.h{rb}, p0, [{a}, #2, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ26VL2(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000010101000 a:5 11010" "asm"="ld1w {lb}z26.s{rb}, p0/z, [{a}, #2, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MOVAZ22ZA2H() "feature"="sme" "enc"="11000000100000100000000100010110" "asm"="mova z22.s, p0/m, za2h.s[w12, 0]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @SCVTFZ22() "feature"="sme" "enc"="01100101100101001010001011010110" "asm"="scvtf z22.s, p0/m, z22.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMULZ22Z26() "feature"="sme" "enc"="01100101100110100000101011010110" "asm"="fmul z22.s, z22.s, z26.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMULZ22Z3() "feature"="sme" "enc"="01100101100000110000101011010110" "asm"="fmul z22.s, z22.s, z3.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ30VL2(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000010101000 a:5 11110" "asm"="ld1w {lb}z30.s{rb}, p0/z, [{a}, #2, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FADDZ22Z30() "feature"="sme" "enc"="01100101100111100000001011010110" "asm"="fadd z22.s, z22.s, z30.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1WZ22VL2(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010101000010111000 a:5 10110" "asm"="st1w {lb}z22.s{rb}, p0, [{a}, #2, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MOVZ26ZERO() "feature"="sme" "enc"="00100101101110001100000000011010" "asm"="mov z26.s, #0" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ22VL2(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000010101000 a:5 10110" "asm"="ld1w {lb}z22.s{rb}, p0/z, [{a}, #2, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FABSZ22() "feature"="sme" "enc"="00000100100111001010001011010110" "asm"="fabs z22.s, p0/m, z22.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMAXZ26Z22() "feature"="sme" "enc"="01100101100001101000001011011010" "asm"="fmax z26.s, p0/m, z26.s, z22.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMULZ22Z5() "feature"="sme" "enc"="01100101100001010000101011010110" "asm"="fmul z22.s, z22.s, z5.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FRINTNZ22() "feature"="sme" "enc"="01100101100000001010001011010110" "asm"="frintn z22.s, p0/m, z22.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FCVTZSZ22() "feature"="sme" "enc"="01100101100111001010001011010110" "asm"="fcvtzs z22.s, p0/m, z22.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1BZ22SVL2(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010001000010111000 a:5 10110" "asm"="st1b {lb}z22.s{rb}, p0, [{a}, #2, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1BZ23HVL3(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010000100011101000 a:5 10111" "asm"="ld1b {lb}z23.h{rb}, p0/z, [{a}, #3, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LSLZ27Z23H4() "feature"="sme" "enc"="00000100001101001001111011111011" "asm"="lsl z27.h, z23.h, #4" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ANDZ27H7F0() "feature"="sme" "enc"="00000101100000000110010011011011" "asm"="and z27.h, z27.h, #0x7f0" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ADDZ27Z19H() "feature"="sme" "enc"="00000100011100110000001101111011" "asm"="add z27.h, z27.h, z19.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LSLZ23H8() "feature"="sme" "enc"="00000100001110001001111011110111" "asm"="lsl z23.h, z23.h, #8" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ANDZ23H8000() "feature"="sme" "enc"="00000101100000000000110000010111" "asm"="and z23.h, z23.h, #0x8000" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ORRZ27Z23() "feature"="sme" "enc"="00000100011101110011001101111011" "asm"="orr z27.d, z27.d, z23.d" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1HZ27VL3(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010010100011111000 a:5 11011" "asm"="st1h {lb}z27.h{rb}, p0, [{a}, #3, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ27VL3(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000011101000 a:5 11011" "asm"="ld1w {lb}z27.s{rb}, p0/z, [{a}, #3, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MOVAZ23ZA3H() "feature"="sme" "enc"="11000000100000100000000110010111" "asm"="mova z23.s, p0/m, za3h.s[w12, 0]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @SCVTFZ23() "feature"="sme" "enc"="01100101100101001010001011110111" "asm"="scvtf z23.s, p0/m, z23.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMULZ23Z27() "feature"="sme" "enc"="01100101100110110000101011110111" "asm"="fmul z23.s, z23.s, z27.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMULZ23Z3() "feature"="sme" "enc"="01100101100000110000101011110111" "asm"="fmul z23.s, z23.s, z3.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ31VL3(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000011101000 a:5 11111" "asm"="ld1w {lb}z31.s{rb}, p0/z, [{a}, #3, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FADDZ23Z31() "feature"="sme" "enc"="01100101100111110000001011110111" "asm"="fadd z23.s, z23.s, z31.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1WZ23VL3(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010101000011111000 a:5 10111" "asm"="st1w {lb}z23.s{rb}, p0, [{a}, #3, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MOVZ27ZERO() "feature"="sme" "enc"="00100101101110001100000000011011" "asm"="mov z27.s, #0" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD1WZ23VL3(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010101000011101000 a:5 10111" "asm"="ld1w {lb}z23.s{rb}, p0/z, [{a}, #3, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FABSZ23() "feature"="sme" "enc"="00000100100111001010001011110111" "asm"="fabs z23.s, p0/m, z23.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMAXZ27Z23() "feature"="sme" "enc"="01100101100001101000001011111011" "asm"="fmax z27.s, p0/m, z27.s, z23.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMULZ23Z5() "feature"="sme" "enc"="01100101100001010000101011110111" "asm"="fmul z23.s, z23.s, z5.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FRINTNZ23() "feature"="sme" "enc"="01100101100000001010001011110111" "asm"="frintn z23.s, p0/m, z23.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FCVTZSZ23() "feature"="sme" "enc"="01100101100111001010001011110111" "asm"="fcvtzs z23.s, p0/m, z23.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ST1BZ23SVL3(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1110010001000011111000 a:5 10111" "asm"="st1b {lb}z23.s{rb}, p0, [{a}, #3, mul vl]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMAXZ24Z25() "feature"="sme" "enc"="01100101100001101000001100111000" "asm"="fmax z24.s, p0/m, z24.s, z25.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMAXZ26Z27() "feature"="sme" "enc"="01100101100001101000001101111010" "asm"="fmax z26.s, p0/m, z26.s, z27.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMAXZ24Z26() "feature"="sme" "enc"="01100101100001101000001101011000" "asm"="fmax z24.s, p0/m, z24.s, z26.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @FMAXVS5Z24() "feature"="sme" "enc"="01100101100001100010001100000101" "asm"="fmaxv s5, p0, z24.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+declare void @llvm.epitome.sme.fp8.dequant4(ptr, ptr)
+
+define void @sme.fp8.dequant4(ptr "reg"="xsp" %src, ptr "reg"="xsp" %dst) "feature"="sme" "recipe"="sme.fp8.dequant4.expand" {
+  call void @llvm.epitome.sme.fp8.dequant4(ptr %src, ptr %dst)
+  ret void
+}
+
+define void @sme.fp8.dequant4.expand(ptr %src, ptr %dst) {
+  call void @LD1BZ20HVL0(ptr %src)
+  call void @LD1BZ21HVL1(ptr %src)
+  call void @LD1BZ22HVL2(ptr %src)
+  call void @LD1BZ23HVL3(ptr %src)
+  call void @LSLZ24Z20H4()
+  call void @LSLZ25Z21H4()
+  call void @LSLZ26Z22H4()
+  call void @LSLZ27Z23H4()
+  call void @ANDZ24H7F0()
+  call void @ANDZ25H7F0()
+  call void @ANDZ26H7F0()
+  call void @ANDZ27H7F0()
+  call void @ADDZ24Z16H()
+  call void @ADDZ25Z17H()
+  call void @ADDZ26Z18H()
+  call void @ADDZ27Z19H()
+  call void @LSLZ20H8()
+  call void @LSLZ21H8()
+  call void @LSLZ22H8()
+  call void @LSLZ23H8()
+  call void @ANDZ20H8000()
+  call void @ANDZ21H8000()
+  call void @ANDZ22H8000()
+  call void @ANDZ23H8000()
+  call void @ORRZ24Z20()
+  call void @ORRZ25Z21()
+  call void @ORRZ26Z22()
+  call void @ORRZ27Z23()
+  call void @ST1HZ24VL0(ptr %dst)
+  call void @ST1HZ25VL1(ptr %dst)
+  call void @ST1HZ26VL2(ptr %dst)
+  call void @ST1HZ27VL3(ptr %dst)
+  ret void
+}
+
+declare void @llvm.epitome.sme.i8.colscales(ptr)
+
+define void @sme.i8.colscales(ptr "reg"="xsp" %p) "feature"="sme" "recipe"="sme.i8.colscales.expand" {
+  call void @llvm.epitome.sme.i8.colscales(ptr %p)
+  ret void
+}
+
+define void @sme.i8.colscales.expand(ptr %p) {
+  call void @LD1WZ24VL0(ptr %p)
+  call void @LD1WZ25VL1(ptr %p)
+  call void @LD1WZ26VL2(ptr %p)
+  call void @LD1WZ27VL3(ptr %p)
+  ret void
+}
+
+declare void @llvm.epitome.sme.i8.out4(ptr, ptr, i32)
+
+define void @sme.i8.out4(ptr "reg"="xsp" %c, ptr "reg"="xsp" %am, i32 "reg"="w" %slice) "feature"="sme" "recipe"="sme.i8.out4.expand" {
+  call void @llvm.epitome.sme.i8.out4(ptr %c, ptr %am, i32 %slice)
+  ret void
+}
+
+define void @sme.i8.out4.expand(ptr %c, ptr %am, i32 %slice) {
+  call void @MOVW12(i32 %slice)
+  call void @MOVAZ20ZA0H()
+  call void @MOVAZ21ZA1H()
+  call void @MOVAZ22ZA2H()
+  call void @MOVAZ23ZA3H()
+  call void @SCVTFZ20()
+  call void @SCVTFZ21()
+  call void @SCVTFZ22()
+  call void @SCVTFZ23()
+  call void @FMULZ20Z24()
+  call void @FMULZ21Z25()
+  call void @FMULZ22Z26()
+  call void @FMULZ23Z27()
+  call void @LD1RWZ3(ptr %am)
+  call void @FMULZ20Z3()
+  call void @FMULZ21Z3()
+  call void @FMULZ22Z3()
+  call void @FMULZ23Z3()
+  call void @LD1WZ28VL0(ptr %c)
+  call void @LD1WZ29VL1(ptr %c)
+  call void @LD1WZ30VL2(ptr %c)
+  call void @LD1WZ31VL3(ptr %c)
+  call void @FADDZ20Z28()
+  call void @FADDZ21Z29()
+  call void @FADDZ22Z30()
+  call void @FADDZ23Z31()
+  call void @ST1WZ20VL0(ptr %c)
+  call void @ST1WZ21VL1(ptr %c)
+  call void @ST1WZ22VL2(ptr %c)
+  call void @ST1WZ23VL3(ptr %c)
+  ret void
+}
+
+declare void @llvm.epitome.sme.absmax4.start()
+
+define void @sme.absmax4.start() "feature"="sme" "recipe"="sme.absmax4.start.expand" {
+  call void @llvm.epitome.sme.absmax4.start()
+  ret void
+}
+
+define void @sme.absmax4.start.expand() {
+  call void @MOVZ24ZERO()
+  call void @MOVZ25ZERO()
+  call void @MOVZ26ZERO()
+  call void @MOVZ27ZERO()
+  ret void
+}
+
+declare void @llvm.epitome.sme.absmax4.add(ptr)
+
+define void @sme.absmax4.add(ptr "reg"="xsp" %p) "feature"="sme" "recipe"="sme.absmax4.add.expand" {
+  call void @llvm.epitome.sme.absmax4.add(ptr %p)
+  ret void
+}
+
+define void @sme.absmax4.add.expand(ptr %p) {
+  call void @LD1WZ20VL0(ptr %p)
+  call void @LD1WZ21VL1(ptr %p)
+  call void @LD1WZ22VL2(ptr %p)
+  call void @LD1WZ23VL3(ptr %p)
+  call void @FABSZ20()
+  call void @FABSZ21()
+  call void @FABSZ22()
+  call void @FABSZ23()
+  call void @FMAXZ24Z20()
+  call void @FMAXZ25Z21()
+  call void @FMAXZ26Z22()
+  call void @FMAXZ27Z23()
+  ret void
+}
+
+declare void @llvm.epitome.sme.absmax4.end(ptr)
+
+define void @sme.absmax4.end(ptr "reg"="xsp" %p) "feature"="sme" "recipe"="sme.absmax4.end.expand" {
+  call void @llvm.epitome.sme.absmax4.end(ptr %p)
+  ret void
+}
+
+define void @sme.absmax4.end.expand(ptr %p) {
+  call void @FMAXZ24Z25()
+  call void @FMAXZ26Z27()
+  call void @FMAXZ24Z26()
+  call void @FMAXVS5Z24()
+  call void @DUPZ5S5()
+  call void @ST1WZ5P0(ptr %p)
+  call void @MOVZ3127()
+  call void @SCVTFZ3()
+  call void @FDIVRZ5Z3()
+  ret void
+}
+
+declare void @llvm.epitome.sme.quantize64(ptr, ptr)
+
+define void @sme.quantize64(ptr "reg"="xsp" %src, ptr "reg"="xsp" %dst) "feature"="sme" "recipe"="sme.quantize64.expand" {
+  call void @llvm.epitome.sme.quantize64(ptr %src, ptr %dst)
+  ret void
+}
+
+define void @sme.quantize64.expand(ptr %src, ptr %dst) {
+  call void @LD1WZ20VL0(ptr %src)
+  call void @LD1WZ21VL1(ptr %src)
+  call void @LD1WZ22VL2(ptr %src)
+  call void @LD1WZ23VL3(ptr %src)
+  call void @FMULZ20Z5()
+  call void @FMULZ21Z5()
+  call void @FMULZ22Z5()
+  call void @FMULZ23Z5()
+  call void @FRINTNZ20()
+  call void @FRINTNZ21()
+  call void @FRINTNZ22()
+  call void @FRINTNZ23()
+  call void @FCVTZSZ20()
+  call void @FCVTZSZ21()
+  call void @FCVTZSZ22()
+  call void @FCVTZSZ23()
+  call void @ST1BZ20SVL0(ptr %dst)
+  call void @ST1BZ21SVL1(ptr %dst)
+  call void @ST1BZ22SVL2(ptr %dst)
+  call void @ST1BZ23SVL3(ptr %dst)
+  ret void
+}
+
+; FP8 to BF16 in four instructions a vector rather than six: with t<<4 the
+; sign lands in bit 11, and (t & 0x80) * 0xF0 (mla) moves it to bit 15:
+; (t << 4) + bias + (t & 0x80) * 0xF0. z12 holds 0xF0 (sme.fp8.init).
+
+define void @MOVZ12HF0() "feature"="sme" "enc"="00000101110000000110010001101100" "asm"="mov z12.h, #0xf0" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ANDZ20H80() "feature"="sme" "enc"="00000101100000000100110000010100" "asm"="and z20.h, z20.h, #0x80" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MLAZ24Z20Z12() "feature"="sme" "enc"="00000100010011000100001010011000" "asm"="mla z24.h, p0/m, z20.h, z12.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ANDZ21H80() "feature"="sme" "enc"="00000101100000000100110000010101" "asm"="and z21.h, z21.h, #0x80" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MLAZ25Z21Z12() "feature"="sme" "enc"="00000100010011000100001010111001" "asm"="mla z25.h, p0/m, z21.h, z12.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ANDZ22H80() "feature"="sme" "enc"="00000101100000000100110000010110" "asm"="and z22.h, z22.h, #0x80" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MLAZ26Z22Z12() "feature"="sme" "enc"="00000100010011000100001011011010" "asm"="mla z26.h, p0/m, z22.h, z12.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @ANDZ23H80() "feature"="sme" "enc"="00000101100000000100110000010111" "asm"="and z23.h, z23.h, #0x80" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MLAZ27Z23Z12() "feature"="sme" "enc"="00000100010011000100001011111011" "asm"="mla z27.h, p0/m, z23.h, z12.h" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+declare void @llvm.epitome.sme.fp8.init()
+
+define void @sme.fp8.init() "feature"="sme" "recipe"="sme.fp8.init.expand" {
+  call void @llvm.epitome.sme.fp8.init()
+  ret void
+}
+
+define void @sme.fp8.init.expand() {
+  call void @MOVZ12HF0()
+  ret void
+}
+
+declare void @llvm.epitome.sme.fp8.dequant4m(ptr, ptr)
+
+define void @sme.fp8.dequant4m(ptr "reg"="xsp" %src, ptr "reg"="xsp" %dst) "feature"="sme" "recipe"="sme.fp8.dequant4m.expand" {
+  call void @llvm.epitome.sme.fp8.dequant4m(ptr %src, ptr %dst)
+  ret void
+}
+
+define void @sme.fp8.dequant4m.expand(ptr %src, ptr %dst) {
+  call void @LD1BZ20HVL0(ptr %src)
+  call void @LD1BZ21HVL1(ptr %src)
+  call void @LD1BZ22HVL2(ptr %src)
+  call void @LD1BZ23HVL3(ptr %src)
+  call void @LSLZ24Z20H4()
+  call void @LSLZ25Z21H4()
+  call void @LSLZ26Z22H4()
+  call void @LSLZ27Z23H4()
+  call void @ANDZ20H80()
+  call void @ANDZ21H80()
+  call void @ANDZ22H80()
+  call void @ANDZ23H80()
+  call void @ADDZ24Z16H()
+  call void @ADDZ25Z17H()
+  call void @ADDZ26Z18H()
+  call void @ADDZ27Z19H()
+  call void @MLAZ24Z20Z12()
+  call void @MLAZ25Z21Z12()
+  call void @MLAZ26Z22Z12()
+  call void @MLAZ27Z23Z12()
+  call void @ST1HZ24VL0(ptr %dst)
+  call void @ST1HZ25VL1(ptr %dst)
+  call void @ST1HZ26VL2(ptr %dst)
+  call void @ST1HZ27VL3(ptr %dst)
+  ret void
+}

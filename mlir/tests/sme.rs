@@ -268,3 +268,21 @@ fn constant_weights_in_int8() {
     assert!(text.contains("_panels64_i8_scales"), "{text}");
     compile_and_run(&m, &constant_weights_driver(k, "x", 1e-2), "sme-i8", &["smopa za3.s", "fcvtzs", "st1b"]);
 }
+
+/// The same with FP8 (E4M3) weights (`aarch64-sme:fp8`): B a byte each, a
+/// power of two for each column; made BF16 in the kernel, a panel at a
+/// time, then as BF16. Within FP8's error of the f32 product.
+#[test]
+fn constant_weights_in_fp8() {
+    let k = 96;
+    let (m, text) = constant_weights(k, "aarch64-sme:fp8");
+    assert!(text.contains("@__epitome_sme_matmul_fp8_64"), "{text}");
+    // These weights (eighths) are exact in FP8; A is rounded to BF16.
+    let round = "let b = x.to_bits(); f32::from_bits(((b + 0x7fff + ((b >> 16) & 1)) >> 16) << 16)";
+    compile_and_run(
+        &m,
+        &constant_weights_driver(k, round, 1e-4),
+        "sme-fp8",
+        &["bfmopa za3.s", "ld1b {z20.h}", "mla z27.h"],
+    );
+}

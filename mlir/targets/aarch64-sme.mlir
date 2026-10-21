@@ -174,7 +174,7 @@ func.func private @__epitome_sme_matmul_bf16_64(%c: !llvm.ptr, %ldc: i64, %a: !l
 // adds four byte products into each 32-bit integer of ZA, from zero; each
 // row of the result is then made f32, times its column's scale (ws, which
 // the pass makes the column's scale over 127) and its row's, and added to
-// C. at holds A's bytes (64 k), then their transpose (64 k), then the rows'
+// C. Each step works on four vectors at once. at holds A's bytes (64 k), then their transpose (64 k), then the rows'
 // scales (64 x 16 f32). k is a multiple of 64; ldb and panel are in words
 // (64, and 16 k).
 "epitome.kernel"() <{op = "matmul", element = f32, weights = "i8",
@@ -212,25 +212,25 @@ func.func private @__epitome_sme_matmul_i8_64(%c: !llvm.ptr, %ldc: i64, %a: !llv
     %qri = arith.index_cast %qr : index to i64
     %qro = "llvm.mul"(%qri, %lda) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
     %qsrc = "llvm.getelementptr"(%a, %qro) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-    "llvm.call_intrinsic"() <{intrin = "llvm.epitome.sme.absmax.start"}> : () -> ()
-    "scf.for"(%c0, %ki, %c16) ({
+    "llvm.call_intrinsic"() <{intrin = "llvm.epitome.sme.absmax4.start"}> : () -> ()
+    "scf.for"(%c0, %ki, %c64) ({
     ^bb0(%qb: index):
       %qbi = arith.index_cast %qb : index to i64
       %qp = "llvm.getelementptr"(%qsrc, %qbi) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-      "llvm.call_intrinsic"(%qp) <{intrin = "llvm.epitome.sme.absmax.add"}> : (!llvm.ptr) -> ()
+      "llvm.call_intrinsic"(%qp) <{intrin = "llvm.epitome.sme.absmax4.add"}> : (!llvm.ptr) -> ()
       "scf.yield"() : () -> ()
     }) : (index, index, index) -> ()
     %qso = "llvm.mul"(%qri, %all) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
     %qslot = "llvm.getelementptr"(%am, %qso) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-    "llvm.call_intrinsic"(%qslot) <{intrin = "llvm.epitome.sme.absmax.end"}> : (!llvm.ptr) -> ()
+    "llvm.call_intrinsic"(%qslot) <{intrin = "llvm.epitome.sme.absmax4.end"}> : (!llvm.ptr) -> ()
     %qdo = "llvm.mul"(%qri, %k) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
     %qdst = "llvm.getelementptr"(%at, %qdo) <{elem_type = i8, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-    "scf.for"(%c0, %ki, %c16) ({
+    "scf.for"(%c0, %ki, %c64) ({
     ^bb0(%qb: index):
       %qbi = arith.index_cast %qb : index to i64
       %qp = "llvm.getelementptr"(%qsrc, %qbi) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
       %qd = "llvm.getelementptr"(%qdst, %qbi) <{elem_type = i8, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-      "llvm.call_intrinsic"(%qp, %qd) <{intrin = "llvm.epitome.sme.quantize16"}> : (!llvm.ptr, !llvm.ptr) -> ()
+      "llvm.call_intrinsic"(%qp, %qd) <{intrin = "llvm.epitome.sme.quantize64"}> : (!llvm.ptr, !llvm.ptr) -> ()
       "scf.yield"() : () -> ()
     }) : (index, index, index) -> ()
     "scf.yield"() : () -> ()
@@ -279,6 +279,7 @@ func.func private @__epitome_sme_matmul_i8_64(%c: !llvm.ptr, %ldc: i64, %a: !llv
       %pbo0 = "llvm.mul"(%pn, %panel) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
       %bj = "llvm.getelementptr"(%b, %pbo0) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
       %wsj = "llvm.getelementptr"(%ws, %pji) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+      "llvm.call_intrinsic"(%wsj) <{intrin = "llvm.epitome.sme.i8.colscales"}> : (!llvm.ptr) -> ()
       "scf.for"(%c0, %c4, %c1) ({
       ^bb0(%pq: index):
         %pqi = arith.index_cast %pq : index to i64
@@ -304,26 +305,171 @@ func.func private @__epitome_sme_matmul_i8_64(%c: !llvm.ptr, %ldc: i64, %a: !llv
           %oam = "llvm.mul"(%orow, %all) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
           %amr = "llvm.getelementptr"(%am, %oam) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
           %os = arith.trunci %ori : i64 to i32
-          %o0 = arith.constant 0 : i64
-          %oc0 = "llvm.getelementptr"(%crow, %o0) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-          %ow0 = "llvm.getelementptr"(%wsj, %o0) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-          "llvm.call_intrinsic"(%oc0, %ow0, %amr, %os) <{intrin = "llvm.epitome.sme.i8.out.za0"}> : (!llvm.ptr, !llvm.ptr, !llvm.ptr, i32) -> ()
-          %o1 = arith.constant 16 : i64
-          %oc1 = "llvm.getelementptr"(%crow, %o1) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-          %ow1 = "llvm.getelementptr"(%wsj, %o1) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-          "llvm.call_intrinsic"(%oc1, %ow1, %amr, %os) <{intrin = "llvm.epitome.sme.i8.out.za1"}> : (!llvm.ptr, !llvm.ptr, !llvm.ptr, i32) -> ()
-          %o2 = arith.constant 32 : i64
-          %oc2 = "llvm.getelementptr"(%crow, %o2) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-          %ow2 = "llvm.getelementptr"(%wsj, %o2) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-          "llvm.call_intrinsic"(%oc2, %ow2, %amr, %os) <{intrin = "llvm.epitome.sme.i8.out.za2"}> : (!llvm.ptr, !llvm.ptr, !llvm.ptr, i32) -> ()
-          %o3 = arith.constant 48 : i64
-          %oc3 = "llvm.getelementptr"(%crow, %o3) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-          %ow3 = "llvm.getelementptr"(%wsj, %o3) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-          "llvm.call_intrinsic"(%oc3, %ow3, %amr, %os) <{intrin = "llvm.epitome.sme.i8.out.za3"}> : (!llvm.ptr, !llvm.ptr, !llvm.ptr, i32) -> ()
+          "llvm.call_intrinsic"(%crow, %amr, %os) <{intrin = "llvm.epitome.sme.i8.out4"}> : (!llvm.ptr, !llvm.ptr, i32) -> ()
           "scf.yield"() : () -> ()
         }) : (index, index, index) -> ()
         "scf.yield"() : () -> ()
       }) : (index, index, index) -> ()
+    "scf.yield"() : () -> ()
+  }) : (index, index, index) -> ()
+  "llvm.call_intrinsic"() <{intrin = "llvm.epitome.sme.stop"}> : () -> ()
+  "func.return"() : () -> ()
+}
+
+// Matrix products with FP8 weights ("weights = fp8"), for B a constant:
+// B quantised when compiling to E4M3 bytes, each column scaled by a power
+// of two (2^e, e in its bias), packed as @__epitome_sme_matmul_bf16_64's
+// BF16 pairs are but a byte each. For each panel, the kernel makes the
+// panel BF16 into the second half of at (sme.fp8.dequant), then goes on as
+// the BF16 kernel does. bias holds each column's BF16 exponent bias, twice.
+// k is a multiple of 32.
+"epitome.kernel"() <{op = "matmul", element = f32, weights = "fp8",
+    indexing_maps = [affine_map<(d0, d1, d2) -> (d0, d2)>, affine_map<(d0, d1, d2) -> (d2, d1)>,
+                     affine_map<(d0, d1, d2) -> (d0, d1)>],
+    iterator_types = ["parallel", "parallel", "reduction"],
+    body = ["arith.mulf", "arith.addf"],
+    tile = array<i64: 64, 16>, whole_rows, pack_b = 64, transpose_a,
+    function = @__epitome_sme_matmul_fp8_64}> : () -> ()
+
+func.func private @__epitome_sme_matmul_fp8_64(%c: !llvm.ptr, %ldc: i64, %a: !llvm.ptr, %lda: i64, %at: !llvm.ptr, %b: !llvm.ptr, %ldb: i64, %k: i64, %n: i64, %panel: i64, %bias: !llvm.ptr) attributes {llvm.no_inline} {
+  "llvm.call_intrinsic"() <{intrin = "llvm.epitome.sme.start"}> : () -> ()
+  "llvm.call_intrinsic"() <{intrin = "llvm.epitome.sme.ptrue.p0.h"}> : () -> ()
+  "llvm.call_intrinsic"() <{intrin = "llvm.epitome.sme.ptrue.p1.h"}> : () -> ()
+  "llvm.call_intrinsic"() <{intrin = "llvm.epitome.sme.fp8.init"}> : () -> ()
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %c4 = arith.constant 4 : index
+  %c16 = arith.constant 16 : index
+  %c32 = arith.constant 32 : index
+  %c64 = arith.constant 64 : index
+  %all = arith.constant 16 : i64
+  %ld64 = "llvm.mlir.constant"() <{value = 64 : i64}> : () -> i64
+  %one = "llvm.mlir.constant"() <{value = 1 : i64}> : () -> i64
+  %ld32 = "llvm.mlir.constant"() <{value = 32 : i64}> : () -> i64
+  %half = "llvm.mul"(%k, %ld32) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+  %ni = arith.index_cast %n : i64 to index
+  %ki = arith.index_cast %k : i64 to index
+  %c2 = arith.constant 2 : index
+  %kp = arith.divui %ki, %c2 : index
+  // A as BF16 pairs, transposed a word at a time: AT[k/2][64].
+  "scf.for"(%c0, %ki, %c32) ({
+  ^bb0(%tk: index):
+    %tkk = arith.index_cast %tk : index to i64
+    %tkp = "llvm.lshr"(%tkk, %one) : (i64, i64) -> i64
+    %ta = "llvm.getelementptr"(%a, %tkk) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+    %tto = "llvm.mul"(%tkp, %ld64) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+    %tt = "llvm.getelementptr"(%at, %tto) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+    "scf.for"(%c0, %c4, %c1) ({
+    ^bb0(%tq: index):
+      %tqq = arith.index_cast %tq : index to i64
+      %trow0 = "llvm.mul"(%tqq, %all) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+      %tro = "llvm.mul"(%trow0, %lda) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+      %tab = "llvm.getelementptr"(%ta, %tro) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+      %ttb = "llvm.getelementptr"(%tt, %trow0) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+      "scf.for"(%c0, %c16, %c1) ({
+      ^bb0(%tr: index):
+        %tri = arith.index_cast %tr : index to i64
+        %ts = arith.trunci %tri : i64 to i32
+        %tro2 = "llvm.mul"(%tri, %lda) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+        %tp = "llvm.getelementptr"(%tab, %tro2) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+        "llvm.call_intrinsic"(%tp, %ts) <{intrin = "llvm.epitome.sme.bf16.row.za0h"}> : (!llvm.ptr, i32) -> ()
+        "scf.yield"() : () -> ()
+      }) : (index, index, index) -> ()
+      "scf.for"(%c0, %c16, %c1) ({
+      ^bb0(%tr: index):
+        %tri = arith.index_cast %tr : index to i64
+        %ts = arith.trunci %tri : i64 to i32
+        %tro2 = "llvm.mul"(%tri, %ld64) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+        %tp = "llvm.getelementptr"(%ttb, %tro2) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+        "llvm.call_intrinsic"(%tp, %ts) <{intrin = "llvm.epitome.sme.st1w.za0v.s"}> : (!llvm.ptr, i32) -> ()
+        "scf.yield"() : () -> ()
+      }) : (index, index, index) -> ()
+      "scf.yield"() : () -> ()
+    }) : (index, index, index) -> ()
+    "scf.yield"() : () -> ()
+  }) : (index, index, index) -> ()
+  "scf.for"(%c0, %ni, %c64) ({
+  ^bb0(%wj: index):
+    %wjj = arith.index_cast %wj : index to i64
+    %wcj = "llvm.getelementptr"(%c, %wjj) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+    %six = "llvm.mlir.constant"() <{value = 6 : i64}> : () -> i64
+    %wpn = "llvm.lshr"(%wjj, %six) : (i64, i64) -> i64
+    %wpo = "llvm.mul"(%wpn, %panel) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+    %wbj = "llvm.getelementptr"(%at, %half) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+    %wb8 = "llvm.getelementptr"(%b, %wpo) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+    %dbias = "llvm.getelementptr"(%bias, %wjj) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+    "llvm.call_intrinsic"(%dbias) <{intrin = "llvm.epitome.sme.fp8.bias"}> : (!llvm.ptr) -> ()
+    // The panel as BF16, into the second half of at.
+    "scf.for"(%c0, %kp, %c1) ({
+    ^bb0(%dk: index):
+      %dki = arith.index_cast %dk : index to i64
+      %dso = "llvm.mul"(%dki, %ld32) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+      %dsrc = "llvm.getelementptr"(%wb8, %dso) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+      %ddo = "llvm.mul"(%dki, %ld64) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+      %ddst = "llvm.getelementptr"(%wbj, %ddo) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+      "llvm.call_intrinsic"(%dsrc, %ddst) <{intrin = "llvm.epitome.sme.fp8.dequant4m"}> : (!llvm.ptr, !llvm.ptr) -> ()
+      "scf.yield"() : () -> ()
+    }) : (index, index, index) -> ()
+    "scf.for"(%c0, %c4, %c1) ({
+    ^bb0(%wq: index):
+      %wqq = arith.index_cast %wq : index to i64
+      %wrow0 = "llvm.mul"(%wqq, %all) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+      %wco = "llvm.mul"(%wrow0, %ldc) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+      %wci = "llvm.getelementptr"(%wcj, %wco) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+      %wai = "llvm.getelementptr"(%at, %wrow0) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+      // C's 16 x 64 block into za0.s-za3.s, a row of each at a time.
+      "scf.for"(%c0, %c16, %c1) ({
+      ^bb0(%wr: index):
+        %wri = arith.index_cast %wr : index to i64
+        %ws = arith.trunci %wri : i64 to i32
+        %wro = "llvm.mul"(%wri, %ldc) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+        %wrow = "llvm.getelementptr"(%wci, %wro) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+          %wt0 = arith.constant 0 : i64
+          %wp0 = "llvm.getelementptr"(%wrow, %wt0) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+          "llvm.call_intrinsic"(%wp0, %ws) <{intrin = "llvm.epitome.sme.ld1w.za0h.s"}> : (!llvm.ptr, i32) -> ()
+          %wt1 = arith.constant 16 : i64
+          %wp1 = "llvm.getelementptr"(%wrow, %wt1) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+          "llvm.call_intrinsic"(%wp1, %ws) <{intrin = "llvm.epitome.sme.ld1w.za1h.s"}> : (!llvm.ptr, i32) -> ()
+          %wt2 = arith.constant 32 : i64
+          %wp2 = "llvm.getelementptr"(%wrow, %wt2) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+          "llvm.call_intrinsic"(%wp2, %ws) <{intrin = "llvm.epitome.sme.ld1w.za2h.s"}> : (!llvm.ptr, i32) -> ()
+          %wt3 = arith.constant 48 : i64
+          %wp3 = "llvm.getelementptr"(%wrow, %wt3) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+          "llvm.call_intrinsic"(%wp3, %ws) <{intrin = "llvm.epitome.sme.ld1w.za3h.s"}> : (!llvm.ptr, i32) -> ()
+        "scf.yield"() : () -> ()
+      }) : (index, index, index) -> ()
+      "scf.for"(%c0, %kp, %c1) ({
+      ^bb0(%wi: index):
+        %wii = arith.index_cast %wi : index to i64
+        %wao = "llvm.mul"(%wii, %ld64) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+        %wap = "llvm.getelementptr"(%wai, %wao) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+        %wbo = "llvm.mul"(%wii, %ld64) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+        %wbp = "llvm.getelementptr"(%wbj, %wbo) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+        "llvm.call_intrinsic"(%wap, %wbp) <{intrin = "llvm.epitome.sme.bfmopa4w.za.s"}> : (!llvm.ptr, !llvm.ptr) -> ()
+        "scf.yield"() : () -> ()
+      }) : (index, index, index) -> ()
+      "scf.for"(%c0, %c16, %c1) ({
+      ^bb0(%wr: index):
+        %wri = arith.index_cast %wr : index to i64
+        %ws = arith.trunci %wri : i64 to i32
+        %wro = "llvm.mul"(%wri, %ldc) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
+        %wrow = "llvm.getelementptr"(%wci, %wro) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+          %wt0 = arith.constant 0 : i64
+          %wp0 = "llvm.getelementptr"(%wrow, %wt0) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+          "llvm.call_intrinsic"(%wp0, %ws) <{intrin = "llvm.epitome.sme.st1w.za0h.s"}> : (!llvm.ptr, i32) -> ()
+          %wt1 = arith.constant 16 : i64
+          %wp1 = "llvm.getelementptr"(%wrow, %wt1) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+          "llvm.call_intrinsic"(%wp1, %ws) <{intrin = "llvm.epitome.sme.st1w.za1h.s"}> : (!llvm.ptr, i32) -> ()
+          %wt2 = arith.constant 32 : i64
+          %wp2 = "llvm.getelementptr"(%wrow, %wt2) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+          "llvm.call_intrinsic"(%wp2, %ws) <{intrin = "llvm.epitome.sme.st1w.za2h.s"}> : (!llvm.ptr, i32) -> ()
+          %wt3 = arith.constant 48 : i64
+          %wp3 = "llvm.getelementptr"(%wrow, %wt3) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+          "llvm.call_intrinsic"(%wp3, %ws) <{intrin = "llvm.epitome.sme.st1w.za3h.s"}> : (!llvm.ptr, i32) -> ()
+        "scf.yield"() : () -> ()
+      }) : (index, index, index) -> ()
+      "scf.yield"() : () -> ()
+    }) : (index, index, index) -> ()
     "scf.yield"() : () -> ()
   }) : (index, index, index) -> ()
   "llvm.call_intrinsic"() <{intrin = "llvm.epitome.sme.stop"}> : () -> ()
