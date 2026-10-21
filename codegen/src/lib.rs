@@ -326,7 +326,8 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
     for text in texts {
         out.push_str(&text?);
     }
-    let globals = asm::collect_globals(&cx, &abi)?;
+    let mut globals = asm::collect_globals(&cx, &abi)?;
+    globals.extend(asm::eh_stubs(&funcs, &abi));
     asm::print_globals(&abi, &globals, &mut out);
     let aliases = asm::collect_aliases(&cx, &abi)?;
     asm::print_aliases(&aliases, &mut out);

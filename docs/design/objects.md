@@ -13,8 +13,10 @@ assembly: **Done**. Assembling other compilers' assembly: **Partial** (see
 below). Programs and SQLite built
 from our own Mach-O objects, linked by the system linker, run and answer as
 clang's builds do. Unwind tables (`.eh_frame`): **Done**. Exception
-tables: **Done** for Mach-O, **Later** for ELF. Compact unwind and debug
-info: **Later**.
+tables: **Done** for Mach-O, run; **Done** for ELF, checked against the
+assemblers but not run (nothing here runs Linux programs). Thread-local
+variables: **Done** (Mach-O's descriptors; ELF's by TLSDESC on AArch64,
+local-exec offsets on RISC-V). Compact unwind and debug info: **Later**.
 
 ## Sources
 
@@ -416,7 +418,22 @@ of relocations as its own address is.
 
 Assembly writes `.cfi_personality 155, sym` and `.cfi_lsda 16, label`,
 and the table as `.byte` lists, with `.long sym@GOT-label` for the types.
-`epitome-as` reads all of these. Two things were found by running
+`epitome-as` reads all of these.
+
+ELF has no 4-byte reference to a GOT entry that every linker takes in
+data, so ELF's tables reach the personality and the types through words
+of ours instead, as clang's do: `sym.DW.stub`, a local 8-byte word in
+`.data` holding the symbol's address (`asm::eh_stubs`, named by
+`Abi::eh_ref`). The encodings are the same, `0x9b`, with the relocation
+whose `use` is `eh-pcrel` (`R_AARCH64_PREL32`, `R_RISCV_32_PCREL`) to
+the word; the LSDA's is `0x1b`, 4 bytes, PC-relative to the table's
+place. Assembly writes `.cfi_personality 155, sym.DW.stub`, `.cfi_lsda
+27, label` and `.long sym.DW.stub-label`. Assemblers put each CIE before
+its FDEs, the CIE without a personality first, and so do we. The objects
+are checked against the assemblers (`tests/unwind.rs`): on AArch64 they
+are what clang's assembler and ours make of our assembly; on RISC-V their
+code, tables and words are LLVM's, byte for byte. Linking and running
+them needs Linux. Two things were found by running
 programs, not by comparing bytes:
 
 - **Mach-O's 4-byte GOT reference** holds `0xc0000000` less its own offset
@@ -439,16 +456,13 @@ must print what rustc's build of it does, at `-C opt-level=0` and `2`.
 
 ## Not yet
 
-- ELF exception tables: the personality and the types caught as
-  `DW.ref.*` symbols in a COMDAT group, with encodings `0x9c` and `0x1b`.
-  A function with landing pads is an error under ELF for now.
 - Compact unwind entries for Mach-O (smaller than DWARF's, and what Apple's
   assembler writes where a frame fits them), and debug info.
 - `.subsections_via_symbols` (Mach-O): without it the linker keeps each
   section whole, so it cannot drop unused functions.
 - Zero-filled sections in Mach-O (`__DATA,__bss`): zeros are stored.
 - Weak and `linkonce` definitions (written as global), common symbols,
-  thread-local storage in ELF (Mach-O's is done), and sections chosen by
-  attribute.
+  `.tbss` (zero-initialised thread-local variables are stored as zeros in
+  `.tdata`), and sections chosen by attribute.
 - Disassembling instructions the description does not have (`ldp`, `stp`,
   pointer authentication, system instructions): they print as `.word`.

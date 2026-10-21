@@ -22,15 +22,16 @@
 //! The function's unwind tables name the LSDA and the personality (see
 //! `unwind.rs`).
 
-use crate::abi::Syntax;
 use crate::mir::{MFunc, MOp, Opcode};
 use crate::target::Target;
 
-/// A function's LSDA: its bytes, and where GOT-relative references to
-/// symbols go in them (4 bytes each).
+/// A function's LSDA: its bytes, and where references to the types caught
+/// go in them (4 bytes each, indirect and PC-relative: Mach-O's to their
+/// GOT entries, ELF's to words holding their addresses; see
+/// `Abi::eh_ref`).
 pub struct Lsda {
     pub bytes: Vec<u8>,
-    pub got_refs: Vec<(u64, String)>,
+    pub type_refs: Vec<(u64, String)>,
 }
 
 pub fn uleb(out: &mut Vec<u8>, mut v: u64) {
@@ -60,11 +61,8 @@ pub fn sleb(out: &mut Vec<u8>, mut v: i64) {
 /// The LSDA of `f`, laid out (its instructions' offsets are final), if it
 /// has landing pads. `symbol` gives a type's symbol as the platform writes
 /// it.
-pub fn lsda(t: &Target, f: &MFunc, syntax: Syntax, symbol: &dyn Fn(&str) -> String) -> Result<Option<Lsda>, String> {
+pub fn lsda(t: &Target, f: &MFunc, symbol: &dyn Fn(&str) -> String) -> Result<Option<Lsda>, String> {
     let Some(eh) = &f.eh else { return Ok(None) };
-    if syntax == Syntax::Elf {
-        return Err(format!("{}: exception tables in ELF objects are not supported yet", f.name));
-    }
     // Where each block starts.
     let mut starts = Vec::new();
     let mut at = 0u64;
@@ -139,7 +137,7 @@ pub fn lsda(t: &Target, f: &MFunc, syntax: Syntax, symbol: &dyn Fn(&str) -> Stri
         rest.extend(&actions);
         if !table {
             out.extend(rest);
-            return Ok(Some(Lsda { bytes: out, got_refs: vec![] }));
+            return Ok(Some(Lsda { bytes: out, type_refs: vec![] }));
         }
         let mut len = after_header + rest.len();
         while len % 4 != 0 {
@@ -154,18 +152,18 @@ pub fn lsda(t: &Target, f: &MFunc, syntax: Syntax, symbol: &dyn Fn(&str) -> Stri
         }
         out.extend(field);
         out.extend(rest);
-        let mut got_refs = Vec::new();
+        let mut type_refs = Vec::new();
         for ty in eh.types.iter().rev() {
             match ty {
                 Some(name) => {
-                    got_refs.push((out.len() as u64, symbol(name)));
+                    type_refs.push((out.len() as u64, symbol(name)));
                     out.extend([0u8; 4]);
                 }
                 None => out.extend([0u8; 4]),
             }
         }
         out.extend(&eh.specs);
-        return Ok(Some(Lsda { bytes: out, got_refs }));
+        return Ok(Some(Lsda { bytes: out, type_refs }));
     }
     Err(format!("{}: an exception table too big", f.name))
 }

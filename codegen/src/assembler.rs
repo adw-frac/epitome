@@ -34,8 +34,9 @@
 //! `.short`, `.long`, `.quad` (of numbers, or of `symbol+offset`),
 //! `.ascii`, `.asciz`, `.space`, `.zero` and `.build_version`; the
 //! `.cfi_*` directives of unwind tables, with `.cfi_personality` and
-//! `.cfi_lsda` (Mach-O's encodings only); `.long symbol@GOT-label`, with
-//! the label at the field (exception tables' references to types); and
+//! `.cfi_lsda` (the encodings we write); `.long symbol@GOT-label` (Mach-O)
+//! or `.long symbol-label` (ELF), with the label at the field (exception
+//! tables' references to types); and
 //! `.subsections_via_symbols`, which is accepted and ignored.
 
 use std::collections::{HashMap, HashSet};
@@ -510,10 +511,15 @@ impl<'t> Assembler<'t> {
                         let Some(f) = open.as_mut() else {
                             return Err(err(n, "a .cfi directive outside .cfi_startproc".into()));
                         };
-                        // Indirect, PC-relative and 4 bytes; PC-relative.
-                        let want = if name == "cfi_personality" { 155 } else { 16 };
-                        match (syntax, list().as_slice()) {
-                            (Syntax::MachO, [e, sym]) if parse_int(e) == Some(want) => {
+                        // Indirect, PC-relative and 4 bytes; PC-relative
+                        // (Mach-O's 8 bytes, ELF's 4).
+                        let want = match (name, syntax) {
+                            ("cfi_personality", _) => 155,
+                            (_, Syntax::MachO) => 16,
+                            (_, Syntax::Elf) => 27,
+                        };
+                        match list().as_slice() {
+                            [e, sym] if parse_int(e) == Some(want) => {
                                 if name == "cfi_personality" {
                                     f.personality = Some(sym.clone());
                                 } else {
@@ -575,7 +581,13 @@ impl<'t> Assembler<'t> {
                             if sec.kind == SectionKind::Bss {
                                 return Err(err(n, "data in .bss".into()));
                             }
-                            let got = v.split_once("@GOT-").filter(|_| size == 4 && syntax == Syntax::MachO);
+                            // A reference relative to a label at it: Mach-O's
+                            // to a GOT entry, ELF's to a symbol.
+                            let got = match syntax {
+                                Syntax::MachO => v.split_once("@GOT-"),
+                                Syntax::Elf => v.split_once('-').filter(|(a, b)| valid_symbol(a) && valid_symbol(b)),
+                            }
+                            .filter(|_| size == 4);
                             match parse_int(&v) {
                                 Some(x) => sec.data.extend_from_slice(&(x as u64).to_le_bytes()[..size]),
                                 None if let Some((symbol, label)) = got => {
@@ -708,13 +720,16 @@ impl<'t> Assembler<'t> {
                         errors.push(err(line, format!("{label} is not where the reference is")));
                         continue;
                     }
+                    let usage = if syntax == Syntax::MachO { RelocUse::GotPcRel32 } else { RelocUse::EhPcRel };
                     let kind = self
                         .t
                         .machine
-                        .reloc_used(RelocUse::GotPcRel32)
-                        .ok_or("the description has no relocation for references to GOT entries")?;
-                    obj.sections[section].data[offset as usize..offset as usize + 4]
-                        .copy_from_slice(&crate::unwind::macho_got_field(offset));
+                        .reloc_used(usage)
+                        .ok_or_else(|| format!("the description has no relocation with use {usage:?}"))?;
+                    if syntax == Syntax::MachO {
+                        obj.sections[section].data[offset as usize..offset as usize + 4]
+                            .copy_from_slice(&crate::unwind::macho_got_field(offset));
+                    }
                     pending.push(Pending {
                         section,
                         offset,
@@ -738,7 +753,13 @@ impl<'t> Assembler<'t> {
             let code = obj.sections[s].kind == SectionKind::Text;
             obj.symbols.push(Symbol {
                 size: sizes.get(&name).copied().unwrap_or(0),
-                kind: types.get(&name).copied().unwrap_or(if code { SymbolKind::Func } else { SymbolKind::Object }),
+                // Without a .type, ELF's are of no type (as its assemblers
+                // make them).
+                kind: types.get(&name).copied().unwrap_or(match (syntax, code) {
+                    (Syntax::Elf, _) => SymbolKind::NoType,
+                    (Syntax::MachO, true) => SymbolKind::Func,
+                    (Syntax::MachO, false) => SymbolKind::Object,
+                }),
                 global: globals.contains(&name),
                 section: Some(s),
                 value,

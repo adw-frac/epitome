@@ -810,7 +810,6 @@ above: values narrower than 32 bits live in W registers with their upper
 bits undefined, and odd widths live in the next register width; operations
 that read every bit get their operands extended in place first.
 
-Exception handling works for Mach-O; ELF's exception tables are not done
-yet (see [objects.md](objects.md)). Not yet: frames over 32KB, object files (the output is assembly), load
-and store pairs, pre-index addressing, scalable vectors, and vector
-floating-point minimum, maximum and unordered comparisons.
+Exception handling works for Mach-O and ELF (see
+[objects.md](objects.md)). Not yet: scalable vectors, and vectors wider
+than a register passed or returned by value (`<4 x i64>` arguments).

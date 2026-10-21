@@ -236,6 +236,17 @@ impl Abi {
 
     /// The prefix of local labels, which the assembler keeps out of the
     /// symbol table.
+    /// How unwind and exception tables reach symbol `name` (a personality
+    /// routine, a type caught): Mach-O's through its GOT entry, so by its
+    /// own name; ELF's through a word of ours holding its address (see
+    /// `asm::eh_stubs`).
+    pub fn eh_ref(&self, name: &str) -> String {
+        match self.syntax {
+            Syntax::MachO => self.symbol(name),
+            Syntax::Elf => format!("{}.DW.stub", self.symbol(name)),
+        }
+    }
+
     pub fn local_prefix(&self) -> &'static str {
         match self.syntax {
             Syntax::MachO => "L",

@@ -195,59 +195,69 @@ pub fn add_eh_frame(obj: &mut Object, m: &Machine, p: &Params, frames: &[Frame])
     // Mach-O's pairs subtract a symbol at the table's start.
     let start_sym = if macho { Some(section_start(obj, s, "ltmp_eh_frame")) } else { None };
     // A CIE for each personality routine (and for none): what all the
-    // functions it covers share.
+    // functions it covers share, each followed by theirs, as assemblers
+    // order them (none's first, then by first use).
+    let mut order: Vec<&Frame> = frames.iter().collect();
+    let first_use = |p: &Option<String>| frames.iter().position(|f| &f.personality == p);
+    order.sort_by_key(|f| (f.personality.is_some(), first_use(&f.personality)));
     let mut cies: Vec<(Option<String>, u64)> = Vec::new();
-    let mut personalities: Vec<Option<String>> = Vec::new();
-    for f in frames {
-        if !personalities.contains(&f.personality) {
-            personalities.push(f.personality.clone());
-        }
-    }
-    for pers in personalities {
-        let at = data.len() as u64;
-        let mut cie = vec![0u8; 4];
-        cie.extend(0u32.to_le_bytes());
-        cie.push(1);
-        cie.extend(if pers.is_some() { &b"zPLR\0"[..] } else { &b"zR\0"[..] });
-        uleb(&mut cie, 1);
-        sleb(&mut cie, p.data_align);
-        cie.push(m.dwarf_number(p.ra).ok_or("the link register has no DWARF number")? as u8);
-        let fde_enc = if macho { 0x10 } else { 0x1b };
-        match &pers {
-            Some(name) => {
-                if !macho {
-                    return Err("personality routines in ELF unwind tables are not supported yet".into());
-                }
-                // The personality: indirect, PC-relative, 4 bytes (its GOT
-                // entry); then the LSDA's and the FDE's encodings.
-                uleb(&mut cie, 7);
-                cie.push(0x9b);
-                let field = at + cie.len() as u64;
-                cie.extend(macho_got_field(field));
-                let sym = symbol_named(obj, name);
-                relocs.push(Reloc {
-                    offset: field,
-                    kind: reloc(RelocUse::GotPcRel32)?,
-                    target: RelocTarget::Symbol(sym),
-                    addend: 0,
-                });
-                cie.push(0x10);
-                cie.push(fde_enc);
-            }
-            None => {
-                uleb(&mut cie, 1);
-                cie.push(fde_enc);
-            }
-        }
-        cie.push(0x0c);
-        uleb(&mut cie, m.dwarf_number(m.sp).ok_or("the stack pointer has no DWARF number")? as u64);
-        uleb(&mut cie, 0);
-        finish(&mut cie);
-        data.extend(&cie);
-        cies.push((pers, at));
-    }
     let mut last = 0;
-    for f in frames {
+    for f in order {
+        if !cies.iter().any(|c| c.0 == f.personality) {
+            let pers = f.personality.clone();
+            let at = data.len() as u64;
+            let mut cie = vec![0u8; 4];
+            cie.extend(0u32.to_le_bytes());
+            cie.push(1);
+            cie.extend(if pers.is_some() { &b"zPLR\0"[..] } else { &b"zR\0"[..] });
+            uleb(&mut cie, 1);
+            sleb(&mut cie, p.data_align);
+            cie.push(m.dwarf_number(p.ra).ok_or("the link register has no DWARF number")? as u8);
+            let fde_enc = if macho { 0x10 } else { 0x1b };
+            match &pers {
+                Some(name) => {
+                    // The personality: indirect, PC-relative, 4 bytes (Mach-O's
+                    // GOT entry, ELF's word holding its address: see
+                    // `Abi::eh_ref`); then the LSDA's and the FDE's encodings
+                    // (PC-relative, Mach-O's 8 bytes, ELF's 4).
+                    uleb(&mut cie, 7);
+                    cie.push(0x9b);
+                    let field = at + cie.len() as u64;
+                    let sym = symbol_named(obj, name);
+                    if macho {
+                        cie.extend(macho_got_field(field));
+                        relocs.push(Reloc {
+                            offset: field,
+                            kind: reloc(RelocUse::GotPcRel32)?,
+                            target: RelocTarget::Symbol(sym),
+                            addend: 0,
+                        });
+                    } else {
+                        // (A local symbol by its section, as ELF's assemblers
+                        // write it.)
+                        cie.extend([0u8; 4]);
+                        let def = &obj.symbols[sym];
+                        let (target, addend) = match def.section {
+                            Some(x) if !def.global => (RelocTarget::Section(x), def.value as i64),
+                            _ => (RelocTarget::Symbol(sym), 0),
+                        };
+                        relocs.push(Reloc { offset: field, kind: reloc(RelocUse::EhPcRel)?, target, addend });
+                    }
+                    cie.push(if macho { 0x10 } else { 0x1b });
+                    cie.push(fde_enc);
+                }
+                None => {
+                    uleb(&mut cie, 1);
+                    cie.push(fde_enc);
+                }
+            }
+            cie.push(0x0c);
+            uleb(&mut cie, m.dwarf_number(m.sp).ok_or("the stack pointer has no DWARF number")? as u64);
+            uleb(&mut cie, 0);
+            finish(&mut cie);
+            data.extend(&cie);
+            cies.push((pers, at));
+        }
         let at = data.len() as u64;
         last = at as usize;
         let cie_at = cies.iter().find(|c| c.0 == f.personality).map_or(0, |c| c.1);
@@ -314,7 +324,18 @@ pub fn add_eh_frame(obj: &mut Object, m: &Machine, p: &Params, frames: &[Frame])
                     addend: 0,
                 });
             }
-            (Some(_), None) => return Err("LSDAs in ELF unwind tables are not supported yet".into()),
+            // ELF's: PC-relative, 4 bytes, to the table's place.
+            (Some((ls, lo)), None) => {
+                uleb(&mut fde, 4);
+                let field = at + fde.len() as u64;
+                fde.extend([0u8; 4]);
+                relocs.push(Reloc {
+                    offset: field,
+                    kind: reloc(RelocUse::EhPcRel)?,
+                    target: RelocTarget::Section(ls),
+                    addend: lo as i64,
+                });
+            }
             (None, _) => uleb(&mut fde, 0),
         }
         fde.extend(instructions(m, p, &f.rules)?);

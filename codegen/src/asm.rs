@@ -19,7 +19,7 @@ use crate::target::{Target, sext};
 pub fn function(t: &Target, f: &MFunc, index: usize, out: &mut String) -> Result<(), String> {
     let abi = &f.abi;
     let sym = abi.symbol(&f.name);
-    let table = crate::eh::lsda(t, f, abi.syntax, &|n| abi.symbol(n))?;
+    let table = crate::eh::lsda(t, f, &|n| abi.eh_ref(n))?;
     let table_label = format!("{}exception{index}", abi.local_prefix());
     let _ = writeln!(out, "\t.p2align 2");
     if f.global {
@@ -31,9 +31,11 @@ pub fn function(t: &Target, f: &MFunc, index: usize, out: &mut String) -> Result
     let _ = writeln!(out, "{sym}:");
     let _ = writeln!(out, "\t.cfi_startproc");
     if let (Some(eh), Some(_)) = (&f.eh, &table) {
-        // Indirect, PC-relative, 4 bytes; and PC-relative.
-        let _ = writeln!(out, "\t.cfi_personality 155, {}", abi.symbol(&eh.personality));
-        let _ = writeln!(out, "\t.cfi_lsda 16, {table_label}");
+        // Indirect, PC-relative, 4 bytes; and PC-relative (Mach-O's 8
+        // bytes, ELF's 4).
+        let _ = writeln!(out, "\t.cfi_personality 155, {}", abi.eh_ref(&eh.personality));
+        let lsda_enc = if abi.syntax == Syntax::Elf { 27 } else { 16 };
+        let _ = writeln!(out, "\t.cfi_lsda {lsda_enc}, {table_label}");
     }
     let mut referenced = vec![false; f.blocks.len()];
     for b in &f.blocks {
@@ -58,20 +60,24 @@ pub fn function(t: &Target, f: &MFunc, index: usize, out: &mut String) -> Result
         let _ = writeln!(out, "\t.size {sym}, .-{sym}");
     }
     if let Some(table) = table {
-        // The table's bytes, its references to types through the GOT each
-        // relative to a label at it.
+        // The table's bytes, its references to types (through the GOT, or
+        // a word of ours) each relative to a label at it.
         let _ = writeln!(out, "\t{}", abi.section_directive(SectionKind::ExceptTable));
         let _ = writeln!(out, "\t.p2align 2");
         // A symbol at it too, for the unwind tables to name.
         let _ = writeln!(out, "GCC_except_table{index}:\n{table_label}:");
         let mut at = 0;
-        let mut refs = table.got_refs.iter().peekable();
+        let mut refs = table.type_refs.iter().peekable();
         let mut n = 0;
         while at < table.bytes.len() {
             if let Some((off, name)) = refs.next_if(|r| r.0 as usize == at) {
                 let l = format!("{}ttype{index}_{n}", abi.local_prefix());
                 n += 1;
-                let _ = writeln!(out, "{l}:\n\t.long {name}@GOT-{l}");
+                match abi.syntax {
+                    Syntax::MachO => writeln!(out, "{l}:\n\t.long {name}@GOT-{l}"),
+                    Syntax::Elf => writeln!(out, "{l}:\n\t.long {name}-{l}"),
+                }
+                .ok();
                 at = *off as usize + 4;
                 continue;
             }
@@ -84,6 +90,32 @@ pub fn function(t: &Target, f: &MFunc, index: usize, out: &mut String) -> Result
     }
     out.push('\n');
     Ok(())
+}
+
+/// For ELF, the words unwind and exception tables reach personality
+/// routines and the types caught through (`Abi::eh_ref`): each holds the
+/// address of the one it is named after.
+pub fn eh_stubs(funcs: &[MFunc], abi: &Abi) -> Vec<GlobalData> {
+    let mut out: Vec<GlobalData> = Vec::new();
+    if abi.syntax != Syntax::Elf {
+        return out;
+    }
+    for eh in funcs.iter().filter_map(|f| f.eh.as_ref()) {
+        for name in std::iter::once(&eh.personality).chain(eh.types.iter().flatten()) {
+            let symbol = abi.eh_ref(name);
+            if out.iter().any(|g| g.symbol == symbol) {
+                continue;
+            }
+            out.push(GlobalData {
+                symbol,
+                global: false,
+                section: SectionKind::Data,
+                align: 8,
+                items: vec![Item::Addr { symbol: abi.symbol(name), offset: 0 }],
+            });
+        }
+    }
+    out
 }
 
 /// The globals with initial values, in module order, as data.

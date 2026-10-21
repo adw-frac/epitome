@@ -265,7 +265,7 @@ pub fn build(
         // Its exception table, if it has landing pads, its references to
         // the types caught through their GOT entries.
         let mut lsda = None;
-        if let Some(table) = crate::eh::lsda(t, f, abi.syntax, &|n| abi.symbol(n))? {
+        if let Some(table) = crate::eh::lsda(t, f, &|n| abi.eh_ref(n))? {
             let es = section(&mut obj, SectionKind::ExceptTable);
             let eat = place(&mut obj, es, 4);
             obj.sections[es].data.extend(&table.bytes);
@@ -278,11 +278,15 @@ pub fn build(
                 global: false,
                 kind: SymbolKind::NoType,
             });
-            let kind = t.machine.reloc_used(RelocUse::GotPcRel32).ok_or("no relocation has use GotPcRel32")?;
-            for (off, name) in table.got_refs {
+            let macho = abi.syntax == Syntax::MachO;
+            let usage = if macho { RelocUse::GotPcRel32 } else { RelocUse::EhPcRel };
+            let kind = t.machine.reloc_used(usage).ok_or_else(|| format!("no relocation has use {usage:?}"))?;
+            for (off, name) in table.type_refs {
                 let field = eat + off;
-                obj.sections[es].data[field as usize..field as usize + 4]
-                    .copy_from_slice(&crate::unwind::macho_got_field(field));
+                if macho {
+                    obj.sections[es].data[field as usize..field as usize + 4]
+                        .copy_from_slice(&crate::unwind::macho_got_field(field));
+                }
                 pending.push(Pending {
                     section: es,
                     offset: field,
@@ -300,7 +304,7 @@ pub fn build(
             len: 4 * words.len() as u64,
             symbol,
             rules: mir::cfi_rules(f),
-            personality: f.eh.as_ref().map(|e| abi.symbol(&e.personality)),
+            personality: f.eh.as_ref().map(|e| abi.eh_ref(&e.personality)),
             lsda,
         });
         for fx in fixups {

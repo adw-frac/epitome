@@ -13,6 +13,11 @@
 //!    assembler (rustc's) makes of our assembly, byte for byte, for C
 //!    programs of `tests/programs`. (AArch64's ELF tables are checked so
 //!    against clang by `tests/programs.rs`.)
+//! 4. ELF exception tables (`tests/unwind/landing.cpp`, for Linux, which
+//!    nothing here runs): on AArch64 our object is what clang's assembler
+//!    and ours make of our assembly; on RISC-V its code, unwind and
+//!    exception tables, and the words they reach personality routines and
+//!    types through, are LLVM's of it, byte for byte.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -200,4 +205,73 @@ fn landing_pads_reached_only_by_unwinding_are_kept() {
     let compiled = compile(&t, &mut m, &Options::default()).unwrap();
     compiled.object_file(&t).unwrap();
     assert!(compiled.asm.contains("_abort") && compiled.asm.contains("Unwind_Resume"), "{}", compiled.asm);
+}
+
+/// ELF objects' exception tables, against the assemblers' (4. above).
+#[test]
+fn elf_exception_tables_are_the_assemblers() {
+    let ok = have("clang++")
+        && Command::new("rustc").args(["--print", "sysroot"]).output().is_ok_and(|o| {
+            let root = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            Path::new(&root).join("lib/rustlib/riscv64gc-unknown-none-elf").exists()
+        });
+    if !ok {
+        eprintln!("needs clang++ and rustc's riscv64gc-unknown-none-elf target; skipping");
+        return;
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("unwind-elf");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let a64 = Target::aarch64();
+    let rv = Target::load_path(root.join("targets/riscv64").to_str().unwrap()).unwrap();
+    for opt in ["-O0", "-O2"] {
+        let ll = tmp.join(format!("landing{opt}.ll"));
+        run(Command::new("clang++")
+            .args(["--target=aarch64-linux-gnu", "-fPIC", "-S", "-emit-llvm", opt])
+            .arg(root.join("tests/unwind/landing.cpp"))
+            .arg("-o")
+            .arg(&ll))
+        .unwrap();
+        let src = std::fs::read_to_string(&ll).unwrap();
+
+        // AArch64: clang's assembler and ours, of our assembly.
+        let mut m = epitome_ir::parse_module(&src).unwrap();
+        let c = compile(&a64, &mut m, &Options::default()).unwrap();
+        let ours = elf::read(&c.object_file(&a64).unwrap()).unwrap().canonical(&a64.machine);
+        let as_ours = Assembler::new(&a64).assemble(&c.asm, None).unwrap();
+        let as_ours = elf::read(&elf::write(&as_ours.object, &a64.machine).unwrap()).unwrap().canonical(&a64.machine);
+        let diff = epitome_codegen::object::differences(&ours, &as_ours, 8);
+        assert!(diff.is_empty(), "{opt}: epitome-as differs:\n{}", diff.join("\n"));
+        let (s, o) = (tmp.join(format!("landing{opt}.s")), tmp.join(format!("landing{opt}.o")));
+        std::fs::write(&s, &c.asm).unwrap();
+        run(Command::new("clang").args(["--target=aarch64-linux-gnu", "-c", "-o"]).arg(&o).arg(&s)).unwrap();
+        let theirs = elf::read(&std::fs::read(&o).unwrap()).unwrap().canonical(&a64.machine);
+        let diff = epitome_codegen::object::differences(&ours, &theirs, 8);
+        assert!(diff.is_empty(), "{opt}: clang's assembler differs:\n{}", diff.join("\n"));
+
+        // RISC-V: LLVM's assembler, not compressed, not relaxed.
+        let mut m = epitome_ir::parse_module(&src).unwrap();
+        let c = compile(&rv, &mut m, &Options::default()).unwrap();
+        let ours = c.object_file(&rv).unwrap();
+        let stem = format!("landing_rv{opt}");
+        std::fs::write(tmp.join(format!("{stem}.s")), format!(".option norvc\n.option norelax\n{}", c.asm)).unwrap();
+        std::fs::write(
+            tmp.join(format!("{stem}.rs")),
+            format!("#![no_std]\ncore::arch::global_asm!(include_str!(\"{stem}.s\"), options(raw));\n"),
+        )
+        .unwrap();
+        let o = tmp.join(format!("{stem}.o"));
+        run(Command::new("rustc")
+            .args(["--target", "riscv64gc-unknown-none-elf", "--crate-type", "lib", "--emit", "obj", "-C"])
+            .arg("target-feature=+m,+a,+zbb")
+            .arg("-o")
+            .arg(&o)
+            .arg(tmp.join(format!("{stem}.rs"))))
+        .unwrap();
+        let theirs = std::fs::read(&o).unwrap();
+        for name in [".text", ".eh_frame", ".gcc_except_table", ".data"] {
+            assert!(!section(&ours, name).is_empty() || name == ".data", "{opt}: no {name}");
+            assert_eq!(section(&ours, name), section(&theirs, name), "{opt}: RISC-V {name} differs from LLVM's");
+        }
+    }
 }
