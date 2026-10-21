@@ -115,7 +115,11 @@ impl OpSpec {
             Some(b) => m.blocks[b.index()].ops.push(op),
             // At the top level, before the resources, which end a file.
             None => {
-                let at = m.items.iter().position(|i| matches!(i, Item::Resources(_))).unwrap_or(m.items.len());
+                let at = m
+                    .items
+                    .iter()
+                    .position(|i| matches!(i, Item::Resources(_) | Item::Blob { .. }))
+                    .unwrap_or(m.items.len());
                 m.items.insert(at, Item::Op(op));
             }
         }

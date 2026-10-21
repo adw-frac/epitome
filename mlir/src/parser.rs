@@ -216,7 +216,7 @@ impl<'a> Parser<'a> {
                 let Some(len) = self.src[start..].find("#-}") else {
                     return Err(self.error_at(tok, "'{-#' without '#-}'"));
                 };
-                self.m.items.push(Item::Resources(self.src[start..start + len].to_string()));
+                self.m.items.push(Item::Resources(self.src[start..start + len].into()));
                 self.pos = start + len + 3;
             } else if tok.is_type_id() {
                 self.next();

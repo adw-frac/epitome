@@ -15,8 +15,10 @@ pub mod bufferize;
 pub mod build;
 pub mod ir;
 pub mod lexer;
+pub mod linalg_fold;
 pub mod linalg_generalize;
 pub mod linalg_kernels;
+pub mod linalg_outline;
 pub mod linalg_to_loops;
 pub mod parser;
 pub mod printer;
@@ -33,8 +35,10 @@ pub use printer::print_module;
 pub const PASSES: &[&str] = &[
     "torch-to-linalg",
     "linalg-generalize-named-ops",
+    "linalg-fold-constants",
     "bufferize",
     "linalg-to-kernels=<target>",
+    "outline-linalg",
     "linalg-to-loops",
     "to-llvm",
 ];
@@ -45,7 +49,8 @@ pub const TORCH_TO_LLVM: &[&str] = &["torch-to-linalg", "bufferize", "linalg-to-
 
 /// `linalg-to-llvm` runs these in turn: from `linalg` on tensors, as
 /// upstream's tools write it, to the `llvm` dialect.
-pub const LINALG_TO_LLVM: &[&str] = &["linalg-generalize-named-ops", "bufferize", "linalg-to-loops", "to-llvm"];
+pub const LINALG_TO_LLVM: &[&str] =
+    &["linalg-generalize-named-ops", "linalg-fold-constants", "bufferize", "linalg-to-loops", "to-llvm"];
 
 /// Runs pass `name` on `m`, giving a new module.
 pub fn run_pass(name: &str, m: &Module) -> Result<Module, String> {
@@ -59,6 +64,8 @@ pub fn run_pass(name: &str, m: &Module) -> Result<Module, String> {
             Ok(m)
         }
         "linalg-generalize-named-ops" => linalg_generalize::run(m),
+        "linalg-fold-constants" => linalg_fold::run(m),
+        "outline-linalg" => linalg_outline::run(m),
         _ if name.starts_with("linalg-to-kernels=") => linalg_kernels::run(m, &name["linalg-to-kernels=".len()..]),
         "torch-to-linalg" => torch_to_linalg::run(m),
         "bufferize" => bufferize::run(m),

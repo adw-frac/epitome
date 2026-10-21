@@ -377,6 +377,42 @@ impl<'m> Printer<'m> {
         format!("{} {}", self.ty(self.value_ty(v)), self.value(v))
     }
 
+    /// Data in memory order as a constant of type `ty`: a string for an
+    /// array of `i8`, otherwise each element, as LLVM writes an array of
+    /// numbers.
+    fn bytes(&self, ty: TypeId, b: &[u8]) -> String {
+        match self.m.types.get(ty) {
+            Type::Array { elem, .. } if matches!(self.m.types.get(*elem), Type::Int(8)) => format!("c{}", quote(b)),
+            Type::Array { len, elem } => {
+                let size = if *len == 0 { 0 } else { b.len() / *len as usize };
+                let es: Vec<String> = b
+                    .chunks(size.max(1))
+                    .take(*len as usize)
+                    .map(|c| format!("{} {}", self.ty(*elem), self.bytes(*elem, c)))
+                    .collect();
+                format!("[{}]", es.join(", "))
+            }
+            Type::Int(_) => {
+                let mut v = 0u64;
+                for (k, &x) in b.iter().take(8).enumerate() {
+                    v |= (x as u64) << (8 * k);
+                }
+                let bits = b.len() as u32 * 8;
+                crate::apint::ApInt::from_u64(bits, v).to_string()
+            }
+            t => match FloatKind::of(t) {
+                Some(kind) => {
+                    let mut v = 0u128;
+                    for (k, &x) in b.iter().enumerate() {
+                        v |= (x as u128) << (8 * k);
+                    }
+                    float::print(kind, v)
+                }
+                None => format!("c{}", quote(b)),
+            },
+        }
+    }
+
     fn typed_const(&self, c: ConstId) -> String {
         format!("{} {}", self.ty(self.m.constant(c).ty), self.constant(c))
     }
@@ -417,7 +453,7 @@ impl<'m> Printer<'m> {
                 let es: Vec<String> = es.iter().map(|&e| self.typed_const(e)).collect();
                 format!("<{}>", es.join(", "))
             }
-            ConstKind::Bytes(b) => format!("c{}", quote(b)),
+            ConstKind::Bytes(b) => self.bytes(k.ty, b),
             ConstKind::Splat(e) => format!("splat ({})", self.typed_const(*e)),
             ConstKind::Global(g) => self.global_name(*g),
             ConstKind::BlockAddress { func, block } => {

@@ -1,10 +1,10 @@
-//! The program `examples/tinystories.rs` links TinyStories-1M into: it
-//! turns a prompt into tokens, runs the model compiled by Epitome to choose
-//! each next token greedily, and prints the story as it goes.
+//! The program `examples/llm.rs` links a language model into: it turns a
+//! prompt into tokens, runs the model compiled by Epitome to choose each
+//! next token greedily, and prints the text as it goes.
 //!
 //! ```sh
-//! target/tinystories/tinystories "Once upon a time, there was a little dog called"
-//! target/tinystories/tinystories --ids "..."   # the token ids too
+//! target/smollm2/llm "Once upon a time, there was a little dog called"
+//! target/smollm2/llm --ids "..."   # the token ids too
 //! ```
 //!
 //! The model is one function, written by Epitome into `model.o`:
@@ -14,17 +14,12 @@
 //! ```
 //!
 //! The tokenizer is GPT-2's byte-level BPE, from `tokens.txt` and
-//! `merges.txt` next to the program (written by `export.py`).
+//! `merges.txt`, and the window, vocabulary and end token are in
+//! `config.txt`, all next to the program (written by `export.py`).
 
 use std::collections::HashMap;
 use std::io::Write;
 use std::time::Instant;
-
-/// The model's window of tokens and vocabulary, as exported.
-const WINDOW: usize = 64;
-const VOCAB: usize = 50257;
-/// `<|endoftext|>`, which ends a story.
-const END: u32 = 50256;
 
 unsafe extern "C" {
     fn forward(ids: *const i64, logits: *mut f32);
@@ -38,37 +33,38 @@ fn main() {
     }
     let prompt = if args.is_empty() { "Once upon a time".to_string() } else { args.join(" ") };
     let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf())).unwrap_or_default();
-    let bpe = match Bpe::load(&dir) {
-        Ok(b) => b,
+    let (bpe, config) = match Bpe::load(&dir).and_then(|b| Ok((b, Config::load(&dir)?))) {
+        Ok(x) => x,
         Err(e) => {
-            eprintln!("tinystories: {e}");
+            eprintln!("llm: {e}");
             std::process::exit(1);
         }
     };
+    let Config { window: win, vocab, end } = config;
 
     let mut ids = bpe.encode(&prompt);
-    if ids.len() >= WINDOW {
-        eprintln!("tinystories: the prompt is {} tokens; the window is {WINDOW}", ids.len());
+    if ids.len() >= win {
+        eprintln!("llm: the prompt is {} tokens; the window is {win}", ids.len());
         std::process::exit(1);
     }
-    let mut window = [0i64; WINDOW];
+    let mut window = vec![0i64; win];
     for (w, &id) in window.iter_mut().zip(&ids) {
         *w = id as i64;
     }
-    let mut logits = vec![0f32; WINDOW * VOCAB];
+    let mut logits = vec![0f32; win * vocab];
 
     let mut out = std::io::stdout().lock();
     out.write_all(prompt.as_bytes()).unwrap();
     out.flush().unwrap();
     let start = Instant::now();
     let first = ids.len();
-    while ids.len() < WINDOW {
+    while ids.len() < win {
         // SAFETY: `window` and `logits` have the sizes `forward` was compiled for.
         unsafe { forward(window.as_ptr(), logits.as_mut_ptr()) };
         let t = ids.len() - 1;
-        let row = &logits[t * VOCAB..(t + 1) * VOCAB];
+        let row = &logits[t * vocab..(t + 1) * vocab];
         let next = argmax(row);
-        if next == END {
+        if Some(next) == end {
             break;
         }
         window[ids.len()] = next as i64;
@@ -83,6 +79,30 @@ fn main() {
     if show_ids {
         let list: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
         println!("{}", list.join(" "));
+    }
+}
+
+/// The window, vocabulary and end token the model was exported with.
+struct Config {
+    window: usize,
+    vocab: usize,
+    end: Option<u32>,
+}
+
+impl Config {
+    fn load(dir: &std::path::Path) -> Result<Config, String> {
+        let path = dir.join("config.txt");
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let get = |key: &str| -> Result<i64, String> {
+            text.lines()
+                .find_map(|l| l.strip_prefix(key).and_then(|v| v.trim().parse().ok()))
+                .ok_or_else(|| format!("{}: no {key}", path.display()))
+        };
+        Ok(Config {
+            window: get("window ")? as usize,
+            vocab: get("vocab ")? as usize,
+            end: u32::try_from(get("end ")?).ok(),
+        })
     }
 }
 

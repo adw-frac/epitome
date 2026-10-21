@@ -451,7 +451,7 @@ The checks (`mlir/tests/torch.rs`):
   matrix multiply (`math.roundeven`, `arith.maximumf` and `minimumf`,
   which needed `frintn`, `fmax` and `fmin` in the AArch64 description).
 
-**A language model.** `examples/tinystories.rs` takes TinyStories-1M, a
+**A language model.** `examples/llm.rs` takes TinyStories-1M, a
 GPT-Neo model from Hugging Face (8 layers, 16 heads, a vocabulary of
 50,257), from torch-mlir's `linalg` for a window of 64 tokens (480
 `linalg.generic`s, 49 `linalg.matmul`s, views, slices, a scan) through
@@ -487,6 +487,29 @@ with a dynamic batch uses `tensor.dim`.
   Elective choices made while lowering, such as keeping a `scf.for` as a
   loop rather than unrolling one with a constant trip count of two, are
   steps.
+
+**A larger one.** SmolLM2-135M (Llama: 30 layers, RMSNorm, rotary
+embeddings, grouped-query attention; 540 MB of weights, 1.08 GB of MLIR)
+needs no operation the examples above did not, and writes PyTorch's
+tokens. What it needed was scale:
+
+- the translation keeps a blob of weights as one array of bytes
+  (`ConstKind::Bytes`), not an interned constant per element;
+- `linalg-fold-constants` transposes constant weights when compiling, as
+  upstream's `populateConstantFoldLinalgOperations` does: torch-mlir writes
+  each `nn.Linear` as a `linalg.transpose` of the weight, so every call
+  transposed all of them. The new weights are blobs a pass made
+  (`Item::Blob`, read with `Module::resources`);
+- `outline-linalg` makes each `linalg` operation a function of its own,
+  named after what it does (`forward.17.matmul`): the optimiser's time on
+  the model falls from 8.8 s to 2.2 s, and a profiler can tell them apart.
+
+It runs at 2 tokens a second with SME, for about 17 GFLOP a window. A
+profile shows most of the time in the SME kernel, inlined into each call:
+reading the weights' columns a row at a time (a stride of a whole row of
+the weight per k) and one tile of ZA at a time, not the arithmetic, is
+what is slow. That is the next work: kernels that read the weights in
+their own layout, and all four tiles of ZA.
 
 ### 5.8 Target kernels: matrix products on SME
 
@@ -535,7 +558,7 @@ frame saves `d8`-`d15`, which `smstart` zeroes (the entries say
 `"clobbers"`). A tile of 32-bit elements is 16 x 16: M4's streaming vector
 length is 512 bits.
 
-On TinyStories-1M, `--sme` (`examples/tinystories.rs`) takes generation
+On TinyStories-1M, `--sme` (`examples/llm.rs`) takes generation
 from 2.1 to 32 tokens a second, with the same tokens. `mlir/tests/sme.rs`
 checks a 70 x 40 by 40 x 50 product, which has rows past the last whole
 tile and a narrow last tile of columns, against a plain one on an M4.

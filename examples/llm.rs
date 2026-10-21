@@ -1,8 +1,8 @@
 //! A language model from Hugging Face, compiled by Epitome into a Mach-O
-//! executable that writes stories.
+//! executable that writes text.
 //!
-//! TinyStories-1M is exported from PyTorch as MLIR by
-//! `examples/tinystories/export.py` (`linalg` on tensors, as torch-mlir
+//! The model (TinyStories-1M, SmolLM2-135M, ...) is exported from PyTorch as
+//! MLIR by `examples/llm/export.py` (`linalg` on tensors, as torch-mlir
 //! lowers it). This program takes it the rest of the way, every stage in
 //! Epitome:
 //!
@@ -12,18 +12,18 @@
 //! 3. `epitome-opt`'s pipeline;
 //! 4. code generation for AArch64, to a Mach-O object, `model.o`;
 //!
-//! With `--sme`, matrix products go to the SME kernels of
-//! `mlir/targets/aarch64-sme.mlir` (`linalg-to-kernels`, after
-//! `bufferize`), and the code generator targets `apple-m4`.
+//! then links it with the Rust program in `examples/llm/driver.rs`, which
+//! tokenizes a prompt and runs the model to choose each next token.
 //!
-//! then links it with the Rust program in `examples/tinystories/driver.rs`,
-//! which tokenizes a prompt and runs the model to choose each next token.
+//! With `--sme`, matrix products go to the SME kernels of
+//! `mlir/targets/aarch64-sme.mlir` (`linalg-to-kernels`, after `bufferize`),
+//! and the code generator targets `apple-m4`; without it, they are loops.
+//! `--dump` writes each stage's MLIR and the LLVM IR next to the model.
 //!
 //! ```sh
-//! python examples/tinystories/export.py target/tinystories   # torch-mlir's Python
-//! cargo run --release --example tinystories                   # add --dump for each stage's MLIR
-//! cargo run --release --example tinystories -- --sme          # matrix products on SME (Apple M4)
-//! target/tinystories/tinystories "Once upon a time, there was a little dog called"
+//! python examples/llm/export.py --model HuggingFaceTB/SmolLM2-135M target/smollm2   # torch-mlir's Python
+//! cargo run --release --example llm -- target/smollm2 --sme
+//! target/smollm2/llm "Once upon a time, there was a little dog called"
 //! ```
 //!
 //! On an AArch64 Mac, with `rustc` to build the driver.
@@ -43,14 +43,14 @@ fn main() -> ExitCode {
         .iter()
         .find(|a| !a.starts_with("--"))
         .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("target/tinystories"));
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("target/llm"));
     match build(&dir, dump, sme) {
         Ok(exe) => {
             println!("built {}", exe.display());
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("tinystories: {e}");
+            eprintln!("llm: {e}");
             ExitCode::FAILURE
         }
     }
@@ -62,17 +62,21 @@ fn build(dir: &Path, dump: bool, sme: bool) -> Result<PathBuf, String> {
     let path = dir.join("model.mlir");
     let start = Instant::now();
     let src = std::fs::read_to_string(&path)
-        .map_err(|e| format!("{}: {e} (run examples/tinystories/export.py first)", path.display()))?;
+        .map_err(|e| format!("{}: {e} (run examples/llm/export.py first)", path.display()))?;
     let mut m = epitome_mlir::parse_module(&src).map_err(|e| format!("{}:{e}", path.display()))?;
     drop(src);
     step("read MLIR (linalg on tensors)", start);
 
     // MLIR, stage by stage, to the llvm dialect.
     let mut passes: Vec<&str> = epitome_mlir::LINALG_TO_LLVM.to_vec();
+    let mut at = passes.iter().position(|&p| p == "bufferize").unwrap() + 1;
     if sme {
-        let at = passes.iter().position(|&p| p == "bufferize").unwrap() + 1;
         passes.insert(at, "linalg-to-kernels=aarch64-sme");
+        at += 1;
     }
+    // Each linalg operation a function of its own: registers allocated
+    // far better than in one huge function, and a profiler tells them apart.
+    passes.insert(at, "outline-linalg");
     for (k, pass) in passes.iter().enumerate() {
         let start = Instant::now();
         m = epitome_mlir::run_pass(pass, &m).map_err(|e| format!("{pass}: {e}"))?;
@@ -108,8 +112,8 @@ fn build(dir: &Path, dump: bool, sme: bool) -> Result<PathBuf, String> {
 
     // The driver, linked with the model.
     let start = Instant::now();
-    let driver = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/tinystories/driver.rs");
-    let exe = dir.join("tinystories");
+    let driver = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/llm/driver.rs");
+    let exe = dir.join("llm");
     let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
     let built = Command::new(&rustc)
         .args(["--edition", "2024", "-O", "-C"])

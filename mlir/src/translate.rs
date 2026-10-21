@@ -44,7 +44,7 @@ use epitome_ir::module::{
 };
 use epitome_ir::types::{StructBody, Type as LType, TypeId as LTypeId};
 
-use crate::ir::{Attr, AttrId, BlockId, Item, Module, OpId, Type, TypeId, ValueId};
+use crate::ir::{Attr, AttrId, BlockId, Module, OpId, Type, TypeId, ValueId};
 use crate::printer::type_text;
 
 type Result<T> = std::result::Result<T, String>;
@@ -278,25 +278,13 @@ struct Translator<'a> {
     out: ll::Module,
     dl: DataLayout,
     symbols: HashMap<String, GlobalId>,
-    /// The `dialect_resources` blobs, by key, as hex text.
-    resources: HashMap<String, &'a str>,
+    /// The `dialect_resources` blobs, by key.
+    resources: crate::ir::Resources<'a>,
 }
 
 impl<'a> Translator<'a> {
     fn new(m: &'a Module) -> Translator<'a> {
-        let mut resources = HashMap::new();
-        for item in &m.items {
-            if let Item::Resources(text) = item {
-                for line in text.lines() {
-                    let line = line.trim().trim_end_matches(',');
-                    let Some((key, value)) = line.split_once(':') else { continue };
-                    let value = value.trim();
-                    if let Some(hex) = value.strip_prefix("\"0x").and_then(|v| v.strip_suffix('"')) {
-                        resources.insert(key.trim().trim_matches('"').to_string(), hex);
-                    }
-                }
-            }
-        }
+        let resources = m.resources();
         let out = ll::Module { source_filename: Some(b"LLVMDialectModule".to_vec()), ..Default::default() };
         Translator { m, out, dl: DataLayout::default(), symbols: HashMap::new(), resources }
     }
@@ -701,10 +689,7 @@ impl<'a> Translator<'a> {
             }
             Attr::Builtin { keyword: "dense_resource", body, .. } => {
                 let key = strip_brackets(body).trim();
-                let hex = self.resources.get(key).ok_or_else(|| format!("no resource {key}"))?;
-                let bytes = hex_bytes(hex)?;
-                // The first word is the blob's alignment.
-                let data = bytes.get(4..).ok_or_else(|| format!("resource {key} is too short"))?.to_vec();
+                let data = self.resources.get(key).ok_or_else(|| format!("no resource {key}"))?.into_owned();
                 self.leaves(ty, Elems::Raw(data))
             }
             Attr::Array(items) => {
@@ -740,6 +725,23 @@ impl<'a> Translator<'a> {
         while let Some((len, elem)) = self.leaf_step(leaf) {
             count *= len;
             leaf = elem;
+        }
+        // An array of numbers filled with raw data: the data as it is, in
+        // memory order (a model's weights: millions of elements).
+        if let Elems::Raw(bytes) = &elems
+            && count > 1
+            && matches!(self.out.types.get(ty), LType::Array { .. })
+        {
+            let bits = match self.out.types.get(leaf) {
+                LType::Int(b) if *b >= 8 && b % 8 == 0 => Some(*b),
+                t => FloatKind::of(t).map(|k| k.bits()),
+            };
+            if let Some(bits) = bits
+                && bytes.len() as u64 == count * (bits as u64 / 8)
+            {
+                let bytes = bytes.clone();
+                return Ok(self.konst(ty, ConstKind::Bytes(bytes)));
+            }
         }
         let consts: Vec<ConstId> = match elems {
             Elems::Text(texts) => {

@@ -133,15 +133,15 @@ cargo run --release -p epitome-codegen --bin epitome-llc -- mlp.ll -o mlp.o
 ```
 
 ```sh
-# A language model from Hugging Face (TinyStories-1M), exported from
-# PyTorch as MLIR, compiled through every stage by Epitome into a Mach-O
-# executable with a Rust driver, writing a story (needs torch-mlir's Python
-# environment with transformers for the export, and an AArch64 Mac).
-python examples/tinystories/export.py target/tinystories
-cargo run --release --example tinystories
-target/tinystories/tinystories "Once upon a time, there was a little dog called"
-# The same with matrix products on SME (Apple M4): 15 times as fast.
-cargo run --release --example tinystories -- --sme
+# A language model from Hugging Face, exported from PyTorch as MLIR,
+# compiled through every stage by Epitome into a Mach-O executable with a
+# Rust driver (needs torch-mlir's Python environment with transformers for
+# the export, and an AArch64 Mac). SmolLM2-135M (Llama, 30 layers) or
+# TinyStories-1M (GPT-Neo, 8 layers); --sme puts matrix products on SME
+# (Apple M4).
+python examples/llm/export.py --model HuggingFaceTB/SmolLM2-135M target/smollm2
+cargo run --release --example llm -- target/smollm2 --sme
+target/smollm2/llm "Once upon a time, there was a little dog called"
 ```
 
 `epitome-opt --help` lists the options. `opt/tests/examples` has small

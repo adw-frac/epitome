@@ -29,6 +29,13 @@ pub fn print_module(m: &Module) -> String {
                 p.attr(*attr);
             }
             Item::Resources(text) => write!(p.out, "{{-#{text}#-}}").unwrap(),
+            Item::Blob { key, align, bytes } => {
+                write!(p.out, "{{-#\n  dialect_resources: {{\n    builtin: {{\n      {key}: \"0x").unwrap();
+                for b in align.to_le_bytes().iter().chain(bytes.iter()) {
+                    write!(p.out, "{b:02X}").unwrap();
+                }
+                p.out.push_str("\"\n    }\n  }\n#-}");
+            }
         }
         p.out.push('\n');
     }

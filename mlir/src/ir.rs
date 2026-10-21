@@ -290,8 +290,16 @@ pub enum Item {
         attr: AttrId,
     },
     /// The text between `{-#` and `#-}`, such as `dialect_resources`, kept
-    /// as written. It can hold a model's weights.
-    Resources(String),
+    /// as written and shared between the modules passes make. It can hold a
+    /// model's weights.
+    Resources(std::sync::Arc<str>),
+    /// A blob of `dialect_resources` a pass made, such as weights it
+    /// transposed: its key, the alignment its data needs, and the data.
+    Blob {
+        key: String,
+        align: u32,
+        bytes: std::sync::Arc<Vec<u8>>,
+    },
 }
 
 /// A parsed MLIR file.
@@ -393,6 +401,30 @@ impl Module {
         attr
     }
 
+    /// The file's `dialect_resources` blobs and those passes made, by key:
+    /// an index made once, as a model's weights can be a gigabyte of text.
+    pub fn resources(&self) -> Resources<'_> {
+        let mut map = HashMap::new();
+        for item in &self.items {
+            match item {
+                Item::Blob { key, bytes, .. } => {
+                    map.insert(key.as_str(), Blob::Bytes(&bytes[..]));
+                }
+                Item::Resources(text) => {
+                    for line in text.lines() {
+                        let line = line.trim().trim_end_matches(',');
+                        let Some((k, value)) = line.split_once(':') else { continue };
+                        if let Some(hex) = value.trim().strip_prefix("\"0x").and_then(|v| v.strip_suffix('"')) {
+                            map.insert(k.trim().trim_matches('"'), Blob::Hex(hex));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Resources { map }
+    }
+
     /// The value of `key` in an operation's properties or attributes.
     pub fn op_attr(&self, op: OpId, key: &str) -> Option<AttrId> {
         let o = &self.ops[op.index()];
@@ -420,5 +452,35 @@ impl Module {
                 }
             }
         }
+    }
+}
+
+/// A module's `dialect_resources` blobs, by key (`Module::resources`).
+pub struct Resources<'m> {
+    map: HashMap<&'m str, Blob<'m>>,
+}
+
+enum Blob<'m> {
+    /// As the file has it: hex, starting with the alignment word.
+    Hex(&'m str),
+    /// As a pass made it, without the alignment word.
+    Bytes(&'m [u8]),
+}
+
+impl<'m> Resources<'m> {
+    /// The data of blob `key`, without the alignment word it starts with.
+    pub fn get(&self, key: &str) -> Option<std::borrow::Cow<'m, [u8]>> {
+        match self.map.get(key)? {
+            Blob::Bytes(b) => Some(std::borrow::Cow::Borrowed(b)),
+            Blob::Hex(hex) => {
+                let bytes: Option<Vec<u8>> =
+                    (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok()).collect();
+                Some(std::borrow::Cow::Owned(bytes?.get(4..)?.to_vec()))
+            }
+        }
+    }
+
+    pub fn contains(&self, key: &str) -> bool {
+        self.map.contains_key(key)
     }
 }
