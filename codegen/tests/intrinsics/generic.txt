@@ -1,0 +1,385 @@
+# LLVM's generic intrinsics: what tests/intrinsics.rs does with each (see
+# there for the form of a line). Values that would make a result poison
+# are kept out (shift amounts below the width, divisors not zero...).
+
+# --- Integers
+test ; llvm.abs.{0} ; 0(0, i1 0) ; int | oddint | vint | widevint
+test ; llvm.bitreverse.{0} ; 0(0) ; int | oddint | vint | widevint
+test ; llvm.bswap.{0} ; 0(0) ; int16s | <4 x i16> | <8 x i16> | <2 x i32> | <4 x i32> | <2 x i64> | <8 x i32> | <3 x i32>
+test ; llvm.ctpop.{0} ; 0(0) ; int | oddint | vint | widevint
+test ; llvm.ctlz.{0} ; 0(0, i1 0) ; int | oddint | vint | widevint
+test ; llvm.cttz.{0} ; 0(0, i1 0) ; int | oddint | vint | widevint
+test ; llvm.fshl.{0} ; 0(0, 0, 0) ; int | oddint | vint | widevint
+test ; llvm.fshr.{0} ; 0(0, 0, 0) ; int | oddint | vint | widevint
+test ; llvm.smax.{0} ; 0(0, 0) ; int | oddint | vint | widevint
+test ; llvm.smin.{0} ; 0(0, 0) ; int | oddint | vint | widevint
+test ; llvm.umax.{0} ; 0(0, 0) ; int | oddint | vint | widevint
+test ; llvm.umin.{0} ; 0(0, 0) ; int | oddint | vint | widevint
+test ; llvm.scmp.{0}.{1} ; 0(1, 1) ; i8, i32 | i32, i64 | i8, i128 | i2, i8 | <4 x i32>, <4 x i32> | <16 x i8>, <16 x i8> | <2 x i8>, <2 x i64>
+test ; llvm.ucmp.{0}.{1} ; 0(1, 1) ; i8, i32 | i32, i64 | i8, i128 | i2, i8 | <4 x i32>, <4 x i32> | <16 x i8>, <16 x i8> | <2 x i8>, <2 x i64>
+test ; llvm.sadd.sat.{0} ; 0(0, 0) ; int | oddint | vint | widevint
+test ; llvm.uadd.sat.{0} ; 0(0, 0) ; int | oddint | vint | widevint
+test ; llvm.ssub.sat.{0} ; 0(0, 0) ; int | oddint | vint | widevint
+test ; llvm.usub.sat.{0} ; 0(0, 0) ; int | oddint | vint | widevint
+test ; llvm.sshl.sat.{0} ; 0(0, 0:lt8) ; i8 | i16 | i32 | i64 | <16 x i8> | <4 x i32>
+test ; llvm.ushl.sat.{0} ; 0(0, 0:lt8) ; i8 | i16 | i32 | i64 | <16 x i8> | <4 x i32>
+test ; llvm.sadd.with.overflow.{0} ; {0, b0}(0, 0) ; int | oddint | vint
+test ; llvm.uadd.with.overflow.{0} ; {0, b0}(0, 0) ; int | oddint | vint
+test ; llvm.ssub.with.overflow.{0} ; {0, b0}(0, 0) ; int | oddint | vint
+test ; llvm.usub.with.overflow.{0} ; {0, b0}(0, 0) ; int | oddint | vint
+test ; llvm.smul.with.overflow.{0} ; {0, b0}(0, 0) ; int | oddint | vint
+test ; llvm.umul.with.overflow.{0} ; {0, b0}(0, 0) ; int | oddint | vint
+test ; llvm.smul.fix.{0} ; 0(0, 0, i32 3) ; i8 | i16 | i32 | i64 | <4 x i32>
+test ; llvm.umul.fix.{0} ; 0(0, 0, i32 3) ; i8 | i16 | i32 | i64 | <4 x i32>
+test ; llvm.smul.fix.sat.{0} ; 0(0, 0, i32 3) ; i8 | i16 | i32 | i64 | <4 x i32>
+test ; llvm.umul.fix.sat.{0} ; 0(0, 0, i32 3) ; i8 | i16 | i32 | i64 | <4 x i32>
+test ; llvm.sdiv.fix.sat.{0} ; 0(0, 0:nz, i32 3) ; i8 | i16 | i32 | i64
+test ; llvm.udiv.fix.{0} ; 0(0, 0:nz, i32 3) ; i8 | i16 | i32 | i64
+test ; llvm.udiv.fix.sat.{0} ; 0(0, 0:nz, i32 3) ; i8 | i16 | i32 | i64
+# (Signed fixed-point division overflows, to poison, for the least
+# number by -1: only its saturating form is run.)
+build ; llvm.sdiv.fix.{0} ; 0(0, 0, i32 3) ; i16 | i32
+test ; llvm.clmul.{0} ; 0(0, 0) ; i8 | i16 | i32 | i64 | <16 x i8> | <2 x i64>
+test ; llvm.pdep.{0} ; 0(0, 0) ; i8 | i16 | i32 | i64
+test ; llvm.pext.{0} ; 0(0, 0) ; i8 | i16 | i32 | i64
+
+# --- Floating point
+test ; llvm.fabs.{0} ; 0(0) ; fp | vfp | widevfp | fp128
+test ; llvm.sqrt.{0} ; 0(0) ; fp | vfp | widevfp
+test ; llvm.ceil.{0} ; 0(0) ; fp | vfp | widevfp
+test ; llvm.floor.{0} ; 0(0) ; fp | vfp | widevfp
+test ; llvm.trunc.{0} ; 0(0) ; fp | vfp | widevfp
+test ; llvm.rint.{0} ; 0(0) ; fp | vfp | widevfp
+test ; llvm.nearbyint.{0} ; 0(0) ; fp | vfp | widevfp
+test ; llvm.round.{0} ; 0(0) ; fp | vfp | widevfp
+test ; llvm.roundeven.{0} ; 0(0) ; fp | vfp | widevfp
+test ; llvm.canonicalize.{0} ; 0(0) ; fp | vfp
+test ; llvm.arithmetic.fence.{0} ; 0(0) ; fp | vfp
+test ; llvm.copysign.{0} ; 0(0, 0) ; fp | vfp | widevfp | fp128
+test ; llvm.minnum.{0} ; 0(0, 0) ; fp | vfp | widevfp
+test ; llvm.maxnum.{0} ; 0(0, 0) ; fp | vfp | widevfp
+test ; llvm.minimum.{0} ; 0(0, 0) ; fp | vfp | widevfp
+test ; llvm.maximum.{0} ; 0(0, 0) ; fp | vfp | widevfp
+test ; llvm.minimumnum.{0} ; 0(0, 0) ; fp | vfp | widevfp
+test ; llvm.maximumnum.{0} ; 0(0, 0) ; fp | vfp | widevfp
+test ; llvm.fma.{0} ; 0(0, 0, 0) ; fp | vfp | widevfp
+test ; llvm.fmuladd.{0} ; 0(0, 0, 0) ; fp | vfp | widevfp
+test ; llvm.exp.{0} ; 0(0) ; float | double | <2 x double> | <4 x float>
+test ; llvm.exp2.{0} ; 0(0) ; float | double | <2 x double> | <4 x float>
+test ; llvm.exp10.{0} ; 0(0) ; float | double | <2 x double>
+test ; llvm.log.{0} ; 0(0) ; float | double | <2 x double> | <4 x float>
+test ; llvm.log2.{0} ; 0(0) ; float | double | <2 x double>
+test ; llvm.log10.{0} ; 0(0) ; float | double | <2 x double>
+test ; llvm.sin.{0} ; 0(0) ; float | double | <2 x double> | <4 x float>
+test ; llvm.cos.{0} ; 0(0) ; float | double | <2 x double> | <4 x float>
+test ; llvm.tan.{0} ; 0(0) ; float | double | <2 x double>
+test ; llvm.asin.{0} ; 0(0) ; float | double | <2 x double>
+test ; llvm.acos.{0} ; 0(0) ; float | double | <2 x double>
+test ; llvm.atan.{0} ; 0(0) ; float | double | <2 x double>
+test ; llvm.sinh.{0} ; 0(0) ; float | double | <2 x double>
+test ; llvm.cosh.{0} ; 0(0) ; float | double | <2 x double>
+test ; llvm.tanh.{0} ; 0(0) ; float | double | <2 x double>
+test ; llvm.atan2.{0} ; 0(0, 0) ; float | double | <2 x double>
+test ; llvm.pow.{0} ; 0(0, 0) ; float | double | <2 x double> | <4 x float>
+test ; llvm.powi.{0}.i32 ; 0(0, i32:lt40) ; fp | <2 x double> | <4 x float>
+test ; llvm.ldexp.{0}.{1} ; 0(0, 1:lt300) ; float, i32 | double, i32 | half, i32 | <2 x double>, <2 x i32> | <4 x float>, <4 x i32>
+test ; llvm.frexp.{0}.{1} ; {0, 1}(0) ; float, i32 | double, i32 | half, i32 | <2 x double>, <2 x i32> | <4 x float>, <4 x i32>
+test ; llvm.modf.{0} ; {0, 0}(0) ; float | double | <2 x double>
+test ; llvm.sincos.{0} ; {0, 0}(0) ; float | double | <2 x double>
+test ; llvm.sincospi.{0} ; {0, 0}(0) ; float | double
+test ; llvm.is.fpclass.{0} ; b0(0, i32 3) ; fp | vfp
+test ; llvm.is.fpclass.{0} ; b0(0, i32 516) ; fp | vfp
+test ; llvm.is.fpclass.{0} ; b0(0, i32 144) ; fp | vfp
+test ; llvm.is.fpclass.{0} ; b0(0, i32 264) ; fp | vfp
+test ; llvm.is.fpclass.{0} ; b0(0, i32 1023) ; fp | vfp
+test ; llvm.is.fpclass.{0} ; b0(0, i32 96) ; fp | vfp
+test ; llvm.fptosi.sat.{0}.{1} ; 0(1) ; i32, float | i64, float | i32, double | i64, double | i8, float | i16, double | i1, float | i128, double | i32, half | <4 x i32>, <4 x float> | <2 x i64>, <2 x double> | <2 x i32>, <2 x double> | <4 x i16>, <4 x float> | <8 x i8>, <8 x half>
+test ; llvm.fptoui.sat.{0}.{1} ; 0(1) ; i32, float | i64, float | i32, double | i64, double | i8, float | i16, double | i1, float | i128, double | i32, half | <4 x i32>, <4 x float> | <2 x i64>, <2 x double> | <2 x i32>, <2 x double> | <4 x i16>, <4 x float> | <8 x i8>, <8 x half>
+test ; llvm.lrint.{0}.{1} ; 0(1:r) ; i64, float | i64, double | i32, float | i32, double | <2 x i64>, <2 x double>
+test ; llvm.llrint.{0}.{1} ; 0(1:r) ; i64, float | i64, double | <2 x i64>, <2 x double>
+test ; llvm.lround.{0}.{1} ; 0(1:r) ; i64, float | i64, double | i32, float | i32, double
+test ; llvm.llround.{0}.{1} ; 0(1:r) ; i64, float | i64, double
+skip ; llvm.fptrunc.round ; LLVM's AArch64 back end cannot select it either (it is for AMDGPU)
+skip ; llvm.convert.to.arbitrary.fp ; LLVM's AArch64 back end cannot select it either
+skip ; llvm.convert.from.arbitrary.fp ; LLVM's AArch64 back end cannot select it either
+
+# --- Floating point with an environment (all in its default state here)
+test ; llvm.experimental.constrained.fadd.{0} ; 0(0, 0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.fsub.{0} ; 0(0, 0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.fmul.{0} ; 0(0, 0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.fdiv.{0} ; 0(0, 0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.frem.{0} ; 0(0, 0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.fma.{0} ; 0(0, 0, 0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.fmuladd.{0} ; 0(0, 0, 0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.sqrt.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.pow.{0} ; 0(0, 0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.powi.{0} ; 0(0, i32:lt40, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.ldexp.{0}.i32 ; 0(0, i32:lt300, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.sin.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.cos.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.tan.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.asin.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.acos.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.atan.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.atan2.{0} ; 0(0, 0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.sinh.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.cosh.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.tanh.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.exp.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.exp2.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.log.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.log10.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.log2.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.rint.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.nearbyint.{0} ; 0(0, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.lrint.{0}.{1} ; 0(1:r, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; i64, float | i64, double
+test ; llvm.experimental.constrained.llrint.{0}.{1} ; 0(1:r, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; i64, float | i64, double
+test ; llvm.experimental.constrained.lround.{0}.{1} ; 0(1:r, metadata !"fpexcept.ignore") ; i64, float | i64, double
+test ; llvm.experimental.constrained.llround.{0}.{1} ; 0(1:r, metadata !"fpexcept.ignore") ; i64, float | i64, double
+test ; llvm.experimental.constrained.maxnum.{0} ; 0(0, 0, metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.minnum.{0} ; 0(0, 0, metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.maximum.{0} ; 0(0, 0, metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.minimum.{0} ; 0(0, 0, metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.ceil.{0} ; 0(0, metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.floor.{0} ; 0(0, metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.round.{0} ; 0(0, metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.roundeven.{0} ; 0(0, metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.trunc.{0} ; 0(0, metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.fptosi.{0}.{1} ; 0(1:r, metadata !"fpexcept.ignore") ; i32, float | i64, double | i32, double | <4 x i32>, <4 x float>
+test ; llvm.experimental.constrained.fptoui.{0}.{1} ; 0(1:r, metadata !"fpexcept.ignore") ; i64, double | i16, float
+test ; llvm.experimental.constrained.sitofp.{0}.{1} ; 0(1, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float, i32 | double, i64 | float, i64 | half, i16 | <4 x float>, <4 x i32>
+test ; llvm.experimental.constrained.uitofp.{0}.{1} ; 0(1, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float, i32 | double, i64 | float, i64 | half, i16 | <4 x float>, <4 x i32>
+test ; llvm.experimental.constrained.fptrunc.{0}.{1} ; 0(1, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float, double | half, float | half, double
+test ; llvm.experimental.constrained.fpext.{0}.{1} ; 0(1, metadata !"fpexcept.ignore") ; double, float | float, half | double, half
+test ; llvm.experimental.constrained.fcmp.{0} ; b0(0, 0, metadata !"olt", metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.fcmp.{0} ; b0(0, 0, metadata !"une", metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.fcmp.{0} ; b0(0, 0, metadata !"ueq", metadata !"fpexcept.ignore") ; float | double
+test ; llvm.experimental.constrained.fcmps.{0} ; b0(0, 0, metadata !"oge", metadata !"fpexcept.ignore") ; fp | vfp
+test ; llvm.experimental.constrained.fcmps.{0} ; b0(0, 0, metadata !"one", metadata !"fpexcept.ignore") ; float | double
+
+# --- The floating-point environment
+test ; llvm.get.rounding ; i32()
+build ; llvm.set.rounding ; void(i32 2)
+build ; llvm.get.fpenv.i64 ; i64()
+build ; llvm.set.fpenv.i64 ; void(i64)
+build ; llvm.reset.fpenv ; void()
+build ; llvm.get.fpmode.i32 ; i32()
+build ; llvm.set.fpmode.i32 ; void(i32)
+build ; llvm.reset.fpmode ; void()
+
+# --- Vectors
+test ; llvm.vector.reduce.add.{0} ; e0(0) ; vint | widevint | <16 x i1> | <4 x i1>
+test ; llvm.vector.reduce.mul.{0} ; e0(0) ; vint | widevint
+test ; llvm.vector.reduce.and.{0} ; e0(0) ; vint | widevint | <16 x i1> | <8 x i1>
+test ; llvm.vector.reduce.or.{0} ; e0(0) ; vint | widevint | <16 x i1> | <8 x i1>
+test ; llvm.vector.reduce.xor.{0} ; e0(0) ; vint | widevint | <16 x i1> | <8 x i1>
+test ; llvm.vector.reduce.smax.{0} ; e0(0) ; vint | widevint
+test ; llvm.vector.reduce.smin.{0} ; e0(0) ; vint | widevint
+test ; llvm.vector.reduce.umax.{0} ; e0(0) ; vint | widevint | <16 x i1>
+test ; llvm.vector.reduce.umin.{0} ; e0(0) ; vint | widevint | <16 x i1>
+test ; llvm.vector.reduce.fadd.{0} ; e0(e0, 0) ; vfp | widevfp
+test ; llvm.vector.reduce.fmul.{0} ; e0(e0, 0) ; vfp | widevfp
+test ; llvm.vector.reduce.fmax.{0} ; e0(0) ; vfp | widevfp
+test ; llvm.vector.reduce.fmin.{0} ; e0(0) ; vfp | widevfp
+test ; llvm.vector.reduce.fmaximum.{0} ; e0(0) ; vfp | widevfp
+test ; llvm.vector.reduce.fminimum.{0} ; e0(0) ; vfp | widevfp
+test ; llvm.vector.partial.reduce.add.{0}.{1} ; 0(0, 1) ; <4 x i32>, <16 x i32> | <2 x i64>, <8 x i64> | <4 x i32>, <8 x i32> | <8 x i16>, <16 x i16>
+test ; llvm.vector.partial.reduce.fadd.{0}.{1} ; 0(0, 1) ; <4 x float>, <8 x float> | <2 x double>, <8 x double>
+test ; llvm.vector.reverse.{0} ; 0(0) ; vint | vfp | widevint | <16 x i1>
+test ; llvm.vector.splice.left.{0} ; 0(0, 0, i32 1) ; vint | vfp | <8 x i32>
+test ; llvm.vector.splice.right.{0} ; 0(0, 0, i32 1) ; vint | vfp | <8 x i32>
+test ; llvm.vector.extract.{0}.{1} ; 0(1, i64 0) ; <2 x i32>, <4 x i32> | <8 x i8>, <16 x i8> | <2 x float>, <4 x float> | <4 x i32>, <8 x i32> | <2 x i64>, <4 x i64>
+test ; llvm.vector.extract.{0}.{1} ; 0(1, i64 2) ; <2 x i32>, <4 x i32> | <2 x float>, <4 x float> | <2 x i64>, <4 x i64> | <2 x i8>, <16 x i8>
+test ; llvm.vector.extract.{0}.{1} ; 0(1, i64 4) ; <4 x i32>, <8 x i32> | <4 x i16>, <8 x i16>
+test ; llvm.vector.extract.{0}.{1} ; 0(1, i64 8) ; <8 x i8>, <16 x i8>
+test ; llvm.vector.insert.{0}.{1} ; 0(0, 1, i64 0) ; <4 x i32>, <2 x i32> | <16 x i8>, <8 x i8> | <4 x float>, <2 x float> | <8 x i32>, <4 x i32> | <4 x i64>, <2 x i64>
+test ; llvm.vector.insert.{0}.{1} ; 0(0, 1, i64 2) ; <4 x i32>, <2 x i32> | <4 x float>, <2 x float> | <4 x i64>, <2 x i64> | <16 x i8>, <2 x i8>
+test ; llvm.vector.insert.{0}.{1} ; 0(0, 1, i64 4) ; <8 x i32>, <4 x i32> | <8 x i16>, <4 x i16>
+test ; llvm.vector.insert.{0}.{1} ; 0(0, 1, i64 8) ; <16 x i8>, <8 x i8>
+test ; llvm.vector.interleave2.{0} ; 0(1, 1) ; <8 x i32>, <4 x i32> | <16 x i8>, <8 x i8> | <4 x double>, <2 x double> | <4 x float>, <2 x float>
+test ; llvm.vector.interleave3.{0} ; 0(1, 1, 1) ; <12 x i32>, <4 x i32> | <6 x float>, <2 x float>
+test ; llvm.vector.interleave4.{0} ; 0(1, 1, 1, 1) ; <16 x i32>, <4 x i32> | <8 x i16>, <2 x i16>
+test ; llvm.vector.interleave6.{0} ; 0(1, 1, 1, 1, 1, 1) ; <12 x i16>, <2 x i16>
+test ; llvm.vector.interleave8.{0} ; 0(1, 1, 1, 1, 1, 1, 1, 1) ; <16 x i8>, <2 x i8>
+test ; llvm.vector.deinterleave2.{0} ; {1, 1}(0) ; <8 x i32>, <4 x i32> | <16 x i8>, <8 x i8> | <4 x double>, <2 x double> | <4 x float>, <2 x float>
+test ; llvm.vector.deinterleave3.{0} ; {1, 1, 1}(0) ; <12 x i32>, <4 x i32> | <6 x float>, <2 x float>
+test ; llvm.vector.deinterleave4.{0} ; {1, 1, 1, 1}(0) ; <16 x i32>, <4 x i32> | <8 x i16>, <2 x i16>
+test ; llvm.vector.deinterleave6.{0} ; {1, 1, 1, 1, 1, 1}(0) ; <12 x i16>, <2 x i16>
+test ; llvm.vector.deinterleave8.{0} ; {1, 1, 1, 1, 1, 1, 1, 1}(0) ; <16 x i8>, <2 x i8>
+skip ; llvm.vector.interleave5 ; LLVM's AArch64 back end cannot select it either
+skip ; llvm.vector.interleave7 ; LLVM's AArch64 back end cannot select it either
+skip ; llvm.vector.deinterleave5 ; LLVM's AArch64 back end cannot select it either
+skip ; llvm.vector.deinterleave7 ; LLVM's AArch64 back end cannot select it either
+test ; llvm.stepvector.{0} ; 0() ; vint | <8 x i32>
+test ; llvm.get.active.lane.mask.{0}.{1} ; 0(1, 1) ; <4 x i1>, i64 | <16 x i1>, i32 | <8 x i1>, i64 | <2 x i1>, i8
+test ; llvm.experimental.cttz.elts.{0}.{1} ; 0(1, i1 0) ; i64, <4 x i1> | i32, <16 x i1> | i8, <8 x i1> | i64, <2 x i1>
+test ; llvm.experimental.vector.compress.{0} ; 0(0, b0, 0) ; <4 x i32> | <16 x i8> | <2 x double> | <4 x float> | <8 x i32>
+test ; llvm.experimental.vector.extract.last.active.{0} ; e0(0, b0, e0) ; <4 x i32> | <16 x i8> | <2 x double> | <8 x i16>
+test ; llvm.experimental.vector.match.{0}.{1} ; b0(0, 1, b0) ; <16 x i8>, <16 x i8> | <8 x i16>, <8 x i16> | <16 x i8>, <4 x i8>
+skip ; llvm.vscale ; for scalable vectors (SVE): LLVM's back end cannot select it without SVE either
+skip ; llvm.experimental.get.vector.length ; for scalable vectors (SVE, RISC-V V), which the M1 has none of
+skip ; llvm.loop.dependence.raw.mask ; for scalable vectors' loops, made by the loop vectoriser (SVE)
+skip ; llvm.loop.dependence.war.mask ; for scalable vectors' loops, made by the loop vectoriser (SVE)
+skip ; llvm.experimental.vector.histogram* ; for SVE's histogram instructions, which the M1 does not have
+
+# --- Masked memory and memory
+test ; llvm.masked.load.{0}.p0 ; 0(mem, b0, 0) ; <4 x i32> | <16 x i8> | <2 x double> | <4 x float> | <8 x i32> | <2 x i64>
+test ; llvm.masked.store.{0}.p0 ; void(0, mem, b0) ; <4 x i32> | <16 x i8> | <2 x double> | <4 x float> | <8 x i32> | <2 x i64>
+test ; llvm.masked.gather.{0}.{v0} ; 0(ptrs0, b0, 0) ; <4 x i32> | <2 x double> | <4 x float> | <8 x i16>
+test ; llvm.masked.scatter.{0}.{v0} ; void(0, ptrs0, b0) ; <4 x i32> | <2 x double> | <4 x float> | <8 x i16>
+test ; llvm.masked.expandload.{0} ; 0(mem, b0, 0) ; <4 x i32> | <16 x i8> | <2 x double> | <8 x i16>
+test ; llvm.masked.compressstore.{0} ; void(0, mem, b0) ; <4 x i32> | <16 x i8> | <2 x double> | <8 x i16>
+test ; llvm.masked.udiv.{0} ; 0(0, 0:nz, b0) ; <4 x i32> | <8 x i16> | <2 x i64>
+test ; llvm.masked.urem.{0} ; 0(0, 0:nz, b0) ; <4 x i32> | <8 x i16> | <2 x i64>
+test ; llvm.masked.sdiv.{0} ; 0(0, 0:nz, b0) ; <4 x i32> | <8 x i16> | <2 x i64>
+test ; llvm.masked.srem.{0} ; 0(0, 0:nz, b0) ; <4 x i32> | <8 x i16> | <2 x i64>
+test ; llvm.memcpy.p0.p0.i64 ; void(mem, mem+32, i64:lt32, i1 0)
+test ; llvm.memcpy.p0.p0.i64 ; void(mem+3, mem+40, i64 17, i1 0)
+test ; llvm.memcpy.inline.p0.p0.i64 ; void(mem, mem+32, i64 24, i1 0)
+test ; llvm.memmove.p0.p0.i64 ; void(mem, mem+7, i64:lt56, i1 0)
+test ; llvm.memmove.p0.p0.i64 ; void(mem+9, mem, i64:lt55, i1 0)
+test ; llvm.memset.p0.i64 ; void(mem, i8, i64:lt64, i1 0)
+test ; llvm.memset.p0.i64 ; void(mem+5, i8, i64 33, i1 0)
+test ; llvm.memset.inline.p0.i64 ; void(mem+1, i8, i64 19, i1 0)
+test ; llvm.experimental.memset.pattern.p0.i32.i64 ; void(mem, i32, i64:lt16, i1 0)
+test ; llvm.experimental.memset.pattern.p0.i64.i64 ; void(mem+8, i64, i64 3, i1 0)
+# (Calls to runtime functions, `__llvm_memcpy_element_unordered_atomic_4`,
+# that only Java's runtimes have.)
+build ; llvm.memcpy.element.unordered.atomic.p0.p0.i64 ; void(mem align 4, mem+32 align 4, i64 16, i32 4)
+build ; llvm.memmove.element.unordered.atomic.p0.p0.i64 ; void(mem align 8, mem+8 align 8, i64 24, i32 8)
+build ; llvm.memset.element.unordered.atomic.p0.i64 ; void(mem align 4, i8, i64 32, i32 4)
+test ; llvm.load.relative.i64 ; ptr(mem, i64 0)
+test ; llvm.ptrmask.p0.i64 ; ptr(mem+13, i64 -8)
+test ; llvm.prefetch.p0 ; void(mem, i32 0, i32 3, i32 1)
+test ; llvm.prefetch.p0 ; void(mem, i32 1, i32 0, i32 1)
+test ; llvm.objectsize.i64.p0 ; i64(mem, i1 0, i1 1, i1 0)
+test ; llvm.objectsize.i64.p0 ; i64(mem, i1 1, i1 1, i1 0)
+
+# --- Telling the optimiser things: no code, the value passed on
+test ; llvm.expect.{0} ; 0(0, 0) ; i1 | i32 | i64
+test ; llvm.expect.with.probability.{0} ; 0(0, 0, double 0.5) ; i1 | i32 | i64
+test ; llvm.assume ; void(i1 1)
+test ; llvm.donothing ; void()
+test ; llvm.sideeffect ; void()
+test ; llvm.annotation.i32.p0 ; i32(i32, ptr null, ptr null, i32 0)
+test ; llvm.var.annotation.p0.p0 ; void(mem, ptr null, ptr null, i32 0, ptr null)
+test ; llvm.ptr.annotation.p0.p0 ; ptr(mem, ptr null, ptr null, i32 0, ptr null)
+test ; llvm.launder.invariant.group.p0 ; ptr(mem+4)
+test ; llvm.strip.invariant.group.p0 ; ptr(mem+4)
+test ; llvm.invariant.start.p0 ; ptr(i64 8, mem)
+build ; llvm.invariant.end.p0 ; void(ptr null, i64 8, mem)
+test ; llvm.fake.use ; void(...i32)
+test ; llvm.allow.runtime.check ; i1(metadata !"check")
+test ; llvm.allow.ubsan.check ; i1(i8 1)
+test ; llvm.is.constant.{0} ; i1(0) ; i32 | double
+test ; llvm.licm.disable ; void()
+# (On allocas only, which a function here has none of; see tests/memops.rs.)
+skip ; llvm.lifetime.start ; markers of allocas' lives, which other tests cover (allocas are not made here)
+skip ; llvm.lifetime.end ; markers of allocas' lives, which other tests cover (allocas are not made here)
+skip ; llvm.experimental.noalias.scope.decl ; needs scope metadata, which these modules do not have; tests/rust.rs's code has many
+skip ; llvm.allow.sanitize* ; for sanitizers' passes, before code generation
+skip ; llvm.alloc.token.id ; for the allocation-token pass, before code generation
+
+# --- The machine and the frame: built, not run (they read state that
+# differs between builds)
+build ; llvm.trap ; void()
+build ; llvm.debugtrap ; void()
+build ; llvm.ubsantrap ; void(i8 3)
+build ; llvm.frameaddress.p0 ; ptr(i32 0)
+build ; llvm.returnaddress ; ptr(i32 0)
+build ; llvm.addressofreturnaddress.p0 ; ptr()
+build ; llvm.sponentry.p0 ; ptr()
+build ; llvm.stackaddress.p0 ; ptr()
+build ; llvm.stacksave.p0 ; ptr()
+build ; llvm.stackrestore.p0 ; void(mem)
+build ; llvm.thread.pointer.p0 ; ptr()
+build ; llvm.readcyclecounter ; i64()
+build ; llvm.readsteadycounter ; i64()
+build ; llvm.read_register.i64 ; i64(metadata !{!"sp"})
+build ; llvm.read_volatile_register.i64 ; i64(metadata !{!"sp"})
+build ; llvm.write_register.i64 ; void(metadata !{!"x18"}, i64)
+build ; llvm.write_volatile_register.i64 ; void(metadata !{!"x18"}, i64)
+build ; llvm.clear_cache ; void(mem, mem+64)
+build ; llvm.adjust.trampoline ; ptr(mem)
+build ; llvm.get.dynamic.area.offset.i64 ; i64()
+build ; llvm.va_copy.p0 ; void(mem, mem+8)
+build ; llvm.va_end.p0 ; void(mem)
+build ; llvm.cond.loop ; void(i1 0)
+build ; llvm.looptrap ; void()
+# (Pointer authentication: what the keys give differs between processes.)
+build ; llvm.ptrauth.sign ; i64(i64, i32 0, i64)
+build ; llvm.ptrauth.sign.generic ; i64(i64, i64)
+build ; llvm.ptrauth.auth ; i64(i64, i32 0, i64)
+build ; llvm.ptrauth.resign ; i64(i64, i32 0, i64, i32 1, i64)
+build ; llvm.ptrauth.strip ; i64(i64, i32 0)
+build ; llvm.ptrauth.blend ; i64(i64, i64)
+build ; llvm.ptrauth.auth.with.pc.and.resign ; i64(i64, i32 0, i64, i64, i32 1, i64)
+build ; llvm.ptrauth.resign.load.relative ; i64(i64, i32 0, i64, i32 1, i64, i64 0)
+
+skip ; llvm.stackguard ; for stack protectors, which no function here asks for (LLVM's back end crashes on it alone)
+skip ; llvm.init.trampoline ; nested functions' trampolines (GCC's C extension), needing a function to call
+skip ; llvm.pcmarker ; for profilers on Alpha; LLVM's AArch64 back end cannot select it
+skip ; llvm.va_start ; needs a varargs function; tests/stdio.rs covers va_list
+skip ; llvm.threadlocal.address ; needs a thread-local global; tests/elf_tls.rs and tests/rust.rs cover thread-locals
+skip ; llvm.reloc.none ; needs a symbol; for linkers' dependencies
+skip ; llvm.stackprotector ; needs an alloca; for stack protectors, which no function here asks for
+
+# --- Debug information and markers for tools: no code
+skip ; llvm.dbg.value ; debug information, which needs metadata nodes and locations these modules do not have
+skip ; llvm.dbg.declare ; debug information, which needs metadata nodes and locations these modules do not have
+skip ; llvm.dbg.assign ; debug information (assignment tracking), which needs metadata nodes these modules do not have
+skip ; llvm.dbg.label ; debug information (labels), which needs metadata nodes these modules do not have
+skip ; llvm.pseudoprobe ; sample profiling's probes, from its passes
+skip ; llvm.instrprof* ; profiling's instrumentation, lowered by its pass before code generation
+skip ; llvm.ssa.copy ; made and removed by passes (predicate information); LLVM's back end cannot select it
+
+# --- Made or lowered by passes before code generation
+skip ; llvm.coro.* ; coroutines, lowered by the coroutine passes before code generation
+skip ; llvm.matrix.* ; lowered by the matrix pass before code generation
+skip ; llvm.type.test ; control-flow integrity, lowered by its passes before code generation
+skip ; llvm.public.type.test ; control-flow integrity, lowered by its passes before code generation
+skip ; llvm.type.checked.load* ; control-flow integrity, lowered by its passes before code generation
+skip ; llvm.icall.branch.funnel ; control-flow integrity, lowered by its passes before code generation
+skip ; llvm.preserve.* ; BPF's relocations of fields (CO-RE)
+skip ; llvm.protected.field.ptr ; pointer field protection, lowered by its pass before code generation
+skip ; llvm.structured.* ; SPIR-V's and DirectX's structured addressing
+skip ; llvm.experimental.convergence.* ; GPUs' convergence control
+skip ; llvm.experimental.widenable.condition ; made and lowered by the guard-widening passes
+skip ; llvm.experimental.guard ; lowered to branches by the guard passes before code generation
+skip ; llvm.experimental.deoptimize ; deoptimisation for managed runtimes' compilers (JITs), not for C or Rust
+skip ; llvm.experimental.gc.* ; garbage collectors' statepoints, for managed runtimes
+skip ; llvm.experimental.patchpoint* ; stack maps and patch points, for managed runtimes' compilers
+skip ; llvm.experimental.stackmap ; stack maps and patch points, for managed runtimes' compilers
+skip ; llvm.gcroot ; garbage collectors' roots, for managed runtimes
+skip ; llvm.gcread ; garbage collectors' barriers, for managed runtimes
+skip ; llvm.gcwrite ; garbage collectors' barriers, for managed runtimes
+skip ; llvm.asan.* ; AddressSanitizer's checks, from its pass
+skip ; llvm.hwasan.* ; HWAddressSanitizer's checks, from its pass
+skip ; llvm.set.loop.iterations ; hardware loops (Arm M-profile, PowerPC), made by their passes
+skip ; llvm.start.loop.iterations ; hardware loops (Arm M-profile, PowerPC), made by their passes
+skip ; llvm.test.set.loop.iterations ; hardware loops (Arm M-profile, PowerPC), made by their passes
+skip ; llvm.test.start.loop.iterations ; hardware loops (Arm M-profile, PowerPC), made by their passes
+skip ; llvm.loop.decrement* ; hardware loops (Arm M-profile, PowerPC), made by their passes
+skip ; llvm.call.preallocated.* ; Windows x86's arguments made in place (inalloca)
+skip ; llvm.seh.* ; Windows' structured exception handling (SEH)
+skip ; llvm.codeview.annotation ; Windows' debug information (CodeView)
+skip ; llvm.xray.* ; XRay's instrumentation, from its pass
+skip ; llvm.localescape ; Windows' structured exception handling (SEH)
+skip ; llvm.localrecover ; Windows' structured exception handling (SEH)
+skip ; llvm.localaddress ; Windows' structured exception handling (SEH)
+skip ; llvm.swift.async.context.addr ; Swift's async frames
+skip ; llvm.callbr.landingpad ; for `callbr` (asm goto), which is not read here yet
+skip ; llvm.objc.* ; Objective-C's ARC runtime calls, for Objective-C
+skip ; llvm.vp.* ; vector predication (an explicit vector length), for RISC-V V and SVE
+skip ; llvm.experimental.vp.* ; vector predication (an explicit vector length), for RISC-V V and SVE
+
+# --- Exception handling
+skip ; llvm.eh.typeid.for* ; lowered with landing pads; tests/unwind.rs and tests/rust.rs cover catching by type
+skip ; llvm.eh.sjlj.* ; SjLj exception handling, for platforms without unwind tables
+skip ; llvm.eh.dwarf.cfa ; for GCC's __builtin_eh_return, which unwinders' own code uses
+skip ; llvm.eh.return.i32 ; for GCC's __builtin_eh_return, which unwinders' own code uses
+skip ; llvm.eh.return.i64 ; for GCC's __builtin_eh_return, which unwinders' own code uses
+skip ; llvm.eh.unwind.init ; for GCC's __builtin_unwind_init, which unwinders' own code uses
+skip ; llvm.eh.exceptioncode ; Windows' structured exception handling (SEH)
+skip ; llvm.eh.exceptionpointer ; Windows' and Wasm's exception handling
+skip ; llvm.eh.recoverfp ; Windows' structured exception handling (SEH)

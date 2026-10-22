@@ -6,6 +6,9 @@ not a clone of LLVM: it reads and writes the same IR, and its tools take
 the same kinds of input and give the same kinds of output, but how it gets
 there is its own.
 
+**198 crates' own test suites pass with their code compiled by Epitome**
+(on an AArch64 Mac; see [Crates that build](#crates-that-build)).
+
 > **Experimental.** Epitome is young and changes quickly, and it is
 > suitable only for the adventurous at the moment: expect missing features,
 > rough edges and bugs, and check its output before relying on it.
@@ -185,3 +188,36 @@ built against rustc's internals and turn its MIR into our IR.
 
 Copyright (c) 2026 Amy Thomason. No license has been chosen yet; see
 [LICENSE](LICENSE).
+
+## Crates that build
+
+These crates' own tests (`cargo test --release`) pass with their code,
+and their dependencies', compiled by Epitome through `epitome-rustc` (see
+[Building Rust crates with Epitome](#building-rust-crates-with-epitome)),
+on an AArch64 Mac with Rust 1.99.1: 198 crates, at the versions given.
+chrono's pass too, but for 8 tests of time-zone files its package leaves
+out. Crates whose tests fail for reasons of their own (files or crates
+missing from the package, or failing under plain rustc) are not listed.
+
+- **a**: adler2 2.0.1, ahash 0.8.12, aho-corasick 1.1.5, allocator-api2 0.4.0, anstyle 1.0.14, anyhow 1.0.104, approx 0.5.1, arbitrary 1.4.2, arrayref 0.3.9, arrayvec 0.7.8, async-channel 2.5.0, async-lock 3.4.2, async-task 4.7.1, atomic-waker 1.1.2
+- **b**: base64 0.22.1, bincode 1.3.3, bit_field 0.10.1, bit-set 0.9.1, bit-vec 0.9.1, bitflags 2.13.2, bitstream-io 4.9.0, bitvec 1.0.1, bumpalo 3.20.3, bytecount 0.6.9, bytemuck 1.25.2, byteorder 1.5.0, bytes 1.12.1
+- **c**: castaway 0.2.4, chacha20 0.10.2, cobs 0.3.0, color_quant 1.1.0, combine 4.6.8, compact_str 0.9.1, concurrent-queue 2.5.0, crc32fast 1.5.3, crossbeam-channel 0.5.17, crossbeam-deque 0.8.8, crossbeam-epoch 0.9.21, crossbeam-queue 0.3.14, crossbeam-utils 0.8.23, csv 1.4.0, csv-core 0.1.13, ctor 1.0.13
+- **d**: dary_heap 0.3.9, data-encoding 2.11.1, dissimilar 1.0.11, downcast-rs 2.0.2
+- **e**: either 1.19.0, encode_unicode 1.0.0, encoding_rs 0.8.42, env_logger 0.11.11, equivalent 1.0.3, erased-serde 0.4.10, euclid 0.22.14, event-listener 5.4.2
+- **f**: fallible-iterator 0.3.0, fallible-streaming-iterator 0.1.9, fancy-regex 0.18.0, faster-hex 0.5.0, fastrand 2.5.0, fixedbitset 0.5.7, flate2 1.1.10, float-ord 0.3.0, flume 0.12.0, fnv 1.0.7, foldhash 0.2.0, form_urlencoded 1.2.2, futures-lite 2.6.1, fxhash 0.2.1
+- **g**: gimli 0.34.0, glam 0.32.1, glob 0.3.4, globset 0.4.20
+- **h**: half 2.7.1, hash32 0.3.1, hashbrown 0.17.1, hashlink 0.9.1, heapless 0.9.3, heck 0.5.0, hex 0.4.3, hexf-parse 0.2.1, hmac 0.13.0, httparse 1.10.1, httpdate 1.0.3, humantime 2.4.0
+- **i**: indexmap 2.14.2, inventory 0.3.24, ipnet 2.12.2, itertools 0.14.0, itoa 1.0.18
+- **l**: lexopt 0.3.1, lock_api 0.4.14, log 0.4.34, lz4_flex 0.13.1
+- **m**: matches 0.1.10, matrixmultiply 0.3.11, memchr 2.8.3, memmap2 0.9.11, memoffset 0.6.5, minimal-lexical 0.2.1, miniserde 0.1.45, miniz_oxide 0.9.1, multimap 0.10.1
+- **n**: num-bigint 0.5.1, num-complex 0.4.6, num-integer 0.1.47, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19
+- **o**: once_cell 1.21.4, oneshot 0.1.13, oorandom 11.1.5, ordered-float 5.5.0
+- **p**: parking_lot 0.12.5, pathdiff 0.2.3, percent-encoding 2.3.2, pest 2.8.0, petgraph 0.8.3, phf_shared 0.12.1, pico-args 0.5.0, piper 0.2.5, postcard 1.1.3, ppv-lite86 0.2.21, pulldown-cmark 0.9.6
+- **q**: quick-error 2.0.1, quick-xml 0.41.0
+- **r**: radium 0.7.0, rand 0.10.3, rand_chacha 0.9.0, rand_distr 0.6.0, rand_pcg 0.10.2, rand_xorshift 0.5.0, rand_xoshiro 0.8.0, rayon 1.12.0, regex-syntax 0.8.11, rgb 0.8.53, ron 0.12.2, rustc-demangle 0.1.27, rustc-hash 2.1.3, rustc-hex 2.1.0, ryu 1.0.23
+- **s**: same-file 1.0.6, scopeguard 1.2.0, seahash 4.1.0, semver 1.0.28, serde_bytes 0.11.19, serde_cbor 0.11.2, serde_json 1.0.154, serde_repr 0.1.21, serde_urlencoded 0.7.1, sha1 0.11.0, sha2 0.11.0, sharded-slab 0.1.7, shlex 2.0.1, simba 0.9.1, simdutf8 0.1.5, siphasher 1.0.3, slab 0.4.12, slotmap 1.1.1, smallvec 1.16.3, smawk 0.3.2, smol_str 0.2.2, snap 1.1.1, spin 0.10.1, stable_deref_trait 1.2.1, static_assertions 1.1.0, statrs 0.18.0, strsim 0.11.1, subtle 2.6.1
+- **t**: tap 1.0.1, termcolor 1.4.1, textwrap 0.16.1, thiserror 2.0.21, thread_local 1.1.10, tinystr 0.8.4, tinyvec 1.13.3, toml 1.1.8+spec-1.1.0, toml_edit 0.25.15+spec-1.1.0, twox-hash 2.1.5, typenum 1.20.1, typetag 0.2.14
+- **u**: unicase 2.10.0, unicode-bidi 0.3.18, unicode-normalization 0.1.25, unicode-segmentation 1.13.3, unicode-width 0.2.2, unicode-xid 0.2.6, url 2.5.8, urlencoding 2.1.3, utf8_iter 1.0.4, utf8parse 0.2.2, uuid 1.26.1
+- **v**: vec_map 0.8.2
+- **w**: walkdir 2.5.0, wide 0.7.33, winnow 1.0.4
+- **z**: zeroize 1.9.1, zmij 1.0.23

@@ -1861,15 +1861,20 @@ fn bitcast_round_trips(cx: &mut Ctx, f: &mut Function) {
 /// Lanes of masks (`<N x i1>`), taken out or put in, through integer
 /// lanes: the mask sign-extended (all ones or zeros a lane), the lane
 /// taken and truncated; or put in sign-extended, and the vector compared
-/// with zero to be a mask again.
+/// with zero to be a mask again. The lanes are as wide as those of the
+/// comparison that made the mask, where that is known (its register's:
+/// after legalisation, an extension to another width would be taken as
+/// free).
 fn mask_lanes(cx: &mut Ctx, f: &mut Function) {
     let i1 = cx.m.types.int(1);
-    let wide = |cx: &mut Ctx, ty: TypeId| -> Option<(TypeId, TypeId)> {
+    let wide = |cx: &mut Ctx, f: &Function, ty: TypeId, mask: Option<Value>| -> Option<(TypeId, TypeId)> {
         let Type::Vector { len, elem, scalable: false } = *cx.m.types.get(ty) else { return None };
         if elem != i1 {
             return None;
         }
-        let w = (128 / len).clamp(8, 64);
+        let w = mask
+            .and_then(|m| crate::legalize::mask_width(cx, f, m, &mut Vec::new()))
+            .unwrap_or((128 / len).clamp(8, 64));
         let e = cx.m.types.int(w);
         Some((cx.m.types.intern(Type::Vector { len, elem: e, scalable: false }), e))
     };
@@ -1883,15 +1888,15 @@ fn mask_lanes(cx: &mut Ctx, f: &mut Function) {
                 continue;
             };
             let op = f.insts[i.index()].op.clone();
-            let mty = match &op {
-                Op::ExtractElement { vector, .. } => cx.value_ty(f, *vector),
-                Op::InsertElement { .. } => f.locals[r.index()].ty,
+            let (mty, mask) = match &op {
+                Op::ExtractElement { vector, .. } => (cx.value_ty(f, *vector), *vector),
+                Op::InsertElement { vector, .. } => (f.locals[r.index()].ty, *vector),
                 _ => {
                     k += 1;
                     continue;
                 }
             };
-            let Some((wt, e)) = wide(cx, mty) else {
+            let Some((wt, e)) = wide(cx, f, mty, Some(mask)) else {
                 k += 1;
                 continue;
             };
