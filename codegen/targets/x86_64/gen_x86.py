@@ -13,7 +13,7 @@ label `dest`; a symbol `s`; a memory operand the parts `m.base`, `m.index`,
     disp(base,index,scale)      an index (never rsp)        ...x
     sym(%rip)                   a symbol, PC-relative       ...p
 
-Usage: gen_x86.py > 80-asm.ll
+Usage: gen_x86.py > 80-asm.ll; gen_x86.py vector > 81-vector.ll
 """
 
 import sys
@@ -58,11 +58,11 @@ SYM = 'ptr "sym" %s'
 # after the register, a guard, and the relocation.
 MEMS = [
     ("m", ['i64 "reg"="r64" %m.base', 'i64 "imm" %m.disp'], "{m.disp}({m.base})",
-     ("4", "m.base"), "m.base, 4, 1, m.disp, 0", "", ""),
+     ("4", "m.base"), "m.base, 4, 1, m.disp, 0, 1", "", ""),
     ("x", ['i64 "reg"="r64" %m.base', 'i64 "reg"="r64" %m.index', 'i64 "imm" %m.scale', 'i64 "imm" %m.disp'],
-     "{m.disp}({m.base},{m.index},{m.scale})", ("m.index", "m.base"), "m.base, m.index, m.scale, m.disp, 0",
+     "{m.disp}({m.base},{m.index},{m.scale})", ("m.index", "m.base"), "m.base, m.index, m.scale, m.disp, 0, 1",
      "if(m.index!=4) ", ""),
-    ("p", ['ptr "sym" %m.sym'], "{m.sym}(%rip)", ("0", "0"), "16, 4, 1, 0, m.sym", "", ' "reloc"="pc32x"'),
+    ("p", ['ptr "sym" %m.sym'], "{m.sym}(%rip)", ("0", "0"), "16, 4, 1, 0, m.sym, 1", "", ' "reloc"="pc32x"'),
 ]
 
 
@@ -288,20 +288,217 @@ def bit_counts():
             mem(f"{M}rM", [reg(cls, "d")], [], wpre + pre, w, f"00001111 | {op}", "d", f"{mn}{sfx} {{M}}, {{d}}")
 
 
+# ---------------------------------------------------------------------------
+# Vectors. pp: the implied prefix (0 none, 1 66, 2 F3, 3 F2); map: 1 0F,
+# 2 0F38, 3 0F3A.
+
+PREFIX = {0: "", 1: "01100110 | ", 2: "11110011 | ", 3: "11110010 | "}
+MAPS = {1: "00001111", 2: "00001111 | 00111000", 3: "00001111 | 00111010"}
+
+
+def mem_parts(rmargs):
+    base, index = rmargs.split(", ")[:2]
+    return base, index
+
+
+def sse(name, mn, pp, mp, op, dcls="x", scls="x", w=0, store=False, imm=False, reg_form=True, mem_form=True):
+    """A legacy SSE instruction, ModRM.reg the destination (or, `store`,
+    the source)."""
+    pre, opc = PREFIX[pp], f"{MAPS[mp]} | {bits(op)}"
+    tail, ip, ia = (" | ib:8=c", [IMM], "${c}, ") if imm else ("", [], "")
+    if store:
+        mem(f"{name}Mr", [], [reg(scls, "s")], pre, w, opc, "s", f"{mn} {{s}}, {{M}}")
+        return
+    if reg_form:
+        entry(f"{name}rr", [reg(dcls, "d"), reg(scls, "s")] + ip,
+              f"{pre}rex({w}, d, 0, s) | {opc} | rr(d, s){tail}", f"{mn} {ia}{{s}}, {{d}}")
+    if mem_form:
+        mem(f"{name}rM", [reg(dcls, "d")], ip, pre, w, opc, "d", f"{mn} {ia}{{M}}, {{d}}", tail=tail)
+
+
+def vex(name, mn, pp, mp, op, w, l, cls, three=True, store=False, scls=None, commute=False, swap=None):
+    """A VEX instruction: d, v (vvvv, if `three`), s (ModRM.rm). As
+    llvm-mc does, a commutative one (`commute`) whose s needs the
+    three-byte prefix and v does not swaps them, and a move (`swap`, its
+    store opcode) whose s needs it and d does not uses the store form."""
+    scls = scls or cls
+    v = "v" if three else "0"
+    vp = [reg(cls, "v")] if three else []
+    va = "{v}, " if three else ""
+    opc = bits(op)
+    if store:
+        for sfx, params, masm, _, rmargs, guard, reloc in MEMS:
+            base, index = mem_parts(rmargs)
+            entry(f"{name}{sfx}r", params + [reg(cls, "s")],
+                  f"{{ {guard}vexm(s, {base}, {index}, {mp}, {w}, 0, {l}, {pp}) | {opc} | rm(s, {rmargs}) }}",
+                  f"{mn} {{s}}, {masm}", reloc)
+        return
+    plain = f"vex(d, 0, s, {mp}, {w}, {v}, {l}, {pp}) | {opc} | rr(d, s)"
+    if commute:
+        plain = (f"{{ if(s<8) {plain} ; if(v<8) vex(d, 0, v, {mp}, {w}, s, {l}, {pp}) | {opc} | rr(d, v) ; "
+                 f"{plain} }}")
+    elif swap is not None:
+        plain = (f"{{ if(s<8) {plain} ; if(d<8) vex(s, 0, d, {mp}, {w}, 0, {l}, {pp}) | {bits(swap)} | rr(s, d) ; "
+                 f"{plain} }}")
+    entry(f"{name}rr", [reg(cls, "d")] + vp + [reg(scls, "s")], plain, f"{mn} {{s}}, {va}{{d}}")
+    for sfx, params, masm, _, rmargs, guard, reloc in MEMS:
+        base, index = mem_parts(rmargs)
+        entry(f"{name}r{sfx}", [reg(cls, "d")] + vp + params,
+              f"{{ {guard}vexm(d, {base}, {index}, {mp}, {w}, {v}, {l}, {pp}) | {opc} | rm(d, {rmargs}) }}",
+              f"{mn} {masm}, {va}{{d}}", reloc)
+
+
+def evex(name, mn, pp, mp, op, w, three=True, store=False, n=64, bcast=None, scls="z"):
+    """An EVEX instruction on zmm registers: d, v, s; memory operands'
+    byte displacements count n bytes; `bcast` (elements, their bytes) adds
+    the broadcast form."""
+    v = "v" if three else "0"
+    vp = [reg("z", "v")] if three else []
+    va = "{v}, " if three else ""
+    opc = bits(op)
+
+    def forms(bc, nn, suffix, tag):
+        for sfx, params, masm, _, rmargs, guard, reloc in MEMS:
+            base, index = mem_parts(rmargs)
+            rma = rmargs.rsplit(", ", 1)[0] + f", {nn}"
+            if store:
+                entry(f"{name}{sfx}r", params + [reg("z", "s")],
+                      f"{{ {guard}evexm(s, {base}, {index}, {mp}, {w}, 0, 2, {pp}, 0, 0, 0) | {opc} | rm(s, {rma}) }}",
+                      f"{mn} {{s}}, {masm}", reloc)
+            else:
+                entry(f"{name}r{sfx}{tag}", [reg("z", "d")] + vp + params,
+                      f"{{ {guard}evexm(d, {base}, {index}, {mp}, {w}, {v}, 2, {pp}, {bc}, 0, 0) | {opc} | rm(d, {rma}) }}",
+                      f"{mn} {masm}{suffix}, {va}{{d}}", reloc)
+
+    if not store:
+        entry(f"{name}rr", [reg("z", "d")] + vp + [reg(scls, "s")],
+              f"evexr(d, s, {mp}, {w}, {v}, 2, {pp}, 0, 0) | {opc} | rr(d, s)", f"{mn} {{s}}, {va}{{d}}")
+    forms(0, n, "", "")
+    if bcast:
+        k, size = bcast
+        forms(1, size, f"{{lb}}1to{k}{{rb}}", "b")
+
+
+def vectors():
+    # SSE: arithmetic in four types.
+    types = [("ps", 0), ("pd", 1), ("ss", 2), ("sd", 3)]
+    for mn, op in [("add", 0x58), ("mul", 0x59), ("sub", 0x5C), ("min", 0x5D), ("div", 0x5E), ("max", 0x5F),
+                   ("sqrt", 0x51)]:
+        for t, pp in types:
+            sse(f"{mn.upper()}{t.upper()}", f"{mn}{t}", pp, 1, op)
+    for mn, op in [("and", 0x54), ("andn", 0x55), ("or", 0x56), ("xor", 0x57)]:
+        for t, pp in types[:2]:
+            sse(f"{mn.upper()}{t.upper()}", f"{mn}{t}", pp, 1, op)
+    for mn, pp, load, store in [("movaps", 0, 0x28, 0x29), ("movapd", 1, 0x28, 0x29), ("movups", 0, 0x10, 0x11),
+                                ("movupd", 1, 0x10, 0x11), ("movss", 2, 0x10, 0x11), ("movsd", 3, 0x10, 0x11),
+                                ("movdqa", 1, 0x6F, 0x7F), ("movdqu", 2, 0x6F, 0x7F)]:
+        sse(mn.upper(), mn, pp, 1, load)
+        sse(mn.upper(), mn, pp, 1, store, store=True)
+    for mn, pp, op in [("ucomiss", 0, 0x2E), ("ucomisd", 1, 0x2E), ("comiss", 0, 0x2F), ("comisd", 1, 0x2F),
+                       ("cvtss2sd", 2, 0x5A), ("cvtsd2ss", 3, 0x5A), ("cvtdq2ps", 0, 0x5B), ("cvttps2dq", 2, 0x5B),
+                       ("unpcklps", 0, 0x14), ("unpckhps", 0, 0x15)]:
+        sse(mn.upper(), mn, pp, 1, op)
+    for mn, op in [("paddb", 0xFC), ("paddw", 0xFD), ("paddd", 0xFE), ("paddq", 0xD4), ("psubd", 0xFA),
+                   ("psubq", 0xFB), ("pand", 0xDB), ("pandn", 0xDF), ("por", 0xEB), ("pxor", 0xEF),
+                   ("pcmpeqd", 0x76), ("pmuludq", 0xF4), ("pmaddwd", 0xF5)]:
+        sse(mn.upper(), mn, 1, 1, op)
+    for mn, op in [("pmulld", 0x40), ("pshufb", 0x00)]:
+        sse(mn.upper(), mn, 1, 2, op)
+    sse("SHUFPS", "shufps", 0, 1, 0xC6, imm=True)
+    sse("PSHUFD", "pshufd", 1, 1, 0x70, imm=True)
+    # Between the files.
+    for mn, pp in [("cvtsi2sd", 3), ("cvtsi2ss", 2)]:
+        sse(f"{mn.upper()}32", f"{mn}l", pp, 1, 0x2A, "x", "r32")
+        sse(f"{mn.upper()}64", f"{mn}q", pp, 1, 0x2A, "x", "r64", w=1)
+    for mn, pp in [("cvttsd2si", 3), ("cvttss2si", 2)]:
+        sse(f"{mn.upper()}32", mn, pp, 1, 0x2C, "r32", "x", reg_form=True)
+        sse(f"{mn.upper()}64", mn, pp, 1, 0x2C, "r64", "x", w=1)
+    sse("MOVDxr", "movd", 1, 1, 0x6E, "x", "r32")
+    # (A quadword from memory is F3 0F 7E, to memory 66 0F D6.)
+    sse("MOVQxr", "movq", 1, 1, 0x6E, "x", "r64", w=1, mem_form=False)
+    sse("MOVQx", "movq", 2, 1, 0x7E, reg_form=False)
+    sse("MOVQx", "movq", 1, 1, 0xD6, store=True)
+    entry("MOVDrx", [reg("r32", "d"), reg("x", "s")], "01100110 | rex(0, s, 0, d) | 00001111 | 01111110 | rr(s, d)",
+          "movd {s}, {d}")
+    entry("MOVQrx", [reg("r64", "d"), reg("x", "s")], "01100110 | rex(1, s, 0, d) | 00001111 | 01111110 | rr(s, d)",
+          "movq {s}, {d}")
+
+    # AVX and AVX2 (VEX), on 128 and 256 bits.
+    for mn, op in [("add", 0x58), ("mul", 0x59), ("sub", 0x5C), ("min", 0x5D), ("div", 0x5E), ("max", 0x5F),
+                   ("and", 0x54), ("or", 0x56), ("xor", 0x57)]:
+        for t, pp in types:
+            if t in ("ss", "sd") and mn in ("and", "or", "xor"):
+                continue
+            for l, cls, L in [(0, "x", "128"), (1, "y", "256")]:
+                if t in ("ss", "sd") and l == 1:
+                    continue
+                vex(f"V{mn.upper()}{t.upper()}{L}", f"v{mn}{t}", pp, 1, op, 0, l, cls,
+                    commute=mn in ("add", "mul", "and", "or", "xor") and t in ("ps", "pd"))
+    for mn, op in [("vpaddd", 0xFE), ("vpaddq", 0xD4), ("vpsubd", 0xFA), ("vpxor", 0xEF), ("vpand", 0xDB),
+                   ("vpor", 0xEB), ("vpmaddwd", 0xF5)]:
+        for l, cls, L in [(0, "x", "128"), (1, "y", "256")]:
+            vex(f"{mn.upper()}{L}", mn, 1, 1, op, 0, l, cls, commute=mn != "vpsubd")
+    for mn, op in [("vpmulld", 0x40), ("vpshufb", 0x00)]:
+        for l, cls, L in [(0, "x", "128"), (1, "y", "256")]:
+            vex(f"{mn.upper()}{L}", mn, 1, 2, op, 0, l, cls)
+    for form, op in [("132", 0x98), ("213", 0xA8), ("231", 0xB8)]:
+        for t, w in [("ps", 0), ("pd", 1)]:
+            for l, cls, L in [(0, "x", "128"), (1, "y", "256")]:
+                vex(f"VFMADD{form}{t.upper()}{L}", f"vfmadd{form}{t}", 1, 2, op, w, l, cls)
+        for t, w in [("ss", 0), ("sd", 1)]:
+            vex(f"VFMADD{form}{t.upper()}", f"vfmadd{form}{t}", 1, 2, op + 1, w, 0, "x")
+    for mn, pp, load, store in [("vmovaps", 0, 0x28, 0x29), ("vmovups", 0, 0x10, 0x11), ("vmovapd", 1, 0x28, 0x29),
+                                ("vmovupd", 1, 0x10, 0x11), ("vmovdqa", 1, 0x6F, 0x7F), ("vmovdqu", 2, 0x6F, 0x7F)]:
+        for l, cls, L in [(0, "x", "128"), (1, "y", "256")]:
+            vex(f"{mn.upper()}{L}", mn, pp, 1, load, 0, l, cls, three=False, swap=store)
+            vex(f"{mn.upper()}{L}", mn, pp, 1, store, 0, l, cls, three=False, store=True)
+    for mn, op in [("vbroadcastss", 0x18), ("vpbroadcastd", 0x58)]:
+        for l, cls, L in [(0, "x", "128"), (1, "y", "256")]:
+            vex(f"{mn.upper()}{L}", mn, 1, 2, op, 0, l, cls, three=False, scls="x")
+    for l, cls, L in [(0, "x", "128"), (1, "y", "256")]:
+        vex(f"VSQRTPS{L}", "vsqrtps", 0, 1, 0x51, 0, l, cls, three=False)
+    entry("VZEROUPPER", [], "11000101 | 11111000 | 01110111", "vzeroupper")
+
+    # AVX-512 (EVEX), on 512 bits.
+    for mn, op in [("add", 0x58), ("mul", 0x59), ("sub", 0x5C), ("min", 0x5D), ("div", 0x5E), ("max", 0x5F)]:
+        evex(f"V{mn.upper()}PSZ", f"v{mn}ps", 0, 1, op, 0, bcast=(16, 4))
+        evex(f"V{mn.upper()}PDZ", f"v{mn}pd", 1, 1, op, 1, bcast=(8, 8))
+    for form, op in [("132", 0x98), ("213", 0xA8), ("231", 0xB8)]:
+        evex(f"VFMADD{form}PSZ", f"vfmadd{form}ps", 1, 2, op, 0, bcast=(16, 4))
+        evex(f"VFMADD{form}PDZ", f"vfmadd{form}pd", 1, 2, op, 1, bcast=(8, 8))
+    for mn, pp, w, load, store in [("vmovaps", 0, 0, 0x28, 0x29), ("vmovups", 0, 0, 0x10, 0x11),
+                                   ("vmovapd", 1, 1, 0x28, 0x29), ("vmovupd", 1, 1, 0x10, 0x11),
+                                   ("vmovdqu32", 2, 0, 0x6F, 0x7F), ("vmovdqu64", 2, 1, 0x6F, 0x7F)]:
+        evex(f"{mn.upper()}Z", mn, pp, 1, load, w, three=False)
+        evex(f"{mn.upper()}Z", mn, pp, 1, store, w, three=False, store=True)
+    for mn, w, op in [("vpaddd", 0, 0xFE), ("vpaddq", 1, 0xD4), ("vpsubd", 0, 0xFA), ("vpxord", 0, 0xEF),
+                      ("vpxorq", 1, 0xEF), ("vpandd", 0, 0xDB), ("vpord", 0, 0xEB)]:
+        evex(f"{mn.upper()}Z", mn, 1, 1, op, w, bcast=(16, 4) if w == 0 else (8, 8))
+    # Dot products: VNNI's bytes, and BF16's.
+    evex("VPDPBUSDZ", "vpdpbusd", 1, 2, 0x50, 0, bcast=(16, 4))
+    evex("VPDPWSSDZ", "vpdpwssd", 1, 2, 0x52, 0, bcast=(16, 4))
+    evex("VDPBF16PSZ", "vdpbf16ps", 2, 2, 0x52, 0, bcast=(16, 4))
+    evex("VCVTNE2PS2BF16Z", "vcvtne2ps2bf16", 3, 2, 0x72, 0, bcast=(16, 4))
+    evex("VBROADCASTSSZ", "vbroadcastss", 1, 2, 0x18, 0, three=False, n=4, scls="xe")
+
+
 def main():
-    out.append("""; x86-64's integer instructions, for assembly and disassembly ("asmonly").
+    out.append("""; x86-64's instructions, for assembly and disassembly ("asmonly").
 ; Written by gen_x86.py from the opcode tables of the Intel SDM and the AMD
 ; APM; every entry is checked against llvm-mc. Do not edit: change the
 ; script.
 """)
-    alu()
-    moves()
-    test()
-    unary()
-    shifts()
-    conditions()
-    control()
-    bit_counts()
+    if sys.argv[1:] == ["vector"]:
+        vectors()
+    else:
+        alu()
+        moves()
+        test()
+        unary()
+        shifts()
+        conditions()
+        control()
+        bit_counts()
     sys.stdout.write("\n".join(out))
 
 

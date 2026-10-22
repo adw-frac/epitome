@@ -708,7 +708,7 @@ pub fn eval(e: &Expr, env: &Env) -> Option<i64> {
 
 /// If `e` is a slice of `name`'s bits (`name`, `name>>k`, `(name>>k)&m`
 /// or `name&m`), where its lowest bit is: `k`.
-fn slice_of(e: &Expr, name: &str) -> Option<i64> {
+fn slice_of(e: &Expr, name: &str) -> Option<(i64, i64)> {
     let shifted = |e: &Expr| match e {
         Expr::Var(v) if v == name => Some(0),
         Expr::Bin('>', a, k) if matches!(&**a, Expr::Var(v) if v == name) => match **k {
@@ -717,9 +717,18 @@ fn slice_of(e: &Expr, name: &str) -> Option<i64> {
         },
         _ => None,
     };
-    match e {
+    let masked = |e: &Expr| match e {
         Expr::Bin('&', a, m) if matches!(**m, Expr::Int(m) if (m + 1).count_ones() == 1) => shifted(a),
         _ => shifted(e),
+    };
+    // A slice with its bits flipped, `(x>>3)^1` (VEX's inverted register
+    // bits).
+    match e {
+        Expr::Bin('^', a, k) => match **k {
+            Expr::Int(k) => Some((masked(a)?, k)),
+            _ => None,
+        },
+        _ => Some((masked(e)?, 0)),
     }
 }
 
@@ -906,20 +915,20 @@ impl Alt {
                 fields.iter().filter(|f| f.names.as_slice() == std::slice::from_ref(name)).collect();
             // (Fields holding the same bits, as `rs1` and `rs2` both `n` do
             // in `fmv.d`, are copies, not slices.)
-            let disjoint = |slices: &[i64]| {
+            let disjoint = |slices: &[(i64, i64)]| {
                 let mut ranges: Vec<(i64, i64)> =
-                    holding.iter().zip(slices).map(|(f, &k)| (k, k + f.width as i64)).collect();
+                    holding.iter().zip(slices).map(|(f, &(k, _))| (k, k + f.width as i64)).collect();
                 ranges.sort();
                 ranges.windows(2).all(|w| w[0].1 <= w[1].0)
             };
             if holding.len() > 1
-                && let Some(slices) = holding.iter().map(|f| slice_of(&f.expr, name)).collect::<Option<Vec<i64>>>()
+                && let Some(slices) =
+                    holding.iter().map(|f| slice_of(&f.expr, name)).collect::<Option<Vec<(i64, i64)>>>()
                 && disjoint(&slices)
             {
-                let v = holding
-                    .iter()
-                    .zip(&slices)
-                    .fold(0i64, |acc, (f, &k)| acc.wrapping_add(Self::field_value(f, &words).wrapping_shl(k as u32)));
+                let v = holding.iter().zip(&slices).fold(0i64, |acc, (f, &(k, flip))| {
+                    acc.wrapping_add((Self::field_value(f, &words) ^ flip).wrapping_shl(k as u32))
+                });
                 env.insert(name.clone(), v);
                 continue;
             }

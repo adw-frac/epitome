@@ -1,4 +1,5 @@
-//! The x86-64 description's instructions, written and read back. For every
+//! The x86-64 description's instructions (integer, SSE, AVX and AVX-512),
+//! written and read back. For every
 //! entry, lines at the edges of its operands: every register in each place,
 //! immediates and displacements at their limits, each memory form,
 //! RIP-relative symbols, branches near and far. The test:
@@ -59,7 +60,7 @@ fn samples(t: &Target) -> String {
             .operands
             .iter()
             .map(|o| match o.kind {
-                Kind::Reg(c) => (0..16)
+                Kind::Reg(c) => (0..t.machine.def(c).names.len() as i64)
                     .filter(|&k| !(o.name == "m.index" && k == 4))
                     .map(|k| V::Reg(t.machine.phys(c, k)))
                     .collect(),
@@ -68,6 +69,7 @@ fn samples(t: &Target) -> String {
                         "m.disp" => DISPS.to_vec(),
                         "m.scale" => vec![1, 2, 4, 8],
                         "n" => COUNTS.to_vec(),
+                        _ if mnemonic.contains("shuf") => vec![0, 1, 27, 255],
                         _ => imms(bits),
                     };
                     vals.into_iter().map(V::Imm).collect()
@@ -111,7 +113,7 @@ fn x86_instructions_round_trip() {
     let report = epitome_codegen::check::check(&t);
     let enc = report.sections.iter().find(|s| s.name == "encodings").unwrap();
     assert!(enc.errors.is_empty(), "{}", enc.errors.join("\n"));
-    assert!(enc.checked > 20000, "{} checked", enc.checked);
+    assert!(enc.checked > 40000, "{} checked", enc.checked);
 
     // 2. Ours, written and read back.
     let asm = samples(&t);
@@ -131,7 +133,8 @@ fn x86_instructions_round_trip() {
     std::fs::create_dir_all(&tmp).unwrap();
     let (s, o) = (tmp.join("sample.s"), tmp.join("theirs.o"));
     std::fs::write(&s, &asm).unwrap();
-    let out = Command::new(mc).args(["-triple=x86_64-linux-gnu", "-filetype=obj", "-o"]).arg(&o).arg(&s).output().unwrap();
+    let out =
+        Command::new(mc).args(["-triple=x86_64-linux-gnu", "-filetype=obj", "-o"]).arg(&o).arg(&s).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let theirs = Image::read(&std::fs::read(&o).unwrap(), &t.machine).unwrap();
     let ((ours_code, ours_rel), (their_code, their_rel)) = (text_of(&img), text_of(&theirs));

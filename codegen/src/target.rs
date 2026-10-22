@@ -138,9 +138,26 @@ impl Instr {
     /// Decodes the start of `bytes` as this instruction, tied operands
     /// included, and gives its length.
     pub fn decode(&self, bytes: &[u8]) -> Option<(Env, usize)> {
+        self.decode_with(bytes, None)
+    }
+
+    /// Decodes `bytes` as alternative `alt` of the encoding: what it
+    /// encodes, where another alternative may read the same bytes
+    /// otherwise (a commutative operation's sources swapped).
+    pub fn decode_alt(&self, bytes: &[u8], alt: usize) -> Option<(Env, usize)> {
+        self.decode_with(bytes, Some(alt))
+    }
+
+    fn decode_with(&self, bytes: &[u8], alt: Option<usize>) -> Option<(Env, usize)> {
         let free = self.free();
         let names: Vec<String> = self.operands.iter().filter(|o| !o.tied).map(|o| o.name.clone()).collect();
-        let (mut env, len) = self.enc.decode(bytes, &names, &free)?;
+        let (mut env, len) = match alt {
+            Some(k) => {
+                let a = &self.enc.alts[k];
+                (a.decode(bytes, &names, &free)?, a.len as usize)
+            }
+            None => self.enc.decode(bytes, &names, &free)?,
+        };
         let d = env.get("d").copied();
         for o in self.operands.iter().filter(|o| o.tied) {
             env.insert(o.name.clone(), d?);
@@ -442,6 +459,7 @@ pub const AARCH64_FILES: &[(&str, &str)] = &[
 pub const X86_64_FILES: &[(&str, &str)] = &[
     ("00-base.ll", include_str!("../targets/x86_64/00-base.ll")),
     ("80-asm.ll", include_str!("../targets/x86_64/80-asm.ll")),
+    ("81-vector.ll", include_str!("../targets/x86_64/81-vector.ll")),
 ];
 
 pub fn type_bits(m: &Module, ty: TypeId) -> u32 {

@@ -386,7 +386,7 @@ impl<'t> Assembler<'t> {
             }
             // The values must encode, and decode back as themselves.
             let Some((bytes, alt)) = ins.encode_alt(&r.env) else { continue };
-            let Some((back, _)) = ins.decode(&bytes) else { continue };
+            let Some((back, _)) = ins.decode_alt(&bytes, alt) else { continue };
 
             if r.env.iter().any(|(n, v)| back.get(n).is_some_and(|b| b != v)) {
                 continue;
