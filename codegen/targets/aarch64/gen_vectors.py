@@ -273,8 +273,10 @@ define {W} @XTN2{2*n}{suffix(e)}({S} "reg"="v" "tied" %lo, {D} "reg"="q" %m) "en
 }}
 '''.replace("{'8b':'00','4h':'01','2s':'10'}[src]", {'8b':'00','4h':'01','2s':'10'}[src]))
 # halves and joins of 128-bit vectors
-for n2, e in [(16,8),(8,16),(4,32),(2,64)]:
-    W = vt(n2, it(e)); H = vt(n2//2, it(e)); n = n2//2
+for n2, e, ty in [(16,8,None),(8,16,None),(4,32,None),(2,64,None),(4,32,'float')]:
+    el = ty or it(e)
+    W = vt(n2, el); H = vt(n2//2, el); n = n2//2
+    e = f'{e}{"f" if ty else ""}'
     lo = ', '.join(f'i32 {k}' for k in range(n)); hi = ', '.join(f'i32 {k}' for k in range(n, n2)); all_ = ', '.join(f'i32 {k}' for k in range(n2))
     o.append(f'''define {H} @LOW{n2}x{e}({W} "reg"="q" %n) "enc"="0 0 0 01110 10 1 m:5=n 00011 1 n:5 d:5" "asm"="mov {{d:8b}}, {{n:8b}}" "nodecode" {{
   %r = shufflevector {W} %n, {W} poison, <{n} x i32> <{lo}>

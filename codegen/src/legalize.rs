@@ -1055,7 +1055,7 @@ fn expand_lanewise(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
 /// The lane width of mask `v`: that of the comparison that made it, through
 /// logic, freezes, selects and phis. `None` for masks of any width: splats
 /// of one boolean (the whole register is ones or zeros) and constants.
-fn mask_width(cx: &Ctx, f: &Function, v: Value, seen: &mut Vec<LocalId>) -> Option<u32> {
+pub(crate) fn mask_width(cx: &Ctx, f: &Function, v: Value, seen: &mut Vec<LocalId>) -> Option<u32> {
     let Value::Local(x) = v else { return None };
     let LocalDef::Inst(d) = f.locals[x.index()].def else { return None };
     if seen.contains(&x) {

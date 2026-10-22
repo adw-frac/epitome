@@ -151,6 +151,9 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     one_lane_vectors(cx, &mut f);
     odd_lane_vectors(cx, &mut f);
     vector_arguments(cx, &mut f);
+    // (Before masks' bitcasts are made other operations, which want to
+    // see the comparisons masks come from.)
+    mask_logic(cx, &mut f);
     wide_mask_bits(cx, &mut f);
     vector_int_bitcasts(cx, &mut f);
     bit_masks(cx, &mut f);
@@ -1235,6 +1238,138 @@ fn wide_mask_bits(cx: &mut Ctx, f: &mut Function) {
                     let bt = vec(cx, n, i8t);
                     let zero = Value::Const(cx.m.consts.intern(Constant { ty: bt, kind: ConstKind::Zero }));
                     Some(s.op(Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: level[0], rhs: zero }, to))
+                }
+                _ => None,
+            };
+            let Some(v) = v else {
+                k += 1;
+                continue;
+            };
+            let new = std::mem::take(&mut s.new);
+            f.replace_uses(Value::Local(r), v);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
+}
+
+/// Masks moved about as the integers of their lanes, and chosen between by
+/// logic: a shuffle of masks is a shuffle of them sign-extended to the
+/// width of the comparison that made them (so that what uses it sees the
+/// same width), compared with zero again; a select of one mask or another
+/// by a mask is `(c & t) | (!c & e)`. And `llvm.vector.partial.reduce.add`,
+/// which may add the input's lanes into the accumulator's in any way: the
+/// accumulator plus each of the input's parts of its width.
+fn mask_logic(cx: &mut Ctx, f: &mut Function) {
+    let i1 = cx.m.types.int(1);
+    let mask_len = |cx: &Ctx, t: TypeId| match cx.m.types.get(t) {
+        Type::Vector { len, elem, scalable: false } if *elem == i1 => Some(*len),
+        _ => None,
+    };
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Some(r) = f.insts[i.index()].result else {
+                k += 1;
+                continue;
+            };
+            let rt = f.locals[r.index()].ty;
+            let op = f.insts[i.index()].op.clone();
+            let mut s = Seq { f, new: Vec::new() };
+            let v = match op {
+                Op::ShuffleVector { a, b: bv, mask } if mask_len(cx, cx.value_ty(s.f, a)).is_some() => {
+                    let n = mask_len(cx, cx.value_ty(s.f, a)).unwrap();
+                    let m = mask_len(cx, rt).unwrap();
+                    let w = crate::legalize::mask_width(cx, s.f, a, &mut Vec::new())
+                        .or_else(|| crate::legalize::mask_width(cx, s.f, bv, &mut Vec::new()))
+                        .unwrap_or(8)
+                        .max(8);
+                    // Not of masks whose lanes as integers would be narrower
+                    // than a register (which split lane by lane): their
+                    // shuffles are selection's, lanes chosen by poison made
+                    // the first.
+                    if n * w < 64 || m * w < 64 {
+                        let mk = cx.m.constant(mask).clone();
+                        if let ConstKind::Vector(es) = &mk.kind
+                            && es.iter().any(|&e| matches!(cx.m.constant(e).kind, ConstKind::Poison | ConstKind::Undef))
+                        {
+                            let i32t = cx.m.types.int(32);
+                            let zero =
+                                cx.m.consts.intern(Constant { ty: i32t, kind: ConstKind::Int(ApInt::from_i64(32, 0)) });
+                            let es: Vec<ConstId> = es
+                                .iter()
+                                .map(|&e| {
+                                    if matches!(cx.m.constant(e).kind, ConstKind::Poison | ConstKind::Undef) {
+                                        zero
+                                    } else {
+                                        e
+                                    }
+                                })
+                                .collect();
+                            let nm = cx.m.consts.intern(Constant { ty: mk.ty, kind: ConstKind::Vector(es) });
+                            s.f.insts[i.index()].op = Op::ShuffleVector { a, b: bv, mask: nm };
+                        }
+                        k += 1;
+                        continue;
+                    }
+                    let e = cx.m.types.int(w);
+                    let (st, dt) = (
+                        cx.m.types.intern(Type::Vector { scalable: false, len: n, elem: e }),
+                        cx.m.types.intern(Type::Vector { scalable: false, len: m, elem: e }),
+                    );
+                    // (A constant's lanes extended as constants: poison, zero,
+                    // all ones.)
+                    let widen = |cx: &mut Ctx, s: &mut Seq, v: Value| match v {
+                        Value::Const(c) => {
+                            let kind = match &cx.m.constant(c).kind {
+                                ConstKind::Poison | ConstKind::Undef => Some(ConstKind::Poison),
+                                ConstKind::Zero => Some(ConstKind::Zero),
+                                _ => None,
+                            };
+                            match kind {
+                                Some(kind) => Value::Const(cx.m.consts.intern(Constant { ty: st, kind })),
+                                None => s.cast(CastOp::SExt, v, st),
+                            }
+                        }
+                        v => s.cast(CastOp::SExt, v, st),
+                    };
+                    let (x, y) = (widen(cx, &mut s, a), widen(cx, &mut s, bv));
+                    let sh = s.op(Op::ShuffleVector { a: x, b: y, mask }, dt);
+                    let zero = Value::Const(cx.m.consts.intern(Constant { ty: dt, kind: ConstKind::Zero }));
+                    Some(s.op(Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: sh, rhs: zero }, rt))
+                }
+                Op::Select { cond, then_value, else_value, .. }
+                    if mask_len(cx, rt).is_some() && mask_len(cx, cx.value_ty(s.f, cond)).is_some() =>
+                {
+                    let ones = cx.m.consts.intern(Constant { ty: i1, kind: ConstKind::Int(ApInt::from_i64(1, -1)) });
+                    let all = Value::Const(cx.m.consts.intern(Constant { ty: rt, kind: ConstKind::Splat(ones) }));
+                    let t = s.bin(BinOp::And, cond, then_value, rt);
+                    let nc = s.bin(BinOp::Xor, cond, all, rt);
+                    let e = s.bin(BinOp::And, nc, else_value, rt);
+                    Some(s.bin(BinOp::Or, t, e, rt))
+                }
+                Op::Call(call)
+                    if callee_name(cx.m, &call).is_some_and(|n| n.starts_with("llvm.vector.partial.reduce.add."))
+                        && call.args.len() == 2 =>
+                {
+                    let (acc, x) = (call.args[0].value, call.args[1].value);
+                    let (at, xt) = (cx.value_ty(s.f, acc), cx.value_ty(s.f, x));
+                    match (cx.m.types.get(at).clone(), cx.m.types.get(xt).clone()) {
+                        (Type::Vector { len: an, .. }, Type::Vector { len: xn, .. }) if xn % an == 0 => {
+                            let p = Value::Const(cx.m.consts.intern(Constant { ty: xt, kind: ConstKind::Poison }));
+                            let mut sum = acc;
+                            for c in 0..xn / an {
+                                let lanes: Vec<u32> = (c * an..(c + 1) * an).collect();
+                                let part = shuffle_lanes(cx, &mut s, x, p, &lanes, at);
+                                sum = s.bin(BinOp::Add, sum, part, at);
+                            }
+                            Some(sum)
+                        }
+                        _ => None,
+                    }
                 }
                 _ => None,
             };

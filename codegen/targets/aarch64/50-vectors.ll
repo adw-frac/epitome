@@ -1771,6 +1771,21 @@ define <2 x i64> @JOIN2x64(<1 x i64> "reg"="v" "tied" %lo, <1 x i64> "reg"="v" %
   ret <2 x i64> %r
 }
 
+define <2 x float> @LOW4x32f(<4 x float> "reg"="q" %n) "feature"="neon" "enc"="0 0 0 01110 10 1 m:5=n 00011 1 n:5 d:5" "asm"="mov {d:8b}, {n:8b}" "nodecode" {
+  %r = shufflevector <4 x float> %n, <4 x float> poison, <2 x i32> <i32 0, i32 1>
+  ret <2 x float> %r
+}
+
+define <2 x float> @HIGH4x32f(<4 x float> "reg"="q" %n) "feature"="neon" "enc"="01 0 11110000 11000 0 0000 1 n:5 d:5" "asm"="mov {d}, {n:.d}[1]" "nodecode" {
+  %r = shufflevector <4 x float> %n, <4 x float> poison, <2 x i32> <i32 2, i32 3>
+  ret <2 x float> %r
+}
+
+define <4 x float> @JOIN4x32f(<2 x float> "reg"="v" "tied" %lo, <2 x float> "reg"="v" %n) "feature"="neon" "enc"="0 1 1 01110000 11000 0 0000 1 n:5 d:5" "asm"="mov {d:.d}[1], {n:.d}[0]" "nodecode" {
+  %r = shufflevector <2 x float> %lo, <2 x float> %n, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
+  ret <4 x float> %r
+}
+
 define <16 x i8> @ADDV16b(<16 x i8> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110 00 11000 11011 10 n:5 d:5" "asm"="addv {d:b}, {n:16b}" "nomatch" {
   ret <16 x i8> %n
 }
