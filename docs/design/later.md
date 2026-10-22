@@ -133,3 +133,17 @@ these are for after.
 - **Half-precision NEON operations** (`fabd`, `fmulx`, the pairwise ones,
   `fmlal`...) on `<4 x half>`/`<8 x half>`: not done, as vectors of halves
   are integers here (`prepare::half_as_int`).
+- **Reporting to the user** (`epitome-rustc`): a crate Epitome cannot
+  compile keeps rustc's object and says why only in
+  `epitome-rustc.log`. Better: errors and warnings on stderr in rustc's
+  form (its JSON when Cargo asks for `--error-format=json`), at the Rust
+  source line from the IR's debug information (`!dbg`) where the crate has
+  it. rustc's own mechanism (LLVM's diagnostic handler, inline
+  assembly's `!srcloc` cookies) belongs to a codegen backend running
+  inside rustc, which a wrapper is not.
+- **Hardware limits as diagnostics**: a description should be able to
+  say what the machine cannot do (no writable memory, so no stack slots,
+  spills or calls that save a return address; no runtime to call; only
+  some operations), and a compilation should report, at the source line,
+  each thing the program asks for that the machine lacks, all of them
+  rather than the first, so that the program can be changed to fit.
