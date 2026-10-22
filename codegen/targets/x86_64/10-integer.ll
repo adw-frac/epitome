@@ -479,7 +479,7 @@ define void @UD2() "enc"="00001111 | 00001011" "asm"="ud2" "role"="trap" "nodeco
   unreachable
 }
 
-define i1 @SETCC(i1 "cond" %c) "enc"="{ if(d<4) 00001111 | 1001 cc:4=c | 11 000 rm:3=d&7 ; rex(0, 0, 0, d) | 00001111 | 1001 cc:4=c | 11 000 rm:3=d&7 ; 0100 0 0 0 B:1=d>>3 | 00001111 | 1001 cc:4=c | 11 000 rm:3=d&7 }" "asm"="set{c} {d:r8}" "dclass"="r32" "nodecode" {
+define i1 @SETCC(i1 "cond" %c) "enc"="{ if(d<4) 00001111 | 1001 cc:4=c | 11 000 rm:3=d&7 ; 0100 0 0 0 B:1=d>>3 | 00001111 | 1001 cc:4=c | 11 000 rm:3=d&7 }" "asm"="set{c} {d:r8}" "dclass"="r32" "nodecode" {
   ret i1 %c
 }
 

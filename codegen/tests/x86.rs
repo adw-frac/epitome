@@ -86,7 +86,7 @@ fn samples(t: &Target, all: bool) -> String {
                     vec![V::Text(back.clone()), V::Text(".Lfar".into())]
                 }
                 Kind::Label => vec![V::Text(back.clone())],
-                Kind::Cond => vec![V::Imm(0)],
+                Kind::Cond => t.conds.iter().map(|c| V::Imm(c.value)).collect(),
             })
             .collect();
         let n = lists.iter().map(Vec::len).max().unwrap_or(1).max(1);
@@ -96,9 +96,10 @@ fn samples(t: &Target, all: bool) -> String {
         let mut seen = std::collections::HashSet::new();
         for k in 0..n {
             let pick = |j: usize| &lists[j][(k * (j + 1)) % lists[j].len()];
-            // To be read back as written, an immediate must be the value
-            // its bytes decode as ($255 to a byte operation is $-1).
-            if !all {
+            // The values must encode (an index register is never rsp); and
+            // to be read back as written, an immediate must be the value its
+            // bytes decode as ($255 to a byte operation is $-1).
+            {
                 let env: Env = ins
                     .operands
                     .iter()
@@ -112,11 +113,12 @@ fn samples(t: &Target, all: bool) -> String {
                         (o.name.clone(), v)
                     })
                     .collect();
-                let back = ins.encode(&env).and_then(|b| ins.decode(&b)).map(|(e, _)| e);
+                let Some(bytes) = ins.encode(&env) else { continue };
+                let back = ins.decode(&bytes).map(|(e, _)| e);
                 let same = back.is_some_and(|b| {
                     ins.operands.iter().all(|o| o.kind != Kind::Imm || b.get(&o.name) == env.get(&o.name))
                 });
-                if !same {
+                if !all && !same {
                     continue;
                 }
             }

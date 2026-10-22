@@ -226,7 +226,6 @@ def control():
     # setcc writes a byte: 0 or 1.
     entry('i1', 'SETCC', ['i1 "cond" %c'],
           '{ if(d<4) 00001111 | 1001 cc:4=c | 11 000 rm:3=d&7 ; '
-          'rex(0, 0, 0, d) | 00001111 | 1001 cc:4=c | 11 000 rm:3=d&7 ; '
           '0100 0 0 0 B:1=d>>3 | 00001111 | 1001 cc:4=c | 11 000 rm:3=d&7 }',
           'set{c} {d:r8}', ['ret i1 %c'], ' "dclass"="r32"')
     # select: the second value, then the first moved over it if c.

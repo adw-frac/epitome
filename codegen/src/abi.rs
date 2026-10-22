@@ -58,6 +58,10 @@ pub struct Abi {
     /// An integer wider than a register starts in an even-numbered
     /// register, and at a 16-aligned stack slot (AAPCS64's `i128`).
     pub wide_pairs_even: bool,
+    /// An integer wider than a register goes at a 16-aligned stack slot,
+    /// in registers as any other (`"wide-pairs"="stack16"`: System V's
+    /// `__int128`).
+    pub wide_stack16: bool,
     /// The `va_list` a variadic function makes: a pointer to the next
     /// argument (false), or AAPCS64's record of register save areas and
     /// the stack (`va-list` = `aapcs64`).
@@ -222,7 +226,7 @@ impl Abi {
                 *next = regs.len();
             }
             let mut here = Vec::new();
-            if even {
+            if even || (self.wide_stack16 && parts.first().is_some_and(|p| p.wide)) {
                 stack = (stack + 15) / 16 * 16;
             }
             // A homogeneous aggregate: its members side by side, aligned as
@@ -380,6 +384,7 @@ pub fn read(m: &Module, prefix: &str, machine: &crate::machine::Machine) -> Resu
             sret: props.get("sret").map(|v| regs(v)).transpose()?.and_then(|v| v.first().copied()),
             base: props.get("base").map(|v| regs(v)).transpose()?.and_then(|v| v.first().copied()),
             wide_pairs_even: props.get("wide-pairs").is_some_and(|v| v.first().is_some_and(|x| x == "even")),
+            wide_stack16: props.get("wide-pairs").is_some_and(|v| v.first().is_some_and(|x| x == "stack16")),
             va_list_aapcs64: props.get("va-list").is_some_and(|v| v.first().is_some_and(|x| x == "aapcs64")),
             hfa: props.get("hfa").is_some_and(|v| v.first().is_some_and(|x| x == "yes")),
             eh_regs: match props.get("eh-regs") {
