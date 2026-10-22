@@ -726,7 +726,9 @@ fn neon_intrinsics(cx: &mut Ctx, f: &mut Function) {
 ///
 /// Where the machine has neither, but has offsets from the thread pointer
 /// (`tprel.*`, as RISC-V's code is a program's): the variable's address
-/// as that sum (`llvm.epitome.tprel`).
+/// as that sum (`llvm.epitome.tprel`). Or, with the offset in the GOT
+/// (`tls.ie`, initial exec: x86's for programs and the libraries they
+/// load), the thread pointer plus that (`llvm.epitome.tls.ie`).
 fn thread_locals(cx: &mut Ctx, f: &mut Function) {
     let darwin = cx.m.triple.as_deref().is_some_and(|t| {
         let t = String::from_utf8_lossy(t);
@@ -734,7 +736,8 @@ fn thread_locals(cx: &mut Ctx, f: &mut Function) {
     });
     let elf = !darwin && cx.t.role("tlsdesc.call").is_some();
     let tprel = !darwin && !elf && cx.t.role("tprel.hi").is_some();
-    if !elf && !tprel && (!darwin || cx.t.role("tlv.hi").is_none()) {
+    let ie = !darwin && !elf && !tprel && cx.t.role("tls.ie").is_some();
+    if !elf && !tprel && !ie && (!darwin || cx.t.role("tlv.hi").is_none()) {
         return;
     }
     let ptr = cx.m.types.ptr(0);
@@ -763,9 +766,10 @@ fn thread_locals(cx: &mut Ctx, f: &mut Function) {
                 k += n;
                 continue;
             }
-            if elf {
+            if elf || ie {
                 let i64t = cx.m.types.int(64);
-                let off = call_intrinsic(cx, &mut s, "llvm.epitome.tlsdesc", vec![var], i64t);
+                let how = if ie { "llvm.epitome.tls.ie" } else { "llvm.epitome.tlsdesc" };
+                let off = call_intrinsic(cx, &mut s, how, vec![var], i64t);
                 let tp = call_intrinsic(cx, &mut s, "llvm.thread.pointer.p0", vec![], ptr);
                 let i8t = cx.m.types.int(8);
                 let addr = s.op(
@@ -2319,6 +2323,18 @@ fn half_as_int(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     if !f.locals.iter().map(|l| l.ty).collect::<Vec<_>>().into_iter().any(|t| has_half(cx, t)) {
         return Ok(());
     }
+    // C's sqrtf16 (which clang calls where errno may be set): the C
+    // libraries have none; it is llvm.sqrt.f16, but for errno.
+    for i in f.insts_in_order().collect::<Vec<_>>() {
+        if let Op::Call(c) = &f.insts[i.index()].op
+            && callee_name(cx.m, c).as_deref() == Some("sqrtf16")
+        {
+            let callee = crate::legalize::declare(cx, "llvm.sqrt.f16", half, &[half]);
+            if let Op::Call(c) = &mut f.insts[i.index()].op {
+                c.callee = callee;
+            }
+        }
+    }
     // Parameters and results of half, and calls' arguments and results:
     // the i16s of their bits, marked as passed where halves are (`HALF`).
     let scalar_half = |cx: &Ctx, t: TypeId| matches!(cx.m.types.get(t), Type::Half);
@@ -2498,7 +2514,37 @@ fn half_as_int(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         f.insts[i.index()].op = op;
     }
     half_arith(cx, f);
+    half_helpers(cx, f);
     Ok(())
+}
+
+/// Conversions of half the machine has no instruction for (x86-64 without
+/// F16C): calls of the C library's (libgcc's and compiler-rt's
+/// `__extendhfsf2`, `__truncsfhf2`, `__truncdfhf2`), their halves passed
+/// as halves are.
+fn half_helpers(cx: &mut Ctx, f: &mut Function) {
+    for i in f.insts_in_order().collect::<Vec<_>>() {
+        let Op::Call(c) = &f.insts[i.index()].op else { continue };
+        let Some(name) = callee_name(cx.m, c) else { continue };
+        let (helper, arg_half) = match name.as_str() {
+            "llvm.convert.from.fp16.f32" => ("__extendhfsf2", true),
+            "llvm.convert.to.fp16.f32" => ("__truncsfhf2", false),
+            "llvm.convert.to.fp16.f64" => ("__truncdfhf2", false),
+            _ => continue,
+        };
+        if cx.selects_intrinsic(&name) {
+            continue;
+        }
+        let Type::Function { ret, params, .. } = cx.m.types.get(c.fn_ty).clone() else { continue };
+        let callee = crate::legalize::declare(cx, helper, ret, &params);
+        let Op::Call(c) = &mut f.insts[i.index()].op else { unreachable!() };
+        c.callee = callee;
+        if arg_half {
+            c.args[0].attrs.push(Attr::Word(HALF.into()));
+        } else {
+            c.ret_attrs.push(Attr::Word(HALF.into()));
+        }
+    }
 }
 
 /// What intrinsic `name` of `half` (`llvm.sqrt.f16`) is done as: its

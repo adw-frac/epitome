@@ -318,7 +318,8 @@ def legacy(rec, form, eosz, rexw, mem):
             elif rm_bits is not None:
                 rmpart = bits8(rm_bits)[5:]
             else:
-                raise Unsupported('rm')
+                # (Nor is ModRM.rm of none: mfence is 0F AE F0.)
+                rmpart = '000'
             pieces.append(f'11 {regpart} {rmpart}')
     # Immediates, in order.
     k = 0

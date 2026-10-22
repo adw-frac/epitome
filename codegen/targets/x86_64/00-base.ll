@@ -83,7 +83,7 @@
 ; ===========================================================================
 ; Parameters.
 
-!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110, !1111, !1112, !1113, !1114, !1115}
+!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110, !1111, !1112, !1113, !1114, !1115, !1116}
 !1100 = !{!"sp", !"%rsp"}
 !1101 = !{!"vector-bits", !"0"}
 !1102 = !{!"elf-machine", !"62"}
@@ -106,6 +106,9 @@
 !1114 = !{!"cfi-return-column", !"16"}
 ; Floating-point comparisons no one condition tests: made of two.
 !1115 = !{!"fcmp-split", !"oeq", !"une"}
+; Loads of any ordering are plain moves; a sequentially consistent store is
+; an xchg.
+!1116 = !{!"seq-cst-stores", !"swap"}
 
 !target.cpus = !{!1150}
 !1150 = !{!"x86-64"}
@@ -121,13 +124,16 @@
 ; field, so its addend is what the field's expression adds (the
 ; instruction's end subtracted) plus the field's place in the instruction.
 
-!target.relocs = !{!1200, !1201, !1202, !1203, !1204, !1205}
+!target.relocs = !{!1200, !1201, !1202, !1203, !1204, !1205, !1206}
 !1200 = !{!"name", !"abs64", !"elf", !"1", !"elf-name", !"R_X86_64_64", !"use", !"data8"}
 !1201 = !{!"name", !"pc32", !"elf", !"2", !"elf-name", !"R_X86_64_PC32", !"use", !"eh-pcrel", !"target", !"pc + v"}
 !1202 = !{!"name", !"plt32", !"elf", !"4", !"elf-name", !"R_X86_64_PLT32", !"use", !"call", !"target", !"pc + v"}
 !1203 = !{!"name", !"gotpcrel", !"elf", !"9", !"elf-name", !"R_X86_64_GOTPCREL", !"elf-syntax", !"{s}@GOTPCREL", !"use", !"got", !"target", !"pc + v"}
 !1204 = !{!"name", !"abs32s", !"elf", !"11", !"elf-name", !"R_X86_64_32S"}
 !1205 = !{!"name", !"pc32x", !"elf", !"2", !"elf-name", !"R_X86_64_PC32", !"target", !"pc + v"}
+; A thread-local variable's offset from the thread pointer, in the GOT
+; (initial exec).
+!1206 = !{!"name", !"gottpoff", !"elf", !"22", !"elf-name", !"R_X86_64_GOTTPOFF", !"elf-syntax", !"{s}@GOTTPOFF", !"use", !"tls", !"target", !"pc + v"}
 
 ; DWARF's numbers for the registers, by hardware number: DWARF orders them
 ; rax, rdx, rcx, rbx, rsi, rdi, rbp, rsp, then r8-r15; xmm0-xmm31 from 17.

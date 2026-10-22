@@ -285,6 +285,10 @@ pub struct Machine {
     /// made of two (`"fcmp-split"`: AArch64's one and ueq, the default;
     /// x86's oeq and une).
     pub fcmp_split: Vec<String>,
+    /// A sequentially consistent store is a swap whose old value goes
+    /// unused (`"seq-cst-stores"="swap"`: x86's `xchg`, as its loads of
+    /// any ordering are plain ones).
+    pub seq_cst_swap: bool,
     /// Loads and stores need no alignment and cost no more without it
     /// (`unaligned-access` = `fast`), so small copies may use wide ones.
     pub unaligned_fast: bool,
@@ -463,6 +467,7 @@ impl Machine {
             cfi_return_column: None,
             nops: Vec::new(),
             fcmp_split: vec!["one".into(), "ueq".into()],
+            seq_cst_swap: false,
             cfi_data_align: (-8, -8),
             asm_aliases: Vec::new(),
         };
@@ -506,6 +511,7 @@ impl Machine {
             Some("sign") => Narrow::Sign,
             Some(o) => return Err(format!("target parameter narrow-results: {o}")),
         };
+        mc.seq_cst_swap = params.get("seq-cst-stores").is_some_and(|v| v == "swap");
         mc.external_via_got = params.get("external-via-got").is_some_and(|v| v == "yes");
         if let Some(t) = all_params.iter().find(|t| t[0] == "fcmp-split") {
             mc.fcmp_split = t[1..].to_vec();

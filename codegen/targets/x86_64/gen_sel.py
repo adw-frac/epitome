@@ -26,10 +26,10 @@ def bits(v, n=8):
     return format(v, f'0{n}b')
 
 
-def entry(ret, name, params, enc, asm, body, attrs=''):
+def entry(ret, name, params, enc, asm, body, attrs='', decode=False):
     """An entry: `body` is the IR lines between braces. (None is read by the
-    disassembler: 80-xed.ll's entries are.)"""
-    if '"nodecode"' not in attrs:
+    disassembler, 02-xed.ll's entries are, but those `decode` says.)"""
+    if not decode and '"nodecode"' not in attrs:
         attrs += ' "nodecode"'
     out.append(f'define {ret} @{name}({", ".join(params)}) "enc"="{enc}" "asm"="{asm}"{attrs} {{\n'
                + ''.join(f'  {line}\n' for line in body) + '}\n')
@@ -49,7 +49,8 @@ def alu():
             # op m, d: d = d op m (01 + 8n /r: ModRM.reg the source).
             entry(ty, f'{N}rr', [f'{ty} "reg"="{cls}" "tied" %n', f'{ty} "reg"="{cls}" %m'],
                   f'rex({rw}, m, 0, d) | {bits(n * 8 + 1)} | rr(m, d)', f'{mn}{sfx} {{m}}, {{d}}',
-                  [f'%r = {ir} {ty} %n, %m', f'ret {ty} %r'], FLAGS + zext)
+                  [f'%r = {ir} {ty} %n, %m', f'ret {ty} %r'],
+                  FLAGS + zext + (' "role"="sub"' if (mn, w) == ('sub', 64) else ''))
             # op $imm, d: a byte if it fits (83 /n), else 32 bits (81 /n).
             # (The accumulator's own form, 05 + 8n, where the byte does not
             # hold the immediate: as llvm-mc writes it.)
@@ -144,6 +145,15 @@ def moves():
           'leaq {s}(%rip), {d}', ['ret ptr %s'], ' "reloc"="pc32x" "role"="addr" "nomatch" "nodecode"')
     entry('ptr', 'MOVgot', ['ptr "sym" %s'], 'rex(1, d, 0, 0) | 10001011 | rm(d, 16, 4, 1, 0, s, 1)',
           'movq {s}(%rip), {d}', ['ret ptr %s'], ' "reloc"="gotpcrel" "role"="got" "nomatch" "nodecode"')
+    # Thread-local variables (initial exec): the offset from the GOT, and
+    # the thread pointer, the word at fs:0 (read back by this entry: the
+    # generated ones have no segment prefixes).
+    entry('i64', 'MOVgottpoff', ['ptr "sym" %s'], 'rex(1, d, 0, 0) | 10001011 | rm(d, 16, 4, 1, 0, s, 1)',
+          'movq {s}(%rip), {d}', ['ret i64 0'], ' "reloc"="gottpoff" "role"="tls.ie" "nomatch" "nodecode"')
+    entry('ptr', 'MOVfs0', [], '01100100 | rex(1, d, 0, 0) | 10001011 | 00 r:3=d&7 100 | 00100101 | '
+          '00000000 | 00000000 | 00000000 | 00000000', 'movq %fs:0, {d}', ['%p = call ptr @llvm.thread.pointer.p0()', 'ret ptr %p'],
+          ' "role"="thread.pointer"', decode=True)
+    out.append('declare ptr @llvm.thread.pointer.p0()\n')
 
 
 def memory():
@@ -403,7 +413,7 @@ def floats():
             scls = 'r64' if src == 'i64' else 'r32'
             n = '{n:r64}' if (src == 'i32' and w == 1) else '{n}'
             entry(ty, f'CVT{ext.upper()}{src.upper()}{T}', [f'{src} "reg"="{scls}" %n'],
-                  f'{pre}rex({w}, d, 0, n) | 00001111 | 00101010 | rr(d, n)', f'cvtsi2{sfx}{"q" if w else "l"} {n}, {{d}}',
+                  f'{pre}rex({w}, d, 0, n) | 00001111 | 00101010 | rr(d, n)', f'cvtsi2{sfx} {n}, {{d}}',
                   [f'%r = {ext} {src} %n to {ty}', f'ret {ty} %r'])
         # To integers, truncating (an unsigned 32-bit result is the low
         # half of the 64-bit conversion).
@@ -460,11 +470,84 @@ def floats():
                    f'  %f2 = call %flags @TEST64rr(i64 %x, i64 %x)\n  %n2 = call i1 @cc.l(%flags %f2)\n'
                    f'  %ri = call {ity} @{"CMOV64" if ty == "double" else "CMOV32"}(i1 %n2, {ity} %c2i, {ity} %ci)\n'
                    f'  %r = call {ty} @MOV{T}from{ity}({ity} %ri)\n  ret {ty} %r\n}}\n')
+        # To an unsigned 64-bit value: converted signed, and again less
+        # 2^63; a value of 2^63 or more gives the first 1<<63 (the
+        # indefinite result), and then the second's bits go in too.
+        big = '0x43E0000000000000' if ty == 'double' else '0x5F000000'
+        out.append(f'define i64 @fptoui.64.{cls}({ty} "reg"="{cls}" %x) "recipe"="fptoui.64.{cls}.expand" {{\n'
+                   f'  %r = fptoui {ty} %x to i64\n  ret i64 %r\n}}\n')
+        out.append(f'define i64 @fptoui.64.{cls}.expand({ty} %x) {{\n'
+                   f'  %a = call i64 @CVTTFPTOSI{T}I64({ty} %x)\n'
+                   f'  %ki = call {ity} @{"MOVABS64ri" if ty == "double" else "MOV32ri"}({ity} {int(big, 16)})\n'
+                   f'  %k = call {ty} @MOV{T}from{ity}({ity} %ki)\n  %y = call {ty} @SUB{T}({ty} %x, {ty} %k)\n'
+                   f'  %b = call i64 @CVTTFPTOSI{T}I64({ty} %y)\n  %s = call i64 @SAR64ri(i64 %a, i64 63)\n'
+                   f'  %m = call i64 @AND64rr(i64 %b, i64 %s)\n  %r = call i64 @OR64rr(i64 %a, i64 %m)\n'
+                   f'  ret i64 %r\n}}\n')
+    # A half's bits in an xmm register's low 16 (as halves are passed):
+    # in with movd, out with pextrw (which zero-extends).
+    entry('float', 'MOVDh', ['i16 "reg"="r32" %n'], '01100110 | rex(0, d, 0, n) | 00001111 | 01101110 | rr(d, n)',
+          'movd {n}, {d}', ['%r = bitcast i32 0 to float', 'ret float %r'], ' "role"="move.h.w" "nomatch" "nodecode"')
+    entry('i16', 'PEXTRWh', ['float "reg"="s" %n'], '01100110 | rex(0, d, 0, n) | 00001111 | 11000101 | rr(d, n) | 00000000',
+          'pextrw $0, {n}, {d}', ['ret i16 0'], ' "dclass"="r32" "zext"="16" "role"="move.w.h" "nomatch" "nodecode"')
     # Between the two widths.
     entry('double', 'CVTSS2SD', ['float "reg"="s" %n'], '11110011 | rex(0, d, 0, n) | 00001111 | 01011010 | rr(d, n)',
           'cvtss2sd {n}, {d}', ['%r = fpext float %n to double', 'ret double %r'])
     entry('float', 'CVTSD2SS', ['double "reg"="d" %n'], '11110010 | rex(0, d, 0, n) | 00001111 | 01011010 | rr(d, n)',
           'cvtsd2ss {n}, {d}', ['%r = fptrunc double %n to float', 'ret float %r'])
+
+
+def atomics():
+    """Atomics. x86 orders memory strongly (TSO): loads of any ordering
+    and release stores are plain moves; a sequentially consistent store
+    is an xchg (`seq-cst-stores`); read-modify-writes are xchg (locked
+    without a prefix), lock xadd, and lock cmpxchg (with the value
+    expected and the old one in rax), whatever their ordering."""
+    rex8 = lambda r, b: f'{{ if({r}<4) rex(0, {r}, 4, {b}) ; 0100 0 R:1=({r})>>3 X:1=0 B:1=({b})>>3 }}'
+    # (Type, suffix, REX.W, class, view, 16-bit prefix.)
+    widths = [('i8', 'b', 0, 'r32', ':r8', ''), ('i16', 'w', 0, 'r32', ':r16', '01100110 | '),
+              ('i32', 'l', 0, 'r32', '', ''), ('i64', 'q', 1, 'r64', '', '')]
+    orders = ['monotonic', 'acquire', 'release', 'seq_cst']
+    for ty, sfx, w, cls, view, p16 in widths:
+        byte = ty == 'i8'
+        bits_ = ty[1:]
+        rx = (lambda r: rex8(r, 'n')) if byte else (lambda r: f'rex({w}, {r}, 4, n)')
+        # Acquire loads and release stores.
+        ld = {'i8': ('movzbl', '00001111 | 10110110', '{d:r32}'), 'i16': ('movzwl', '00001111 | 10110111', '{d:r32}'),
+              'i32': ('movl', '10001011', '{d}'), 'i64': ('movq', '10001011', '{d}')}[ty]
+        lw = 1 if ty == 'i64' else 0
+        entry(ty, f'LDA{ty.upper()}', ['ptr "reg"="r64" %n'], f'rex({lw}, d, 4, n) | {ld[1]} | rm(d, n, 4, 1, 0, 0, 1)',
+              f'{ld[0]} 0({{n}}), {ld[2]}', [f'%r = load atomic {ty}, ptr %n acquire, align {int(bits_) // 8}', f'ret {ty} %r'],
+              f' "dclass"="{cls}" "nodecode"' + ('' if ty == 'i64' else f' "zext"="{bits_}"' if byte or ty == 'i16' else ''))
+        op = '10001000' if byte else '10001001'
+        entry('void', f'STR{ty.upper()}', [f'{ty} "reg"="{cls}" %t', 'ptr "reg"="r64" %n'],
+              f'{p16}{rx("t")} | {op} | rm(t, n, 4, 1, 0, 0, 1)', f'mov{sfx} {{t{view}}}, 0({{n}})',
+              [f'store atomic {ty} %t, ptr %n release, align {int(bits_) // 8}', 'ret void'], ' "nodecode"')
+        for k, order in enumerate(orders):
+            # xchg m, (n): m the old value after.
+            entry(ty, f'XCHG{ty.upper()}{k}', [f'{ty} "reg"="{cls}" "tied" %m', 'ptr "reg"="r64" %n'],
+                  f'{p16}{rx("d")} | {"10000110" if byte else "10000111"} | rm(d, n, 4, 1, 0, 0, 1)',
+                  f'xchg{sfx} {{d{view}}}, 0({{n}})', [f'%r = atomicrmw xchg ptr %n, {ty} %m {order}', f'ret {ty} %r'],
+                  ' "nodecode"')
+            entry(ty, f'XADD{ty.upper()}{k}', [f'{ty} "reg"="{cls}" "tied" %m', 'ptr "reg"="r64" %n'],
+                  f'{p16}11110000 | {rx("d")} | 00001111 | {"11000000" if byte else "11000001"} | rm(d, n, 4, 1, 0, 0, 1)',
+                  f'lock xadd{sfx} {{d{view}}}, 0({{n}})', [f'%r = atomicrmw add ptr %n, {ty} %m {order}', f'ret {ty} %r'],
+                  ' "clobbers"="flags" "nodecode"')
+            entry(ty, f'CMPXCHG{ty.upper()}{k}', [f'{ty} "reg"="rax" "tied" %old', f'{ty} "reg"="{cls}" %new',
+                                                    'ptr "reg"="r64" %n'],
+                  f'{p16}11110000 | {rx("new")} | 00001111 | {"10110000" if byte else "10110001"} | rm(new, n, 4, 1, 0, 0, 1)',
+                  f'lock cmpxchg{sfx} {{new{view}}}, 0({{n}})',
+                  [f'%r = call {ty} @llvm.epitome.cmpxchg.{ty}(ptr %n, {ty} %old, {ty} %new, i32 {k})', f'ret {ty} %r'],
+                  ' "dclass"="rax" "clobbers"="flags" "nodecode"')
+        out.append(f'declare {ty} @llvm.epitome.cmpxchg.{ty}(ptr, {ty}, {ty}, i32)\n')
+    entry('ptr', 'LDAP', ['ptr "reg"="r64" %n'], 'rex(1, d, 4, n) | 10001011 | rm(d, n, 4, 1, 0, 0, 1)',
+          'movq 0({n}), {d}', ['%r = load atomic ptr, ptr %n acquire, align 8', 'ret ptr %r'], ' "nodecode"')
+    entry('void', 'STRP', ['ptr "reg"="r64" %t', 'ptr "reg"="r64" %n'], 'rex(1, t, 4, n) | 10001001 | rm(t, n, 4, 1, 0, 0, 1)',
+          'movq {t}, 0({n})', ['store atomic ptr %t, ptr %n release, align 8', 'ret void'], ' "nodecode"')
+    # Fences: only a sequentially consistent one orders anything on x86,
+    # but acquire ones are mfence too (the code generator has one head for
+    # the others).
+    entry('void', 'MFENCE', [], '00001111 | 10101110 | 11110000', 'mfence', ['fence seq_cst', 'ret void'], ' "nodecode"')
+    entry('void', 'MFENCEA', [], '00001111 | 10101110 | 11110000', 'mfence', ['fence acquire', 'ret void'], ' "nodecode"')
 
 
 def vector_copies():
@@ -499,6 +582,7 @@ def main():
     division()
     recipes()
     floats()
+    atomics()
     vector_copies()
     sys.stdout.write('\n'.join(out))
 

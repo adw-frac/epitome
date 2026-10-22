@@ -32,7 +32,7 @@ define i64 @AND64ri(i64 "reg"="r64" "tied" %n, i64 "imm" %imm) "enc"="{ rex(1, 0
   ret i64 %r
 }
 
-define i64 @SUB64rr(i64 "reg"="r64" "tied" %n, i64 "reg"="r64" %m) "enc"="rex(1, m, 0, d) | 00101001 | rr(m, d)" "asm"="subq {m}, {d}" "clobbers"="flags" "nodecode" {
+define i64 @SUB64rr(i64 "reg"="r64" "tied" %n, i64 "reg"="r64" %m) "enc"="rex(1, m, 0, d) | 00101001 | rr(m, d)" "asm"="subq {m}, {d}" "clobbers"="flags" "role"="sub" "nodecode" {
   %r = sub i64 %n, %m
   ret i64 %r
 }
@@ -308,6 +308,17 @@ define ptr @LEArip(ptr "sym" %s) "enc"="rex(1, d, 0, 0) | 10001101 | rm(d, 16, 4
 define ptr @MOVgot(ptr "sym" %s) "enc"="rex(1, d, 0, 0) | 10001011 | rm(d, 16, 4, 1, 0, s, 1)" "asm"="movq {s}(%rip), {d}" "reloc"="gotpcrel" "role"="got" "nomatch" "nodecode" {
   ret ptr %s
 }
+
+define i64 @MOVgottpoff(ptr "sym" %s) "enc"="rex(1, d, 0, 0) | 10001011 | rm(d, 16, 4, 1, 0, s, 1)" "asm"="movq {s}(%rip), {d}" "reloc"="gottpoff" "role"="tls.ie" "nomatch" "nodecode" {
+  ret i64 0
+}
+
+define ptr @MOVfs0() "enc"="01100100 | rex(1, d, 0, 0) | 10001011 | 00 r:3=d&7 100 | 00100101 | 00000000 | 00000000 | 00000000 | 00000000" "asm"="movq %fs:0, {d}" "role"="thread.pointer" {
+  %p = call ptr @llvm.thread.pointer.p0()
+  ret ptr %p
+}
+
+declare ptr @llvm.thread.pointer.p0()
 
 define i64 @LDI64(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(1, d, 4, n) | 10001011 | rm(d, n, 4, 1, off, 0, 1)" "asm"="movq {off}({n}), {d}" "role"="load.x,load.r64" "dclass"="r64" "nodecode" {
   %a = getelementptr i8, ptr %n, i64 %off
@@ -1061,17 +1072,17 @@ define i64 @MOVi64fromSD(double "reg"="d" %n) "enc"="01100110 | rex(1, n, 0, d) 
   ret i64 %r
 }
 
-define double @CVTSITOFPI32SD(i32 "reg"="r32" %n) "enc"="11110010 | rex(0, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2sdl {n}, {d}" "nodecode" {
+define double @CVTSITOFPI32SD(i32 "reg"="r32" %n) "enc"="11110010 | rex(0, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2sd {n}, {d}" "nodecode" {
   %r = sitofp i32 %n to double
   ret double %r
 }
 
-define double @CVTSITOFPI64SD(i64 "reg"="r64" %n) "enc"="11110010 | rex(1, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2sdq {n}, {d}" "nodecode" {
+define double @CVTSITOFPI64SD(i64 "reg"="r64" %n) "enc"="11110010 | rex(1, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2sd {n}, {d}" "nodecode" {
   %r = sitofp i64 %n to double
   ret double %r
 }
 
-define double @CVTUITOFPI32SD(i32 "reg"="r32" %n) "enc"="11110010 | rex(1, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2sdq {n:r64}, {d}" "nodecode" {
+define double @CVTUITOFPI32SD(i32 "reg"="r32" %n) "enc"="11110010 | rex(1, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2sd {n:r64}, {d}" "nodecode" {
   %r = uitofp i32 %n to double
   ret double %r
 }
@@ -1170,6 +1181,23 @@ define double @uitofp.64.d.expand(i64 %x) {
   ret double %r
 }
 
+define i64 @fptoui.64.d(double "reg"="d" %x) "recipe"="fptoui.64.d.expand" {
+  %r = fptoui double %x to i64
+  ret i64 %r
+}
+
+define i64 @fptoui.64.d.expand(double %x) {
+  %a = call i64 @CVTTFPTOSISDI64(double %x)
+  %ki = call i64 @MOVABS64ri(i64 4890909195324358656)
+  %k = call double @MOVSDfromi64(i64 %ki)
+  %y = call double @SUBSD(double %x, double %k)
+  %b = call i64 @CVTTFPTOSISDI64(double %y)
+  %s = call i64 @SAR64ri(i64 %a, i64 63)
+  %m = call i64 @AND64rr(i64 %b, i64 %s)
+  %r = call i64 @OR64rr(i64 %a, i64 %m)
+  ret i64 %r
+}
+
 define %fflags @UCOMISS(float "reg"="s" %n, float "reg"="s" %m) "enc"="rex(0, n, 0, m) | 00001111 | 00101110 | rr(n, m)" "asm"="ucomiss {m}, {n}" "sets"="zcp" "nodecode" {
   %a = fpext float %n to double
   %b = fpext float %m to double
@@ -1235,17 +1263,17 @@ define i32 @MOVi32fromSS(float "reg"="s" %n) "enc"="01100110 | rex(0, n, 0, d) |
   ret i32 %r
 }
 
-define float @CVTSITOFPI32SS(i32 "reg"="r32" %n) "enc"="11110011 | rex(0, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2ssl {n}, {d}" "nodecode" {
+define float @CVTSITOFPI32SS(i32 "reg"="r32" %n) "enc"="11110011 | rex(0, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2ss {n}, {d}" "nodecode" {
   %r = sitofp i32 %n to float
   ret float %r
 }
 
-define float @CVTSITOFPI64SS(i64 "reg"="r64" %n) "enc"="11110011 | rex(1, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2ssq {n}, {d}" "nodecode" {
+define float @CVTSITOFPI64SS(i64 "reg"="r64" %n) "enc"="11110011 | rex(1, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2ss {n}, {d}" "nodecode" {
   %r = sitofp i64 %n to float
   ret float %r
 }
 
-define float @CVTUITOFPI32SS(i32 "reg"="r32" %n) "enc"="11110011 | rex(1, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2ssq {n:r64}, {d}" "nodecode" {
+define float @CVTUITOFPI32SS(i32 "reg"="r32" %n) "enc"="11110011 | rex(1, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2ss {n:r64}, {d}" "nodecode" {
   %r = uitofp i32 %n to float
   ret float %r
 }
@@ -1344,6 +1372,32 @@ define float @uitofp.64.s.expand(i64 %x) {
   ret float %r
 }
 
+define i64 @fptoui.64.s(float "reg"="s" %x) "recipe"="fptoui.64.s.expand" {
+  %r = fptoui float %x to i64
+  ret i64 %r
+}
+
+define i64 @fptoui.64.s.expand(float %x) {
+  %a = call i64 @CVTTFPTOSISSI64(float %x)
+  %ki = call i32 @MOV32ri(i32 1593835520)
+  %k = call float @MOVSSfromi32(i32 %ki)
+  %y = call float @SUBSS(float %x, float %k)
+  %b = call i64 @CVTTFPTOSISSI64(float %y)
+  %s = call i64 @SAR64ri(i64 %a, i64 63)
+  %m = call i64 @AND64rr(i64 %b, i64 %s)
+  %r = call i64 @OR64rr(i64 %a, i64 %m)
+  ret i64 %r
+}
+
+define float @MOVDh(i16 "reg"="r32" %n) "enc"="01100110 | rex(0, d, 0, n) | 00001111 | 01101110 | rr(d, n)" "asm"="movd {n}, {d}" "role"="move.h.w" "nomatch" "nodecode" {
+  %r = bitcast i32 0 to float
+  ret float %r
+}
+
+define i16 @PEXTRWh(float "reg"="s" %n) "enc"="01100110 | rex(0, d, 0, n) | 00001111 | 11000101 | rr(d, n) | 00000000" "asm"="pextrw $0, {n}, {d}" "dclass"="r32" "zext"="16" "role"="move.w.h" "nomatch" "nodecode" {
+  ret i16 0
+}
+
 define double @CVTSS2SD(float "reg"="s" %n) "enc"="11110011 | rex(0, d, 0, n) | 00001111 | 01011010 | rr(d, n)" "asm"="cvtss2sd {n}, {d}" "nodecode" {
   %r = fpext float %n to double
   ret double %r
@@ -1352,6 +1406,314 @@ define double @CVTSS2SD(float "reg"="s" %n) "enc"="11110011 | rex(0, d, 0, n) | 
 define float @CVTSD2SS(double "reg"="d" %n) "enc"="11110010 | rex(0, d, 0, n) | 00001111 | 01011010 | rr(d, n)" "asm"="cvtsd2ss {n}, {d}" "nodecode" {
   %r = fptrunc double %n to float
   ret float %r
+}
+
+define i8 @LDAI8(ptr "reg"="r64" %n) "enc"="rex(0, d, 4, n) | 00001111 | 10110110 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="movzbl 0({n}), {d:r32}" "dclass"="r32" "nodecode" "zext"="8" {
+  %r = load atomic i8, ptr %n acquire, align 1
+  ret i8 %r
+}
+
+define void @STRI8(i8 "reg"="r32" %t, ptr "reg"="r64" %n) "enc"="{ if(t<4) rex(0, t, 4, n) ; 0100 0 R:1=(t)>>3 X:1=0 B:1=(n)>>3 } | 10001000 | rm(t, n, 4, 1, 0, 0, 1)" "asm"="movb {t:r8}, 0({n})" "nodecode" {
+  store atomic i8 %t, ptr %n release, align 1
+  ret void
+}
+
+define i8 @XCHGI80(i8 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="{ if(d<4) rex(0, d, 4, n) ; 0100 0 R:1=(d)>>3 X:1=0 B:1=(n)>>3 } | 10000110 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgb {d:r8}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i8 %m monotonic
+  ret i8 %r
+}
+
+define i8 @XADDI80(i8 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="11110000 | { if(d<4) rex(0, d, 4, n) ; 0100 0 R:1=(d)>>3 X:1=0 B:1=(n)>>3 } | 00001111 | 11000000 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddb {d:r8}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i8 %m monotonic
+  ret i8 %r
+}
+
+define i8 @CMPXCHGI80(i8 "reg"="rax" "tied" %old, i8 "reg"="r32" %new, ptr "reg"="r64" %n) "enc"="11110000 | { if(new<4) rex(0, new, 4, n) ; 0100 0 R:1=(new)>>3 X:1=0 B:1=(n)>>3 } | 00001111 | 10110000 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgb {new:r8}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i8 @llvm.epitome.cmpxchg.i8(ptr %n, i8 %old, i8 %new, i32 0)
+  ret i8 %r
+}
+
+define i8 @XCHGI81(i8 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="{ if(d<4) rex(0, d, 4, n) ; 0100 0 R:1=(d)>>3 X:1=0 B:1=(n)>>3 } | 10000110 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgb {d:r8}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i8 %m acquire
+  ret i8 %r
+}
+
+define i8 @XADDI81(i8 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="11110000 | { if(d<4) rex(0, d, 4, n) ; 0100 0 R:1=(d)>>3 X:1=0 B:1=(n)>>3 } | 00001111 | 11000000 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddb {d:r8}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i8 %m acquire
+  ret i8 %r
+}
+
+define i8 @CMPXCHGI81(i8 "reg"="rax" "tied" %old, i8 "reg"="r32" %new, ptr "reg"="r64" %n) "enc"="11110000 | { if(new<4) rex(0, new, 4, n) ; 0100 0 R:1=(new)>>3 X:1=0 B:1=(n)>>3 } | 00001111 | 10110000 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgb {new:r8}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i8 @llvm.epitome.cmpxchg.i8(ptr %n, i8 %old, i8 %new, i32 1)
+  ret i8 %r
+}
+
+define i8 @XCHGI82(i8 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="{ if(d<4) rex(0, d, 4, n) ; 0100 0 R:1=(d)>>3 X:1=0 B:1=(n)>>3 } | 10000110 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgb {d:r8}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i8 %m release
+  ret i8 %r
+}
+
+define i8 @XADDI82(i8 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="11110000 | { if(d<4) rex(0, d, 4, n) ; 0100 0 R:1=(d)>>3 X:1=0 B:1=(n)>>3 } | 00001111 | 11000000 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddb {d:r8}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i8 %m release
+  ret i8 %r
+}
+
+define i8 @CMPXCHGI82(i8 "reg"="rax" "tied" %old, i8 "reg"="r32" %new, ptr "reg"="r64" %n) "enc"="11110000 | { if(new<4) rex(0, new, 4, n) ; 0100 0 R:1=(new)>>3 X:1=0 B:1=(n)>>3 } | 00001111 | 10110000 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgb {new:r8}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i8 @llvm.epitome.cmpxchg.i8(ptr %n, i8 %old, i8 %new, i32 2)
+  ret i8 %r
+}
+
+define i8 @XCHGI83(i8 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="{ if(d<4) rex(0, d, 4, n) ; 0100 0 R:1=(d)>>3 X:1=0 B:1=(n)>>3 } | 10000110 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgb {d:r8}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i8 %m seq_cst
+  ret i8 %r
+}
+
+define i8 @XADDI83(i8 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="11110000 | { if(d<4) rex(0, d, 4, n) ; 0100 0 R:1=(d)>>3 X:1=0 B:1=(n)>>3 } | 00001111 | 11000000 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddb {d:r8}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i8 %m seq_cst
+  ret i8 %r
+}
+
+define i8 @CMPXCHGI83(i8 "reg"="rax" "tied" %old, i8 "reg"="r32" %new, ptr "reg"="r64" %n) "enc"="11110000 | { if(new<4) rex(0, new, 4, n) ; 0100 0 R:1=(new)>>3 X:1=0 B:1=(n)>>3 } | 00001111 | 10110000 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgb {new:r8}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i8 @llvm.epitome.cmpxchg.i8(ptr %n, i8 %old, i8 %new, i32 3)
+  ret i8 %r
+}
+
+declare i8 @llvm.epitome.cmpxchg.i8(ptr, i8, i8, i32)
+
+define i16 @LDAI16(ptr "reg"="r64" %n) "enc"="rex(0, d, 4, n) | 00001111 | 10110111 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="movzwl 0({n}), {d:r32}" "dclass"="r32" "nodecode" "zext"="16" {
+  %r = load atomic i16, ptr %n acquire, align 2
+  ret i16 %r
+}
+
+define void @STRI16(i16 "reg"="r32" %t, ptr "reg"="r64" %n) "enc"="01100110 | rex(0, t, 4, n) | 10001001 | rm(t, n, 4, 1, 0, 0, 1)" "asm"="movw {t:r16}, 0({n})" "nodecode" {
+  store atomic i16 %t, ptr %n release, align 2
+  ret void
+}
+
+define i16 @XCHGI160(i16 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="01100110 | rex(0, d, 4, n) | 10000111 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgw {d:r16}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i16 %m monotonic
+  ret i16 %r
+}
+
+define i16 @XADDI160(i16 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="01100110 | 11110000 | rex(0, d, 4, n) | 00001111 | 11000001 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddw {d:r16}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i16 %m monotonic
+  ret i16 %r
+}
+
+define i16 @CMPXCHGI160(i16 "reg"="rax" "tied" %old, i16 "reg"="r32" %new, ptr "reg"="r64" %n) "enc"="01100110 | 11110000 | rex(0, new, 4, n) | 00001111 | 10110001 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgw {new:r16}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i16 @llvm.epitome.cmpxchg.i16(ptr %n, i16 %old, i16 %new, i32 0)
+  ret i16 %r
+}
+
+define i16 @XCHGI161(i16 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="01100110 | rex(0, d, 4, n) | 10000111 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgw {d:r16}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i16 %m acquire
+  ret i16 %r
+}
+
+define i16 @XADDI161(i16 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="01100110 | 11110000 | rex(0, d, 4, n) | 00001111 | 11000001 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddw {d:r16}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i16 %m acquire
+  ret i16 %r
+}
+
+define i16 @CMPXCHGI161(i16 "reg"="rax" "tied" %old, i16 "reg"="r32" %new, ptr "reg"="r64" %n) "enc"="01100110 | 11110000 | rex(0, new, 4, n) | 00001111 | 10110001 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgw {new:r16}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i16 @llvm.epitome.cmpxchg.i16(ptr %n, i16 %old, i16 %new, i32 1)
+  ret i16 %r
+}
+
+define i16 @XCHGI162(i16 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="01100110 | rex(0, d, 4, n) | 10000111 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgw {d:r16}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i16 %m release
+  ret i16 %r
+}
+
+define i16 @XADDI162(i16 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="01100110 | 11110000 | rex(0, d, 4, n) | 00001111 | 11000001 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddw {d:r16}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i16 %m release
+  ret i16 %r
+}
+
+define i16 @CMPXCHGI162(i16 "reg"="rax" "tied" %old, i16 "reg"="r32" %new, ptr "reg"="r64" %n) "enc"="01100110 | 11110000 | rex(0, new, 4, n) | 00001111 | 10110001 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgw {new:r16}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i16 @llvm.epitome.cmpxchg.i16(ptr %n, i16 %old, i16 %new, i32 2)
+  ret i16 %r
+}
+
+define i16 @XCHGI163(i16 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="01100110 | rex(0, d, 4, n) | 10000111 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgw {d:r16}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i16 %m seq_cst
+  ret i16 %r
+}
+
+define i16 @XADDI163(i16 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="01100110 | 11110000 | rex(0, d, 4, n) | 00001111 | 11000001 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddw {d:r16}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i16 %m seq_cst
+  ret i16 %r
+}
+
+define i16 @CMPXCHGI163(i16 "reg"="rax" "tied" %old, i16 "reg"="r32" %new, ptr "reg"="r64" %n) "enc"="01100110 | 11110000 | rex(0, new, 4, n) | 00001111 | 10110001 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgw {new:r16}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i16 @llvm.epitome.cmpxchg.i16(ptr %n, i16 %old, i16 %new, i32 3)
+  ret i16 %r
+}
+
+declare i16 @llvm.epitome.cmpxchg.i16(ptr, i16, i16, i32)
+
+define i32 @LDAI32(ptr "reg"="r64" %n) "enc"="rex(0, d, 4, n) | 10001011 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="movl 0({n}), {d}" "dclass"="r32" "nodecode" {
+  %r = load atomic i32, ptr %n acquire, align 4
+  ret i32 %r
+}
+
+define void @STRI32(i32 "reg"="r32" %t, ptr "reg"="r64" %n) "enc"="rex(0, t, 4, n) | 10001001 | rm(t, n, 4, 1, 0, 0, 1)" "asm"="movl {t}, 0({n})" "nodecode" {
+  store atomic i32 %t, ptr %n release, align 4
+  ret void
+}
+
+define i32 @XCHGI320(i32 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="rex(0, d, 4, n) | 10000111 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgl {d}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i32 %m monotonic
+  ret i32 %r
+}
+
+define i32 @XADDI320(i32 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="11110000 | rex(0, d, 4, n) | 00001111 | 11000001 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddl {d}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i32 %m monotonic
+  ret i32 %r
+}
+
+define i32 @CMPXCHGI320(i32 "reg"="rax" "tied" %old, i32 "reg"="r32" %new, ptr "reg"="r64" %n) "enc"="11110000 | rex(0, new, 4, n) | 00001111 | 10110001 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgl {new}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i32 @llvm.epitome.cmpxchg.i32(ptr %n, i32 %old, i32 %new, i32 0)
+  ret i32 %r
+}
+
+define i32 @XCHGI321(i32 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="rex(0, d, 4, n) | 10000111 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgl {d}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i32 %m acquire
+  ret i32 %r
+}
+
+define i32 @XADDI321(i32 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="11110000 | rex(0, d, 4, n) | 00001111 | 11000001 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddl {d}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i32 %m acquire
+  ret i32 %r
+}
+
+define i32 @CMPXCHGI321(i32 "reg"="rax" "tied" %old, i32 "reg"="r32" %new, ptr "reg"="r64" %n) "enc"="11110000 | rex(0, new, 4, n) | 00001111 | 10110001 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgl {new}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i32 @llvm.epitome.cmpxchg.i32(ptr %n, i32 %old, i32 %new, i32 1)
+  ret i32 %r
+}
+
+define i32 @XCHGI322(i32 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="rex(0, d, 4, n) | 10000111 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgl {d}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i32 %m release
+  ret i32 %r
+}
+
+define i32 @XADDI322(i32 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="11110000 | rex(0, d, 4, n) | 00001111 | 11000001 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddl {d}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i32 %m release
+  ret i32 %r
+}
+
+define i32 @CMPXCHGI322(i32 "reg"="rax" "tied" %old, i32 "reg"="r32" %new, ptr "reg"="r64" %n) "enc"="11110000 | rex(0, new, 4, n) | 00001111 | 10110001 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgl {new}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i32 @llvm.epitome.cmpxchg.i32(ptr %n, i32 %old, i32 %new, i32 2)
+  ret i32 %r
+}
+
+define i32 @XCHGI323(i32 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="rex(0, d, 4, n) | 10000111 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgl {d}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i32 %m seq_cst
+  ret i32 %r
+}
+
+define i32 @XADDI323(i32 "reg"="r32" "tied" %m, ptr "reg"="r64" %n) "enc"="11110000 | rex(0, d, 4, n) | 00001111 | 11000001 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddl {d}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i32 %m seq_cst
+  ret i32 %r
+}
+
+define i32 @CMPXCHGI323(i32 "reg"="rax" "tied" %old, i32 "reg"="r32" %new, ptr "reg"="r64" %n) "enc"="11110000 | rex(0, new, 4, n) | 00001111 | 10110001 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgl {new}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i32 @llvm.epitome.cmpxchg.i32(ptr %n, i32 %old, i32 %new, i32 3)
+  ret i32 %r
+}
+
+declare i32 @llvm.epitome.cmpxchg.i32(ptr, i32, i32, i32)
+
+define i64 @LDAI64(ptr "reg"="r64" %n) "enc"="rex(1, d, 4, n) | 10001011 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="movq 0({n}), {d}" "dclass"="r64" "nodecode" {
+  %r = load atomic i64, ptr %n acquire, align 8
+  ret i64 %r
+}
+
+define void @STRI64(i64 "reg"="r64" %t, ptr "reg"="r64" %n) "enc"="rex(1, t, 4, n) | 10001001 | rm(t, n, 4, 1, 0, 0, 1)" "asm"="movq {t}, 0({n})" "nodecode" {
+  store atomic i64 %t, ptr %n release, align 8
+  ret void
+}
+
+define i64 @XCHGI640(i64 "reg"="r64" "tied" %m, ptr "reg"="r64" %n) "enc"="rex(1, d, 4, n) | 10000111 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgq {d}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i64 %m monotonic
+  ret i64 %r
+}
+
+define i64 @XADDI640(i64 "reg"="r64" "tied" %m, ptr "reg"="r64" %n) "enc"="11110000 | rex(1, d, 4, n) | 00001111 | 11000001 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddq {d}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i64 %m monotonic
+  ret i64 %r
+}
+
+define i64 @CMPXCHGI640(i64 "reg"="rax" "tied" %old, i64 "reg"="r64" %new, ptr "reg"="r64" %n) "enc"="11110000 | rex(1, new, 4, n) | 00001111 | 10110001 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgq {new}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i64 @llvm.epitome.cmpxchg.i64(ptr %n, i64 %old, i64 %new, i32 0)
+  ret i64 %r
+}
+
+define i64 @XCHGI641(i64 "reg"="r64" "tied" %m, ptr "reg"="r64" %n) "enc"="rex(1, d, 4, n) | 10000111 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgq {d}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i64 %m acquire
+  ret i64 %r
+}
+
+define i64 @XADDI641(i64 "reg"="r64" "tied" %m, ptr "reg"="r64" %n) "enc"="11110000 | rex(1, d, 4, n) | 00001111 | 11000001 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddq {d}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i64 %m acquire
+  ret i64 %r
+}
+
+define i64 @CMPXCHGI641(i64 "reg"="rax" "tied" %old, i64 "reg"="r64" %new, ptr "reg"="r64" %n) "enc"="11110000 | rex(1, new, 4, n) | 00001111 | 10110001 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgq {new}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i64 @llvm.epitome.cmpxchg.i64(ptr %n, i64 %old, i64 %new, i32 1)
+  ret i64 %r
+}
+
+define i64 @XCHGI642(i64 "reg"="r64" "tied" %m, ptr "reg"="r64" %n) "enc"="rex(1, d, 4, n) | 10000111 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgq {d}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i64 %m release
+  ret i64 %r
+}
+
+define i64 @XADDI642(i64 "reg"="r64" "tied" %m, ptr "reg"="r64" %n) "enc"="11110000 | rex(1, d, 4, n) | 00001111 | 11000001 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddq {d}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i64 %m release
+  ret i64 %r
+}
+
+define i64 @CMPXCHGI642(i64 "reg"="rax" "tied" %old, i64 "reg"="r64" %new, ptr "reg"="r64" %n) "enc"="11110000 | rex(1, new, 4, n) | 00001111 | 10110001 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgq {new}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i64 @llvm.epitome.cmpxchg.i64(ptr %n, i64 %old, i64 %new, i32 2)
+  ret i64 %r
+}
+
+define i64 @XCHGI643(i64 "reg"="r64" "tied" %m, ptr "reg"="r64" %n) "enc"="rex(1, d, 4, n) | 10000111 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="xchgq {d}, 0({n})" "nodecode" {
+  %r = atomicrmw xchg ptr %n, i64 %m seq_cst
+  ret i64 %r
+}
+
+define i64 @XADDI643(i64 "reg"="r64" "tied" %m, ptr "reg"="r64" %n) "enc"="11110000 | rex(1, d, 4, n) | 00001111 | 11000001 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="lock xaddq {d}, 0({n})" "clobbers"="flags" "nodecode" {
+  %r = atomicrmw add ptr %n, i64 %m seq_cst
+  ret i64 %r
+}
+
+define i64 @CMPXCHGI643(i64 "reg"="rax" "tied" %old, i64 "reg"="r64" %new, ptr "reg"="r64" %n) "enc"="11110000 | rex(1, new, 4, n) | 00001111 | 10110001 | rm(new, n, 4, 1, 0, 0, 1)" "asm"="lock cmpxchgq {new}, 0({n})" "dclass"="rax" "clobbers"="flags" "nodecode" {
+  %r = call i64 @llvm.epitome.cmpxchg.i64(ptr %n, i64 %old, i64 %new, i32 3)
+  ret i64 %r
+}
+
+declare i64 @llvm.epitome.cmpxchg.i64(ptr, i64, i64, i32)
+
+define ptr @LDAP(ptr "reg"="r64" %n) "enc"="rex(1, d, 4, n) | 10001011 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="movq 0({n}), {d}" "nodecode" {
+  %r = load atomic ptr, ptr %n acquire, align 8
+  ret ptr %r
+}
+
+define void @STRP(ptr "reg"="r64" %t, ptr "reg"="r64" %n) "enc"="rex(1, t, 4, n) | 10001001 | rm(t, n, 4, 1, 0, 0, 1)" "asm"="movq {t}, 0({n})" "nodecode" {
+  store atomic ptr %t, ptr %n release, align 8
+  ret void
+}
+
+define void @MFENCE() "enc"="00001111 | 10101110 | 11110000" "asm"="mfence" "nodecode" {
+  fence seq_cst
+  ret void
+}
+
+define void @MFENCEA() "enc"="00001111 | 10101110 | 11110000" "asm"="mfence" "nodecode" {
+  fence acquire
+  ret void
 }
 
 define <2 x i64> @MOVAPSrr(<2 x i64> "reg"="x" %n) "enc"="rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)" "asm"="movaps {n}, {d}" "copy"="x" "nodecode" {

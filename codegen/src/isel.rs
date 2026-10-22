@@ -138,6 +138,9 @@ pub struct Sel<'a, 'b> {
     /// AAPCS64's register save areas of a variadic function: the slots
     /// and sizes of the integer and the vector registers' areas.
     va_areas: Option<(usize, i64, usize, i64)>,
+    /// System V's register save area, and the offsets in it of the first
+    /// integer and vector registers the named arguments left.
+    va_sysv: Option<(usize, i64, i64)>,
     /// Blocks that end in a tail call: they have no successors, and no
     /// copies for phis.
     tail_blocks: HashSet<BlockId>,
@@ -317,6 +320,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             agg_params: HashMap::new(),
             va_offset: 0,
             va_areas: None,
+            va_sysv: None,
             tail_blocks: HashSet::new(),
             landing_next: None,
         }
@@ -1622,7 +1626,13 @@ impl<'a, 'b> Sel<'a, 'b> {
         let sret = attrs.iter().any(|x| matches!(x, Attr::Type { name, .. } if name == "sret"));
         let wide = has_mark(attrs, crate::wide::WIDE);
         let ty = self.ty_of(v);
-        let part = |size, fp| crate::abi::Part { size, fp, sret: false, wide: false, hfa: false };
+        let part = |size, fp| crate::abi::Part { size, fp, sret: false, wide: false, hfa: false, byval: false };
+        // A struct passed in memory: 8-byte pieces of it, on the stack.
+        if let Some(size) = self.byval_size(attrs) {
+            return (0..size.div_ceil(8))
+                .map(|q| crate::abi::Part { byval: true, ..part((size - 8 * q).min(8), false) })
+                .collect();
+        }
         // A half's bits, passed where a half is.
         if has_mark(attrs, prepare::HALF) {
             return vec![part(2, true)];
@@ -1804,6 +1814,14 @@ impl<'a, 'b> Sel<'a, 'b> {
             });
         }
         Ok(regs)
+    }
+
+    /// The size of the struct a `byval` argument points to.
+    fn byval_size(&self, attrs: &[Attr]) -> Option<u64> {
+        attrs.iter().find_map(|x| match x {
+            Attr::Type { name, ty } if name == "byval" => self.cx.size_of(*ty).ok(),
+            _ => None,
+        })
     }
 
     /// The size in bytes of a value passed as an argument.
@@ -2192,11 +2210,31 @@ impl<'a, 'b> Sel<'a, 'b> {
                     }
                     return Ok(());
                 }
-                s if s.starts_with("llvm.va_copy") && self.mf.abi.va_list_aapcs64 => {
+                // System V's: the offsets in the save area of the next
+                // saved registers, the next stack argument, and the area.
+                s if s.starts_with("llvm.va_start") && self.va_sysv.is_some() => {
+                    let (slot, gp, fp) = self.va_sysv.unwrap();
+                    let ap = self.reg_for(args[0].value, self.int_class(true))?;
+                    let sp = Reg::P(self.t.machine.sp);
+                    let (addi, stx, stw) =
+                        (self.t.by_role("addi"), self.t.by_role("store.x"), self.t.by_role("store.w"));
+                    for (off, v) in [(0, gp), (4, fp)] {
+                        let r = self.int_reg(v, false, true)?;
+                        self.push(MInst::new(stw, vec![MOp::Reg(r), MOp::Reg(ap), MOp::Imm(off)]));
+                    }
+                    for (off, at) in [(8, MOp::Incoming(self.va_offset)), (16, MOp::Frame(slot, 0))] {
+                        let p = self.ivreg(true);
+                        self.push(MInst::new(addi, vec![MOp::Reg(Reg::V(p)), MOp::Reg(sp), at]));
+                        self.push(MInst::new(stx, vec![MOp::Reg(Reg::V(p)), MOp::Reg(ap), MOp::Imm(off)]));
+                    }
+                    return Ok(());
+                }
+                s if s.starts_with("llvm.va_copy") && (self.mf.abi.va_list_aapcs64 || self.mf.abi.va_list_sysv) => {
                     let dst = self.reg_for(args[0].value, self.int_class(true))?;
                     let src = self.reg_for(args[1].value, self.int_class(true))?;
                     let (ldx, stx) = (self.t.by_role("load.x"), self.t.by_role("store.x"));
-                    for off in [0, 8, 16, 24] {
+                    let size = if self.mf.abi.va_list_sysv { 24 } else { 32 };
+                    for off in (0..size).step_by(8) {
                         let p = self.ivreg(true);
                         self.push(MInst::new(ldx, vec![MOp::Reg(Reg::V(p)), MOp::Reg(src), MOp::Imm(off)]));
                         self.push(MInst::new(stx, vec![MOp::Reg(Reg::V(p)), MOp::Reg(dst), MOp::Imm(off)]));
@@ -2260,6 +2298,19 @@ impl<'a, 'b> Sel<'a, 'b> {
                     self.push(MInst::new(self.t.by_role("tprel.hi"), vec![MOp::Reg(d), sym()]));
                     self.push(MInst::new(self.t.by_role("tprel.add"), vec![MOp::Reg(d), MOp::Reg(d), sym()]));
                     self.push(MInst::new(self.t.by_role("tprel.lo"), vec![MOp::Reg(d), MOp::Reg(d), sym()]));
+                    return Ok(());
+                }
+                // A thread-local variable's offset from the thread pointer,
+                // from the GOT (initial exec).
+                "llvm.epitome.tls.ie" => {
+                    let Value::Const(c) = args[0].value else { return self.err("llvm.epitome.tls.ie of a value") };
+                    let Some((g, 0)) = prepare::const_address(self.cx, c) else {
+                        return self.err("llvm.epitome.tls.ie of something not a variable");
+                    };
+                    let name = self.cx.m.global(g).name.clone().unwrap_or_default();
+                    let r = inst.result.ok_or("llvm.epitome.tls.ie without a result")?;
+                    let d = Reg::V(self.vreg_of(r));
+                    self.push(MInst::new(self.t.by_role("tls.ie"), vec![MOp::Reg(d), MOp::Sym(name)]));
                     return Ok(());
                 }
                 // An ELF thread-local variable's offset from the thread
@@ -2326,6 +2377,22 @@ impl<'a, 'b> Sel<'a, 'b> {
         let mut halves = Vec::new();
         for (k, a) in args.iter().enumerate() {
             let ty = self.ty_of(a.value);
+            // A struct passed in memory: copied, a piece at a time.
+            if shapes[k].first().is_some_and(|p| p.byval) {
+                let src = self.reg_for(a.value, self.int_class(true))?;
+                for (q, part) in shapes[k].iter().enumerate() {
+                    let ld = self.t.by_role(&format!("load.{}", mem_size(part.size, false)));
+                    let d = self.ivreg(true);
+                    self.push(MInst::new(ld, vec![MOp::Reg(Reg::V(d)), MOp::Reg(src), MOp::Imm(8 * q as i64)]));
+                    regs.push(Reg::V(d));
+                    locs.push(part_locs[k][q]);
+                    sizes.push(part.size);
+                    fps.push(false);
+                    is_named.push(true);
+                    halves.push(false);
+                }
+                continue;
+            }
             if let Some(n) = self.agg_len(ty) {
                 for (p, r) in self.parts(a.value, n)?.into_iter().enumerate() {
                     regs.push(r);
@@ -2906,7 +2973,10 @@ impl<'a, 'b> Sel<'a, 'b> {
         // A variadic function's variable arguments follow its named ones on
         // the stack, 8-aligned, under conventions that put them there.
         if let Type::Function { varargs: true, .. } = self.cx.m.types.get(f.ty) {
-            if self.mf.abi.variadic != crate::abi::Variadic::Stack && !self.mf.abi.va_list_aapcs64 {
+            if self.mf.abi.variadic != crate::abi::Variadic::Stack
+                && !self.mf.abi.va_list_aapcs64
+                && !self.mf.abi.va_list_sysv
+            {
                 return self
                     .err(format!("defining variadic functions under {} is not supported yet", self.mf.abi.name));
             }
@@ -2956,6 +3026,38 @@ impl<'a, 'b> Sel<'a, 'b> {
                 }
                 self.va_areas = Some((gs, gr, vs, vr));
             }
+            // System V: the argument registers the named arguments left,
+            // saved at their places in one area (vector ones as doubles: a
+            // variable argument in one is a double).
+            if self.mf.abi.va_list_sysv {
+                let used = |regs: &[u8]| {
+                    part_locs
+                        .iter()
+                        .flatten()
+                        .filter_map(|l| match l {
+                            crate::abi::ArgLoc::Reg(r) => regs.iter().position(|x| x == r).map(|k| k + 1),
+                            _ => None,
+                        })
+                        .max()
+                        .unwrap_or(0)
+                };
+                let (args, fp_args) = (self.mf.abi.args.clone(), self.mf.abi.fp_args.clone());
+                let (ngr, nvr) = (used(&args), used(&fp_args));
+                let fp_at = 8 * args.len() as i64;
+                self.mf.slots.push(Slot { size: (fp_at + 16 * fp_args.len() as i64) as u64, align: 16, offset: 0 });
+                let slot = self.mf.slots.len() - 1;
+                let sp = self.t.machine.sp;
+                let (stx, std) = (self.t.by_role("store.x"), self.t.by_role("store.d"));
+                for (k, &r) in args.iter().enumerate().skip(ngr) {
+                    let at = MOp::Frame(slot, 8 * k as i64);
+                    self.push(MInst::new(stx, vec![MOp::Reg(Reg::P(r)), MOp::Reg(Reg::P(sp)), at]));
+                }
+                for (k, &r) in fp_args.iter().enumerate().skip(nvr) {
+                    let at = MOp::Frame(slot, fp_at + 16 * k as i64);
+                    self.push(MInst::new(std, vec![MOp::Reg(Reg::P(r)), MOp::Reg(Reg::P(sp)), at]));
+                }
+                self.va_sysv = Some((slot, 8 * ngr as i64, fp_at + 16 * nvr as i64));
+            }
         }
         for (k, p) in f.params.iter().enumerate() {
             if self.uses[p.local.index()] == 0 {
@@ -2992,6 +3094,15 @@ impl<'a, 'b> Sel<'a, 'b> {
                 continue;
             }
             let d = self.vreg_of(p.local);
+            // A struct passed in memory: its address, where the caller put it.
+            if let (true, crate::abi::ArgLoc::Stack(off)) = (shapes[k][0].byval, part_locs[k][0]) {
+                let sp = self.t.machine.sp;
+                self.push(MInst::new(
+                    self.t.by_role("addi"),
+                    vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::P(sp)), MOp::Incoming(off)],
+                ));
+                continue;
+            }
             let half = has_mark(&p.attrs, prepare::HALF);
             match part_locs[k][0] {
                 // A half's bits, out of the floating-point register.

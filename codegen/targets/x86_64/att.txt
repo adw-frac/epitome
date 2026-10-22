@@ -37739,9 +37739,12 @@ X_INVLPG_6981_x	invlpg {m.disp}({m.base},{m.index},{m.scale})	5
 X_INVLPG_6981_p	invlpg {m.sym}(%rip)	7
 X_SWAPGS_6982	swapgs	3
 X_RDTSCP_6983	rdtscp	3
+X_SFENCE_6984	sfence	3
 X_CLFLUSH_6985_m	clflush {m.disp}({m.base})	4
 X_CLFLUSH_6985_x	clflush {m.disp}({m.base},{m.index},{m.scale})	5
 X_CLFLUSH_6985_p	clflush {m.sym}(%rip)	7
+X_LFENCE_6986	lfence	3
+X_MFENCE_6987	mfence	3
 X_MOVHLPS_6988	movhlps {b}, {r}	3
 X_MOVLPS_6989_m	movlps {m.disp}({m.base}), {r}	4
 X_MOVLPS_6989_x	movlps {m.disp}({m.base},{m.index},{m.scale}), {r}	5

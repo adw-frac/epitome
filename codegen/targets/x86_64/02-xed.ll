@@ -120376,6 +120376,10 @@ define void @X_RDTSCP_6983() "enc"="rex(0, 0, 0, 0) | 00001111 | 00000001 | 11 1
   ret void
 }
 
+define void @X_SFENCE_6984() "enc"="rex(0, 0, 0, 0) | 00001111 | 10101110 | 11 111 000" "asm"="sfence" "asmonly" {
+  ret void
+}
+
 define void @X_CLFLUSH_6985_m(i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 00001111 | 10101110 | rm(7, m.base, 4, 1, m.disp, 0, 1)" "asm"="clflush {m.disp}({m.base})" "asmonly" {
   ret void
 }
@@ -120385,6 +120389,14 @@ define void @X_CLFLUSH_6985_x(i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "r
 }
 
 define void @X_CLFLUSH_6985_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 | 10101110 | rm(7, 16, 4, 1, 0, m.sym, 1)" "asm"="clflush {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+  ret void
+}
+
+define void @X_LFENCE_6986() "enc"="rex(0, 0, 0, 0) | 00001111 | 10101110 | 11 101 000" "asm"="lfence" "asmonly" {
+  ret void
+}
+
+define void @X_MFENCE_6987() "enc"="rex(0, 0, 0, 0) | 00001111 | 10101110 | 11 110 000" "asm"="mfence" "asmonly" {
   ret void
 }
 

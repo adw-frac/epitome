@@ -19,6 +19,8 @@
 //!   a loop of compare-and-swap.
 //! - Pointers and floating-point values go through integers of their
 //!   width.
+//! - A sequentially consistent store, where the description says so
+//!   (`seq-cst-stores` = `swap`: x86), is an `atomicrmw xchg`.
 //! - Ordered loads and stores the machine has no instruction for are
 //!   plain ones between fences (the RISC-V psABI's mapping): a load
 //!   acquires with `fence r, rw` after it, and is sequentially consistent
@@ -317,7 +319,20 @@ fn expand_one(cx: &mut Ctx, f: &mut Function, blk: BlockId, k: usize) -> Result<
                 return Ok(Step::Next(1));
             }
             let mut s = Seq { f, new: Vec::new() };
-            if cx.selects_head(|h| matches!(h, Head::StoreRel(b) if *b == bits)) {
+            if at.ordering == Ordering::SeqCst && cx.t.machine.seq_cst_swap {
+                let v = to_int(cx, &mut s, value, ty, ity);
+                let rmw = Op::AtomicRmw {
+                    op: RmwOp::Xchg,
+                    volatile,
+                    elementwise: false,
+                    ptr,
+                    value: v,
+                    scope: None,
+                    ordering: Ordering::SeqCst,
+                    align,
+                };
+                s.op(rmw, ity);
+            } else if cx.selects_head(|h| matches!(h, Head::StoreRel(b) if *b == bits)) {
                 if !is_float(cx, ty) {
                     return Ok(Step::Next(1));
                 }

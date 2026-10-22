@@ -8,7 +8,7 @@
 ; so rbp is saved like rbx and r12-r15. r10 and r11 are kept for spill
 ; code; rbx addresses frames whose stack pointer moves.
 
-!abi.sysv = !{!100, !101, !102, !103, !104, !105, !106, !107, !108, !109, !110, !111, !112, !113, !114, !115, !116, !117, !118, !119, !120, !121, !122, !123}
+!abi.sysv = !{!100, !101, !102, !103, !104, !105, !106, !107, !108, !109, !110, !111, !112, !113, !114, !115, !116, !117, !118, !119, !120, !121, !122, !123, !124}
 !100 = !{!"args", !"%rdi", !"%rsi", !"%rdx", !"%rcx", !"%r8", !"%r9"}
 !101 = !{!"result", !"%rax"}
 !102 = !{!"results", !"%rax", !"%rdx"}
@@ -35,3 +35,6 @@
 !122 = !{!"wide-pairs", !"stack16"}
 ; A variadic call says in al how many vector registers its arguments take.
 !123 = !{!"variadic-fp-count", !"%rax"}
+; A variadic function's va_list: { gp_offset, fp_offset, overflow_arg_area,
+; reg_save_area }.
+!124 = !{!"va-list", !"sysv"}

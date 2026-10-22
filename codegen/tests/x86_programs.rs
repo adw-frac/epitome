@@ -24,7 +24,25 @@ use epitome_codegen::target::Target;
 use epitome_codegen::{Options, compile};
 
 /// The programs that run on x86-64 so far.
-const PROGRAMS: &[&str] = &["basic", "bits", "calls", "divs", "frames", "loops", "tails", "wide"];
+const PROGRAMS: &[&str] = &[
+    "atomics",
+    "atomics_lib",
+    "basic",
+    "bits",
+    "calls",
+    "divs",
+    "floats",
+    "frames",
+    "half",
+    "loops",
+    "structs",
+    "tails",
+    "tls",
+    "varargs",
+    "vectors",
+    "vla",
+    "wide",
+];
 
 fn run(cmd: &mut Command) -> Result<String, String> {
     let out = cmd.output().map_err(|e| format!("{cmd:?}: {e}"))?;
@@ -56,7 +74,16 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<(), S
     let tails = text.contains("// needs-tail-calls");
     let target = ["--target=x86_64-linux-gnu"];
     let reference = tmp.join(format!("{name}.ref"));
-    run(Command::new("clang").args(wrap).args(["-O2", "-no-pie"]).arg(&src).arg(&main).arg("-o").arg(&reference))?;
+    // (Without errno, clang's build calls no sqrtf16, which C libraries
+    // lack: ours takes it as llvm.sqrt.f16.)
+    run(Command::new("clang")
+        .args(wrap)
+        .arg("-fno-math-errno")
+        .args(["-O2", "-no-pie"])
+        .arg(&src)
+        .arg(&main)
+        .args(["-lm", "-latomic", "-o"])
+        .arg(&reference))?;
     let want = run(&mut Command::new(&reference))?;
     let configs: &[(&str, &[&str])] = &[
         ("O0", &["-O0", "-Xclang", "-disable-O0-optnone"]),
@@ -96,7 +123,12 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<(), S
         let obj = tmp.join(format!("{stem}.o"));
         std::fs::write(&obj, &ours).unwrap();
         let exe = tmp.join(&stem);
-        run(Command::new("clang").args(["-O2", "-no-pie"]).arg(&obj).arg(&main).arg("-o").arg(&exe))?;
+        run(Command::new("clang")
+            .args(["-O2", "-no-pie"])
+            .arg(&obj)
+            .arg(&main)
+            .args(["-lm", "-latomic", "-o"])
+            .arg(&exe))?;
         let got = run(&mut Command::new(&exe))?;
         if got != want {
             return Err(format!("{stem}: output differs from clang's build; see {}", s.display()));
