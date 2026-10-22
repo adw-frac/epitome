@@ -60,7 +60,8 @@ fn members(cx: &Ctx, ty: TypeId) -> Option<Vec<(TypeId, u64)>> {
 /// a homogeneous aggregate, `[2 x <4 x float>]`).
 fn is_scalar(cx: &Ctx, ty: TypeId) -> bool {
     match cx.m.types.get(ty) {
-        Type::Int(1..=64) | Type::Ptr(0) | Type::Float | Type::Double => true,
+        // (A 128-bit integer too, which `wide.rs` splits after.)
+        Type::Int(1..=64 | 128) | Type::Ptr(0) | Type::Float | Type::Double => true,
         Type::Vector { scalable: false, .. } => cx.size_of(ty).is_ok_and(|b| b <= 16),
         _ => false,
     }

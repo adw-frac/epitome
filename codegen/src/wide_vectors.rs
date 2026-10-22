@@ -82,10 +82,31 @@ pub fn scalarize(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
             blocks.push(b);
         }
     }
+    // Phis first, a phi of each lane, so that values may come round loops;
+    // their incoming lanes are filled in at the end.
+    let mut phis: Vec<(InstId, Vec<InstId>)> = Vec::new();
+    for &b in &blocks {
+        for &i in &f.blocks[b.index()].insts.clone() {
+            if !f.insts[i.index()].op.is_phi() {
+                break;
+            }
+            let r = f.insts[i.index()].result.unwrap();
+            let Some((len, e)) = wide_vector(cx, f.locals[r.index()].ty) else { continue };
+            let lane_phis: Vec<InstId> = (0..len)
+                .map(|_| f.add_inst(Op::Phi { fmf: FastMath::default(), incoming: vec![] }, Some((None, e))))
+                .collect();
+            split.insert(r, lane_phis.iter().map(|&p| f.result(p)).collect());
+            phis.push((i, lane_phis));
+        }
+    }
     for b in blocks {
         let old = std::mem::take(&mut f.blocks[b.index()].insts);
         let mut out = Vec::new();
         for i in old {
+            if let Some((_, lane_phis)) = phis.iter().find(|(p, _)| *p == i) {
+                out.extend(lane_phis.iter().copied());
+                continue;
+            }
             f.insts[i.index()].op.for_each_value_mut(|v| {
                 if let Value::Local(x) = v
                     && let Some(&n) = repl.get(x)
@@ -309,6 +330,31 @@ pub fn scalarize(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
             out.extend(std::mem::take(&mut s.new));
         }
         f.blocks[b.index()].insts = out;
+    }
+    // The lane phis' incoming lanes: of each incoming vector, taken at the
+    // end of its block if it was left whole.
+    for (i, lane_phis) in phis {
+        let Op::Phi { incoming, .. } = f.insts[i.index()].op.clone() else { unreachable!() };
+        let mut per: Vec<Vec<(Value, BlockId)>> = vec![Vec::new(); lane_phis.len()];
+        for (v, pred) in incoming {
+            let v = match v {
+                Value::Local(x) => repl.get(&x).copied().unwrap_or(v),
+                v => v,
+            };
+            let mut s = Seq { f, new: Vec::new() };
+            let ls = lanes_of(cx, &mut s, &split, v)?;
+            let new = std::mem::take(&mut s.new);
+            if !new.is_empty() {
+                let n = f.blocks[pred.index()].insts.len();
+                f.blocks[pred.index()].insts.splice(n - 1..n - 1, new);
+            }
+            for (l, x) in ls.into_iter().enumerate() {
+                per[l].push((x, pred));
+            }
+        }
+        for (p, inc) in lane_phis.into_iter().zip(per) {
+            f.insts[p.index()].op = Op::Phi { fmf: FastMath::default(), incoming: inc };
+        }
     }
     for (x, v) in repl {
         f.replace_uses(Value::Local(x), v);

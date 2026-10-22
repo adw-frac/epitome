@@ -248,7 +248,8 @@ impl<'t> Assembler<'t> {
                     // By any of its names (a vector's without its
                     // arrangement); the template, printing it back,
                     // decides whether the name was the right one.
-                    let p = self.t.machine.lookup(text.split('.').next()?)?;
+                    let reg = text.split('.').next()?;
+                    let p = self.t.machine.lookup(reg).or_else(|| self.t.machine.lookup(&reg.to_ascii_lowercase()))?;
                     let n = self.t.machine.field(class, p)?;
                     set(&mut r.env, name, n)?;
                     r.shown.insert(k, Operand::Reg(Reg::P(p)));
@@ -262,7 +263,8 @@ impl<'t> Assembler<'t> {
                 }
                 Kind::Imm => set(&mut r.env, name, parse_int(text)?)?,
                 Kind::Cond => {
-                    let c = self.t.conds.iter().find(|c| c.asm == *text)?;
+                    // (In either case: `NE` is `ne`.)
+                    let c = self.t.conds.iter().find(|c| c.asm.eq_ignore_ascii_case(text))?;
                     set(&mut r.env, name, c.value)?;
                 }
                 Kind::Sym => {
@@ -288,6 +290,37 @@ impl<'t> Assembler<'t> {
         Some(r)
     }
 
+    /// `line` with its mnemonic, and the words that are registers or
+    /// conditions, in lower case (symbols are left as they are).
+    fn lower_names(&self, line: &str) -> String {
+        let mut out = String::new();
+        let mut word = String::new();
+        let mut first = true;
+        let flush = |word: &mut String, out: &mut String, first: &mut bool| {
+            if !word.is_empty() {
+                let l = word.to_ascii_lowercase();
+                let name = l.split('.').next().unwrap_or("");
+                if *first || self.t.machine.lookup(name).is_some() || self.t.conds.iter().any(|c| c.asm == l) {
+                    out.push_str(&l);
+                } else {
+                    out.push_str(word);
+                }
+                *first = false;
+                word.clear();
+            }
+        };
+        for c in line.chars() {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '.' {
+                word.push(c);
+            } else {
+                flush(&mut word, &mut out, &mut first);
+                out.push(c);
+            }
+        }
+        flush(&mut word, &mut out, &mut first);
+        out
+    }
+
     /// The instruction `line` is, encoded at `pc`, with `label` giving the
     /// address of a label in the same section; and the symbol it refers
     /// to, if it does.
@@ -298,8 +331,8 @@ impl<'t> Assembler<'t> {
         syntax: Syntax,
         label: &dyn Fn(&str) -> Option<u64>,
     ) -> Result<(usize, u32, Option<String>), String> {
-        let m = mnemonic(line);
-
+        let lower = mnemonic(line).to_ascii_lowercase();
+        let m = lower.as_str();
         let cands: Vec<&Template> = self
             .by_mnemonic
             .get(m)
@@ -339,7 +372,8 @@ impl<'t> Assembler<'t> {
                     None => Operand::Text("?".into()),
                 }
             });
-            if printed != line {
+            // (In any case: inline assembly may write `NE`, or `X0`.)
+            if !printed.eq_ignore_ascii_case(line) {
                 continue;
             }
             // The values must encode, and decode back as themselves.
@@ -687,6 +721,12 @@ impl<'t> Assembler<'t> {
                             self.t.machine.asm_aliases.iter().fold(text.clone(), |l, (a, b)| rewrite(&l, a, b));
                         if canonical == text { Err(e) } else { self.encode(&canonical, offset, syntax, &find) }
                     });
+                    // Written in capitals (`CSEL X0, XZR, X9, NE`): its
+                    // mnemonic, registers and conditions in lower case.
+                    let read = read.or_else(|e| {
+                        let lower = self.lower_names(&text);
+                        if lower == text { Err(e) } else { self.encode(&lower, offset, syntax, &find) }
+                    });
                     let (i, word, sym) = match read {
                         Ok(x) => x,
                         Err(e) => {
@@ -1019,6 +1059,9 @@ fn statements(lines: &[&str], comment: &str, syntax: Syntax) -> Vec<(usize, Stri
     for (n, raw) in lines.iter().enumerate() {
         let unblocked = strip_block_comments(raw, &mut in_block);
         let line = strip_comment(&unblocked, comment, syntax);
+        // A line starting `#` (but a directive's `#` in an operand) is a
+        // comment, as LLVM's assemblers take it (inline assembly's `# x0`).
+        let line = if line.trim_start().starts_with('#') { "" } else { line };
         if syntax == Syntax::MachO || !line.contains(';') {
             out.push((n, line.to_string()));
             continue;

@@ -39,6 +39,7 @@ const ALIASES: &[(&str, &str)] = &[
     ("mov", "orr"),
     ("mov", "movz"),
     ("mov", "movn"),
+    ("mov", "ins"),
     ("neg", "sub"),
     ("sshll", "sxtl"),
     ("ushll", "uxtl"),

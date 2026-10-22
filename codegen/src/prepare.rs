@@ -169,6 +169,9 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     // comparisons.)
     lower_switches(cx, &mut f);
     crate::wide_vectors::scalarize(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
+    // (Aggregates of wide integers, as the overflow intrinsics' { i128,
+    // i1 }, as their fields first, which wide.rs then splits.)
+    crate::aggregates::scalarize(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     crate::wide::split_wide(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     crate::aggregates::scalarize(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     split_struct_selects(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
@@ -533,6 +536,94 @@ fn neon_intrinsics(cx: &mut Ctx, f: &mut Function) {
                         .collect();
                 }
                 Some(level[0])
+            } else if let Some((round, signed)) = match op {
+                // Conversions to integers by a rounding (saturating, as the
+                // instructions do): to nearest, even (n) or away (a), down
+                // (m), up (p), toward zero (z).
+                "fcvtns" => Some(("roundeven", true)),
+                "fcvtnu" => Some(("roundeven", false)),
+                "fcvtas" => Some(("round", true)),
+                "fcvtau" => Some(("round", false)),
+                "fcvtms" => Some(("floor", true)),
+                "fcvtmu" => Some(("floor", false)),
+                "fcvtps" => Some(("ceil", true)),
+                "fcvtpu" => Some(("ceil", false)),
+                "fcvtzs" => Some(("trunc", true)),
+                "fcvtzu" => Some(("trunc", false)),
+                _ => None,
+            } && args.len() == 1
+            {
+                let ft = cx.value_ty(s.f, args[0]);
+                let fm = crate::legalize::mangle(cx, ft);
+                let rm = crate::legalize::mangle(cx, rt);
+                let x = call_intrinsic(cx, &mut s, &format!("llvm.{round}.{fm}"), args, ft);
+                let sat = if signed { "fptosi" } else { "fptoui" };
+                Some(call_intrinsic(cx, &mut s, &format!("llvm.{sat}.sat.{rm}.{fm}"), vec![x], rt))
+            } else if matches!(
+                op,
+                "sqxtn"
+                    | "uqxtn"
+                    | "sqxtun"
+                    | "sqshrn"
+                    | "uqshrn"
+                    | "sqshrun"
+                    | "sqrshrn"
+                    | "uqrshrn"
+                    | "sqrshrun"
+                    | "rshrn"
+            ) && (args.len() == 1 || args.len() == 2)
+            {
+                // Narrowing with saturation: clamped to the narrow range,
+                // then truncated.
+                let wt = cx.value_ty(s.f, args[0]);
+                let (Type::Vector { elem: we, .. }, Type::Vector { elem: ne, .. }) =
+                    (cx.m.types.get(wt).clone(), cx.m.types.get(rt).clone())
+                else {
+                    unreachable!()
+                };
+                let (Type::Int(wb), Type::Int(nb)) = (cx.m.types.get(we).clone(), cx.m.types.get(ne).clone()) else {
+                    unreachable!()
+                };
+                let (lo, hi) = match op {
+                    "sqxtn" | "sqshrn" | "sqrshrn" => (-(1i64 << (nb - 1)), (1i64 << (nb - 1)) - 1),
+                    _ => (0, ((1u64 << nb) - 1) as i64),
+                };
+                let splat = |cx: &mut Ctx, v: i64| {
+                    let e = cx.m.consts.intern(Constant { ty: we, kind: ConstKind::Int(ApInt::from_i64(wb, v)) });
+                    Value::Const(cx.m.consts.intern(Constant { ty: wt, kind: ConstKind::Splat(e) }))
+                };
+                let wm = crate::legalize::mangle(cx, wt);
+                let (hc, lc) = (splat(cx, hi), splat(cx, lo));
+                // The shifting ones: shifted right first (arithmetically,
+                // but for an unsigned one's), rounding first if `r`.
+                let unsigned = op.starts_with('u');
+                let mut v = args[0];
+                if let Some(&sh) = args.get(1) {
+                    let n = cx.const_int(sh).unwrap_or(0);
+                    let shr = if unsigned { BinOp::LShr } else { BinOp::AShr };
+                    let k = splat(cx, n);
+                    let down = s.bin(shr, v, k, wt);
+                    v = if op.contains("rshr") && n > 0 {
+                        // Rounding: plus the last bit shifted out (as adding
+                        // half first would, without overflowing).
+                        let k1 = splat(cx, n - 1);
+                        let one = splat(cx, 1);
+                        let b = s.bin(BinOp::LShr, args[0], k1, wt);
+                        let b = s.bin(BinOp::And, b, one, wt);
+                        s.bin(BinOp::Add, down, b, wt)
+                    } else {
+                        down
+                    };
+                }
+                let x = if op == "rshrn" {
+                    v
+                } else if unsigned {
+                    call_intrinsic(cx, &mut s, &format!("llvm.umin.{wm}"), vec![v, hc], wt)
+                } else {
+                    let y = call_intrinsic(cx, &mut s, &format!("llvm.smin.{wm}"), vec![v, hc], wt);
+                    call_intrinsic(cx, &mut s, &format!("llvm.smax.{wm}"), vec![y, lc], wt)
+                };
+                Some(s.cast(CastOp::Trunc, x, rt))
             } else if matches!(op, "uaddlv" | "saddlv") && args.len() == 1 {
                 // The lanes widened, then added: as wide as the result.
                 let vt = cx.value_ty(s.f, args[0]);
@@ -1343,6 +1434,19 @@ fn mask_logic(cx: &mut Ctx, f: &mut Function) {
                     let zero = Value::Const(cx.m.consts.intern(Constant { ty: dt, kind: ConstKind::Zero }));
                     Some(s.op(Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: sh, rhs: zero }, rt))
                 }
+                // A lane of a constant, by a constant: the lane.
+                Op::ExtractElement { vector: Value::Const(c), index } if cx.const_int(index).is_some() => {
+                    let l = cx.const_int(index).unwrap() as usize;
+                    match cx.m.constant(c).kind.clone() {
+                        ConstKind::Vector(es) if l < es.len() => Some(Value::Const(es[l])),
+                        ConstKind::Splat(e) => Some(Value::Const(e)),
+                        ConstKind::Zero | ConstKind::Poison | ConstKind::Undef => {
+                            let kind = cx.m.constant(c).kind.clone();
+                            Some(Value::Const(cx.m.consts.intern(Constant { ty: rt, kind })))
+                        }
+                        _ => None,
+                    }
+                }
                 Op::Select { cond, then_value, else_value, .. }
                     if mask_len(cx, rt).is_some() && mask_len(cx, cx.value_ty(s.f, cond)).is_some() =>
                 {
@@ -1389,12 +1493,14 @@ fn mask_logic(cx: &mut Ctx, f: &mut Function) {
 }
 
 /// The halves of the 256-bit product of two 128-bit integers, which is how
-/// Rust's `u128` multiplications widen (`trunc (lshr (mul (zext a),
-/// (zext b)), 128)` for the high half, `trunc` of the product for the
-/// low): from the four 64-bit products of their halves, in 128 bits (which
-/// `wide.rs` does). What else is left of 256 bits is unused and removed.
+/// Rust's `u128` multiplications widen (`mul (zext a), (zext b)` in 256
+/// bits): from the four 64-bit products of their halves, in 128 bits
+/// (which `wide.rs` does), made once after the product; what uses it in
+/// terms of its halves (`trunc`s of it and of it shifted down 128, a
+/// comparison of its sign or of its high half with zero) uses them. What
+/// else is left of 256 bits is unused and removed.
 fn wide_products(cx: &mut Ctx, f: &mut Function) {
-    let (i64t, i128t, i256t) = (cx.m.types.int(64), cx.m.types.int(128), cx.m.types.int(256));
+    let (i64t, i128t, i256t, i1) = (cx.m.types.int(64), cx.m.types.int(128), cx.m.types.int(256), cx.m.types.int(1));
     if !f.locals.iter().any(|l| l.ty == i256t) {
         return;
     }
@@ -1403,10 +1509,85 @@ fn wide_products(cx: &mut Ctx, f: &mut Function) {
         let LocalDef::Inst(d) = f.locals[x.index()].def else { return None };
         Some(f.insts[d.index()].op.clone())
     };
-    // The 128-bit integer `v` was extended from.
-    let narrow = |cx: &Ctx, f: &Function, v: Value| -> Option<Value> {
+    // The 128-bit integer `v` was extended from (or is, a constant that
+    // fits).
+    let narrow = |cx: &mut Ctx, f: &Function, v: Value| -> Option<Value> {
+        if let Value::Const(c) = v
+            && let ConstKind::Int(a) = &cx.m.constant(c).kind
+        {
+            let w = a.words();
+            if w.iter().skip(2).any(|&x| x != 0) {
+                return None;
+            }
+            let hex = format!("{:016x}{:016x}", w.get(1).copied().unwrap_or(0), w[0]);
+            let n = ApInt::parse_hex(128, &hex, false)?;
+            return Some(Value::Const(cx.m.consts.intern(Constant { ty: i128t, kind: ConstKind::Int(n) })));
+        }
         match def(f, v)? {
             Op::Cast { op: CastOp::ZExt, value, .. } if cx.value_ty(f, value) == i128t => Some(value),
+            _ => None,
+        }
+    };
+    // Each product's halves, made after it.
+    let mut halves: std::collections::HashMap<LocalId, (Value, Value)> = std::collections::HashMap::new();
+    for b in f.layout.clone() {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            k += 1;
+            let Op::Binary { op: BinOp::Mul, lhs, rhs, .. } = f.insts[i.index()].op else { continue };
+            let r = f.insts[i.index()].result.unwrap();
+            if f.locals[r.index()].ty != i256t {
+                continue;
+            }
+            let (Some(a), Some(bv)) = (narrow(cx, f, lhs), narrow(cx, f, rhs)) else { continue };
+            let mut s = Seq { f, new: Vec::new() };
+            let k64 = cx.int(i128t, 64);
+            let half = |s: &mut Seq, x: Value, up: bool| {
+                let x = if up { s.bin(BinOp::LShr, x, k64, i128t) } else { x };
+                let t = s.cast(CastOp::Trunc, x, i64t);
+                s.cast(CastOp::ZExt, t, i128t)
+            };
+            let lo = s.bin(BinOp::Mul, a, bv, i128t);
+            let (a0, a1) = (half(&mut s, a, false), half(&mut s, a, true));
+            let (b0, b1) = (half(&mut s, bv, false), half(&mut s, bv, true));
+            let p00 = s.bin(BinOp::Mul, a0, b0, i128t);
+            let p01 = s.bin(BinOp::Mul, a0, b1, i128t);
+            let p10 = s.bin(BinOp::Mul, a1, b0, i128t);
+            let p11 = s.bin(BinOp::Mul, a1, b1, i128t);
+            let carry = s.bin(BinOp::LShr, p00, k64, i128t);
+            let l01 = half(&mut s, p01, false);
+            let l10 = half(&mut s, p10, false);
+            let mid = s.bin(BinOp::Add, carry, l01, i128t);
+            let mid = s.bin(BinOp::Add, mid, l10, i128t);
+            let h01 = s.bin(BinOp::LShr, p01, k64, i128t);
+            let h10 = s.bin(BinOp::LShr, p10, k64, i128t);
+            let hm = s.bin(BinOp::LShr, mid, k64, i128t);
+            let h = s.bin(BinOp::Add, p11, h01, i128t);
+            let h = s.bin(BinOp::Add, h, h10, i128t);
+            let hi = s.bin(BinOp::Add, h, hm, i128t);
+            let new = std::mem::take(&mut s.new);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..k, new);
+            k += n;
+            halves.insert(r, (hi, lo));
+        }
+    }
+    if halves.is_empty() {
+        return;
+    }
+    // The product of `v`, and whether `v` is it shifted down 128.
+    let product = |cx: &Ctx, f: &Function, v: Value| -> Option<(LocalId, bool)> {
+        let Value::Local(x) = v else { return None };
+        if halves.contains_key(&x) {
+            return Some((x, false));
+        }
+        match def(f, v)? {
+            Op::Binary { op: BinOp::LShr, lhs: Value::Local(p), rhs, .. }
+                if halves.contains_key(&p) && cx.const_int(rhs) == Some(128) =>
+            {
+                Some((p, true))
+            }
             _ => None,
         }
     };
@@ -1415,56 +1596,44 @@ fn wide_products(cx: &mut Ctx, f: &mut Function) {
         let mut k = 0;
         while k < f.blocks[b.index()].insts.len() {
             let i = f.blocks[b.index()].insts[k];
-            let Op::Cast { op: CastOp::Trunc, value, .. } = f.insts[i.index()].op else {
-                k += 1;
-                continue;
-            };
-            let r = f.insts[i.index()].result.unwrap();
-            if cx.value_ty(f, value) != i256t || f.locals[r.index()].ty != i128t {
-                k += 1;
-                continue;
-            }
-            // The product, and whether its high half is wanted.
-            let (prod, high) = match def(f, value) {
-                Some(Op::Binary { op: BinOp::LShr, lhs, rhs, .. }) if cx.const_int(rhs) == Some(128) => (lhs, true),
-                _ => (value, false),
-            };
-            let Some(Op::Binary { op: BinOp::Mul, lhs, rhs, .. }) = def(f, prod) else {
-                k += 1;
-                continue;
-            };
-            let (Some(a), Some(bv)) = (narrow(cx, f, lhs), narrow(cx, f, rhs)) else {
+            let Some(r) = f.insts[i.index()].result else {
                 k += 1;
                 continue;
             };
             let mut s = Seq { f, new: Vec::new() };
-            let v = if !high {
-                s.bin(BinOp::Mul, a, bv, i128t)
-            } else {
-                let k64 = cx.int(i128t, 64);
-                let half = |cx: &mut Ctx, s: &mut Seq, x: Value, up: bool| {
-                    let x = if up { s.bin(BinOp::LShr, x, k64, i128t) } else { x };
-                    let t = s.cast(CastOp::Trunc, x, i64t);
-                    let _ = cx;
-                    s.cast(CastOp::ZExt, t, i128t)
-                };
-                let (a0, a1) = (half(cx, &mut s, a, false), half(cx, &mut s, a, true));
-                let (b0, b1) = (half(cx, &mut s, bv, false), half(cx, &mut s, bv, true));
-                let p00 = s.bin(BinOp::Mul, a0, b0, i128t);
-                let p01 = s.bin(BinOp::Mul, a0, b1, i128t);
-                let p10 = s.bin(BinOp::Mul, a1, b0, i128t);
-                let p11 = s.bin(BinOp::Mul, a1, b1, i128t);
-                let carry = s.bin(BinOp::LShr, p00, k64, i128t);
-                let l01 = half(cx, &mut s, p01, false);
-                let l10 = half(cx, &mut s, p10, false);
-                let mid = s.bin(BinOp::Add, carry, l01, i128t);
-                let mid = s.bin(BinOp::Add, mid, l10, i128t);
-                let h01 = s.bin(BinOp::LShr, p01, k64, i128t);
-                let h10 = s.bin(BinOp::LShr, p10, k64, i128t);
-                let hm = s.bin(BinOp::LShr, mid, k64, i128t);
-                let h = s.bin(BinOp::Add, p11, h01, i128t);
-                let h = s.bin(BinOp::Add, h, h10, i128t);
-                s.bin(BinOp::Add, h, hm, i128t)
+            let v = match s.f.insts[i.index()].op.clone() {
+                Op::Cast { op: CastOp::Trunc, value, .. } if s.f.locals[r.index()].ty == i128t => {
+                    product(cx, s.f, value).map(|(p, high)| if high { halves[&p].0 } else { halves[&p].1 })
+                }
+                Op::ICmp { pred, lhs, rhs, .. } => match (product(cx, s.f, lhs), cx.const_int(rhs)) {
+                    // Its sign: its high half's.
+                    (Some((p, false)), Some(-1)) if pred == ICmpPred::Sgt => {
+                        let m1 = cx.int(i128t, -1);
+                        Some(s.op(Op::ICmp { pred, samesign: false, lhs: halves[&p].0, rhs: m1 }, i1))
+                    }
+                    (Some((p, false)), Some(0)) if pred == ICmpPred::Slt => {
+                        let z = cx.int(i128t, 0);
+                        Some(s.op(Op::ICmp { pred, samesign: false, lhs: halves[&p].0, rhs: z }, i1))
+                    }
+                    // Its high half with zero.
+                    (Some((p, true)), Some(0)) if matches!(pred, ICmpPred::Eq | ICmpPred::Ne) => {
+                        let z = cx.int(i128t, 0);
+                        Some(s.op(Op::ICmp { pred, samesign: false, lhs: halves[&p].0, rhs: z }, i1))
+                    }
+                    // All of it with zero.
+                    (Some((p, false)), Some(0)) if matches!(pred, ICmpPred::Eq | ICmpPred::Ne) => {
+                        let (h, l) = halves[&p];
+                        let o = s.bin(BinOp::Or, h, l, i128t);
+                        let z = cx.int(i128t, 0);
+                        Some(s.op(Op::ICmp { pred, samesign: false, lhs: o, rhs: z }, i1))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
+            let Some(v) = v else {
+                k += 1;
+                continue;
             };
             let new = std::mem::take(&mut s.new);
             f.replace_uses(Value::Local(r), v);

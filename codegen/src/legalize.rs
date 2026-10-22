@@ -668,6 +668,36 @@ fn canonical_shuffles(cx: &mut Ctx, f: &mut Function) {
             f.insts[i.index()].op = Op::ShuffleVector { a: b, b: poison, mask: m2 };
         }
     }
+    // A shuffle of 64-bit vectors into a 128-bit one (a splat of a lane of
+    // a <4 x i16> to <8 x i16>): of the two joined, the lanes numbered as
+    // they were.
+    for blk in f.layout.clone() {
+        let mut k = 0;
+        while k < f.blocks[blk.index()].insts.len() {
+            let i = f.blocks[blk.index()].insts[k];
+            k += 1;
+            let Op::ShuffleVector { a, b, mask } = f.insts[i.index()].op else { continue };
+            let Some(lanes) = crate::target::mask_lanes(cx.m, mask) else { continue };
+            let aty = cx.value_ty(f, a);
+            let Some((len, elem, eb)) = vec_info(cx, aty) else { continue };
+            if len * eb != 64 || lanes.len() as u32 != 2 * len || eb == 1 {
+                continue;
+            }
+            let all: Vec<i32> = (0..2 * len as i32).collect();
+            if lanes == all {
+                continue;
+            }
+            let wide = vec_ty(cx, 2 * len, elem);
+            let mut bld = Builder { f, new: Vec::new() };
+            let joined = shuffle(&mut bld, cx, a, b, &all, wide);
+            let new = bld.new;
+            let pw = poison(cx, wide);
+            f.insts[i.index()].op = Op::ShuffleVector { a: joined, b: pw, mask };
+            let n = new.len();
+            f.blocks[blk.index()].insts.splice(k - 1..k - 1, new);
+            k += n;
+        }
+    }
 }
 
 /// A select of whole vectors (that a register holds) by one boolean: by a
@@ -1318,7 +1348,15 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     chain_casts(cx, f);
     let mut parts: HashMap<LocalId, Vec<Value>> = HashMap::new();
     let mut pending_phis: Vec<(Vec<InstId>, InstId)> = Vec::new();
-    let blocks: Vec<BlockId> = f.layout.clone();
+    // In an order where values come before their uses (but phis'), as the
+    // layout need not be: a block of uses placed before the loop making
+    // what they use.
+    let mut blocks = crate::wide::reverse_postorder(f);
+    for &b in &f.layout {
+        if !blocks.contains(&b) {
+            blocks.push(b);
+        }
+    }
     for blk in blocks {
         let mut k = 0;
         while k < f.blocks[blk.index()].insts.len() {
@@ -1408,6 +1446,20 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                     let pt = part(cx, vlen, elem, eb);
                     let t = parts_of(cx, &parts, bld.f, then_value, n, pt)?;
                     let e = parts_of(cx, &parts, bld.f, else_value, n, pt)?;
+                    // A splat of one boolean is that boolean.
+                    let cond = match cond {
+                        Value::Local(x)
+                            if !parts.contains_key(&x)
+                                && let LocalDef::Inst(d) = bld.f.locals[x.index()].def
+                                && is_bool_splat(cx, bld.f, d)
+                                && let Op::ShuffleVector { a: Value::Local(ins), .. } = bld.f.insts[d.index()].op
+                                && let LocalDef::Inst(e) = bld.f.locals[ins.index()].def
+                                && let Op::InsertElement { element, .. } = bld.f.insts[e.index()].op =>
+                        {
+                            element
+                        }
+                        c => c,
+                    };
                     let c: Vec<Value> = match cond {
                         Value::Local(x) if parts.contains_key(&x) => parts[&x].clone(),
                         // A scalar condition chooses whole parts: scalars by
@@ -1446,6 +1498,18 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                                 }
                                 _ => vec![v; n],
                             }
+                        }
+                        // Values split lane by lane, by a mask that is not:
+                        // its lanes.
+                        v if !matches!(cx.m.types.get(pt), Type::Vector { .. }) => {
+                            let i1 = cx.m.types.int(1);
+                            let i64t = cx.m.types.int(64);
+                            (0..n)
+                                .map(|l| {
+                                    let idx = cx.int(i64t, l as i64);
+                                    bld.op(Op::ExtractElement { vector: v, index: idx }, Some(i1))
+                                })
+                                .collect()
                         }
                         _ => return Err("a select whose mask is not split as its values are".into()),
                     };
