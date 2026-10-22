@@ -653,6 +653,44 @@ so the recipes for quantising, scaling and conversion work on four vectors
 in registers of their own (z20-z31); int8 went from 32 to 19 ms a window
 when its output step did.
 
+### 5.10 From JAX: StableHLO
+
+JAX exports StableHLO (`jax.jit(f).lower(x).compiler_ir("stablehlo")`,
+printed in the generic form). `stablehlo-to-linalg`
+(`mlir/src/stablehlo_to_linalg.rs`, written from the StableHLO
+specification's definitions) takes it to `linalg` on tensors, after which
+the pipeline is the one a PyTorch model takes:
+
+| StableHLO | `linalg` on tensors |
+| --- | --- |
+| element-wise operations (`add`, `multiply`, `exponential`, `logistic`, `tanh`, `maximum`, ...) | a `linalg.generic`, its body from `mlir/dialects/stablehlo.mlir`, data as for `torch` |
+| `constant` | `arith.constant`; data over 64 bytes becomes a `dense_resource` blob, as weights are |
+| `broadcast_in_dim` | a generic reading the operand through the dimensions it maps to; of a scalar constant, a `linalg.fill` |
+| `dot_general` | a generic over batch, free and contracting dimensions, operands transposed first where needed so that a product has `linalg.matmul`'s or `linalg.batch_matmul`'s maps (a constant's transpose is folded away; the SME kernels match) |
+| `reduce` (one operand, one combining operation, a constant start) | `linalg.fill` and a generic with reduction iterators |
+| `transpose`, `reshape` | a generic; `tensor.collapse_shape` then `tensor.expand_shape` |
+| `convert`, `compare`, `select`, `iota` | generics with `arith` casts, `cmpf`/`cmpi`, `select`, `linalg.index` |
+| `func.call` of a private function (JAX makes one of `jnp.where`) | inlined |
+
+`examples/jax.rs` compiles an attention block that `examples/jax/export.py`
+exports (64 positions: a projection, GELU, a leaky ReLU, four heads, a causal
+softmax, an output projection, 32 KB of weights), links it with a Rust
+driver and compares it with JAX's own output, which
+`mlir/tests/stablehlo.rs` also does from a copy of the export
+(`mlir/tests/jax`). On an M4 Pro:
+
+| Built with | Largest difference from JAX (of the largest value) | A call |
+| --- | --- | --- |
+| loops (NEON) | 4.0e-7 | 2065 us |
+| `--sme` | 3.5e-7 | 85 us |
+| `--sme --weights=bf16` | 1.6e-3 | 86 us |
+| JAX itself (XLA on the CPU, from Python) | | 167 us |
+
+Not yet: `slice`, `concatenate`, `gather`, `scatter`, reductions of several
+operands, and dynamic shapes. JAX writes each element-wise operation as its
+own; fusing them (upstream's `linalg-fuse-elementwise-ops`) would save
+memory traffic for both front ends.
+
 ## 6. Dialect descriptions
 
 A description is written in the dialect it lowers to. `torch` lowers to

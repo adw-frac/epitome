@@ -24,6 +24,7 @@ pub mod linalg_vectorize;
 pub mod math_approx;
 pub mod parser;
 pub mod printer;
+pub mod stablehlo_to_linalg;
 pub mod to_llvm;
 pub mod torch_to_linalg;
 pub mod translate;
@@ -36,6 +37,7 @@ pub use printer::print_module;
 /// lower: from `torch` down to the `llvm` dialect.
 pub const PASSES: &[&str] = &[
     "torch-to-linalg",
+    "stablehlo-to-linalg",
     "linalg-generalize-named-ops",
     "linalg-fold-constants",
     "bufferize",
@@ -78,6 +80,7 @@ pub fn run_pass(name: &str, m: &Module) -> Result<Module, String> {
         }
         "math-polynomial-approximation" => math_approx::run(m),
         "torch-to-linalg" => torch_to_linalg::run(m),
+        "stablehlo-to-linalg" => stablehlo_to_linalg::run(m),
         "bufferize" => bufferize::run(m),
         "linalg-to-loops" => linalg_to_loops::run(m),
         "to-llvm" => to_llvm::run(m),
