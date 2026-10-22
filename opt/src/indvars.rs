@@ -11,7 +11,9 @@
 //!   a signed comparison, `nuw` for unsigned) and a guard proving the loop
 //!   only starts when `start < bound`, the counter reaches `bound` exactly,
 //!   so `i.next < bound` is `i.next != bound`. The same holds counting down
-//!   by 1 with `>`. The trip count is `bound - start`.
+//!   by 1 with `>`. The trip count is `bound - start`. With a larger
+//!   constant step, the start and bound must be constants and the step
+//!   divide their distance.
 //! - **Exit values.** The exit is taken exactly when `i.next == bound`, so
 //!   an exit phi that takes `i.next` along the latch's exit edge takes
 //!   `bound` instead, and no longer needs the loop to compute it.
@@ -295,6 +297,16 @@ fn exact_exit(sh: &Shared, f: &mut Function, guard: BlockId, into: BlockId, iv: 
     let ok = match (iv.step, e.pred) {
         (1, ICmpPred::Slt) | (-1, ICmpPred::Sgt) => iv.flags.contains(IntFlags::NSW),
         (1, ICmpPred::Ult) => iv.flags.contains(IntFlags::NUW),
+        // A larger step, from a constant start to a constant bound it
+        // divides the distance to (a vectorized loop, 4 at a time): the
+        // counter reaches the bound exactly, and cannot wrap before.
+        (s, ICmpPred::Slt | ICmpPred::Ult) if s > 1 => match (int_of(sh, iv.start), int_of(sh, e.bound)) {
+            (Some(a), Some(b)) => {
+                let (a, b) = (eval::sext(a.value, a.bits), eval::sext(b.value, b.bits));
+                a < b && a >= 0 && (b - a) % s == 0
+            }
+            _ => false,
+        },
         _ => false,
     };
     if !ok || !starts_inside(sh, f, guard, into, iv, e.pred, e.bound) {

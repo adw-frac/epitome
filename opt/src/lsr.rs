@@ -2,14 +2,16 @@
 //! stepped through the arrays, and the counter counts down to zero.
 //!
 //! In a loop that tests at the bottom (see `rotate`), with a counter
-//! `i = phi [start, preheader], [i + 1, latch]` that `indvars` has given an
-//! exact exit test (`i.next != bound`):
+//! `i = phi [start, preheader], [i + s, latch]` for a constant step `s`
+//! that `indvars` has given an exact exit test (`i.next != bound`):
 //!
 //! - each `getelementptr T, ptr %base, i64 %i`, for a `%base` that does not
 //!   change in the loop, becomes a pointer of its own,
-//!   `p = phi [&base[start], preheader], [p + 1, latch]`;
+//!   `p = phi [&base[start], preheader], [p + s, latch]`; so does one
+//!   indexed by `%o + %i`, for an `%o` that does not change in the loop
+//!   (a row of a matrix: `&base[o + start]` to start);
 //! - the counter becomes `bound - i`, so the exit test is a comparison with
-//!   zero: `c.next = c - 1; c.next != 0`.
+//!   zero: `c.next = c - s; c.next != 0`.
 //!
 //! On machines with post-increment addressing (AArch64's `ldr x0, [x1],
 //! #8`), stepping a pointer costs nothing beyond the load or store, and a
@@ -28,8 +30,9 @@ use epitome_ir::types::{Type, TypeId};
 use crate::ctx::Shared;
 use crate::loops::{self, Loop};
 
-/// Most arrays turned into pointers in one loop.
-const MAX_POINTERS: usize = 2;
+/// Most arrays turned into pointers in one loop: two inputs and an output
+/// of an element-wise loop, and one more.
+const MAX_POINTERS: usize = 4;
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct Stats {
@@ -71,6 +74,26 @@ fn invariant(f: &Function, l: &Loop, v: Value) -> bool {
     match def_inst(f, v) {
         Some(d) => !l.blocks.iter().any(|b| f.blocks[b.index()].insts.contains(&d)),
         None => !matches!(v, Value::Metadata(_)),
+    }
+}
+
+/// Whether `a` and `b` are the same value: the same, or the same integer
+/// operation on the same values (two copies of a row's offset that LICM took
+/// out of a loop, which CSE has not yet merged), looking `depth` deep.
+fn same(f: &Function, a: Value, b: Value, depth: u32) -> bool {
+    if a == b {
+        return true;
+    }
+    if depth == 0 {
+        return false;
+    }
+    let (Some(x), Some(y)) = (def_inst(f, a), def_inst(f, b)) else { return false };
+    match (&f.insts[x.index()].op, &f.insts[y.index()].op) {
+        (
+            &Op::Binary { op: o1, lhs: l1, rhs: r1, flags: f1, .. },
+            &Op::Binary { op: o2, lhs: l2, rhs: r2, flags: f2, .. },
+        ) => o1 == o2 && f1 == f2 && same(f, l1, l2, depth - 1) && same(f, r1, r2, depth - 1),
+        _ => false,
     }
 }
 
@@ -120,12 +143,14 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[V
         let (Some(start), Some(next)) = (start, next) else { continue };
         let Some(inc) = def_inst(f, next) else { continue };
         let i_v = Value::Local(r);
-        let one = sh.int(64, 1);
-        match f.insts[inc.index()].op {
-            Op::Binary { op: BinOp::Add, lhs, rhs, .. } if (lhs == i_v && rhs == one) || (rhs == i_v && lhs == one) => {
-            }
-            _ => continue,
-        }
+        // The step: a positive constant.
+        let step = match f.insts[inc.index()].op {
+            Op::Binary { op: BinOp::Add, lhs, rhs, .. } if lhs == i_v => int_const(sh, rhs),
+            Op::Binary { op: BinOp::Add, lhs, rhs, .. } if rhs == i_v => int_const(sh, lhs),
+            _ => None,
+        };
+        let Some(step) = step.filter(|&s| s > 0) else { continue };
+        let step_v = sh.int(64, step);
         // The exit test: the latch's branch on `i` or `i.next` against a
         // bound that does not change, for equality.
         let Some(t) = f.terminator(latch) else { continue };
@@ -144,38 +169,72 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[V
         if users(f, cond) != vec![t] {
             continue;
         }
-        // Every use of the counter: its increment, the test, or an index.
-        let mut geps: Vec<(InstId, Value, TypeId)> = Vec::new();
-        let ok_users = users(f, i_v).into_iter().all(|u| {
-            if u == inc || u == cmp || u == phi {
-                return true;
-            }
-            match &f.insts[u.index()].op {
-                Op::Gep { ptr, indices, source_ty, .. }
-                    if indices.as_slice() == [i_v] && *ptr != i_v && invariant(f, l, *ptr) && in_loop(f, l, u) =>
-                {
-                    let g = f.result(u);
-                    let addr_only = users(f, g).into_iter().all(|x| match &f.insts[x.index()].op {
-                        Op::Load { ptr, .. } => *ptr == g,
-                        Op::Store { ptr, value, .. } => *ptr == g && *value != g,
-                        _ => false,
-                    });
-                    if addr_only {
-                        geps.push((u, *ptr, *source_ty));
-                    }
-                    addr_only
+        // Every use of the counter: its increment, the test, or an index:
+        // the counter plus, perhaps, something that does not change in the
+        // loop, plus a constant (a vectorized loop unrolled reads
+        // `o + i + 4`). Each address: (the gep, its base, the offset that is
+        // not constant, the constant, its type).
+        let mut geps: Vec<(InstId, Value, Option<Value>, i64, TypeId)> = Vec::new();
+        let mut offsets: Vec<InstId> = Vec::new();
+        let mut work: Vec<(Value, Option<Value>, i64)> = vec![(i_v, None, 0)];
+        let mut ok_users = true;
+        'walk: while let Some((v, off, c)) = work.pop() {
+            for u in users(f, v) {
+                if v == i_v && (u == inc || u == cmp || u == phi) {
+                    continue;
                 }
-                _ => false,
+                match &f.insts[u.index()].op {
+                    Op::Gep { ptr, indices, source_ty, .. }
+                        if indices.as_slice() == [v] && *ptr != v && invariant(f, l, *ptr) && in_loop(f, l, u) =>
+                    {
+                        let g = f.result(u);
+                        let addr_only = users(f, g).into_iter().all(|x| match &f.insts[x.index()].op {
+                            Op::Load { ptr, .. } => *ptr == g,
+                            Op::Store { ptr, value, .. } => *ptr == g && *value != g,
+                            _ => false,
+                        });
+                        if !addr_only {
+                            ok_users = false;
+                            break 'walk;
+                        }
+                        geps.push((u, *ptr, off, c, *source_ty));
+                    }
+                    &Op::Binary { op: BinOp::Add, lhs, rhs, .. } if in_loop(f, l, u) => {
+                        let x = if lhs == v { rhs } else { lhs };
+                        let a = f.result(u);
+                        match int_const(sh, x) {
+                            Some(k) if x != v => work.push((a, off, c.wrapping_add(k))),
+                            None if x != v && off.is_none() && invariant(f, l, x) => work.push((a, Some(x), c)),
+                            _ => {
+                                ok_users = false;
+                                break 'walk;
+                            }
+                        }
+                        offsets.push(u);
+                    }
+                    _ => {
+                        ok_users = false;
+                        break 'walk;
+                    }
+                }
             }
-        });
+        }
         let next_users = users(f, next);
         if !ok_users || !next_users.iter().all(|&u| u == phi || u == cmp) {
             continue;
         }
-        let mut bases: Vec<(Value, TypeId)> = Vec::new();
-        for &(_, b, ty) in &geps {
-            if !bases.contains(&(b, ty)) {
-                bases.push((b, ty));
+        // One pointer for each base and offset, offsets that are the same
+        // value counting as one.
+        let same_offset = |f: &Function, x: Option<Value>, y: Option<Value>| match (x, y) {
+            (None, None) => true,
+            (Some(x), Some(y)) => same(f, x, y, 4),
+            _ => false,
+        };
+        let mut bases: Vec<(Value, Option<Value>, TypeId)> = Vec::new();
+        for g in geps.iter_mut() {
+            match bases.iter().find(|&&(b, o, ty)| b == g.1 && ty == g.4 && same_offset(f, o, g.2)) {
+                Some(&(_, o, _)) => g.2 = o,
+                None => bases.push((g.1, g.2, g.4)),
             }
         }
         if bases.len() > MAX_POINTERS {
@@ -202,11 +261,33 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[V
         let mut before_latch: Vec<InstId> = Vec::new();
 
         // A pointer for each array.
-        for (base, ty) in bases {
-            let ptr_ty = f.locals
-                [f.insts[geps.iter().find(|g| g.1 == base && g.2 == ty).unwrap().0.index()].result.unwrap().index()]
+        for (base, off, ty) in bases {
+            let ptr_ty = f.locals[f.insts
+                [geps.iter().find(|g| g.1 == base && g.2 == off && g.4 == ty).unwrap().0.index()]
+            .result
+            .unwrap()
+            .index()]
             .ty;
-            let first = if int_const(sh, start) == Some(0) {
+            // Where it starts: base[start], or base[o + start].
+            let first_index = match off {
+                None => start,
+                Some(o) if int_const(sh, start) == Some(0) => o,
+                Some(o) => {
+                    let a = f.add_inst(
+                        Op::Binary {
+                            op: BinOp::Add,
+                            flags: IntFlags::NONE,
+                            fmf: FastMath::default(),
+                            lhs: o,
+                            rhs: start,
+                        },
+                        Some((Some(names.fresh("lsr.offset")), i64t)),
+                    );
+                    before_pre.push(a);
+                    f.result(a)
+                }
+            };
+            let first = if off.is_none() && int_const(sh, start) == Some(0) {
                 base
             } else {
                 let g = f.add_inst(
@@ -215,7 +296,7 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[V
                         inrange: None,
                         source_ty: ty,
                         ptr: base,
-                        indices: vec![start],
+                        indices: vec![first_index],
                     },
                     Some((Some(names.fresh("lsr.start")), ptr_ty)),
                 );
@@ -229,7 +310,7 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[V
             f.blocks[h.index()].insts.insert(0, p);
             let pv = f.result(p);
             let step = f.add_inst(
-                Op::Gep { flags: GepFlags::default(), inrange: None, source_ty: ty, ptr: pv, indices: vec![one] },
+                Op::Gep { flags: GepFlags::default(), inrange: None, source_ty: ty, ptr: pv, indices: vec![step_v] },
                 Some((Some(names.fresh("lsr.ptr.next")), ptr_ty)),
             );
             before_latch.push(step);
@@ -238,12 +319,24 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[V
                 incoming.push((first, pre));
                 incoming.push((sv, latch));
             }
-            for &(g, b, t2) in &geps {
-                if b == base && t2 == ty {
-                    let gv = f.result(g);
-                    f.replace_uses(gv, pv);
-                    for blk in &l.blocks {
-                        f.blocks[blk.index()].insts.retain(|&x| x != g);
+            for &(g, b, o, c, t2) in &geps {
+                if b == base && o == off && t2 == ty {
+                    if c == 0 {
+                        let gv = f.result(g);
+                        f.replace_uses(gv, pv);
+                        for blk in &l.blocks {
+                            f.blocks[blk.index()].insts.retain(|&x| x != g);
+                        }
+                    } else {
+                        // A constant distance from the pointer: an
+                        // immediate offset in the load or store.
+                        f.insts[g.index()].op = Op::Gep {
+                            flags: GepFlags::default(),
+                            inrange: None,
+                            source_ty: ty,
+                            ptr: pv,
+                            indices: vec![sh.int(64, c)],
+                        };
                     }
                 }
             }
@@ -276,9 +369,15 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[V
                 }
             }
         }
-        let minus_one = sh.int(64, -1);
+        // The offsets added to the counter are no longer used.
+        for &a in &offsets {
+            for blk in &l.blocks {
+                f.blocks[blk.index()].insts.retain(|&x| x != a);
+            }
+        }
+        let minus_step = sh.int(64, -step);
         f.insts[inc.index()].op =
-            Op::Binary { op: BinOp::Add, flags: IntFlags::NONE, fmf: FastMath::default(), lhs: i_v, rhs: minus_one };
+            Op::Binary { op: BinOp::Add, flags: IntFlags::NONE, fmf: FastMath::default(), lhs: i_v, rhs: minus_step };
         let zero = sh.int(64, 0);
         f.insts[cmp.index()].op = Op::ICmp { pred, samesign: false, lhs: tested, rhs: zero };
         f.locals[r.index()].name = Some(names.fresh("lsr.count"));

@@ -118,6 +118,9 @@ struct Plan {
     combine: Option<Vec<OpId>>,
 }
 
+/// How many vectors of partial results a reduction keeps, at most.
+const UNROLL: u64 = 4;
+
 /// Operations whose vector form is the same operation on vectors.
 const ELEMENTWISE: &[&str] = &[
     "arith.addf",
@@ -472,11 +475,16 @@ impl Vectorize<'_> {
         let bargs = src.blocks[body.index()].args.clone();
         let ops = src.blocks[body.index()].ops.clone();
 
-        // The outer loops.
+        // The outer loops; a dimension of one is index 0, not a loop.
         let mut at = block;
         let mut ivs = Vec::new();
         let mut loops = Vec::new();
         for &s in &plan.sizes[..d] {
+            if s == 1 {
+                let zero = self.index_const(at, 0);
+                ivs.push(zero);
+                continue;
+            }
             let (f, b, iv, _) = self.for_loop(at, s, 1, &[]);
             loops.push((f, b));
             ivs.push(iv);
@@ -536,31 +544,71 @@ impl Vectorize<'_> {
                     };
                     inits.push(init);
                 }
-                let (f, inner, iv, accs) = self.for_loop(at, plan.sizes[d], self.width, &inits);
-                ivs.push(iv);
-                for (k, &v) in operands[..n_ins].iter().enumerate() {
-                    let idx = self.indices(inner, &plan.maps[k], &ivs);
-                    let x = self.load(inner, v, &idx, plan.vector[k]);
-                    self.map.insert(bargs[k], x);
-                }
-                // The body, each output's old value standing for the vector of
-                // partial results.
-                for (k, &acc) in accs.iter().enumerate() {
-                    self.map.insert(bargs[n_ins + k], acc);
-                }
+                // UNROLL vectors of partial results for each output, each
+                // its own chain of combining: one would make each step wait
+                // for the one before (a sum: the latency of an addition).
+                let vectors = plan.sizes[d] / self.width;
+                let unroll = [UNROLL, 2, 1].into_iter().find(|&u| vectors % u == 0 && vectors >= u).unwrap();
+                let carried: Vec<ValueId> = (0..unroll as usize).flat_map(|_| inits.iter().copied()).collect();
+                let (f, inner, iv, accs) = self.for_loop(at, plan.sizes[d], self.width * unroll, &carried);
                 let mut next = Vec::new();
-                for &p in &ops {
-                    if src.op_name(p) == "linalg.yield" {
-                        for y in &src.ops[p.index()].operands {
-                            next.push(*self.map.get(y).ok_or("a yield of an unknown value")?);
-                        }
-                        break;
+                for u in 0..unroll as usize {
+                    let ivu = if u == 0 {
+                        iv
+                    } else {
+                        let off = self.index_const(inner, (u as u64 * self.width) as i64);
+                        let index = self.out.index_type();
+                        let a = OpSpec::new("arith.addi")
+                            .operands(&[iv, off])
+                            .results(&[index])
+                            .build(self.out, Some(inner));
+                        self.out.result(a)
+                    };
+                    let mut ivs_u = ivs.clone();
+                    ivs_u.push(ivu);
+                    for (k, &v) in operands[..n_ins].iter().enumerate() {
+                        let idx = self.indices(inner, &plan.maps[k], &ivs_u);
+                        let x = self.load(inner, v, &idx, plan.vector[k]);
+                        self.map.insert(bargs[k], x);
                     }
-                    self.body_op(inner, p, &ivs)?;
+                    // The body, each output's old value standing for this
+                    // copy's vector of partial results.
+                    for k in 0..combine.len() {
+                        self.map.insert(bargs[n_ins + k], accs[u * combine.len() + k]);
+                    }
+                    for &p in &ops {
+                        if src.op_name(p) == "linalg.yield" {
+                            for y in &src.ops[p.index()].operands {
+                                next.push(*self.map.get(y).ok_or("a yield of an unknown value")?);
+                            }
+                            break;
+                        }
+                        self.body_op(inner, p, &ivs_u)?;
+                    }
                 }
                 OpSpec::new("scf.yield").operands(&next).build(self.out, Some(inner));
+                // Each output's vectors combined, in pairs.
+                let results = self.out.ops[f.index()].results.clone();
+                let fm = self.out.dialect_attr("arith.fastmath", Some("<none>"));
+                let mut partial = Vec::new();
+                for (k, &c) in combine.iter().enumerate() {
+                    let mut vs: Vec<ValueId> = (0..unroll as usize).map(|u| results[u * combine.len() + k]).collect();
+                    while vs.len() > 1 {
+                        let ty = self.out.value_type(vs[0]);
+                        let mut pairs = Vec::new();
+                        for pair in vs.chunks(2) {
+                            let v = OpSpec::new(src.op_name(c))
+                                .operands(pair)
+                                .results(&[ty])
+                                .prop("fastmath", fm)
+                                .build(self.out, Some(at));
+                            pairs.push(self.out.result(v));
+                        }
+                        vs = pairs;
+                    }
+                    partial.push(vs[0]);
+                }
                 // The lanes combined, then with the old value.
-                let partial = self.out.ops[f.index()].results.clone();
                 for (k, &c) in combine.iter().enumerate() {
                     let kind = match src.op_name(c) {
                         "arith.addf" => "add",

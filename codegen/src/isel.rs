@@ -104,6 +104,10 @@ pub struct Sel<'a, 'b> {
     uses: Vec<u32>,
     inst_block: Vec<Option<BlockId>>,
     pos: Vec<usize>,
+    /// Each local's last two uses, in layout order: a post-increment of a
+    /// pointer must be at its last use before the increment, or the old
+    /// pointer stays live beside the new and costs a copy.
+    last_uses: Vec<[Option<InstId>; 2]>,
     /// The bits above which a register is known to be zero.
     zbits: HashMap<VReg, u32>,
     /// Instructions whose values are wanted in registers.
@@ -249,10 +253,15 @@ impl<'a, 'b> Sel<'a, 'b> {
         global: bool,
     ) -> Self {
         let mut uses = vec![0u32; f.locals.len()];
+        let mut last_uses = vec![[None; 2]; f.locals.len()];
         for i in f.insts_in_order() {
             f.insts[i.index()].op.for_each_value(|v| {
                 if let Value::Local(x) = v {
                     uses[x.index()] += 1;
+                    let l: &mut [Option<InstId>; 2] = &mut last_uses[x.index()];
+                    if l[1] != Some(i) {
+                        *l = [l[1], Some(i)];
+                    }
                 }
             });
         }
@@ -305,6 +314,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             uses,
             inst_block,
             pos,
+            last_uses,
             zbits: HashMap::new(),
             needed: HashSet::new(),
             covered: HashSet::new(),
@@ -726,6 +736,24 @@ impl<'a, 'b> Sel<'a, 'b> {
         let mut extras = Vec::new();
         for (tree, operand) in &p.extra {
             let x = self.find_extra(tree, covered[0], &mut params)?;
+            // The base written back: its last use must be the increment,
+            // and the one before, this instruction or one before it.
+            if let crate::target::Tree::Op(_, kids) = tree
+                && let Some(crate::target::Tree::Leaf(k)) = kids.first()
+                && let Some(Term::V(Value::Local(base))) = params[*k]
+            {
+                let [before, last] = self.last_uses[base.index()];
+                let root = covered[0];
+                let ok = last == Some(x)
+                    && before.is_none_or(|u| {
+                        u == root
+                            || (self.inst_block[u.index()] == self.inst_block[root.index()]
+                                && self.pos[u.index()] < self.pos[root.index()])
+                    });
+                if !ok {
+                    return None;
+                }
+            }
             covered.push(x);
             extras.push((x, *operand));
         }

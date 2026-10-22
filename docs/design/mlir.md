@@ -526,8 +526,9 @@ tokens:
 elements at a time, with `vector.load`, `vector.store`,
 `vector.broadcast` and the body on `vector<width x f32>`, when the
 innermost loop is the last, contiguous dimension of each operand it
-indexes. A reduction along it carries a vector of partial results in the
-loop (`scf.for` with `iter_args`) and combines the lanes at the end
+indexes. A reduction along it carries up to four vectors of partial results in
+the loop (`scf.for` with `iter_args`; one would make each step wait for the
+addition before), combines them, and then the lanes
 (`vector.reduction`). Upstream vectorizes to n-dimensional vectors and
 unrolls them to the native width later; this goes to the native width at
 once. What it cannot vectorize, it leaves for `linalg-to-loops`.
