@@ -27,6 +27,9 @@ pub const SHT_SYMTAB: u32 = 2;
 pub const SHT_STRTAB: u32 = 3;
 pub const SHT_RELA: u32 = 4;
 pub const SHT_NOBITS: u32 = 8;
+pub const SHT_INIT_ARRAY: u32 = 14;
+pub const SHT_FINI_ARRAY: u32 = 15;
+pub const SHT_PREINIT_ARRAY: u32 = 16;
 
 pub const SHF_WRITE: u64 = 1;
 pub const SHF_ALLOC: u64 = 2;
@@ -188,8 +191,17 @@ pub fn write(obj: &Object, m: &Machine) -> Result<Vec<u8>, String> {
         let bss = s.kind == SectionKind::Bss;
         let offset = put(&mut out, if bss { &[] } else { &s.data }, s.align);
         headers.push(Header {
-            name: shstr.add(section_name(s.kind)),
-            ty: if bss { SHT_NOBITS } else { SHT_PROGBITS },
+            name: shstr.add(s.name.as_deref().unwrap_or(section_name(s.kind))),
+            ty: if bss {
+                SHT_NOBITS
+            } else {
+                match s.name.as_deref() {
+                    Some(n) if n.starts_with(".init_array") => SHT_INIT_ARRAY,
+                    Some(n) if n.starts_with(".fini_array") => SHT_FINI_ARRAY,
+                    Some(n) if n.starts_with(".preinit_array") => SHT_PREINIT_ARRAY,
+                    _ => SHT_PROGBITS,
+                }
+            },
             flags: section_flags(s.kind),
             offset,
             size: s.size(),
@@ -218,7 +230,7 @@ pub fn write(obj: &Object, m: &Machine) -> Result<Vec<u8>, String> {
         }
         let offset = put(&mut out, &bytes, 8);
         headers.push(Header {
-            name: shstr.add(&format!(".rela{}", section_name(s.kind))),
+            name: shstr.add(&format!(".rela{}", s.name.as_deref().unwrap_or(section_name(s.kind)))),
             ty: SHT_RELA,
             flags: SHF_INFO_LINK,
             offset,

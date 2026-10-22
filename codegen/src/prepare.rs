@@ -144,8 +144,10 @@ impl Ctx<'_> {
 pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, String> {
     let mut f = f.clone();
     neon_intrinsics(cx, &mut f);
+    number_min_max(cx, &mut f);
     thread_locals(cx, &mut f);
     const_exprs(cx, &mut f);
+    addresses_as_ints(&mut f);
     half_as_int(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     identity_bitcasts(&mut f);
     one_lane_vectors(cx, &mut f);
@@ -448,6 +450,56 @@ fn split_struct_phis(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         f.blocks[b.index()].insts = list;
     }
     Ok(())
+}
+
+/// `ptrtoaddr`: a pointer's address, which on the targets described is
+/// all of it, as `ptrtoint` (after `const_exprs`, which makes constant
+/// ones instructions).
+fn addresses_as_ints(f: &mut Function) {
+    for inst in &mut f.insts {
+        if let Op::Cast { op: op @ CastOp::PtrToAddr, .. } = &mut inst.op {
+            *op = CastOp::PtrToInt;
+        }
+    }
+}
+
+/// `llvm.minimumnum` and `llvm.maximumnum` (Rust's `f32::min`), which
+/// take a number over any NaN, as `llvm.minnum` and `llvm.maxnum` of the
+/// operands each made quiet by its minnum with itself (fminnm gives NaN
+/// for a signalling NaN).
+fn number_min_max(cx: &mut Ctx, f: &mut Function) {
+    for b in f.layout.clone() {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let to = match &f.insts[i.index()].op {
+                Op::Call(call) => callee_name(cx.m, call).and_then(|name| {
+                    let (op, suffix) = name.strip_prefix("llvm.")?.split_once('.')?;
+                    let to = match op {
+                        "minimumnum" => "minnum",
+                        "maximumnum" => "maxnum",
+                        _ => return None,
+                    };
+                    let args: Vec<Value> = call.args.iter().map(|a| a.value).collect();
+                    Some((format!("llvm.{to}.{suffix}"), format!("llvm.minnum.{suffix}"), args))
+                }),
+                _ => None,
+            };
+            let (Some((name, quiet, args)), Some(r)) = (to, f.insts[i.index()].result) else {
+                k += 1;
+                continue;
+            };
+            let rt = f.locals[r.index()].ty;
+            let mut s = Seq { f, new: Vec::new() };
+            let q: Vec<Value> = args.iter().map(|&a| call_intrinsic(cx, &mut s, &quiet, vec![a, a], rt)).collect();
+            let v = call_intrinsic(cx, &mut s, &name, q, rt);
+            let new = std::mem::take(&mut s.new);
+            f.replace_uses(Value::Local(r), v);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
 }
 
 /// NEON's intrinsics that LLVM has generic ones for (Rust's `std::arch`
@@ -2115,11 +2167,18 @@ fn one_lane_vectors(cx: &mut Ctx, f: &mut Function) {
 
 /// Whether constant `c` has arithmetic in it (`add (i64 ptrtoint (ptr @g
 /// to i64), i64 1)`), which selection does not take as a constant; an
-/// address (a global, plus offsets, cast) it does.
+/// address (a global, plus offsets, cast to a pointer-wide integer) it
+/// does. (An address made narrower, or a float, `bitcast (i32 ptrtoint
+/// (ptr @g to i32) to float)`, is arithmetic.)
 fn has_arithmetic(cx: &Ctx, c: ConstId) -> bool {
-    match &cx.m.constant(c).kind {
+    let k = cx.m.constant(c);
+    match &k.kind {
         ConstKind::Expr(ConstExpr::Binary { .. }) => true,
-        ConstKind::Expr(ConstExpr::Cast { value, .. }) => has_arithmetic(cx, *value),
+        ConstKind::Expr(ConstExpr::Cast { value, .. }) => {
+            has_arithmetic(cx, *value)
+                || (!matches!(cx.m.types.get(k.ty), Type::Ptr(_) | Type::Int(64))
+                    && const_address(cx, *value).is_some())
+        }
         ConstKind::Expr(ConstExpr::Gep { ptr, indices, .. }) => {
             has_arithmetic(cx, *ptr) || indices.iter().any(|&i| has_arithmetic(cx, i))
         }
@@ -5624,7 +5683,9 @@ pub fn const_address(cx: &Ctx, c: ConstId) -> Option<(GlobalId, i64)> {
                     && cx.size_of(*source_ty).ok() == Some(1) =>
             {
                 match &cx.m.constant(indices[0]).kind {
-                    ConstKind::Expr(ConstExpr::Cast { op: CastOp::PtrToInt, value, .. }) => const_address(cx, *value),
+                    ConstKind::Expr(ConstExpr::Cast { op: CastOp::PtrToInt | CastOp::PtrToAddr, value, .. }) => {
+                        const_address(cx, *value)
+                    }
                     _ => None,
                 }
             }

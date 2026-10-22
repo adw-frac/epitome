@@ -280,6 +280,26 @@ impl Abi {
         }
     }
 
+    /// The directive that switches to a section of a name of its own
+    /// (`Section::name`), holding data of this kind.
+    pub fn named_section_directive(&self, name: &str, kind: SectionKind) -> String {
+        match self.syntax {
+            Syntax::MachO => format!(".section {name}"),
+            Syntax::Elf => {
+                let flags = match kind {
+                    SectionKind::Text => "ax",
+                    SectionKind::ReadOnly => "a",
+                    _ => "aw",
+                };
+                let ty = ["init_array", "fini_array", "preinit_array"]
+                    .into_iter()
+                    .find(|t| name.strip_prefix('.').is_some_and(|n| n.starts_with(t)))
+                    .unwrap_or("progbits");
+                format!(".section {name},\"{flags}\",@{ty}")
+            }
+        }
+    }
+
     /// The directive that switches to a section of this kind.
     pub fn section_directive(&self, kind: SectionKind) -> &'static str {
         match (self.syntax, kind) {

@@ -104,3 +104,20 @@ these are for after.
   a GOT load), and one descriptor call per variable per function.
 - **Zero-initialised ELF thread-local variables** (`asm.rs`): in `.tdata`
   as zeros, where `.tbss` would count them.
+- **Dead stripping** (`macho.rs`, `asm.rs`): objects are written without
+  `MH_SUBSECTIONS_VIA_SYMBOLS` (assembly without
+  `.subsections_via_symbols`), so the linker keeps all of each object
+  where it could keep only what is reached. Setting it needs
+  `@llvm.used`'s globals marked `N_NO_DEAD_STRIP` (`.no_dead_strip`).
+  (clang's assembler on our assembly, without it, trips an assertion in
+  Apple's linker for a section of a name of its own.)
+- **Branch relaxation** (`layout.rs`, `relax`): the positions are found
+  again after each branch changed, which is quadratic in a function with
+  many far branches. Better: one pass, adjusting the positions after the
+  change.
+- **`llvm.global_ctors` priorities on ELF**: one `.init_array` in
+  priority order within the object, where `.init_array.N` sections would
+  order them across objects.
+- **Address differences in data** between two globals (`sub (ptrtoint
+  @a, ptrtoint @b)`): unsupported (those within one global are folded);
+  they need a pair of relocations (Mach-O's `SUBTRACTOR`).

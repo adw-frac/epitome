@@ -301,6 +301,36 @@ fn section_flags(kind: SectionKind) -> u32 {
     }
 }
 
+/// The type and attributes of a section written `segment,section[,type
+/// [,attribute+attribute...]]`.
+fn named_section_flags(name: &str) -> u32 {
+    let mut parts = name.split(',').skip(2);
+    let ty = match parts.next().unwrap_or("regular") {
+        "zerofill" => S_ZEROFILL,
+        "cstring_literals" => 0x2,
+        "4byte_literals" => 0x3,
+        "8byte_literals" => 0x4,
+        "literal_pointers" => 0x5,
+        "mod_init_funcs" => 0x9,
+        "mod_term_funcs" => 0xa,
+        "coalesced" => 0xb,
+        "16byte_literals" => 0xe,
+        _ => 0,
+    };
+    let attrs = parts.next().unwrap_or("").split('+').fold(0, |a, attr| {
+        a | match attr.trim() {
+            "pure_instructions" => S_ATTR_PURE_INSTRUCTIONS,
+            "no_toc" => 0x4000_0000,
+            "strip_static_syms" => 0x2000_0000,
+            "no_dead_strip" => 0x1000_0000,
+            "live_support" => 0x0800_0000,
+            "debug" => 0x0200_0000,
+            _ => 0,
+        }
+    });
+    ty | attrs
+}
+
 fn put_name16(out: &mut Vec<u8>, name: &str) {
     let mut b = [0u8; 16];
     b[..name.len().min(16)].copy_from_slice(&name.as_bytes()[..name.len().min(16)]);
@@ -458,7 +488,13 @@ pub fn write(obj: &Object, min_os: (u32, u32, u32), m: &Machine) -> Result<Vec<u
     put32(&mut out, nsects);
     put32(&mut out, 0);
     for (k, s) in obj.sections.iter().enumerate() {
-        let (seg, sect) = section_names(s.kind);
+        let (seg, sect) = match &s.name {
+            Some(name) => {
+                let mut parts = name.split(',');
+                (parts.next().unwrap_or(""), parts.next().unwrap_or(""))
+            }
+            None => section_names(s.kind),
+        };
         put_name16(&mut out, sect);
         put_name16(&mut out, seg);
         put64(&mut out, addrs[k]);
@@ -467,7 +503,7 @@ pub fn write(obj: &Object, min_os: (u32, u32, u32), m: &Machine) -> Result<Vec<u
         put32(&mut out, s.align.max(1).trailing_zeros());
         put32(&mut out, rel_offs[k] as u32);
         put32(&mut out, (relocs[k].len() / 8) as u32);
-        put32(&mut out, section_flags(s.kind));
+        put32(&mut out, s.name.as_deref().map_or(section_flags(s.kind), named_section_flags));
         put32(&mut out, 0);
         put32(&mut out, 0);
         put32(&mut out, 0);

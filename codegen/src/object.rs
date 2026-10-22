@@ -63,6 +63,10 @@ pub enum SectionKind {
 #[derive(Clone, Debug)]
 pub struct Section {
     pub kind: SectionKind,
+    /// A section of a name of its own (`#[link_section]`), rather than
+    /// the kind's: for Mach-O `segment,section[,type[,attributes]]`, for
+    /// ELF the name. The kind says what it holds.
+    pub name: Option<String>,
     pub align: u64,
     /// The contents; empty for `Bss`, whose size is `bss_size`.
     pub data: Vec<u8>,
@@ -156,6 +160,8 @@ pub struct GlobalData {
     pub symbol: String,
     pub global: bool,
     pub section: SectionKind,
+    /// The section's own name, if it is not the kind's (`Section::name`).
+    pub section_name: Option<String>,
     pub align: u64,
     pub items: Vec<Item>,
 }
@@ -220,10 +226,17 @@ pub fn build(
     aliases: &[Alias],
 ) -> Result<Object, String> {
     let mut obj = Object::default();
-    let mut by_kind: HashMap<SectionKind, usize> = HashMap::new();
-    let mut section = |obj: &mut Object, kind: SectionKind| -> usize {
-        *by_kind.entry(kind).or_insert_with(|| {
-            obj.sections.push(Section { kind, align: 1, data: Vec::new(), bss_size: 0, relocs: Vec::new() });
+    let mut by_kind: HashMap<(SectionKind, Option<String>), usize> = HashMap::new();
+    let mut section = |obj: &mut Object, kind: SectionKind, name: Option<&String>| -> usize {
+        *by_kind.entry((kind, name.cloned())).or_insert_with(|| {
+            obj.sections.push(Section {
+                kind,
+                name: name.cloned(),
+                align: 1,
+                data: Vec::new(),
+                bss_size: 0,
+                relocs: Vec::new(),
+            });
             obj.sections.len() - 1
         })
     };
@@ -247,7 +260,7 @@ pub fn build(
     let all: Vec<usize> = (0..funcs.len()).collect();
     let encoded = crate::par_run(funcs.len(), &all, threads, || (), |_, k| mir::encode_function(t, &funcs[k]), || ());
     for (f, code) in funcs.iter().zip(encoded) {
-        let s = section(&mut obj, SectionKind::Text);
+        let s = section(&mut obj, SectionKind::Text, None);
         let at = place(&mut obj, s, 4);
         let (words, fixups) = code?;
         for w in &words {
@@ -266,7 +279,7 @@ pub fn build(
         // the types caught through their GOT entries.
         let mut lsda = None;
         if let Some(table) = crate::eh::lsda(t, f, &|n| abi.eh_ref(n))? {
-            let es = section(&mut obj, SectionKind::ExceptTable);
+            let es = section(&mut obj, SectionKind::ExceptTable, None);
             let eat = place(&mut obj, es, 4);
             obj.sections[es].data.extend(&table.bytes);
             // A symbol at it, for the unwind tables to name (unwind.rs).
@@ -322,7 +335,7 @@ pub fn build(
     }
 
     for g in globals {
-        let s = section(&mut obj, g.section);
+        let s = section(&mut obj, g.section, g.section_name.as_ref());
         let at = place(&mut obj, s, g.align.max(1));
         let bss = g.section == SectionKind::Bss;
         for item in &g.items {

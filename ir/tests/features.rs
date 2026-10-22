@@ -72,3 +72,12 @@ fn forward_references_and_type_checks() {
     let bad = "define void @f() {\n  %1 = add i32 1, 1\n  %0 = add i32 1, 1\n  ret void\n}";
     assert!(error(bad).starts_with("3:3: instruction expected to be numbered '%2' or higher"));
 }
+
+/// A float's exact bits (`f0x...`) after an argument's attributes: a
+/// number, not another attribute.
+#[test]
+fn exact_float_bits_after_attributes() {
+    let src = "declare void @g(float)\ndefine void @f() {\n  call void @g(float noundef f0xBF666666)\n  ret void\n}\n";
+    let m = parse_module(src).unwrap_or_else(|e| panic!("{e}"));
+    assert!(m.to_string().contains("noundef"));
+}

@@ -468,8 +468,11 @@ out.append("\n".join(o))
 
 # --- appended: reductions of 64-bit vectors
 o = []
-o.append('''define <2 x i32> @ADDPv2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "enc"="0 0 0 01110 10 1 m:5 10111 1 n:5 d:5" "asm"="addp {d:2s}, {n:2s}, {m:2s}" "nomatch" {
-  ret <2 x i32> %n
+o.append('''declare <2 x i32> @llvm.aarch64.neon.addp.v2i32(<2 x i32>, <2 x i32>)
+
+define <2 x i32> @ADDPv2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "enc"="0 0 0 01110 10 1 m:5 10111 1 n:5 d:5" "asm"="addp {d:2s}, {n:2s}, {m:2s}" {
+  %r = call <2 x i32> @llvm.aarch64.neon.addp.v2i32(<2 x i32> %n, <2 x i32> %m)
+  ret <2 x i32> %r
 }
 
 declare i32 @llvm.vector.reduce.add.v2i32(<2 x i32>)

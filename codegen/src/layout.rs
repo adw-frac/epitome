@@ -253,7 +253,10 @@ fn reaches(t: &Target, inst: &MInst, pc: i64, target: i64) -> bool {
 #[allow(clippy::needless_range_loop)]
 pub fn relax(t: &Target, f: &mut MFunc) {
     let b_op = t.by_role("jump");
-    for _ in 0..16 {
+    // Each change moves what follows, and may add a block: the positions
+    // are found again after each. (Each makes one branch reach further,
+    // so this ends.)
+    loop {
         // Where each block and instruction starts.
         let mut starts = Vec::new();
         let mut at: Vec<Vec<i64>> = Vec::new();
@@ -272,7 +275,7 @@ pub fn relax(t: &Target, f: &mut MFunc) {
             );
         }
         let mut changed = false;
-        for bi in 0..f.blocks.len() {
+        'scan: for bi in 0..f.blocks.len() {
             let len = f.blocks[bi].insts.len();
             for k in 0..len {
                 let inst = &f.blocks[bi].insts[k];
@@ -321,7 +324,7 @@ pub fn relax(t: &Target, f: &mut MFunc) {
                 f.blocks[bi].insts.push(inv);
                 f.blocks[bi].insts.push(far);
                 changed = true;
-                break;
+                break 'scan;
             }
         }
         if !changed {

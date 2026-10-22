@@ -169,3 +169,45 @@ fn wide_lanes_and_nested_aggregates() {
     );
     assert!(a.contains("_g@"), "{a}");
 }
+
+/// `ptrtoaddr` (newer than the clang tests/ir.rs builds with): the
+/// pointer's bits, of a value and of a constant.
+#[test]
+fn addresses_of_pointers() {
+    let a = asm("define i64 @a(ptr %p) {\n  %r = ptrtoaddr ptr %p to i64\n  ret i64 %r\n}");
+    assert!(a.lines().filter(|l| l.starts_with('\t') && !l.contains('.')).count() == 1, "{a}");
+    let a = asm(
+        "@g = global i64 0\ndefine i64 @b(ptr %p) {\n  %a = ptrtoaddr ptr %p to i64\n  %r = sub i64 %a, ptrtoaddr (ptr @g to i64)\n  ret i64 %r\n}",
+    );
+    assert!(a.contains("_g@") && a.contains("sub"), "{a}");
+}
+
+/// Bit tests (`tbz`, which reaches 32KB) going back to two blocks both
+/// far away, in two loops: each becomes the opposite test around jumps,
+/// in a block of its own; the second is found after the first moved the
+/// blocks after it.
+#[test]
+fn far_branches_relaxed_one_after_another() {
+    let mut body = String::from("define i32 @far(i64 %x, ptr %p) {\nentry:\n  br label %A0\n");
+    for i in 0..2 {
+        let next = if i == 0 { "A1".to_string() } else { "done".to_string() };
+        body += &format!("A{i}:\n");
+        body += &"  store volatile i32 1, ptr %p\n".repeat(9000);
+        body += &format!("  br label %B{i}\nB{i}:\n");
+        body += &"  store volatile i32 2, ptr %p\n".repeat(9000);
+        body += &format!(
+            "  %k{i} = load volatile i32, ptr %p\n  %e{i} = icmp eq i32 %k{i}, 0\n  br i1 %e{i}, label %{next}, label %C{i}\n\
+             C{i}:\n  %b{i} = and i64 %x, {}\n  %c{i} = icmp ne i64 %b{i}, 0\n  br i1 %c{i}, label %A{i}, label %B{i}\n",
+            1 << i
+        );
+    }
+    body += "done:\n  ret i32 0\n}";
+    let a = asm(&body);
+    let lines: Vec<&str> = a.lines().map(str::trim).collect();
+    for bit in ["#0", "#1"] {
+        let k = lines.iter().position(|l| l.starts_with("tbz") && l.contains(bit)).expect(&a[..200]);
+        // The test goes to the block after the jump that follows it.
+        let target = lines[k].rsplit(' ').next().unwrap();
+        assert!(lines[k + 1].starts_with("b ") && lines[k + 2] == format!("{target}:"), "{:?}", &lines[k - 1..k + 4]);
+    }
+}

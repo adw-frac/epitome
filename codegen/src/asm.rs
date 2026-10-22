@@ -110,6 +110,7 @@ pub fn eh_stubs(funcs: &[MFunc], abi: &Abi) -> Vec<GlobalData> {
                 symbol,
                 global: false,
                 section: SectionKind::Data,
+                section_name: None,
                 align: 8,
                 items: vec![Item::Addr { symbol: abi.symbol(name), offset: 0 }],
             });
@@ -127,6 +128,14 @@ pub fn collect_globals(cx: &Ctx, abi: &Abi) -> Result<Vec<GlobalData>, String> {
         let GlobalKind::Variable(v) = &gl.kind else { continue };
         let Some(init) = v.init else { continue };
         let name = gl.name.clone().unwrap_or_else(|| format!("g{}", g.0));
+        // Lists for the compiler (`@llvm.used`), not data.
+        if v.section.as_deref() == Some(b"llvm.metadata") {
+            continue;
+        }
+        if name == "llvm.global_ctors" || name == "llvm.global_dtors" {
+            out.push(init_array(cx, abi, init, name == "llvm.global_ctors")?);
+            continue;
+        }
         let align = v.align.or_else(|| cx.dl.abi_align(&m.types, v.ty)).unwrap_or(8).max(1);
         let mut items = Vec::new();
         data(cx, abi, v.ty, init, &mut items)?;
@@ -136,7 +145,14 @@ pub fn collect_globals(cx: &Ctx, abi: &Abi) -> Result<Vec<GlobalData>, String> {
         // the loader copies for each thread. (Zeros too: there is no
         // .tbss yet.)
         if gl.props.thread_local.is_some() && abi.syntax == Syntax::Elf {
-            out.push(GlobalData { symbol: abi.symbol(&name), global, section: SectionKind::ThreadData, align, items });
+            out.push(GlobalData {
+                symbol: abi.symbol(&name),
+                global,
+                section: SectionKind::ThreadData,
+                section_name: None,
+                align,
+                items,
+            });
             continue;
         }
         if gl.props.thread_local.is_some() {
@@ -150,6 +166,7 @@ pub fn collect_globals(cx: &Ctx, abi: &Abi) -> Result<Vec<GlobalData>, String> {
                 symbol: init.clone(),
                 global: false,
                 section: SectionKind::ThreadData,
+                section_name: None,
                 align,
                 items,
             });
@@ -157,6 +174,7 @@ pub fn collect_globals(cx: &Ctx, abi: &Abi) -> Result<Vec<GlobalData>, String> {
                 symbol,
                 global,
                 section: SectionKind::ThreadVars,
+                section_name: None,
                 align: 8,
                 items: vec![
                     Item::Addr { symbol: abi.symbol("_tlv_bootstrap"), offset: 0 },
@@ -166,7 +184,10 @@ pub fn collect_globals(cx: &Ctx, abi: &Abi) -> Result<Vec<GlobalData>, String> {
             });
             continue;
         }
+        let section_name = v.section.as_ref().map(|s| named_section(&String::from_utf8_lossy(s), abi.syntax));
         let section = match (v.constant, has_addresses(m, init)) {
+            // A section of its own holds its zeros.
+            (false, _) if section_name.is_some() => SectionKind::Data,
             // Zeros are only counted, where the format has a section for
             // that which assembly can name simply.
             (false, _) if zero && abi.syntax == Syntax::Elf => SectionKind::Bss,
@@ -174,9 +195,58 @@ pub fn collect_globals(cx: &Ctx, abi: &Abi) -> Result<Vec<GlobalData>, String> {
             (true, false) => SectionKind::ReadOnly,
             (true, true) => SectionKind::RelRo,
         };
-        out.push(GlobalData { symbol: abi.symbol(&name), global, section, align, items });
+        out.push(GlobalData { symbol: abi.symbol(&name), global, section, section_name, align, items });
     }
     Ok(out)
+}
+
+/// A section named by `#[link_section]`, as the object writers and the
+/// assembler take it: Mach-O's constructor lists get the type that makes
+/// them so (which LLVM infers from the name).
+pub fn named_section(name: &str, syntax: Syntax) -> String {
+    let parts: Vec<&str> = name.split(',').map(str::trim).collect();
+    match (syntax, parts.as_slice()) {
+        (Syntax::MachO, [seg, "__mod_init_func"]) => format!("{seg},__mod_init_func,mod_init_funcs"),
+        (Syntax::MachO, [seg, "__mod_term_func"]) => format!("{seg},__mod_term_func,mod_term_funcs"),
+        // The default type is left out.
+        (Syntax::MachO, [seg, sect, "regular"]) => format!("{seg},{sect}"),
+        (Syntax::MachO, _) => parts.join(","),
+        (Syntax::Elf, _) => name.to_string(),
+    }
+}
+
+/// `@llvm.global_ctors` (or `_dtors`), `{ priority, function, data }`
+/// for each: the functions, by priority, in the list the loader calls.
+fn init_array(cx: &Ctx, abi: &Abi, init: ConstId, ctors: bool) -> Result<GlobalData, String> {
+    let m = &*cx.m;
+    let mut list = Vec::new();
+    if let ConstKind::Array(elems) = &m.constant(init).kind {
+        for &e in elems {
+            let ConstKind::Struct(fields) = &m.constant(e).kind else {
+                return Err("@llvm.global_ctors: an entry not a struct".into());
+            };
+            let priority = fields.first().and_then(|&p| cx.const_int(Value::Const(p))).unwrap_or(65535);
+            let Some(&ConstKind::Global(f)) = fields.get(1).map(|&f| &m.constant(f).kind) else {
+                return Err("@llvm.global_ctors: an entry not of a function".into());
+            };
+            list.push((priority, m.global(f).name.clone().unwrap_or_else(|| format!("f{}", f.0))));
+        }
+    }
+    list.sort_by_key(|e| e.0);
+    let section_name = match (abi.syntax, ctors) {
+        (Syntax::MachO, true) => "__DATA,__mod_init_func,mod_init_funcs",
+        (Syntax::MachO, false) => "__DATA,__mod_term_func,mod_term_funcs",
+        (Syntax::Elf, true) => ".init_array",
+        (Syntax::Elf, false) => ".fini_array",
+    };
+    Ok(GlobalData {
+        symbol: format!("{}{}", abi.local_prefix(), if ctors { "global_ctors" } else { "global_dtors" }),
+        global: false,
+        section: SectionKind::RelRo,
+        section_name: Some(section_name.to_string()),
+        align: 8,
+        items: list.into_iter().map(|(_, f)| Item::Addr { symbol: abi.symbol(&f), offset: 0 }).collect(),
+    })
 }
 
 /// The module's aliases, of a global plus a constant offset.
@@ -218,7 +288,14 @@ pub fn print_aliases(aliases: &[object::Alias], out: &mut String) {
 
 pub fn print_globals(abi: &Abi, globals: &[GlobalData], out: &mut String) {
     for g in globals {
-        let _ = writeln!(out, "\t{}", abi.section_directive(g.section));
+        match &g.section_name {
+            Some(name) => {
+                let _ = writeln!(out, "\t{}", abi.named_section_directive(name, g.section));
+            }
+            None => {
+                let _ = writeln!(out, "\t{}", abi.section_directive(g.section));
+            }
+        }
         if g.global {
             let _ = writeln!(out, "\t.globl {}", g.symbol);
         }
@@ -352,6 +429,20 @@ fn data(cx: &Ctx, abi: &Abi, ty: TypeId, c: ConstId, out: &mut Vec<Item>) -> Res
         {
             let ConstKind::Int(a) = &m.constant(*value).kind else { unreachable!() };
             out.push(Item::Int { size: 8, value: a.low_u64(), hex: false });
+        }
+        // The distance between two places in one global: a number.
+        (ConstKind::Expr(ConstExpr::Binary { op: BinOp::Sub, lhs, rhs, .. }), _)
+            if matches!(
+                (prepare::const_address(cx, *lhs), prepare::const_address(cx, *rhs)),
+                (Some((a, _)), Some((b, _))) if a == b
+            ) =>
+        {
+            let (Some((_, x)), Some((_, y))) = (prepare::const_address(cx, *lhs), prepare::const_address(cx, *rhs))
+            else {
+                unreachable!()
+            };
+            let mask = if size >= 8 { u64::MAX } else { (1u64 << (size * 8)) - 1 };
+            out.push(Item::Int { size: size as u8, value: (x - y) as u64 & mask, hex: false });
         }
         _ => match prepare::const_address(cx, c) {
             Some((g, offset)) => {

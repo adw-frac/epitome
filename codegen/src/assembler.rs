@@ -410,7 +410,7 @@ impl<'t> Assembler<'t> {
             Syntax::Elf => name.starts_with(".L"),
         };
         let mut obj = Object::default();
-        let mut by_kind: HashMap<SectionKind, usize> = HashMap::new();
+        let mut by_kind: HashMap<(SectionKind, Option<String>), usize> = HashMap::new();
         let mut cur: Option<usize> = None;
         let mut discard = false;
         let mut held: Option<String> = None;
@@ -479,16 +479,16 @@ impl<'t> Assembler<'t> {
                 let (name, args) = d.split_once(char::is_whitespace).unwrap_or((d, ""));
                 let args = args.trim();
                 let list = || split_args(args);
-                let mut switch = |kind: Option<SectionKind>| {
+                let mut switch = |kind: Option<(SectionKind, Option<String>)>| {
                     discard = kind.is_none();
-                    if let Some(k) = kind {
-                        cur = Some(section_for(&mut obj, &mut by_kind, k));
+                    if let Some((k, name)) = kind {
+                        cur = Some(section_for(&mut obj, &mut by_kind, k, name));
                     }
                 };
                 match name {
-                    "text" => switch(Some(SectionKind::Text)),
-                    "data" => switch(Some(SectionKind::Data)),
-                    "bss" => switch(Some(SectionKind::Bss)),
+                    "text" => switch(Some((SectionKind::Text, None))),
+                    "data" => switch(Some((SectionKind::Data, None))),
+                    "bss" => switch(Some((SectionKind::Bss, None))),
                     "section" => {
                         let kind =
                             section_kind(args, syntax).ok_or_else(|| err(n, "a section not supported".into()))?;
@@ -846,30 +846,75 @@ impl<'t> Assembler<'t> {
 
 /// The section a `.section` directive names: `None` for one that is not
 /// kept (`.note.GNU-stack`, which the ELF writer adds itself).
-fn section_kind(args: &str, syntax: Syntax) -> Option<Option<SectionKind>> {
+fn section_kind(args: &str, syntax: Syntax) -> Option<Option<(SectionKind, Option<String>)>> {
     let parts: Vec<&str> = args.split(',').map(str::trim).collect();
     let name = match syntax {
         Syntax::MachO => format!("{},{}", parts.first()?, parts.get(1)?),
         Syntax::Elf => parts.first()?.to_string(),
     };
-    Some(Some(match name.as_str() {
-        "__TEXT,__text" | ".text" => SectionKind::Text,
-        "__DATA,__data" | ".data" => SectionKind::Data,
-        "__DATA,__bss" | ".bss" => SectionKind::Bss,
-        "__TEXT,__const" | ".rodata" => SectionKind::ReadOnly,
-        "__DATA,__const" | ".data.rel.ro" => SectionKind::RelRo,
-        "__TEXT,__gcc_except_tab" | ".gcc_except_table" => SectionKind::ExceptTable,
-        "__DATA,__thread_vars" => SectionKind::ThreadVars,
-        "__DATA,__thread_data" | ".tdata" => SectionKind::ThreadData,
-        ".note.GNU-stack" => return Some(None),
-        _ => return None,
-    }))
+    Some(Some((
+        match name.as_str() {
+            "__TEXT,__text" | ".text" => SectionKind::Text,
+            "__DATA,__data" | ".data" => SectionKind::Data,
+            "__DATA,__bss" | ".bss" => SectionKind::Bss,
+            "__TEXT,__const" | ".rodata" => SectionKind::ReadOnly,
+            "__DATA,__const" | ".data.rel.ro" => SectionKind::RelRo,
+            "__TEXT,__gcc_except_tab" | ".gcc_except_table" => SectionKind::ExceptTable,
+            "__DATA,__thread_vars" => SectionKind::ThreadVars,
+            "__DATA,__thread_data" | ".tdata" => SectionKind::ThreadData,
+            ".note.GNU-stack" => return Some(None),
+            _ => return Some(Some(named_section_kind(&parts, syntax))),
+        },
+        None,
+    )))
 }
 
-/// The section of this kind, made the first time it is used.
-fn section_for(obj: &mut Object, by_kind: &mut HashMap<SectionKind, usize>, kind: SectionKind) -> usize {
-    *by_kind.entry(kind).or_insert_with(|| {
-        obj.sections.push(Section { kind, align: 1, data: Vec::new(), bss_size: 0, relocs: Vec::new() });
+/// A section of a name of its own: what it holds, by its segment, type
+/// and attributes (Mach-O) or flags and type (ELF), and its name as the
+/// object writers take it (`asm::named_section`).
+fn named_section_kind(parts: &[&str], syntax: Syntax) -> (SectionKind, Option<String>) {
+    let kind = match syntax {
+        Syntax::MachO => {
+            let attrs = parts.get(3).copied().unwrap_or("");
+            if parts.get(2) == Some(&"zerofill") {
+                SectionKind::Bss
+            } else if attrs.contains("pure_instructions") {
+                SectionKind::Text
+            } else if parts[0] == "__TEXT" {
+                SectionKind::ReadOnly
+            } else {
+                SectionKind::Data
+            }
+        }
+        Syntax::Elf => {
+            let flags = parts.get(1).copied().unwrap_or("").trim_matches('"');
+            if parts.get(2).is_some_and(|t| t.ends_with("nobits")) {
+                SectionKind::Bss
+            } else if flags.contains('x') {
+                SectionKind::Text
+            } else if flags.contains('w') {
+                SectionKind::Data
+            } else {
+                SectionKind::ReadOnly
+            }
+        }
+    };
+    let name = match syntax {
+        Syntax::MachO => parts.join(","),
+        Syntax::Elf => parts[0].to_string(),
+    };
+    (kind, Some(crate::asm::named_section(&name, syntax)))
+}
+
+/// The section of this kind (and name), made the first time it is used.
+fn section_for(
+    obj: &mut Object,
+    by_kind: &mut HashMap<(SectionKind, Option<String>), usize>,
+    kind: SectionKind,
+    name: Option<String>,
+) -> usize {
+    *by_kind.entry((kind, name.clone())).or_insert_with(|| {
+        obj.sections.push(Section { kind, name, align: 1, data: Vec::new(), bss_size: 0, relocs: Vec::new() });
         obj.sections.len() - 1
     })
 }
@@ -877,13 +922,13 @@ fn section_for(obj: &mut Object, by_kind: &mut HashMap<SectionKind, usize>, kind
 /// The current section (`default`'s, if none was named yet).
 fn section_of(
     obj: &mut Object,
-    by_kind: &mut HashMap<SectionKind, usize>,
+    by_kind: &mut HashMap<(SectionKind, Option<String>), usize>,
     cur: &mut Option<usize>,
     default: SectionKind,
 ) -> usize {
     let s = match *cur {
         Some(s) => s,
-        None => section_for(obj, by_kind, default),
+        None => section_for(obj, by_kind, default, None),
     };
     *cur = Some(s);
     s

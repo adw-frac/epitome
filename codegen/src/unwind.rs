@@ -348,6 +348,6 @@ pub fn add_eh_frame(obj: &mut Object, m: &Machine, p: &Params, frames: &[Frame])
     }
     let len = (data.len() - last - 4) as u32;
     data[last..last + 4].copy_from_slice(&len.to_le_bytes());
-    obj.sections.push(Section { kind: SectionKind::EhFrame, align: 8, data, bss_size: 0, relocs });
+    obj.sections.push(Section { kind: SectionKind::EhFrame, name: None, align: 8, data, bss_size: 0, relocs });
     Ok(())
 }

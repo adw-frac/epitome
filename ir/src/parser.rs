@@ -583,6 +583,7 @@ impl<'a> Parser<'a> {
         tok.is_attr_group()
             || tok.is_string()
             || (tok.is_word()
+                && !tok.is_number()
                 && !TOP_LEVEL_KEYWORDS.contains(&tok.0)
                 && !OPCODES.contains(&tok.0)
                 && !VALUE_KEYWORDS.contains(&tok.0)
