@@ -195,10 +195,18 @@ fn parse_constraints(text: &str) -> Vec<Constraint> {
 }
 
 /// Roughly how many instructions an inline assembly template is: its
-/// statements that are not labels, directives or comments.
+/// statements that are not labels, directives or comments (`//` and
+/// `/* */` ones: `std::hint::black_box`'s whole template is `/* ${0} */`).
+/// Unwind and exception tables count on it.
 fn statements(template: &str, comment: &str) -> u32 {
-    template
-        .split(['\n', ';'])
+    let mut text = String::new();
+    let mut rest = template;
+    while let Some(at) = rest.find("/*") {
+        text.push_str(&rest[..at]);
+        rest = rest[at + 2..].find("*/").map_or("", |end| &rest[at + 2 + end + 2..]);
+    }
+    text.push_str(rest);
+    text.split(['\n', ';'])
         .map(|l| {
             let l = l.split(comment).next().unwrap_or("").trim();
             // Leading labels.

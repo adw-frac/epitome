@@ -150,6 +150,7 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     identity_bitcasts(&mut f);
     one_lane_vectors(cx, &mut f);
     odd_lane_vectors(cx, &mut f);
+    bits_of_vectors(cx, &mut f);
     vector_arguments(cx, &mut f);
     // (Before masks' bitcasts are made other operations, which want to
     // see the comparisons masks come from.)
@@ -1501,6 +1502,87 @@ fn wide_products(cx: &mut Ctx, f: &mut Function) {
         if !gone {
             break;
         }
+    }
+}
+
+/// A bit of a vector of integers taken as a mask's lane (`extractelement
+/// (bitcast <4 x i32> %v to <128 x i1>), 32`, as chrono tests a bit): the
+/// lane holding it, shifted down, its lowest bit. A bitcast no longer used
+/// is removed.
+fn bits_of_vectors(cx: &mut Ctx, f: &mut Function) {
+    let i1 = cx.m.types.int(1);
+    let i64t = cx.m.types.int(64);
+    let mut changed = false;
+    for b in f.layout.clone() {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::ExtractElement { vector: Value::Local(m), index } = f.insts[i.index()].op else {
+                k += 1;
+                continue;
+            };
+            let Some(bit) = cx.const_int(index) else {
+                k += 1;
+                continue;
+            };
+            let LocalDef::Inst(d) = f.locals[m.index()].def else {
+                k += 1;
+                continue;
+            };
+            let Op::Cast { op: CastOp::BitCast, value, .. } = f.insts[d.index()].op else {
+                k += 1;
+                continue;
+            };
+            let (mt, vt) = (f.locals[m.index()].ty, cx.value_ty(f, value));
+            let mask = matches!(cx.m.types.get(mt), Type::Vector { elem, .. } if *elem == i1);
+            let Type::Vector { elem, .. } = *cx.m.types.get(vt) else {
+                k += 1;
+                continue;
+            };
+            let Type::Int(eb) = *cx.m.types.get(elem) else {
+                k += 1;
+                continue;
+            };
+            if !mask || eb == 1 {
+                k += 1;
+                continue;
+            }
+            let r = f.insts[i.index()].result.unwrap();
+            let mut s = Seq { f, new: Vec::new() };
+            let lane = cx.int(i64t, bit / i64::from(eb));
+            let x = s.op(Op::ExtractElement { vector: value, index: lane }, elem);
+            let sh = cx.int(elem, bit % i64::from(eb));
+            let y = s.bin(BinOp::LShr, x, sh, elem);
+            let z = s.cast(CastOp::Trunc, y, i1);
+            let new = std::mem::take(&mut s.new);
+            f.replace_uses(Value::Local(r), z);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+            changed = true;
+        }
+    }
+    if !changed {
+        return;
+    }
+    // Bitcasts to masks left without uses.
+    let mut used = vec![false; f.locals.len()];
+    for i in f.insts_in_order() {
+        f.insts[i.index()].op.for_each_value(|v| {
+            if let Value::Local(x) = v {
+                used[x.index()] = true;
+            }
+        });
+    }
+    for b in f.layout.clone() {
+        f.blocks[b.index()].insts.retain(|&i| {
+            let inst = &f.insts[i.index()];
+            !(matches!(inst.op, Op::Cast { op: CastOp::BitCast, .. })
+                && inst.result.is_some_and(|r| {
+                    !used[r.index()]
+                        && matches!(cx.m.types.get(f.locals[r.index()].ty), Type::Vector { elem, .. } if *elem == i1)
+                }))
+        });
     }
 }
 
@@ -3739,7 +3821,7 @@ fn libm_base(base: &str) -> Option<&'static str> {
 
 /// The C library's name for function `c` (`log2`) at floating-point type
 /// `ty` (or its lanes'): `log2` for double, `log2f` for float. `powi` is
-/// the runtime's (`__powidf2`, `__powisf2`).
+/// the runtime's (`__powidf2`, `__powisf2`); Apple's `exp10` is `__exp10`.
 fn libm_name(cx: &Ctx, c: &str, ty: TypeId) -> Option<String> {
     let elem = match cx.m.types.get(ty) {
         Type::Vector { elem, .. } => *elem,
@@ -3750,9 +3832,16 @@ fn libm_name(cx: &Ctx, c: &str, ty: TypeId) -> Option<String> {
         Type::Float => true,
         _ => return None,
     };
+    // (Apple's C library has exp10 as __exp10.)
+    let darwin = cx.m.triple.as_deref().is_some_and(|t| {
+        let t = String::from_utf8_lossy(t);
+        t.contains("apple") || t.contains("darwin") || t.contains("macos")
+    });
     Some(match (c, float) {
         ("powi", false) => "__powidf2".into(),
         ("powi", true) => "__powisf2".into(),
+        ("exp10", false) if darwin => "__exp10".into(),
+        ("exp10", true) if darwin => "__exp10f".into(),
         (c, false) => c.into(),
         (c, true) => format!("{c}f"),
     })

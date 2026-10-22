@@ -57,5 +57,14 @@ fn main() {
     });
     let v = outer.err().and_then(|e| e.downcast_ref::<u32>().copied());
     println!("resumed: {v:?}");
+    // A panic after inline assembly that is only a comment (black_box's):
+    // the exception table's call sites must count it as no instructions.
+    let r = panic::catch_unwind(|| {
+        let v: Vec<u8> = std::hint::black_box(vec![1, 2, 3]);
+        let n = std::hint::black_box(v.len());
+        let _ = std::hint::black_box(&v);
+        v.get(n).copied().expect("past the end")
+    });
+    println!("black box: {}", if r.is_err() { "caught" } else { "returned" });
     println!("drops: {}", unsafe { DROPS });
 }
