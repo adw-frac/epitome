@@ -556,6 +556,9 @@ impl<'t> Assembler<'t> {
                         let at = sec.size().next_multiple_of(align);
                         if sec.kind == SectionKind::Bss {
                             sec.bss_size = at;
+                        } else if sec.kind == SectionKind::Text {
+                            let fill = self.t.machine.code_fill(at as usize - sec.data.len());
+                            sec.data.extend(fill);
                         } else {
                             sec.data.resize(at as usize, 0);
                         }

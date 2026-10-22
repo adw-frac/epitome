@@ -88,6 +88,9 @@ pub struct Abi {
     /// The registers results come back in (`"results"`), where they are
     /// not the result register and the argument registers after it.
     pub result_list: Option<Vec<u8>>,
+    /// A register that tells a variadic callee how many vector registers
+    /// its arguments take (`"variadic-fp-count"`: System V's al).
+    pub variadic_fp_count: Option<u8>,
     pub stack_args: StackArgs,
     /// The stack pointer's alignment at calls, in bytes (`stack-align`).
     pub stack_align: i64,
@@ -401,6 +404,7 @@ pub fn read(m: &Module, prefix: &str, machine: &crate::machine::Machine) -> Resu
             lr: *frame.get(1).unwrap_or(&frame[0]),
             ra_on_stack: props.get("return-address").is_some_and(|v| v.first().is_some_and(|x| x == "stack")),
             result_list: props.get("results").map(|v| regs(v)).transpose()?,
+            variadic_fp_count: props.get("variadic-fp-count").map(|v| regs(v)).transpose()?.and_then(|v| v.first().copied()),
             stack_align: {
                 let a: i64 = one("stack-align")?.parse().map_err(|_| format!("{name}: stack-align"))?;
                 if a <= 0 || a & (a - 1) != 0 {

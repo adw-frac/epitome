@@ -7,7 +7,7 @@ define i64 @ADD64rr(i64 "reg"="r64" "tied" %n, i64 "reg"="r64" %m) "enc"="rex(1,
   ret i64 %r
 }
 
-define i64 @ADD64ri(i64 "reg"="r64" "tied" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, d) | 10000011 | rr(0, d) | ib:s8=imm ; rex(1, 0, 0, d) | 10000001 | rr(0, d) | iv:s32=imm }" "asm"="addq ${imm}, {d}" "clobbers"="flags" "nodecode" {
+define i64 @ADD64ri(i64 "reg"="r64" "tied" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, d) | 10000011 | rr(0, d) | ib:s8=imm ; acc:0=d rex(1, 0, 0, 0) | 00000101 | iv:s32=imm ; rex(1, 0, 0, d) | 10000001 | rr(0, d) | iv:s32=imm }" "asm"="addq ${imm}, {d}" "clobbers"="flags" "nodecode" {
   %r = add i64 %n, %imm
   ret i64 %r
 }
@@ -17,7 +17,7 @@ define i64 @OR64rr(i64 "reg"="r64" "tied" %n, i64 "reg"="r64" %m) "enc"="rex(1, 
   ret i64 %r
 }
 
-define i64 @OR64ri(i64 "reg"="r64" "tied" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, d) | 10000011 | rr(1, d) | ib:s8=imm ; rex(1, 0, 0, d) | 10000001 | rr(1, d) | iv:s32=imm }" "asm"="orq ${imm}, {d}" "clobbers"="flags" "nodecode" {
+define i64 @OR64ri(i64 "reg"="r64" "tied" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, d) | 10000011 | rr(1, d) | ib:s8=imm ; acc:0=d rex(1, 0, 0, 0) | 00001101 | iv:s32=imm ; rex(1, 0, 0, d) | 10000001 | rr(1, d) | iv:s32=imm }" "asm"="orq ${imm}, {d}" "clobbers"="flags" "nodecode" {
   %r = or i64 %n, %imm
   ret i64 %r
 }
@@ -27,7 +27,7 @@ define i64 @AND64rr(i64 "reg"="r64" "tied" %n, i64 "reg"="r64" %m) "enc"="rex(1,
   ret i64 %r
 }
 
-define i64 @AND64ri(i64 "reg"="r64" "tied" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, d) | 10000011 | rr(4, d) | ib:s8=imm ; rex(1, 0, 0, d) | 10000001 | rr(4, d) | iv:s32=imm }" "asm"="andq ${imm}, {d}" "clobbers"="flags" "nodecode" {
+define i64 @AND64ri(i64 "reg"="r64" "tied" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, d) | 10000011 | rr(4, d) | ib:s8=imm ; acc:0=d rex(1, 0, 0, 0) | 00100101 | iv:s32=imm ; rex(1, 0, 0, d) | 10000001 | rr(4, d) | iv:s32=imm }" "asm"="andq ${imm}, {d}" "clobbers"="flags" "nodecode" {
   %r = and i64 %n, %imm
   ret i64 %r
 }
@@ -37,7 +37,7 @@ define i64 @SUB64rr(i64 "reg"="r64" "tied" %n, i64 "reg"="r64" %m) "enc"="rex(1,
   ret i64 %r
 }
 
-define i64 @SUB64ri(i64 "reg"="r64" "tied" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, d) | 10000011 | rr(5, d) | ib:s8=imm ; rex(1, 0, 0, d) | 10000001 | rr(5, d) | iv:s32=imm }" "asm"="subq ${imm}, {d}" "clobbers"="flags" "nodecode" {
+define i64 @SUB64ri(i64 "reg"="r64" "tied" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, d) | 10000011 | rr(5, d) | ib:s8=imm ; acc:0=d rex(1, 0, 0, 0) | 00101101 | iv:s32=imm ; rex(1, 0, 0, d) | 10000001 | rr(5, d) | iv:s32=imm }" "asm"="subq ${imm}, {d}" "clobbers"="flags" "nodecode" {
   %r = sub i64 %n, %imm
   ret i64 %r
 }
@@ -47,7 +47,7 @@ define i64 @XOR64rr(i64 "reg"="r64" "tied" %n, i64 "reg"="r64" %m) "enc"="rex(1,
   ret i64 %r
 }
 
-define i64 @XOR64ri(i64 "reg"="r64" "tied" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, d) | 10000011 | rr(6, d) | ib:s8=imm ; rex(1, 0, 0, d) | 10000001 | rr(6, d) | iv:s32=imm }" "asm"="xorq ${imm}, {d}" "clobbers"="flags" "nodecode" {
+define i64 @XOR64ri(i64 "reg"="r64" "tied" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, d) | 10000011 | rr(6, d) | ib:s8=imm ; acc:0=d rex(1, 0, 0, 0) | 00110101 | iv:s32=imm ; rex(1, 0, 0, d) | 10000001 | rr(6, d) | iv:s32=imm }" "asm"="xorq ${imm}, {d}" "clobbers"="flags" "nodecode" {
   %r = xor i64 %n, %imm
   ret i64 %r
 }
@@ -107,7 +107,7 @@ define i32 @ADD32rr(i32 "reg"="r32" "tied" %n, i32 "reg"="r32" %m) "enc"="rex(0,
   ret i32 %r
 }
 
-define i32 @ADD32ri(i32 "reg"="r32" "tied" %n, i32 "imm" %imm) "enc"="{ rex(0, 0, 0, d) | 10000011 | rr(0, d) | ib:s8=imm ; rex(0, 0, 0, d) | 10000001 | rr(0, d) | iv:s32=imm }" "asm"="addl ${imm}, {d}" "clobbers"="flags" "zext"="32" "nodecode" {
+define i32 @ADD32ri(i32 "reg"="r32" "tied" %n, i32 "imm" %imm) "enc"="{ rex(0, 0, 0, d) | 10000011 | rr(0, d) | ib:s8=imm ; acc:0=d rex(0, 0, 0, 0) | 00000101 | iv:s32=imm ; rex(0, 0, 0, d) | 10000001 | rr(0, d) | iv:s32=imm }" "asm"="addl ${imm}, {d}" "clobbers"="flags" "zext"="32" "nodecode" {
   %r = add i32 %n, %imm
   ret i32 %r
 }
@@ -117,7 +117,7 @@ define i32 @OR32rr(i32 "reg"="r32" "tied" %n, i32 "reg"="r32" %m) "enc"="rex(0, 
   ret i32 %r
 }
 
-define i32 @OR32ri(i32 "reg"="r32" "tied" %n, i32 "imm" %imm) "enc"="{ rex(0, 0, 0, d) | 10000011 | rr(1, d) | ib:s8=imm ; rex(0, 0, 0, d) | 10000001 | rr(1, d) | iv:s32=imm }" "asm"="orl ${imm}, {d}" "clobbers"="flags" "zext"="32" "nodecode" {
+define i32 @OR32ri(i32 "reg"="r32" "tied" %n, i32 "imm" %imm) "enc"="{ rex(0, 0, 0, d) | 10000011 | rr(1, d) | ib:s8=imm ; acc:0=d rex(0, 0, 0, 0) | 00001101 | iv:s32=imm ; rex(0, 0, 0, d) | 10000001 | rr(1, d) | iv:s32=imm }" "asm"="orl ${imm}, {d}" "clobbers"="flags" "zext"="32" "nodecode" {
   %r = or i32 %n, %imm
   ret i32 %r
 }
@@ -127,7 +127,7 @@ define i32 @AND32rr(i32 "reg"="r32" "tied" %n, i32 "reg"="r32" %m) "enc"="rex(0,
   ret i32 %r
 }
 
-define i32 @AND32ri(i32 "reg"="r32" "tied" %n, i32 "imm" %imm) "enc"="{ rex(0, 0, 0, d) | 10000011 | rr(4, d) | ib:s8=imm ; rex(0, 0, 0, d) | 10000001 | rr(4, d) | iv:s32=imm }" "asm"="andl ${imm}, {d}" "clobbers"="flags" "zext"="32" "nodecode" {
+define i32 @AND32ri(i32 "reg"="r32" "tied" %n, i32 "imm" %imm) "enc"="{ rex(0, 0, 0, d) | 10000011 | rr(4, d) | ib:s8=imm ; acc:0=d rex(0, 0, 0, 0) | 00100101 | iv:s32=imm ; rex(0, 0, 0, d) | 10000001 | rr(4, d) | iv:s32=imm }" "asm"="andl ${imm}, {d}" "clobbers"="flags" "zext"="32" "nodecode" {
   %r = and i32 %n, %imm
   ret i32 %r
 }
@@ -137,7 +137,7 @@ define i32 @SUB32rr(i32 "reg"="r32" "tied" %n, i32 "reg"="r32" %m) "enc"="rex(0,
   ret i32 %r
 }
 
-define i32 @SUB32ri(i32 "reg"="r32" "tied" %n, i32 "imm" %imm) "enc"="{ rex(0, 0, 0, d) | 10000011 | rr(5, d) | ib:s8=imm ; rex(0, 0, 0, d) | 10000001 | rr(5, d) | iv:s32=imm }" "asm"="subl ${imm}, {d}" "clobbers"="flags" "zext"="32" "nodecode" {
+define i32 @SUB32ri(i32 "reg"="r32" "tied" %n, i32 "imm" %imm) "enc"="{ rex(0, 0, 0, d) | 10000011 | rr(5, d) | ib:s8=imm ; acc:0=d rex(0, 0, 0, 0) | 00101101 | iv:s32=imm ; rex(0, 0, 0, d) | 10000001 | rr(5, d) | iv:s32=imm }" "asm"="subl ${imm}, {d}" "clobbers"="flags" "zext"="32" "nodecode" {
   %r = sub i32 %n, %imm
   ret i32 %r
 }
@@ -147,7 +147,7 @@ define i32 @XOR32rr(i32 "reg"="r32" "tied" %n, i32 "reg"="r32" %m) "enc"="rex(0,
   ret i32 %r
 }
 
-define i32 @XOR32ri(i32 "reg"="r32" "tied" %n, i32 "imm" %imm) "enc"="{ rex(0, 0, 0, d) | 10000011 | rr(6, d) | ib:s8=imm ; rex(0, 0, 0, d) | 10000001 | rr(6, d) | iv:s32=imm }" "asm"="xorl ${imm}, {d}" "clobbers"="flags" "zext"="32" "nodecode" {
+define i32 @XOR32ri(i32 "reg"="r32" "tied" %n, i32 "imm" %imm) "enc"="{ rex(0, 0, 0, d) | 10000011 | rr(6, d) | ib:s8=imm ; acc:0=d rex(0, 0, 0, 0) | 00110101 | iv:s32=imm ; rex(0, 0, 0, d) | 10000001 | rr(6, d) | iv:s32=imm }" "asm"="xorl ${imm}, {d}" "clobbers"="flags" "zext"="32" "nodecode" {
   %r = xor i32 %n, %imm
   ret i32 %r
 }
@@ -410,7 +410,7 @@ define %flags @CMP64rr(i64 "reg"="r64" %n, i64 "reg"="r64" %m) "enc"="rex(1, m, 
   ret %flags %f
 }
 
-define %flags @CMP64ri(i64 "reg"="r64" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, n) | 10000011 | rr(7, n) | ib:s8=imm ; rex(1, 0, 0, n) | 10000001 | rr(7, n) | iv:s32=imm }" "asm"="cmpq ${imm}, {n}" "sets"="zcso" "nodecode" {
+define %flags @CMP64ri(i64 "reg"="r64" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, n) | 10000011 | rr(7, n) | ib:s8=imm ; acc:0=n rex(1, 0, 0, 0) | 00111101 | iv:s32=imm ; rex(1, 0, 0, n) | 10000001 | rr(7, n) | iv:s32=imm }" "asm"="cmpq ${imm}, {n}" "sets"="zcso" "nodecode" {
   %f0 = insertvalue %flags poison, i64 %n, 0
   %f = insertvalue %flags %f0, i64 %imm, 1
   ret %flags %f
@@ -431,7 +431,7 @@ define %flags @CMP32rr(i32 "reg"="r32" %n, i32 "reg"="r32" %m) "enc"="rex(0, m, 
   ret %flags %f
 }
 
-define %flags @CMP32ri(i32 "reg"="r32" %n, i32 "imm" %imm) "enc"="{ rex(0, 0, 0, n) | 10000011 | rr(7, n) | ib:s8=imm ; rex(0, 0, 0, n) | 10000001 | rr(7, n) | iv:s32=imm }" "asm"="cmpl ${imm}, {n}" "sets"="zcso" "nodecode" {
+define %flags @CMP32ri(i32 "reg"="r32" %n, i32 "imm" %imm) "enc"="{ rex(0, 0, 0, n) | 10000011 | rr(7, n) | ib:s8=imm ; acc:0=n rex(0, 0, 0, 0) | 00111101 | iv:s32=imm ; rex(0, 0, 0, n) | 10000001 | rr(7, n) | iv:s32=imm }" "asm"="cmpl ${imm}, {n}" "sets"="zcso" "nodecode" {
   %a = sext i32 %n to i64
   %b = sext i32 %imm to i64
   %f0 = insertvalue %flags poison, i64 %a, 0
@@ -904,6 +904,454 @@ define i64 @MULH64(i64 "reg"="rax" %n, i64 "reg"="r64" %m) "enc"="rex(1, 0, 0, m
 define i64 @MOVZX32(i32 "reg"="r32" %n) "enc"="rex(0, n, 0, d) | 10001001 | rr(n, d)" "asm"="movl {n}, {d:r32}" "zext"="32" "nodecode" {
   %r = zext i32 %n to i64
   ret i64 %r
+}
+
+; Floating point, SSE2's scalar instructions. The flags of a comparison
+; (ucomisd) are ZF, PF and CF: unordered sets all three, less than CF,
+; equal ZF. Each of the eight predicates a condition tests is one condition
+; code; oeq and une are two (prepare splits them: "fcmp-split").
+%fflags = type { double, double }
+; The flags of the operands the other way round: ucomisd n, m compares m
+; with n. Its conditions test the predicates whose operands are swapped:
+; olt is ogt the other way round, ugt ult.
+%fflagsr = type { double, double }
+
+define i1 @cc.fr.olt(%fflagsr %f) "cond"="7" "asm"="a" "reads"="zcp" {
+  %a = extractvalue %fflagsr %f, 0
+  %b = extractvalue %fflagsr %f, 1
+  %c = fcmp olt double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.fr.ole(%fflagsr %f) "cond"="3" "asm"="ae" "reads"="zcp" {
+  %a = extractvalue %fflagsr %f, 0
+  %b = extractvalue %fflagsr %f, 1
+  %c = fcmp ole double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.fr.ugt(%fflagsr %f) "cond"="2" "asm"="b" "reads"="zcp" {
+  %a = extractvalue %fflagsr %f, 0
+  %b = extractvalue %fflagsr %f, 1
+  %c = fcmp ugt double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.fr.uge(%fflagsr %f) "cond"="6" "asm"="be" "reads"="zcp" {
+  %a = extractvalue %fflagsr %f, 0
+  %b = extractvalue %fflagsr %f, 1
+  %c = fcmp uge double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.ogt(%fflags %f) "cond"="7" "asm"="a" "reads"="zcp" {
+  %a = extractvalue %fflags %f, 0
+  %b = extractvalue %fflags %f, 1
+  %c = fcmp ogt double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.oge(%fflags %f) "cond"="3" "asm"="ae" "reads"="zcp" {
+  %a = extractvalue %fflags %f, 0
+  %b = extractvalue %fflags %f, 1
+  %c = fcmp oge double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.ult(%fflags %f) "cond"="2" "asm"="b" "reads"="zcp" {
+  %a = extractvalue %fflags %f, 0
+  %b = extractvalue %fflags %f, 1
+  %c = fcmp ult double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.ule(%fflags %f) "cond"="6" "asm"="be" "reads"="zcp" {
+  %a = extractvalue %fflags %f, 0
+  %b = extractvalue %fflags %f, 1
+  %c = fcmp ule double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.ueq(%fflags %f) "cond"="4" "asm"="e" "reads"="zcp" {
+  %a = extractvalue %fflags %f, 0
+  %b = extractvalue %fflags %f, 1
+  %c = fcmp ueq double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.one(%fflags %f) "cond"="5" "asm"="ne" "reads"="zcp" {
+  %a = extractvalue %fflags %f, 0
+  %b = extractvalue %fflags %f, 1
+  %c = fcmp one double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.uno(%fflags %f) "cond"="10" "asm"="p" "reads"="zcp" {
+  %a = extractvalue %fflags %f, 0
+  %b = extractvalue %fflags %f, 1
+  %c = fcmp uno double %a, %b
+  ret i1 %c
+}
+
+define i1 @cc.f.ord(%fflags %f) "cond"="11" "asm"="np" "reads"="zcp" {
+  %a = extractvalue %fflags %f, 0
+  %b = extractvalue %fflags %f, 1
+  %c = fcmp ord double %a, %b
+  ret i1 %c
+}
+
+define %fflags @UCOMISD(double "reg"="d" %n, double "reg"="d" %m) "enc"="01100110 | rex(0, n, 0, m) | 00001111 | 00101110 | rr(n, m)" "asm"="ucomisd {m}, {n}" "sets"="zcp" "nodecode" {
+  %f0 = insertvalue %fflags poison, double %n, 0
+  %f = insertvalue %fflags %f0, double %m, 1
+  ret %fflags %f
+}
+
+define %fflagsr @UCOMISDrev(double "reg"="d" %n, double "reg"="d" %m) "enc"="01100110 | rex(0, m, 0, n) | 00001111 | 00101110 | rr(m, n)" "asm"="ucomisd {n}, {m}" "sets"="zcp" "nodecode" {
+  %f0 = insertvalue %fflagsr poison, double %n, 0
+  %f = insertvalue %fflagsr %f0, double %m, 1
+  ret %fflagsr %f
+}
+
+define double @ADDSD(double "reg"="d" "tied" %n, double "reg"="d" %m) "enc"="11110010 | rex(0, d, 0, m) | 00001111 | 01011000 | rr(d, m)" "asm"="addsd {m}, {d}" "nodecode" {
+  %r = fadd double %n, %m
+  ret double %r
+}
+
+define double @SUBSD(double "reg"="d" "tied" %n, double "reg"="d" %m) "enc"="11110010 | rex(0, d, 0, m) | 00001111 | 01011100 | rr(d, m)" "asm"="subsd {m}, {d}" "nodecode" {
+  %r = fsub double %n, %m
+  ret double %r
+}
+
+define double @MULSD(double "reg"="d" "tied" %n, double "reg"="d" %m) "enc"="11110010 | rex(0, d, 0, m) | 00001111 | 01011001 | rr(d, m)" "asm"="mulsd {m}, {d}" "nodecode" {
+  %r = fmul double %n, %m
+  ret double %r
+}
+
+define double @DIVSD(double "reg"="d" "tied" %n, double "reg"="d" %m) "enc"="11110010 | rex(0, d, 0, m) | 00001111 | 01011110 | rr(d, m)" "asm"="divsd {m}, {d}" "nodecode" {
+  %r = fdiv double %n, %m
+  ret double %r
+}
+
+define double @SQRTSD(double "reg"="d" %n) "enc"="11110010 | rex(0, d, 0, n) | 00001111 | 01010001 | rr(d, n)" "asm"="sqrtsd {n}, {d}" "nodecode" {
+  %r = call double @llvm.sqrt.f64(double %n)
+  ret double %r
+}
+
+declare double @llvm.sqrt.f64(double)
+
+define double @LDSD(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110010 | rex(0, d, 4, n) | 00001111 | 00010000 | rm(d, n, 4, 1, off, 0, 1)" "asm"="movsd {off}({n}), {d}" "role"="load.d" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load double, ptr %a
+  ret double %r
+}
+
+define void @STSD(double "reg"="d" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110010 | rex(0, t, 4, n) | 00001111 | 00010001 | rm(t, n, 4, 1, off, 0, 1)" "asm"="movsd {t}, {off}({n})" "role"="store.d" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store double %t, ptr %a
+  ret void
+}
+
+define double @MOVSDfromi64(i64 "reg"="r64" %n) "enc"="01100110 | rex(1, d, 0, n) | 00001111 | 01101110 | rr(d, n)" "asm"="movq {n}, {d}" "role"="move.d.r64" "nodecode" {
+  %r = bitcast i64 %n to double
+  ret double %r
+}
+
+define i64 @MOVi64fromSD(double "reg"="d" %n) "enc"="01100110 | rex(1, n, 0, d) | 00001111 | 01111110 | rr(n, d)" "asm"="movq {n}, {d}" "role"="move.r64.d" "nodecode" {
+  %r = bitcast double %n to i64
+  ret i64 %r
+}
+
+define double @CVTSITOFPI32SD(i32 "reg"="r32" %n) "enc"="11110010 | rex(0, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2sdl {n}, {d}" "nodecode" {
+  %r = sitofp i32 %n to double
+  ret double %r
+}
+
+define double @CVTSITOFPI64SD(i64 "reg"="r64" %n) "enc"="11110010 | rex(1, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2sdq {n}, {d}" "nodecode" {
+  %r = sitofp i64 %n to double
+  ret double %r
+}
+
+define double @CVTUITOFPI32SD(i32 "reg"="r32" %n) "enc"="11110010 | rex(1, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2sdq {n:r64}, {d}" "nodecode" {
+  %r = uitofp i32 %n to double
+  ret double %r
+}
+
+define i32 @CVTTFPTOSISDI32(double "reg"="d" %n) "enc"="11110010 | rex(0, d, 0, n) | 00001111 | 00101100 | rr(d, n)" "asm"="cvttsd2si {n}, {d}" "dclass"="r32" "nodecode" {
+  %r = fptosi double %n to i32
+  ret i32 %r
+}
+
+define i64 @CVTTFPTOSISDI64(double "reg"="d" %n) "enc"="11110010 | rex(1, d, 0, n) | 00001111 | 00101100 | rr(d, n)" "asm"="cvttsd2si {n}, {d}" "dclass"="r64" "nodecode" {
+  %r = fptosi double %n to i64
+  ret i64 %r
+}
+
+define i32 @CVTTFPTOUISDI32(double "reg"="d" %n) "enc"="11110010 | rex(1, d, 0, n) | 00001111 | 00101100 | rr(d, n)" "asm"="cvttsd2si {n}, {d:r64}" "dclass"="r32" "nodecode" {
+  %r = fptoui double %n to i32
+  ret i32 %r
+}
+
+define double @select.d(i1 "reg"="r32" %c, double "reg"="d" %a, double "reg"="d" %b) "recipe"="select.d.expand" {
+  %r = select i1 %c, double %a, double %b
+  ret double %r
+}
+
+define double @select.d.expand(i1 %c, double %a, double %b) {
+  %ai = call i64 @MOVi64fromSD(double %a)
+  %bi = call i64 @MOVi64fromSD(double %b)
+  %f = call %flags @TESTB1(i1 %c)
+  %ne = call i1 @cc.ne(%flags %f)
+  %ri = call i64 @CMOV64(i1 %ne, i64 %ai, i64 %bi)
+  %r = call double @MOVSDfromi64(i64 %ri)
+  ret double %r
+}
+
+define double @fneg.d(double "reg"="d" %a) "recipe"="fneg.d.expand" {
+  %r = fneg double %a
+  ret double %r
+}
+
+define double @fneg.d.expand(double %a) {
+  %ai = call i64 @MOVi64fromSD(double %a)
+  %k = call i64 @MOVABS64ri(i64 -9223372036854775808)
+  %x = call i64 @XOR64rr(i64 %ai, i64 %k)
+  %r = call double @MOVSDfromi64(i64 %x)
+  ret double %r
+}
+
+define double @fabs.d(double "reg"="d" %a) "recipe"="fabs.d.expand" {
+  %r = call double @llvm.fabs.f64(double %a)
+  ret double %r
+}
+
+define double @fabs.d.expand(double %a) {
+  %ai = call i64 @MOVi64fromSD(double %a)
+  %k = call i64 @MOVABS64ri(i64 9223372036854775807)
+  %x = call i64 @AND64rr(i64 %ai, i64 %k)
+  %r = call double @MOVSDfromi64(i64 %x)
+  ret double %r
+}
+
+declare double @llvm.fabs.f64(double)
+
+declare double @llvm.fmuladd.f64(double, double, double)
+
+define double @fmuladd.d(double "reg"="d" %a, double "reg"="d" %b, double "reg"="d" %c) "recipe"="fmuladd.d.expand" {
+  %r = call double @llvm.fmuladd.f64(double %a, double %b, double %c)
+  ret double %r
+}
+
+define double @fmuladd.d.expand(double %a, double %b, double %c) {
+  %p = call double @MULSD(double %a, double %b)
+  %r = call double @ADDSD(double %p, double %c)
+  ret double %r
+}
+
+define double @uitofp.64.d(i64 "reg"="r64" %x) "recipe"="uitofp.64.d.expand" {
+  %r = uitofp i64 %x to double
+  ret double %r
+}
+
+define double @uitofp.64.d.expand(i64 %x) {
+  %h = call i64 @SHR64ri(i64 %x, i64 1)
+  %l = call i64 @AND64ri(i64 %x, i64 1)
+  %o = call i64 @OR64rr(i64 %h, i64 %l)
+  %f1 = call %flags @TEST64rr(i64 %x, i64 %x)
+  %n1 = call i1 @cc.l(%flags %f1)
+  %t = call i64 @CMOV64(i1 %n1, i64 %o, i64 %x)
+  %c = call double @CVTSITOFPI64SD(i64 %t)
+  %c2 = call double @ADDSD(double %c, double %c)
+  %ci = call i64 @MOVi64fromSD(double %c)
+  %c2i = call i64 @MOVi64fromSD(double %c2)
+  %f2 = call %flags @TEST64rr(i64 %x, i64 %x)
+  %n2 = call i1 @cc.l(%flags %f2)
+  %ri = call i64 @CMOV64(i1 %n2, i64 %c2i, i64 %ci)
+  %r = call double @MOVSDfromi64(i64 %ri)
+  ret double %r
+}
+
+define %fflags @UCOMISS(float "reg"="s" %n, float "reg"="s" %m) "enc"="rex(0, n, 0, m) | 00001111 | 00101110 | rr(n, m)" "asm"="ucomiss {m}, {n}" "sets"="zcp" "nodecode" {
+  %a = fpext float %n to double
+  %b = fpext float %m to double
+  %f0 = insertvalue %fflags poison, double %a, 0
+  %f = insertvalue %fflags %f0, double %b, 1
+  ret %fflags %f
+}
+
+define %fflagsr @UCOMISSrev(float "reg"="s" %n, float "reg"="s" %m) "enc"="rex(0, m, 0, n) | 00001111 | 00101110 | rr(m, n)" "asm"="ucomiss {n}, {m}" "sets"="zcp" "nodecode" {
+  %a = fpext float %n to double
+  %b = fpext float %m to double
+  %f0 = insertvalue %fflagsr poison, double %a, 0
+  %f = insertvalue %fflagsr %f0, double %b, 1
+  ret %fflagsr %f
+}
+
+define float @ADDSS(float "reg"="s" "tied" %n, float "reg"="s" %m) "enc"="11110011 | rex(0, d, 0, m) | 00001111 | 01011000 | rr(d, m)" "asm"="addss {m}, {d}" "nodecode" {
+  %r = fadd float %n, %m
+  ret float %r
+}
+
+define float @SUBSS(float "reg"="s" "tied" %n, float "reg"="s" %m) "enc"="11110011 | rex(0, d, 0, m) | 00001111 | 01011100 | rr(d, m)" "asm"="subss {m}, {d}" "nodecode" {
+  %r = fsub float %n, %m
+  ret float %r
+}
+
+define float @MULSS(float "reg"="s" "tied" %n, float "reg"="s" %m) "enc"="11110011 | rex(0, d, 0, m) | 00001111 | 01011001 | rr(d, m)" "asm"="mulss {m}, {d}" "nodecode" {
+  %r = fmul float %n, %m
+  ret float %r
+}
+
+define float @DIVSS(float "reg"="s" "tied" %n, float "reg"="s" %m) "enc"="11110011 | rex(0, d, 0, m) | 00001111 | 01011110 | rr(d, m)" "asm"="divss {m}, {d}" "nodecode" {
+  %r = fdiv float %n, %m
+  ret float %r
+}
+
+define float @SQRTSS(float "reg"="s" %n) "enc"="11110011 | rex(0, d, 0, n) | 00001111 | 01010001 | rr(d, n)" "asm"="sqrtss {n}, {d}" "nodecode" {
+  %r = call float @llvm.sqrt.f32(float %n)
+  ret float %r
+}
+
+declare float @llvm.sqrt.f32(float)
+
+define float @LDSS(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110011 | rex(0, d, 4, n) | 00001111 | 00010000 | rm(d, n, 4, 1, off, 0, 1)" "asm"="movss {off}({n}), {d}" "role"="load.s" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load float, ptr %a
+  ret float %r
+}
+
+define void @STSS(float "reg"="s" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110011 | rex(0, t, 4, n) | 00001111 | 00010001 | rm(t, n, 4, 1, off, 0, 1)" "asm"="movss {t}, {off}({n})" "role"="store.s" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store float %t, ptr %a
+  ret void
+}
+
+define float @MOVSSfromi32(i32 "reg"="r32" %n) "enc"="01100110 | rex(0, d, 0, n) | 00001111 | 01101110 | rr(d, n)" "asm"="movd {n}, {d}" "role"="move.s.r32" "nodecode" {
+  %r = bitcast i32 %n to float
+  ret float %r
+}
+
+define i32 @MOVi32fromSS(float "reg"="s" %n) "enc"="01100110 | rex(0, n, 0, d) | 00001111 | 01111110 | rr(n, d)" "asm"="movd {n}, {d}" "role"="move.r32.s" "nodecode" {
+  %r = bitcast float %n to i32
+  ret i32 %r
+}
+
+define float @CVTSITOFPI32SS(i32 "reg"="r32" %n) "enc"="11110011 | rex(0, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2ssl {n}, {d}" "nodecode" {
+  %r = sitofp i32 %n to float
+  ret float %r
+}
+
+define float @CVTSITOFPI64SS(i64 "reg"="r64" %n) "enc"="11110011 | rex(1, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2ssq {n}, {d}" "nodecode" {
+  %r = sitofp i64 %n to float
+  ret float %r
+}
+
+define float @CVTUITOFPI32SS(i32 "reg"="r32" %n) "enc"="11110011 | rex(1, d, 0, n) | 00001111 | 00101010 | rr(d, n)" "asm"="cvtsi2ssq {n:r64}, {d}" "nodecode" {
+  %r = uitofp i32 %n to float
+  ret float %r
+}
+
+define i32 @CVTTFPTOSISSI32(float "reg"="s" %n) "enc"="11110011 | rex(0, d, 0, n) | 00001111 | 00101100 | rr(d, n)" "asm"="cvttss2si {n}, {d}" "dclass"="r32" "nodecode" {
+  %r = fptosi float %n to i32
+  ret i32 %r
+}
+
+define i64 @CVTTFPTOSISSI64(float "reg"="s" %n) "enc"="11110011 | rex(1, d, 0, n) | 00001111 | 00101100 | rr(d, n)" "asm"="cvttss2si {n}, {d}" "dclass"="r64" "nodecode" {
+  %r = fptosi float %n to i64
+  ret i64 %r
+}
+
+define i32 @CVTTFPTOUISSI32(float "reg"="s" %n) "enc"="11110011 | rex(1, d, 0, n) | 00001111 | 00101100 | rr(d, n)" "asm"="cvttss2si {n}, {d:r64}" "dclass"="r32" "nodecode" {
+  %r = fptoui float %n to i32
+  ret i32 %r
+}
+
+define float @select.s(i1 "reg"="r32" %c, float "reg"="s" %a, float "reg"="s" %b) "recipe"="select.s.expand" {
+  %r = select i1 %c, float %a, float %b
+  ret float %r
+}
+
+define float @select.s.expand(i1 %c, float %a, float %b) {
+  %ai = call i32 @MOVi32fromSS(float %a)
+  %bi = call i32 @MOVi32fromSS(float %b)
+  %f = call %flags @TESTB1(i1 %c)
+  %ne = call i1 @cc.ne(%flags %f)
+  %ri = call i32 @CMOV32(i1 %ne, i32 %ai, i32 %bi)
+  %r = call float @MOVSSfromi32(i32 %ri)
+  ret float %r
+}
+
+define float @fneg.s(float "reg"="s" %a) "recipe"="fneg.s.expand" {
+  %r = fneg float %a
+  ret float %r
+}
+
+define float @fneg.s.expand(float %a) {
+  %ai = call i32 @MOVi32fromSS(float %a)
+  %k = call i32 @MOV32ri(i32 -2147483648)
+  %x = call i32 @XOR32rr(i32 %ai, i32 %k)
+  %r = call float @MOVSSfromi32(i32 %x)
+  ret float %r
+}
+
+define float @fabs.s(float "reg"="s" %a) "recipe"="fabs.s.expand" {
+  %r = call float @llvm.fabs.f32(float %a)
+  ret float %r
+}
+
+define float @fabs.s.expand(float %a) {
+  %ai = call i32 @MOVi32fromSS(float %a)
+  %k = call i32 @MOV32ri(i32 2147483647)
+  %x = call i32 @AND32rr(i32 %ai, i32 %k)
+  %r = call float @MOVSSfromi32(i32 %x)
+  ret float %r
+}
+
+declare float @llvm.fabs.f32(float)
+
+declare float @llvm.fmuladd.f32(float, float, float)
+
+define float @fmuladd.s(float "reg"="s" %a, float "reg"="s" %b, float "reg"="s" %c) "recipe"="fmuladd.s.expand" {
+  %r = call float @llvm.fmuladd.f32(float %a, float %b, float %c)
+  ret float %r
+}
+
+define float @fmuladd.s.expand(float %a, float %b, float %c) {
+  %p = call float @MULSS(float %a, float %b)
+  %r = call float @ADDSS(float %p, float %c)
+  ret float %r
+}
+
+define float @uitofp.64.s(i64 "reg"="r64" %x) "recipe"="uitofp.64.s.expand" {
+  %r = uitofp i64 %x to float
+  ret float %r
+}
+
+define float @uitofp.64.s.expand(i64 %x) {
+  %h = call i64 @SHR64ri(i64 %x, i64 1)
+  %l = call i64 @AND64ri(i64 %x, i64 1)
+  %o = call i64 @OR64rr(i64 %h, i64 %l)
+  %f1 = call %flags @TEST64rr(i64 %x, i64 %x)
+  %n1 = call i1 @cc.l(%flags %f1)
+  %t = call i64 @CMOV64(i1 %n1, i64 %o, i64 %x)
+  %c = call float @CVTSITOFPI64SS(i64 %t)
+  %c2 = call float @ADDSS(float %c, float %c)
+  %ci = call i32 @MOVi32fromSS(float %c)
+  %c2i = call i32 @MOVi32fromSS(float %c2)
+  %f2 = call %flags @TEST64rr(i64 %x, i64 %x)
+  %n2 = call i1 @cc.l(%flags %f2)
+  %ri = call i32 @CMOV32(i1 %n2, i32 %c2i, i32 %ci)
+  %r = call float @MOVSSfromi32(i32 %ri)
+  ret float %r
+}
+
+define double @CVTSS2SD(float "reg"="s" %n) "enc"="11110011 | rex(0, d, 0, n) | 00001111 | 01011010 | rr(d, n)" "asm"="cvtss2sd {n}, {d}" "nodecode" {
+  %r = fpext float %n to double
+  ret double %r
+}
+
+define float @CVTSD2SS(double "reg"="d" %n) "enc"="11110010 | rex(0, d, 0, n) | 00001111 | 01011010 | rr(d, n)" "asm"="cvtsd2ss {n}, {d}" "nodecode" {
+  %r = fptrunc double %n to float
+  ret float %r
 }
 
 define <2 x i64> @MOVAPSrr(<2 x i64> "reg"="x" %n) "enc"="rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)" "asm"="movaps {n}, {d}" "copy"="x" "nodecode" {

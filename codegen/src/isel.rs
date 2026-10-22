@@ -2375,6 +2375,17 @@ impl<'a, 'b> Sel<'a, 'b> {
                 crate::abi::ArgLoc::Reg(p) => in_regs.push((p, r)),
             }
         }
+        // How many vector registers a variadic call's arguments take, where
+        // the convention says so (System V's al).
+        let mut count_reg = None;
+        if let (Some(c), Type::Function { varargs: true, .. }) =
+            (self.mf.abi.variadic_fp_count, self.cx.m.types.get(call.fn_ty))
+        {
+            let n = in_regs.iter().filter(|(p, _)| self.mf.abi.fp_args.contains(p)).count() as i64;
+            let v = self.int_reg(n, false, false)?;
+            self.push(MInst::copy(Reg::P(c), v));
+            count_reg = Some(c);
+        }
         for &(p, r) in &in_regs {
             if half_regs.contains(&p) {
                 // A half's bits, into its floating-point register.
@@ -2427,7 +2438,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             (None, Some(r)) => MInst::new(self.t.by_role("callr"), vec![MOp::Reg(r)]),
             _ => unreachable!(),
         };
-        inst_m.imp_uses = in_regs.iter().map(|&(p, _)| p).collect();
+        inst_m.imp_uses = in_regs.iter().map(|&(p, _)| p).chain(count_reg).collect();
         inst_m.imp_defs = self.mf.abi.all_clobbers();
         // From an invoke: where it unwinds to, and what happens there.
         if let Some((lp, action)) = self.landing_next.take() {

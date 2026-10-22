@@ -5412,21 +5412,32 @@ fn legalize_fp(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         replace = Some(s.cast(CastOp::Trunc, w, to_ty));
                     }
                 }
-                Op::FCmp {
-                    pred: pred @ (FCmpPred::One | FCmpPred::Ueq | FCmpPred::True | FCmpPred::False),
-                    lhs,
-                    rhs,
-                    fmf,
-                } => {
+                Op::FCmp { pred, lhs, rhs, fmf }
+                    if matches!(pred, FCmpPred::True | FCmpPred::False)
+                        || cx.t.machine.fcmp_split.iter().any(|p| {
+                            matches!(
+                                (p.as_str(), pred),
+                                ("one", FCmpPred::One)
+                                    | ("ueq", FCmpPred::Ueq)
+                                    | ("oeq", FCmpPred::Oeq)
+                                    | ("une", FCmpPred::Une)
+                            )
+                        }) =>
+                {
                     replace = Some(match pred {
                         FCmpPred::True => cx.int(i1, 1),
                         FCmpPred::False => cx.int(i1, 0),
                         _ => {
-                            // one: ordered and not equal; ueq: unordered or equal.
-                            let (a, b, op) = if pred == FCmpPred::One {
-                                (FCmpPred::Ord, FCmpPred::Une, BinOp::And)
-                            } else {
-                                (FCmpPred::Uno, FCmpPred::Oeq, BinOp::Or)
+                            // A comparison the machine's conditions do not
+                            // test, of two that they do: one, ordered and not
+                            // equal; ueq, unordered or equal; oeq, ordered and
+                            // (unordered or) equal; une, unordered or ordered
+                            // and not equal.
+                            let (a, b, op) = match pred {
+                                FCmpPred::One => (FCmpPred::Ord, FCmpPred::Une, BinOp::And),
+                                FCmpPred::Ueq => (FCmpPred::Uno, FCmpPred::Oeq, BinOp::Or),
+                                FCmpPred::Oeq => (FCmpPred::Ord, FCmpPred::Ueq, BinOp::And),
+                                _ => (FCmpPred::Uno, FCmpPred::One, BinOp::Or),
                             };
                             let x = s.op(Op::FCmp { pred: a, fmf, lhs, rhs }, i1);
                             let y = s.op(Op::FCmp { pred: b, fmf, lhs, rhs }, i1);

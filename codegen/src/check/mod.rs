@@ -782,6 +782,11 @@ fn smoke(t: &Target) -> Section {
         for code in compiled.funcs.iter().filter_map(|f| mir::encode_function(t, f).ok()) {
             for (k, &start) in code.starts.iter().enumerate() {
                 let end = code.starts.get(k + 1).copied().unwrap_or(code.bytes.len());
+                // (Not one a relocation fills in: its field is not yet what
+                // it will be.)
+                if code.fixups.iter().any(|x| (start..end).contains(&x.offset)) {
+                    continue;
+                }
                 let w = &code.bytes[start..end];
                 match mir::decode(t, w) {
                     Some((j, env, n)) if n == w.len() && t.instrs[j].encode(&env).as_deref() == Some(w) => {}

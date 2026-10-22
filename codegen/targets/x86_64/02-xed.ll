@@ -2792,6 +2792,14 @@ define void @X_VEXTRACTPS_657(i64 "imm" %c, i64 "reg"="xe" %o0, i64 "reg"="r32" 
   ret void
 }
 
+define void @X_VZEROALL_658() "enc"="vex(0, 0, 0, 1, 0, 0, 1, 0) | 01110111" "asm"="vzeroall" "asmonly" {
+  ret void
+}
+
+define void @X_VZEROUPPER_659() "enc"="vex(0, 0, 0, 1, 0, 0, 0, 0) | 01110111" "asm"="vzeroupper" "asmonly" {
+  ret void
+}
+
 define void @X_VHADDPD_660_m(i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="x" %o0, i64 "reg"="x" %o1) "enc"="vexm(o1, m.base, 4, 1, 0, o0, 0, 1) | 01111100 | rm(o1, m.base, 4, 1, m.disp, 0, 1)" "asm"="vhaddpd {m.disp}({m.base}), {o0}, {o1}" "asmonly" {
   ret void
 }
@@ -120276,6 +120284,18 @@ define void @X_NOP_6964_64_p(ptr "sym" %m.sym) "enc"="rex(1, 0, 0, 0) | 00001111
   ret void
 }
 
+define void @X_NOP_6965_16(i64 "reg"="r16" %o0) "enc"="01100110 | rex(0, 0, 0, o0) | 00001111 | 00011111 | 11 000 rm:3=o0&7" "asm"="nopw {o0}" "asmonly" {
+  ret void
+}
+
+define void @X_NOP_6965_32(i64 "reg"="r32" %o0) "enc"="rex(0, 0, 0, o0) | 00001111 | 00011111 | 11 000 rm:3=o0&7" "asm"="nopl {o0}" "asmonly" {
+  ret void
+}
+
+define void @X_NOP_6965_64(i64 "reg"="r64" %o0) "enc"="rex(1, 0, 0, o0) | 00001111 | 00011111 | 11 000 rm:3=o0&7" "asm"="nopq {o0}" "asmonly" {
+  ret void
+}
+
 define void @X_VMCALL_6966() "enc"="rex(0, 0, 0, 0) | 00001111 | 00000001 | 11 000 001" "asm"="vmcall" "asmonly" {
   ret void
 }
@@ -124168,6 +124188,10 @@ define void @X_SETO_7633_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 |
   ret void
 }
 
+define void @X_SETO_7634(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10010000 | 11 000 rm:3=o0&7" "asm"="seto {o0}" "asmonly" {
+  ret void
+}
+
 define void @X_SETNO_7635_m(i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 00001111 | 10010001 | rm(0, m.base, 4, 1, m.disp, 0, 1)" "asm"="setno {m.disp}({m.base})" "asmonly" {
   ret void
 }
@@ -124177,6 +124201,10 @@ define void @X_SETNO_7635_x(i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg
 }
 
 define void @X_SETNO_7635_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 | 10010001 | rm(0, 16, 4, 1, 0, m.sym, 1)" "asm"="setno {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+  ret void
+}
+
+define void @X_SETNO_7636(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10010001 | 11 000 rm:3=o0&7" "asm"="setno {o0}" "asmonly" {
   ret void
 }
 
@@ -124192,6 +124220,10 @@ define void @X_SETB_7637_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 |
   ret void
 }
 
+define void @X_SETB_7638(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10010010 | 11 000 rm:3=o0&7" "asm"="setb {o0}" "asmonly" {
+  ret void
+}
+
 define void @X_SETNB_7639_m(i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 00001111 | 10010011 | rm(0, m.base, 4, 1, m.disp, 0, 1)" "asm"="setae {m.disp}({m.base})" "asmonly" {
   ret void
 }
@@ -124201,6 +124233,10 @@ define void @X_SETNB_7639_x(i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg
 }
 
 define void @X_SETNB_7639_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 | 10010011 | rm(0, 16, 4, 1, 0, m.sym, 1)" "asm"="setae {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+  ret void
+}
+
+define void @X_SETNB_7640(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10010011 | 11 000 rm:3=o0&7" "asm"="setae {o0}" "asmonly" {
   ret void
 }
 
@@ -124216,6 +124252,10 @@ define void @X_SETZ_7641_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 |
   ret void
 }
 
+define void @X_SETZ_7642(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10010100 | 11 000 rm:3=o0&7" "asm"="sete {o0}" "asmonly" {
+  ret void
+}
+
 define void @X_SETNZ_7643_m(i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 00001111 | 10010101 | rm(0, m.base, 4, 1, m.disp, 0, 1)" "asm"="setne {m.disp}({m.base})" "asmonly" {
   ret void
 }
@@ -124225,6 +124265,10 @@ define void @X_SETNZ_7643_x(i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg
 }
 
 define void @X_SETNZ_7643_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 | 10010101 | rm(0, 16, 4, 1, 0, m.sym, 1)" "asm"="setne {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+  ret void
+}
+
+define void @X_SETNZ_7644(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10010101 | 11 000 rm:3=o0&7" "asm"="setne {o0}" "asmonly" {
   ret void
 }
 
@@ -124240,6 +124284,10 @@ define void @X_SETBE_7645_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 
   ret void
 }
 
+define void @X_SETBE_7646(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10010110 | 11 000 rm:3=o0&7" "asm"="setbe {o0}" "asmonly" {
+  ret void
+}
+
 define void @X_SETNBE_7647_m(i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 00001111 | 10010111 | rm(0, m.base, 4, 1, m.disp, 0, 1)" "asm"="seta {m.disp}({m.base})" "asmonly" {
   ret void
 }
@@ -124249,6 +124297,10 @@ define void @X_SETNBE_7647_x(i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "re
 }
 
 define void @X_SETNBE_7647_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 | 10010111 | rm(0, 16, 4, 1, 0, m.sym, 1)" "asm"="seta {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+  ret void
+}
+
+define void @X_SETNBE_7648(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10010111 | 11 000 rm:3=o0&7" "asm"="seta {o0}" "asmonly" {
   ret void
 }
 
@@ -127456,6 +127508,10 @@ define void @X_SETS_8019_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 |
   ret void
 }
 
+define void @X_SETS_8020(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10011000 | 11 000 rm:3=o0&7" "asm"="sets {o0}" "asmonly" {
+  ret void
+}
+
 define void @X_SETNS_8021_m(i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 00001111 | 10011001 | rm(0, m.base, 4, 1, m.disp, 0, 1)" "asm"="setns {m.disp}({m.base})" "asmonly" {
   ret void
 }
@@ -127465,6 +127521,10 @@ define void @X_SETNS_8021_x(i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg
 }
 
 define void @X_SETNS_8021_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 | 10011001 | rm(0, 16, 4, 1, 0, m.sym, 1)" "asm"="setns {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+  ret void
+}
+
+define void @X_SETNS_8022(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10011001 | 11 000 rm:3=o0&7" "asm"="setns {o0}" "asmonly" {
   ret void
 }
 
@@ -127480,6 +127540,10 @@ define void @X_SETP_8023_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 |
   ret void
 }
 
+define void @X_SETP_8024(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10011010 | 11 000 rm:3=o0&7" "asm"="setp {o0}" "asmonly" {
+  ret void
+}
+
 define void @X_SETNP_8025_m(i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 00001111 | 10011011 | rm(0, m.base, 4, 1, m.disp, 0, 1)" "asm"="setnp {m.disp}({m.base})" "asmonly" {
   ret void
 }
@@ -127489,6 +127553,10 @@ define void @X_SETNP_8025_x(i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg
 }
 
 define void @X_SETNP_8025_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 | 10011011 | rm(0, 16, 4, 1, 0, m.sym, 1)" "asm"="setnp {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+  ret void
+}
+
+define void @X_SETNP_8026(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10011011 | 11 000 rm:3=o0&7" "asm"="setnp {o0}" "asmonly" {
   ret void
 }
 
@@ -127504,6 +127572,10 @@ define void @X_SETL_8027_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 |
   ret void
 }
 
+define void @X_SETL_8028(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10011100 | 11 000 rm:3=o0&7" "asm"="setl {o0}" "asmonly" {
+  ret void
+}
+
 define void @X_SETNL_8029_m(i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 00001111 | 10011101 | rm(0, m.base, 4, 1, m.disp, 0, 1)" "asm"="setge {m.disp}({m.base})" "asmonly" {
   ret void
 }
@@ -127513,6 +127585,10 @@ define void @X_SETNL_8029_x(i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg
 }
 
 define void @X_SETNL_8029_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 | 10011101 | rm(0, 16, 4, 1, 0, m.sym, 1)" "asm"="setge {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+  ret void
+}
+
+define void @X_SETNL_8030(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10011101 | 11 000 rm:3=o0&7" "asm"="setge {o0}" "asmonly" {
   ret void
 }
 
@@ -127528,6 +127604,10 @@ define void @X_SETLE_8031_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 
   ret void
 }
 
+define void @X_SETLE_8032(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10011110 | 11 000 rm:3=o0&7" "asm"="setle {o0}" "asmonly" {
+  ret void
+}
+
 define void @X_SETNLE_8033_m(i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 00001111 | 10011111 | rm(0, m.base, 4, 1, m.disp, 0, 1)" "asm"="setg {m.disp}({m.base})" "asmonly" {
   ret void
 }
@@ -127537,6 +127617,10 @@ define void @X_SETNLE_8033_x(i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "re
 }
 
 define void @X_SETNLE_8033_p(ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 00001111 | 10011111 | rm(0, 16, 4, 1, 0, m.sym, 1)" "asm"="setg {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+  ret void
+}
+
+define void @X_SETNLE_8034(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 00001111 | 10011111 | 11 000 rm:3=o0&7" "asm"="setg {o0}" "asmonly" {
   ret void
 }
 

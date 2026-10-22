@@ -444,17 +444,16 @@ pub fn disassemble(t: &Target, img: &Image, show_relocs: bool) -> String {
                 (format!(".word {:#010x}", enc::word(&rest[..4])), 4)
             } else {
                 // Against a section: the symbol there, if one is.
-                let named_reloc = relocs.first().map(|r| {
-                    let mut r = (*r).clone();
+                // (Its addend, less what the instruction adds itself.)
+                let named = |r: &mut ImageReloc| {
                     if let Some(sk) = img.sections.iter().position(|x| x.name == r.target)
                         && let Some(n) = at_addr.get(&(sk, img.sections[sk].addr + r.addend as u64))
                     {
                         r.target = (*n).clone();
                         r.addend = 0;
                     }
-                    r
-                });
-                instruction(t, rest, addr, named_reloc.as_ref(), img.macho, &label)
+                };
+                instruction(t, rest, addr, relocs.first().copied(), img.macho, &label, &named)
             };
             // A word as a word, as other disassemblers show one; other
             // lengths as their bytes.
@@ -485,7 +484,8 @@ impl ImageSymbol {
 }
 
 /// The instruction at the start of `bytes`, as assembly, and its length;
-/// `reloc` is the relocation that fills it in, if there is one.
+/// `reloc` is the relocation that fills it in, if there is one, and `named`
+/// names a section-relative one's place by a symbol there.
 pub fn instruction(
     t: &Target,
     bytes: &[u8],
@@ -493,6 +493,7 @@ pub fn instruction(
     reloc: Option<&ImageReloc>,
     macho: bool,
     label: &dyn Fn(u64) -> String,
+    named: &dyn Fn(&mut ImageReloc),
 ) -> (String, usize) {
     let decoded = match reloc.and_then(|r| r.kind) {
         Some(k) => decode_reloc(t, bytes, k).or_else(|| mir::decode(t, bytes)),
@@ -522,6 +523,7 @@ pub fn instruction(
                     });
                     let mut r = r.clone();
                     r.addend -= bias;
+                    named(&mut r);
                     Operand::Text(reloc_operand(&t.machine, &r, macho))
                 }
                 None => match ins.reloc.and_then(|kind| t.machine.relocs[kind.0 as usize].reaches(pc, v)) {
@@ -542,9 +544,28 @@ pub fn instruction(
 /// many instructions there are.
 pub fn reads_back(t: &Target, img: &Image, asm: &str, aliases: &[(&str, &str)]) -> Result<usize, String> {
     let dump = disassemble(t, img, true);
+    // Where functions are, by their symbols' sizes: what lies between them
+    // is padding (x86's no-ops), not written as instructions.
+    let funcs: Vec<(u64, u64)> = img
+        .symbols
+        .iter()
+        .filter(|x| x.class == SymbolClass::Func && x.size > 0)
+        .filter_map(|x| x.section.map(|k| (img.sections[k].addr + x.value_in(img, k), x.size)))
+        .collect();
+    let padding = |addr: u64| !funcs.is_empty() && !funcs.iter().any(|&(a, n)| addr >= a && addr < a + n);
     // Each instruction: its text, and whether a relocation fills it in.
     let mut lines: Vec<(String, bool)> = Vec::new();
+    let mut skipping = false;
     for l in dump.lines() {
+        if let Some((addr, _)) = l.split_once(": ")
+            && let Ok(a) = u64::from_str_radix(addr.trim(), 16)
+            && !l.starts_with('\t')
+        {
+            skipping = padding(a);
+        }
+        if skipping {
+            continue;
+        }
         if l.starts_with("\t\t") {
             if let Some(last) = lines.last_mut() {
                 last.1 = true;

@@ -281,6 +281,10 @@ pub struct Machine {
     /// Branches on a boolean in a register must compare the whole register
     /// (RISC-V), rather than test its lowest bit (AArch64's `tbnz`).
     pub compare_booleans: bool,
+    /// The floating-point comparisons no one condition tests, which are
+    /// made of two (`"fcmp-split"`: AArch64's one and ueq, the default;
+    /// x86's oeq and une).
+    pub fcmp_split: Vec<String>,
     /// Loads and stores need no alignment and cost no more without it
     /// (`unaligned-access` = `fast`), so small copies may use wide ones.
     pub unaligned_fast: bool,
@@ -306,6 +310,10 @@ pub struct Machine {
     /// not the link register.
     pub cfi_cfa_offset: i64,
     pub cfi_return_column: Option<u32>,
+    /// No-ops to pad code with, by length from 1 (`!target.nops`, hex):
+    /// the longest are used as often as they fit, as the assemblers do.
+    /// Without them, code is padded with zeros.
+    pub nops: Vec<Vec<u8>>,
     /// The data alignment factor of unwind tables, in ELF and in Mach-O
     /// (`cfi-data-align`: one value, or ELF's then Mach-O's).
     pub cfi_data_align: (i64, i64),
@@ -453,6 +461,8 @@ impl Machine {
             dwarf_each: HashMap::new(),
             cfi_cfa_offset: 0,
             cfi_return_column: None,
+            nops: Vec::new(),
+            fcmp_split: vec!["one".into(), "ueq".into()],
             cfi_data_align: (-8, -8),
             asm_aliases: Vec::new(),
         };
@@ -497,6 +507,9 @@ impl Machine {
             Some(o) => return Err(format!("target parameter narrow-results: {o}")),
         };
         mc.external_via_got = params.get("external-via-got").is_some_and(|v| v == "yes");
+        if let Some(t) = all_params.iter().find(|t| t[0] == "fcmp-split") {
+            mc.fcmp_split = t[1..].to_vec();
+        }
         mc.elf_machine = num("elf-machine")?.unwrap_or(0) as u16;
         mc.elf_flags = num("elf-flags")?.unwrap_or(0) as u32;
         mc.elf_format = params.get("elf-format").cloned().unwrap_or_else(|| "elf64-little".into());
@@ -558,6 +571,15 @@ impl Machine {
                 }
             }
         }
+        for t in tuples(m, "target.nops") {
+            for hex in t {
+                let bytes = (0..hex.len() / 2)
+                    .map(|k| u8::from_str_radix(&hex[2 * k..2 * k + 2], 16))
+                    .collect::<Result<Vec<u8>, _>>()
+                    .map_err(|_| format!("!target.nops: {hex}"))?;
+                mc.nops.push(bytes);
+            }
+        }
         mc.cfi_cfa_offset = num("cfi-cfa-offset")?.unwrap_or(0) as i64;
         mc.cfi_return_column = num("cfi-return-column")?.map(|v| v as u32);
         for t in tuples(m, "target.asm-aliases") {
@@ -617,6 +639,20 @@ impl Machine {
             });
         }
         Ok(mc)
+    }
+
+    /// `n` bytes of padding for code: no-ops, if the description gives them.
+    pub fn code_fill(&self, mut n: usize) -> Vec<u8> {
+        if self.nops.is_empty() {
+            return vec![0; n];
+        }
+        let mut out = Vec::with_capacity(n);
+        while n > 0 {
+            let k = n.min(self.nops.len());
+            out.extend_from_slice(&self.nops[k - 1]);
+            n -= k;
+        }
+        out
     }
 
     /// What a class holds: for a fixed class (one register), what its

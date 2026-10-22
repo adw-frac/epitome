@@ -51,8 +51,11 @@ def alu():
                   f'rex({rw}, m, 0, d) | {bits(n * 8 + 1)} | rr(m, d)', f'{mn}{sfx} {{m}}, {{d}}',
                   [f'%r = {ir} {ty} %n, %m', f'ret {ty} %r'], FLAGS + zext)
             # op $imm, d: a byte if it fits (83 /n), else 32 bits (81 /n).
+            # (The accumulator's own form, 05 + 8n, where the byte does not
+            # hold the immediate: as llvm-mc writes it.)
             entry(ty, f'{N}ri', [f'{ty} "reg"="{cls}" "tied" %n', f'{ty} "imm" %imm'],
                   f'{{ rex({rw}, 0, 0, d) | 10000011 | rr({n}, d) | ib:s8=imm ; '
+                  f'acc:0=d rex({rw}, 0, 0, 0) | {bits(n * 8 + 5)} | iv:s32=imm ; '
                   f'rex({rw}, 0, 0, d) | 10000001 | rr({n}, d) | iv:s32=imm }}',
                   f'{mn}{sfx} ${{imm}}, {{d}}', [f'%r = {ir} {ty} %n, %imm', f'ret {ty} %r'], FLAGS + zext)
         # imul m, d (0F AF /r: ModRM.reg the destination).
@@ -197,6 +200,7 @@ def compares():
         b2 = '%imm' if w == 64 else '%b'
         entry('%flags', f'CMP{w}ri', [f'{ty} "reg"="{cls}" %n', f'{ty} "imm" %imm'],
               f'{{ rex({rw}, 0, 0, n) | 10000011 | rr(7, n) | ib:s8=imm ; '
+              f'acc:0=n rex({rw}, 0, 0, 0) | 00111101 | iv:s32=imm ; '
               f'rex({rw}, 0, 0, n) | 10000001 | rr(7, n) | iv:s32=imm }}', f'cmp{sfx} ${{imm}}, {{n}}',
               ext2 + [f'%f0 = insertvalue %flags poison, i64 {a}, 0', f'%f = insertvalue %flags %f0, i64 {b2}, 1',
                       'ret %flags %f'], ' "sets"="zcso"')
@@ -329,6 +333,140 @@ def recipes():
           ['%r = zext i32 %n to i64', 'ret i64 %r'], ' "zext"="32"')
 
 
+# Floating point (SSE2): the scalar types, their prefix, their class.
+FP = {'double': ('11110010 | ', 'sd', 'd', 'q'), 'float': ('11110011 | ', 'ss', 's', 'l')}
+
+
+def floats():
+    out.append("""; Floating point, SSE2's scalar instructions. The flags of a comparison
+; (ucomisd) are ZF, PF and CF: unordered sets all three, less than CF,
+; equal ZF. Each of the eight predicates a condition tests is one condition
+; code; oeq and une are two (prepare splits them: "fcmp-split").
+%fflags = type { double, double }
+; The flags of the operands the other way round: ucomisd n, m compares m
+; with n. Its conditions test the predicates whose operands are swapped:
+; olt is ogt the other way round, ugt ult.
+%fflagsr = type { double, double }
+""")
+    for name, pred, code, cc in [('olt', 'olt', 7, 'a'), ('ole', 'ole', 3, 'ae'), ('ugt', 'ugt', 2, 'b'),
+                                 ('uge', 'uge', 6, 'be')]:
+        out.append(f'define i1 @cc.fr.{name}(%fflagsr %f) "cond"="{code}" "asm"="{cc}" "reads"="zcp" {{\n'
+                   f'  %a = extractvalue %fflagsr %f, 0\n  %b = extractvalue %fflagsr %f, 1\n'
+                   f'  %c = fcmp {pred} double %a, %b\n  ret i1 %c\n}}\n')
+    for name, pred, code, cc in [('ogt', 'ogt', 7, 'a'), ('oge', 'oge', 3, 'ae'), ('ult', 'ult', 2, 'b'),
+                                 ('ule', 'ule', 6, 'be'), ('ueq', 'ueq', 4, 'e'), ('one', 'one', 5, 'ne'),
+                                 ('uno', 'uno', 10, 'p'), ('ord', 'ord', 11, 'np')]:
+        out.append(f'define i1 @cc.f.{name}(%fflags %f) "cond"="{code}" "asm"="{cc}" "reads"="zcp" {{\n'
+                   f'  %a = extractvalue %fflags %f, 0\n  %b = extractvalue %fflags %f, 1\n'
+                   f'  %c = fcmp {pred} double %a, %b\n  ret i1 %c\n}}\n')
+    for ty, (pre, sfx, cls, isfx) in FP.items():
+        T = sfx.upper()
+        wide = ['%a = fpext float %n to double', '%b = fpext float %m to double'] if ty == 'float' else []
+        a, b = ('%a', '%b') if ty == 'float' else ('%n', '%m')
+        p66 = '01100110 | ' if ty == 'double' else ''
+        # ucomisd m, n: the flags of n against m; and the other way round.
+        entry('%fflags', f'UCOMI{T}', [f'{ty} "reg"="{cls}" %n', f'{ty} "reg"="{cls}" %m'],
+              f'{p66}rex(0, n, 0, m) | 00001111 | 00101110 | rr(n, m)', f'ucomi{sfx} {{m}}, {{n}}',
+              wide + [f'%f0 = insertvalue %fflags poison, double {a}, 0', f'%f = insertvalue %fflags %f0, double {b}, 1',
+                      'ret %fflags %f'], ' "sets"="zcp"')
+        entry('%fflagsr', f'UCOMI{T}rev', [f'{ty} "reg"="{cls}" %n', f'{ty} "reg"="{cls}" %m'],
+              f'{p66}rex(0, m, 0, n) | 00001111 | 00101110 | rr(m, n)', f'ucomi{sfx} {{n}}, {{m}}',
+              wide + [f'%f0 = insertvalue %fflagsr poison, double {a}, 0', f'%f = insertvalue %fflagsr %f0, double {b}, 1',
+                      'ret %fflagsr %f'], ' "sets"="zcp"')
+        for mn, op, ir in [('add', 0x58, 'fadd'), ('sub', 0x5C, 'fsub'), ('mul', 0x59, 'fmul'), ('div', 0x5E, 'fdiv')]:
+            entry(ty, f'{mn.upper()}{T}', [f'{ty} "reg"="{cls}" "tied" %n', f'{ty} "reg"="{cls}" %m'],
+                  f'{pre}rex(0, d, 0, m) | 00001111 | {bits(op)} | rr(d, m)', f'{mn}{sfx} {{m}}, {{d}}',
+                  [f'%r = {ir} {ty} %n, %m', f'ret {ty} %r'])
+        intr = 'f64' if ty == 'double' else 'f32'
+        entry(ty, f'SQRT{T}', [f'{ty} "reg"="{cls}" %n'], f'{pre}rex(0, d, 0, n) | 00001111 | 01010001 | rr(d, n)',
+              f'sqrt{sfx} {{n}}, {{d}}', [f'%r = call {ty} @llvm.sqrt.{intr}({ty} %n)', f'ret {ty} %r'])
+        out.append(f'declare {ty} @llvm.sqrt.{intr}({ty})\n')
+        # Loads and stores.
+        entry(ty, f'LD{T}', ['ptr "reg"="r64" %n', 'i64 "imm" %off'],
+              f'{pre}rex(0, d, 4, n) | 00001111 | 00010000 | rm(d, n, 4, 1, off, 0, 1)', f'mov{sfx} {{off}}({{n}}), {{d}}',
+              ['%a = getelementptr i8, ptr %n, i64 %off', f'%r = load {ty}, ptr %a', f'ret {ty} %r'],
+              f' "role"="load.{cls}"')
+        entry('void', f'ST{T}', [f'{ty} "reg"="{cls}" %t', 'ptr "reg"="r64" %n', 'i64 "imm" %off'],
+              f'{pre}rex(0, t, 4, n) | 00001111 | 00010001 | rm(t, n, 4, 1, off, 0, 1)', f'mov{sfx} {{t}}, {{off}}({{n}})',
+              ['%a = getelementptr i8, ptr %n, i64 %off', f'store {ty} %t, ptr %a', 'ret void'], f' "role"="store.{cls}"')
+        # Between the files: the bits.
+        ity, icls, w, mv = ('i64', 'r64', 1, 'movq') if ty == 'double' else ('i32', 'r32', 0, 'movd')
+        entry(ty, f'MOV{T}from{ity}', [f'{ity} "reg"="{icls}" %n'],
+              f'01100110 | rex({w}, d, 0, n) | 00001111 | 01101110 | rr(d, n)', f'{mv} {{n}}, {{d}}',
+              [f'%r = bitcast {ity} %n to {ty}', f'ret {ty} %r'], f' "role"="move.{cls}.{icls}"')
+        entry(ity, f'MOV{ity}from{T}', [f'{ty} "reg"="{cls}" %n'],
+              f'01100110 | rex({w}, n, 0, d) | 00001111 | 01111110 | rr(n, d)', f'{mv} {{n}}, {{d}}',
+              [f'%r = bitcast {ty} %n to {ity}', f'ret {ity} %r'], f' "role"="move.{icls}.{cls}"')
+        # Conversions from integers (cvtsi2sd: signed; an unsigned 32-bit
+        # value is its 64-bit register, zero-extended).
+        for src, w, ext in [('i32', 0, 'sitofp'), ('i64', 1, 'sitofp'), ('i32', 1, 'uitofp')]:
+            scls = 'r64' if src == 'i64' else 'r32'
+            n = '{n:r64}' if (src == 'i32' and w == 1) else '{n}'
+            entry(ty, f'CVT{ext.upper()}{src.upper()}{T}', [f'{src} "reg"="{scls}" %n'],
+                  f'{pre}rex({w}, d, 0, n) | 00001111 | 00101010 | rr(d, n)', f'cvtsi2{sfx}{"q" if w else "l"} {n}, {{d}}',
+                  [f'%r = {ext} {src} %n to {ty}', f'ret {ty} %r'])
+        # To integers, truncating (an unsigned 32-bit result is the low
+        # half of the 64-bit conversion).
+        for dst, w, ext in [('i32', 0, 'fptosi'), ('i64', 1, 'fptosi'), ('i32', 1, 'fptoui')]:
+            dcls = 'r64' if dst == 'i64' else 'r32'
+            d = '{d:r64}' if (dst == 'i32' and w == 1) else '{d}'
+            entry(dst, f'CVTT{ext.upper()}{T}{dst.upper()}', [f'{ty} "reg"="{cls}" %n'],
+                  f'{pre}rex({w}, d, 0, n) | 00001111 | 00101100 | rr(d, n)', f'cvtt{sfx}2si {{n}}, {d}',
+                  [f'%r = {ext} {ty} %n to {dst}', f'ret {dst} %r'], f' "dclass"="{dcls}"')
+        # select: through the integer registers.
+        out.append(f'define {ty} @select.{cls}(i1 "reg"="r32" %c, {ty} "reg"="{cls}" %a, {ty} "reg"="{cls}" %b) '
+                   f'"recipe"="select.{cls}.expand" {{\n  %r = select i1 %c, {ty} %a, {ty} %b\n  ret {ty} %r\n}}\n')
+        cm = 'CMOV64' if ty == 'double' else 'CMOV32'
+        out.append(f'define {ty} @select.{cls}.expand(i1 %c, {ty} %a, {ty} %b) {{\n'
+                   f'  %ai = call {ity} @MOV{ity}from{T}({ty} %a)\n  %bi = call {ity} @MOV{ity}from{T}({ty} %b)\n'
+                   f'  %f = call %flags @TESTB1(i1 %c)\n  %ne = call i1 @cc.ne(%flags %f)\n'
+                   f'  %ri = call {ity} @{cm}(i1 %ne, {ity} %ai, {ity} %bi)\n'
+                   f'  %r = call {ty} @MOV{T}from{ity}({ity} %ri)\n  ret {ty} %r\n}}\n')
+        # Negation and absolute value: the sign bit flipped or cleared,
+        # in the integer registers.
+        bitsw = 64 if ty == 'double' else 32
+        sign = -(1 << (bitsw - 1))
+        xor, andr, movk = (('XOR64rr', 'AND64rr', 'MOVABS64ri') if ty == 'double' else ('XOR32rr', 'AND32rr', 'MOV32ri'))
+        for op, body, k in [('fneg', f'%r = fneg {ty} %a', sign), ('fabs', f'%r = call {ty} @llvm.fabs.{intr}({ty} %a)',
+                                                                     (1 << (bitsw - 1)) - 1)]:
+            out.append(f'define {ty} @{op}.{cls}({ty} "reg"="{cls}" %a) "recipe"="{op}.{cls}.expand" {{\n'
+                       f'  {body}\n  ret {ty} %r\n}}\n')
+            inst = xor if op == 'fneg' else andr
+            out.append(f'define {ty} @{op}.{cls}.expand({ty} %a) {{\n'
+                       f'  %ai = call {ity} @MOV{ity}from{T}({ty} %a)\n  %k = call {ity} @{movk}({ity} {k})\n'
+                       f'  %x = call {ity} @{inst}({ity} %ai, {ity} %k)\n'
+                       f'  %r = call {ty} @MOV{T}from{ity}({ity} %x)\n  ret {ty} %r\n}}\n')
+        out.append(f'declare {ty} @llvm.fabs.{intr}({ty})\n')
+        # fmuladd: a multiply, then an add (fusing is allowed, not needed).
+        out.append(f'declare {ty} @llvm.fmuladd.{intr}({ty}, {ty}, {ty})\n')
+        out.append(f'define {ty} @fmuladd.{cls}({ty} "reg"="{cls}" %a, {ty} "reg"="{cls}" %b, {ty} "reg"="{cls}" %c) '
+                   f'"recipe"="fmuladd.{cls}.expand" {{\n  %r = call {ty} @llvm.fmuladd.{intr}({ty} %a, {ty} %b, {ty} %c)\n'
+                   f'  ret {ty} %r\n}}\n')
+        out.append(f'define {ty} @fmuladd.{cls}.expand({ty} %a, {ty} %b, {ty} %c) {{\n'
+                   f'  %p = call {ty} @MUL{T}({ty} %a, {ty} %b)\n  %r = call {ty} @ADD{T}({ty} %p, {ty} %c)\n'
+                   f'  ret {ty} %r\n}}\n')
+        # An unsigned 64-bit value: converted signed if its top bit is
+        # clear; else halved (keeping the low bit, for rounding),
+        # converted, and doubled.
+        out.append(f'define {ty} @uitofp.64.{cls}(i64 "reg"="r64" %x) "recipe"="uitofp.64.{cls}.expand" {{\n'
+                   f'  %r = uitofp i64 %x to {ty}\n  ret {ty} %r\n}}\n')
+        out.append(f'define {ty} @uitofp.64.{cls}.expand(i64 %x) {{\n'
+                   f'  %h = call i64 @SHR64ri(i64 %x, i64 1)\n  %l = call i64 @AND64ri(i64 %x, i64 1)\n'
+                   f'  %o = call i64 @OR64rr(i64 %h, i64 %l)\n'
+                   f'  %f1 = call %flags @TEST64rr(i64 %x, i64 %x)\n  %n1 = call i1 @cc.l(%flags %f1)\n'
+                   f'  %t = call i64 @CMOV64(i1 %n1, i64 %o, i64 %x)\n'
+                   f'  %c = call {ty} @CVTSITOFPI64{T}(i64 %t)\n  %c2 = call {ty} @ADD{T}({ty} %c, {ty} %c)\n'
+                   f'  %ci = call {ity} @MOV{ity}from{T}({ty} %c)\n  %c2i = call {ity} @MOV{ity}from{T}({ty} %c2)\n'
+                   f'  %f2 = call %flags @TEST64rr(i64 %x, i64 %x)\n  %n2 = call i1 @cc.l(%flags %f2)\n'
+                   f'  %ri = call {ity} @{"CMOV64" if ty == "double" else "CMOV32"}(i1 %n2, {ity} %c2i, {ity} %ci)\n'
+                   f'  %r = call {ty} @MOV{T}from{ity}({ity} %ri)\n  ret {ty} %r\n}}\n')
+    # Between the two widths.
+    entry('double', 'CVTSS2SD', ['float "reg"="s" %n'], '11110011 | rex(0, d, 0, n) | 00001111 | 01011010 | rr(d, n)',
+          'cvtss2sd {n}, {d}', ['%r = fpext float %n to double', 'ret double %r'])
+    entry('float', 'CVTSD2SS', ['double "reg"="d" %n'], '11110010 | rex(0, d, 0, n) | 00001111 | 01011010 | rr(d, n)',
+          'cvtsd2ss {n}, {d}', ['%r = fptrunc double %n to float', 'ret float %r'])
+
+
 def vector_copies():
     """Copies of the vector and mask registers (the register allocator's)."""
     entry('<2 x i64>', 'MOVAPSrr', ['<2 x i64> "reg"="x" %n'], 'rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)',
@@ -360,6 +498,7 @@ def main():
     control()
     division()
     recipes()
+    floats()
     vector_copies()
     sys.stdout.write('\n'.join(out))
 

@@ -832,6 +832,8 @@ X_VEXTRACTPS_656_m	vextractps ${c}, {r}, {m.disp}({m.base})	7
 X_VEXTRACTPS_656_x	vextractps ${c}, {r}, {m.disp}({m.base},{m.index},{m.scale})	8
 X_VEXTRACTPS_656_p	vextractps ${c}, {r}, {m.sym}(%rip)	10
 X_VEXTRACTPS_657	vextractps ${c}, {r}, {b}	6
+X_VZEROALL_658	vzeroall	3
+X_VZEROUPPER_659	vzeroupper	3
 X_VHADDPD_660_m	vhaddpd {m.disp}({m.base}), {n}, {r}	5
 X_VHADDPD_660_x	vhaddpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
 X_VHADDPD_660_p	vhaddpd {m.sym}(%rip), {n}, {r}	8
@@ -37714,6 +37716,9 @@ X_NOP_6964_32_p	nopl {m.sym}(%rip)	7
 X_NOP_6964_64_m	nopq {m.disp}({m.base})	5
 X_NOP_6964_64_x	nopq {m.disp}({m.base},{m.index},{m.scale})	6
 X_NOP_6964_64_p	nopq {m.sym}(%rip)	8
+X_NOP_6965_16	nopw {b}	4
+X_NOP_6965_32	nopl {b}	3
+X_NOP_6965_64	nopq {b}	4
 X_VMCALL_6966	vmcall	3
 X_VMLAUNCH_6967	vmlaunch	3
 X_VMRESUME_6968	vmresume	3
@@ -38818,27 +38823,35 @@ X_JNBE_7632	ja {dest}	6
 X_SETO_7633_m	seto {m.disp}({m.base})	4
 X_SETO_7633_x	seto {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETO_7633_p	seto {m.sym}(%rip)	7
+X_SETO_7634	seto {b}	3
 X_SETNO_7635_m	setno {m.disp}({m.base})	4
 X_SETNO_7635_x	setno {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETNO_7635_p	setno {m.sym}(%rip)	7
+X_SETNO_7636	setno {b}	3
 X_SETB_7637_m	setb {m.disp}({m.base})	4
 X_SETB_7637_x	setb {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETB_7637_p	setb {m.sym}(%rip)	7
+X_SETB_7638	setb {b}	3
 X_SETNB_7639_m	setae {m.disp}({m.base})	4
 X_SETNB_7639_x	setae {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETNB_7639_p	setae {m.sym}(%rip)	7
+X_SETNB_7640	setae {b}	3
 X_SETZ_7641_m	sete {m.disp}({m.base})	4
 X_SETZ_7641_x	sete {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETZ_7641_p	sete {m.sym}(%rip)	7
+X_SETZ_7642	sete {b}	3
 X_SETNZ_7643_m	setne {m.disp}({m.base})	4
 X_SETNZ_7643_x	setne {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETNZ_7643_p	setne {m.sym}(%rip)	7
+X_SETNZ_7644	setne {b}	3
 X_SETBE_7645_m	setbe {m.disp}({m.base})	4
 X_SETBE_7645_x	setbe {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETBE_7645_p	setbe {m.sym}(%rip)	7
+X_SETBE_7646	setbe {b}	3
 X_SETNBE_7647_m	seta {m.disp}({m.base})	4
 X_SETNBE_7647_x	seta {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETNBE_7647_p	seta {m.sym}(%rip)	7
+X_SETNBE_7648	seta {b}	3
 X_PUSH_7649_16	pushw %fs	3
 X_PUSH_7649_64	pushq %fs	2
 X_POP_7650_16	popw %fs	3
@@ -39671,27 +39684,35 @@ X_JNLE_8018	jg {dest}	6
 X_SETS_8019_m	sets {m.disp}({m.base})	4
 X_SETS_8019_x	sets {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETS_8019_p	sets {m.sym}(%rip)	7
+X_SETS_8020	sets {b}	3
 X_SETNS_8021_m	setns {m.disp}({m.base})	4
 X_SETNS_8021_x	setns {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETNS_8021_p	setns {m.sym}(%rip)	7
+X_SETNS_8022	setns {b}	3
 X_SETP_8023_m	setp {m.disp}({m.base})	4
 X_SETP_8023_x	setp {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETP_8023_p	setp {m.sym}(%rip)	7
+X_SETP_8024	setp {b}	3
 X_SETNP_8025_m	setnp {m.disp}({m.base})	4
 X_SETNP_8025_x	setnp {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETNP_8025_p	setnp {m.sym}(%rip)	7
+X_SETNP_8026	setnp {b}	3
 X_SETL_8027_m	setl {m.disp}({m.base})	4
 X_SETL_8027_x	setl {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETL_8027_p	setl {m.sym}(%rip)	7
+X_SETL_8028	setl {b}	3
 X_SETNL_8029_m	setge {m.disp}({m.base})	4
 X_SETNL_8029_x	setge {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETNL_8029_p	setge {m.sym}(%rip)	7
+X_SETNL_8030	setge {b}	3
 X_SETLE_8031_m	setle {m.disp}({m.base})	4
 X_SETLE_8031_x	setle {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETLE_8031_p	setle {m.sym}(%rip)	7
+X_SETLE_8032	setle {b}	3
 X_SETNLE_8033_m	setg {m.disp}({m.base})	4
 X_SETNLE_8033_x	setg {m.disp}({m.base},{m.index},{m.scale})	5
 X_SETNLE_8033_p	setg {m.sym}(%rip)	7
+X_SETNLE_8034	setg {b}	3
 X_PUSH_8035_16	pushw %gs	3
 X_PUSH_8035_64	pushq %gs	2
 X_POP_8036_16	popw %gs	3

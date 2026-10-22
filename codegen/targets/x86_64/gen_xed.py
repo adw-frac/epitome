@@ -311,9 +311,8 @@ def legacy(rec, form, eosz, rexw, mem):
             rr = reg_f if reg_f else str(reg_bits if reg_bits is not None else 0)
             pieces.append(f'rm({rr}, {mem[4]})')
         else:
-            if not rf and reg_bits is None:
-                raise Unsupported('reg')
-            regpart = f'reg:3={rf}' if rf else bits8(reg_bits)[5:]
+            # (ModRM.reg of no operand is ignored: 0, as llvm-mc writes it.)
+            regpart = f'reg:3={rf}' if rf else bits8(reg_bits or 0)[5:]
             if rm_f:
                 rmpart = f'rm:3={rm_f}&7'
             elif rm_bits is not None:
@@ -426,13 +425,15 @@ def vex(rec, form, mem):
         m = re.match(r'REG\[0b([01]{3})\]$', t)
         if m:
             reg_bits = int(m.group(1), 2)
-    if r is None and reg_bits is None:
-        raise Unsupported('reg')
-    rr = r if r else str(reg_bits)
+    modrm_byte = any(t.startswith('MOD[') for t in pat)
+    rr = r if r else str(reg_bits or 0)
     v = fields.get('N', '0')
     opc = [bits8(int(t, 16)) for t in pat if re.match(r'0x[0-9A-Fa-f]{2}$', t)]
     if len(opc) != 1:
         raise Unsupported('opcode')
+    if not modrm_byte:
+        # No ModRM (vzeroupper): the prefix and the opcode.
+        return params, f'vex(0, 0, 0, {mp}, {w}, {v}, {l}, {pp}) | {opc[0]}', holes
     if mem:
         base, index = mem[4].split(', ')[:2]
         prefix = f'vexm({rr}, {base}, {index}, {mp}, {w}, {v}, {l}, {pp})'
@@ -447,7 +448,7 @@ def vex(rec, form, mem):
         if b is None and rm_bits is None:
             raise Unsupported('rm')
         prefix = f'vex({rr}, 0, {b or 0}, {mp}, {w}, {v}, {l}, {pp})'
-        regpart = f'reg:3={r}&7' if r else bits8(reg_bits)[5:]
+        regpart = f'reg:3={r}&7' if r else bits8(reg_bits or 0)[5:]
         rmpart = f'rm:3={b}&7' if b else bits8(rm_bits)[5:]
         modrm = f'11 {regpart} {rmpart}'
     pieces = [prefix, opc[0], modrm]
@@ -585,7 +586,7 @@ def evex(rec, form, mem, variant):
         if b is None:
             raise Unsupported('rm')
         prefix = f'evexr({rr}, {b}, {mp}, {w}, {v}, {ll}, {pp}, {bc}, {aaa}, {z})'
-        regpart = f'reg:3={r}&7' if r else bits8(reg_bits)[5:]
+        regpart = f'reg:3={r}&7' if r else bits8(reg_bits or 0)[5:]
         modrm = f'11 {regpart} rm:3={b}&7'
     pieces = [prefix, opc[0], modrm]
     for t in pat:
