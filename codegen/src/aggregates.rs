@@ -33,7 +33,7 @@ struct Leaf {
 }
 
 /// The most leaves an aggregate is split into.
-const MAX_LEAVES: usize = 16;
+const MAX_LEAVES: usize = 64;
 
 /// The fields of a struct (literal or named) or array type, and their
 /// offsets.

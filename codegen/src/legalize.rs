@@ -670,9 +670,9 @@ fn canonical_shuffles(cx: &mut Ctx, f: &mut Function) {
     }
 }
 
-/// A select of whole vectors by one boolean: by a mask of it in every
-/// lane (a splat of one boolean, which `fix_masks` makes right at any
-/// width), lane by lane.
+/// A select of whole vectors (that a register holds) by one boolean: by a
+/// mask of it in every lane (a splat of one boolean, which `fix_masks`
+/// makes right at any width), lane by lane.
 fn scalar_selects(cx: &mut Ctx, f: &mut Function) {
     let i1 = cx.m.types.int(1);
     let i32t = cx.m.types.int(32);
@@ -690,7 +690,9 @@ fn scalar_selects(cx: &mut Ctx, f: &mut Function) {
                 k += 1;
                 continue;
             };
-            if cx.value_ty(f, cond) != i1 {
+            // (A vector split into parts is chosen part by part by the
+            // boolean itself, when it is split.)
+            if cx.value_ty(f, cond) != i1 || split_count(cx, ty).is_some() {
                 k += 1;
                 continue;
             }
@@ -1408,8 +1410,43 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                     let e = parts_of(cx, &parts, bld.f, else_value, n, pt)?;
                     let c: Vec<Value> = match cond {
                         Value::Local(x) if parts.contains_key(&x) => parts[&x].clone(),
-                        // A scalar condition chooses whole vectors.
-                        v if !matches!(cx.m.types.get(cx.value_ty(bld.f, v)), Type::Vector { .. }) => vec![v; n],
+                        // A scalar condition chooses whole parts: scalars by
+                        // it, vectors by it in every lane (its extension
+                        // splatted and compared with zero, a mask of the
+                        // parts' lane width).
+                        v if !matches!(cx.m.types.get(cx.value_ty(bld.f, v)), Type::Vector { .. }) => {
+                            match *cx.m.types.get(pt) {
+                                Type::Vector { len: pl, .. } => {
+                                    let it = cx.m.types.int(eb.max(8));
+                                    let vt = vec_ty(cx, pl, it);
+                                    let i1 = cx.m.types.int(1);
+                                    let mt = vec_ty(cx, pl, i1);
+                                    let x = bld.op(
+                                        Op::Cast {
+                                            op: CastOp::SExt,
+                                            flags: IntFlags::NONE,
+                                            fmf: FastMath::default(),
+                                            value: v,
+                                        },
+                                        Some(it),
+                                    );
+                                    let pz = poison(cx, vt);
+                                    let i32t = cx.m.types.int(32);
+                                    let zero_idx = cx.int(i32t, 0);
+                                    let one =
+                                        bld.op(Op::InsertElement { vector: pz, element: x, index: zero_idx }, Some(vt));
+                                    let all = shuffle(&mut bld, cx, one, pz, &vec![0; pl as usize], vt);
+                                    let zero =
+                                        Value::Const(cx.m.consts.intern(Constant { ty: vt, kind: ConstKind::Zero }));
+                                    let m = bld.op(
+                                        Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: all, rhs: zero },
+                                        Some(mt),
+                                    );
+                                    vec![m; n]
+                                }
+                                _ => vec![v; n],
+                            }
+                        }
                         _ => return Err("a select whose mask is not split as its values are".into()),
                     };
                     if c.len() != n {

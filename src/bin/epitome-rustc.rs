@@ -18,8 +18,10 @@
 //! What stays rustc's (LLVM's): the standard library, which comes built;
 //! the allocator shim; proc-macro crates and build scripts, which run
 //! inside the build (`EPITOME_RUSTC_BUILD_SCRIPTS=1` takes build scripts
-//! too); and any crate whose IR we cannot compile, which keeps rustc's
-//! object. Every crate's outcome is a line in `EPITOME_RUSTC_LOG`
+//! too); crates built with link-time optimisation, and libraries built
+//! with bitcode for it (without `-C embed-bitcode=no`), as it is LLVM's
+//! of the bitcode our objects do not have; and any crate whose IR we
+//! cannot compile, which keeps rustc's object. Every crate's outcome is a line in `EPITOME_RUSTC_LOG`
 //! (default `epitome-rustc.log` beside the target directory's `deps`).
 //!
 //! `EPITOME_RUSTC_OPT=1` asks rustc for its IR before LLVM's passes
@@ -147,6 +149,25 @@ fn wrap(rustc: &str, args: &[String]) -> ExitCode {
         .collect();
     if let Some(t) = types.iter().find(|t| matches!(**t, "proc-macro" | "dylib" | "cdylib" | "staticlib")) {
         return pass(&format!("a {t}"), Some(&log), &krate);
+    }
+    // Link-time optimisation is LLVM's, of the bitcode in each crate's
+    // object, which ours do not have: a crate built with it, or a library
+    // that a build with it may link (Cargo asks for no bitcode, with
+    // `-C embed-bitcode=no`, only when none will), keeps rustc's.
+    let lto = args.iter().enumerate().any(|(k, a)| {
+        let v = if a == "-C" {
+            args.get(k + 1).map(String::as_str).unwrap_or("")
+        } else {
+            a.strip_prefix("-C").unwrap_or("")
+        };
+        v == "lto" || v.strip_prefix("lto=").is_some_and(|x| !matches!(x, "off" | "no" | "n" | "false"))
+    });
+    if lto {
+        return pass("link-time optimisation", Some(&log), &krate);
+    }
+    let library = !args.iter().any(|a| a == "--test") && !types.contains(&"bin");
+    if library && codegen_option(args, "embed-bitcode") != Some("no") {
+        return pass("bitcode for link-time optimisation", Some(&log), &krate);
     }
     if krate.starts_with("build_script_") && std::env::var("EPITOME_RUSTC_BUILD_SCRIPTS").is_err() {
         return pass("a build script", Some(&log), &krate);

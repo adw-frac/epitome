@@ -870,8 +870,11 @@ fn intrinsic(
                 let h = s.bin(BinOp::Sub, xh, sign, i64t);
                 (l, s.bin(BinOp::Sub, h, c, i64t))
             }
-            "llvm.bswap" if bits == 128 => {
+            // A byte swap: the halves' swapped, and exchanged; at fewer
+            // than 128 bits, of the value zero-extended, then shifted down.
+            "llvm.bswap" if bits % 8 == 0 => {
                 let (lo, hi) = get(cx, 0)?;
+                let hi = normal(cx, s, ty, hi, bits, false);
                 let callee = crate::legalize::declare(cx, "llvm.bswap.i64", i64t, &[i64t]);
                 let swap = |cx: &mut Ctx, s: &mut B, v: Value| {
                     let fn_ty = cx.m.types.intern(Type::Function { ret: i64t, params: vec![i64t], varargs: false });
@@ -891,7 +894,13 @@ fn intrinsic(
                         i64t,
                     )
                 };
-                (swap(cx, s, hi), swap(cx, s, lo))
+                let swapped = (swap(cx, s, hi), swap(cx, s, lo));
+                if bits == 128 {
+                    swapped
+                } else {
+                    let by = int(cx, i64t, i64::from(128 - bits));
+                    shift(cx, s, ty, BinOp::LShr, swapped, by)
+                }
             }
             "llvm.ctpop" | "llvm.ctlz" | "llvm.cttz" => {
                 let (lo, hi) = get(cx, 0)?;
