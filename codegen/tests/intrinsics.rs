@@ -27,7 +27,8 @@
 //! `(...)`), or `ptrs0` (a
 //! vector of pointers, one to each of the scratch buffer's elements of
 //! `0`). A loaded argument may say what values it takes: `0:r` (floats in
-//! the range of the integers), `0:nz` (not zero), `0:ltK` (below K). In the
+//! the range of the integers), `0:p` (those not negative), `0:nz` (not
+//! zero), `0:ltK` (below K). In the
 //! name, `{0}` is LLVM's mangling of type `0`, and `{v0}` that of its
 //! shape of pointers.
 //!
@@ -159,6 +160,7 @@ impl Ty {
         let size = e.bytes();
         let kind = match (&e, domain) {
             (Ty::Fp("half" | "float" | "double"), "r") => "r",
+            (Ty::Fp("half" | "float" | "double"), "p") => "p",
             (Ty::Fp("half" | "float" | "double"), _) => "f",
             (_, "nz") => "n",
             (_, d) if d.starts_with("lt") => "u",
@@ -390,7 +392,7 @@ fn make_case(entry: &Entry, tys: &[Ty], sym: &str) -> Case {
         }
         if a.starts_with("metadata") {
             args.push(a.to_string());
-            parts.push(a.replace(' ', ""));
+            parts.push(a.replace([' ', '"'], ""));
             continue;
         }
         let (tok, domain) = a.split_once(':').unwrap_or((&a, ""));
@@ -543,6 +545,25 @@ fn uncovered(names: &Path, entries: &[Entry]) -> Vec<String> {
         .collect()
 }
 
+thread_local! {
+    static QUIET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether panics on this thread are printed (the tests run on threads of
+/// their own, at once: the hook is the process's).
+fn quiet_panics(quiet: bool) {
+    static HOOK: std::sync::Once = std::sync::Once::new();
+    HOOK.call_once(|| {
+        let default = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if !QUIET.with(|q| q.get()) {
+                default(info);
+            }
+        }));
+    });
+    QUIET.with(|q| q.set(quiet));
+}
+
 fn run_catalogue(which: &str) {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/intrinsics");
     let entries = read_catalogue(&dir.join(format!("{which}.txt")));
@@ -578,8 +599,7 @@ fn run_catalogue(which: &str) {
 
     // Each built alone, by us and by llc. (Our compiler's panics are
     // caught, and reported as failures, not printed.)
-    let hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
+    quiet_panics(true);
     // (Label, why.)
     let mut failures: Vec<(String, String)> = Vec::new();
     let mut reference_fails = Vec::new();
@@ -618,7 +638,7 @@ fn run_catalogue(which: &str) {
         }
     }
 
-    std::panic::set_hook(hook);
+    quiet_panics(false);
 
     // Those to run, linked into one program each way.
     let table = |side: &str| -> PathBuf {
@@ -631,7 +651,8 @@ fn run_catalogue(which: &str) {
         c.push_str("struct Case cases[] = {\n");
         for &k in &run {
             let x = &cases[k].1;
-            let _ = writeln!(c, "    {{c{k}, \"{}\", \"{}\", \"{}\"}},", x.label, x.input, x.output);
+            let label = x.label.replace('\\', "\\\\").replace('"', "\\\"");
+            let _ = writeln!(c, "    {{c{k}, \"{label}\", \"{}\", \"{}\"}},", x.input, x.output);
         }
         let _ = writeln!(c, "    {{0, 0, 0, 0}}}};\nint ncases = {};", run.len());
         let p = tmp.join(format!("table.{side}.c"));

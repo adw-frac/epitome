@@ -144,7 +144,9 @@ impl Ctx<'_> {
 pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, String> {
     let mut f = f.clone();
     neon_intrinsics(cx, &mut f);
+    crate::neon::lower(cx, &mut f);
     number_min_max(cx, &mut f);
+    crate::intrinsics::lower(cx, &mut f);
     thread_locals(cx, &mut f);
     const_exprs(cx, &mut f);
     addresses_as_ints(&mut f);
@@ -525,11 +527,13 @@ fn neon_intrinsics(cx: &mut Ctx, f: &mut Function) {
     ];
     let reductions: &[(&str, &str, Option<CastOp>)] = &[
         ("uaddv", "add", Some(CastOp::ZExt)),
-        ("saddv", "add", Some(CastOp::SExt)),
+        // (Each zero-extended, as LLVM's back end gives them: the lane is
+        // read with `fmov` from its narrow register.)
+        ("saddv", "add", Some(CastOp::ZExt)),
         ("umaxv", "umax", Some(CastOp::ZExt)),
         ("uminv", "umin", Some(CastOp::ZExt)),
-        ("smaxv", "smax", Some(CastOp::SExt)),
-        ("sminv", "smin", Some(CastOp::SExt)),
+        ("smaxv", "smax", Some(CastOp::ZExt)),
+        ("sminv", "smin", Some(CastOp::ZExt)),
         ("fmaxv", "fmaximum", None),
         ("fminv", "fminimum", None),
         ("fmaxnmv", "fmax", None),
@@ -677,14 +681,26 @@ fn neon_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 };
                 Some(s.cast(CastOp::Trunc, x, rt))
             } else if matches!(op, "uaddlv" | "saddlv") && args.len() == 1 {
-                // The lanes widened, then added: as wide as the result.
+                // The lanes widened to twice their width, then added (the
+                // instruction's sum, in a register of that width), then
+                // zero-extended to the result, as LLVM's back end reads it.
                 let vt = cx.value_ty(s.f, args[0]);
-                let Type::Vector { len, .. } = *cx.m.types.get(vt) else { unreachable!() };
-                let wt = cx.m.types.intern(Type::Vector { scalable: false, len, elem: rt });
+                let Type::Vector { len, elem, .. } = *cx.m.types.get(vt) else { unreachable!() };
+                let eb = match cx.m.types.get(elem) {
+                    Type::Int(b) => *b,
+                    _ => 32,
+                };
+                let rb = match cx.m.types.get(rt) {
+                    Type::Int(b) => *b,
+                    _ => 64,
+                };
+                let st = cx.m.types.int((2 * eb).min(rb));
+                let wt = cx.m.types.intern(Type::Vector { scalable: false, len, elem: st });
                 let c = if op == "uaddlv" { CastOp::ZExt } else { CastOp::SExt };
                 let w = s.cast(c, args[0], wt);
                 let mangled = crate::legalize::mangle(cx, wt);
-                Some(call_intrinsic(cx, &mut s, &format!("llvm.vector.reduce.add.{mangled}"), vec![w], rt))
+                let sum = call_intrinsic(cx, &mut s, &format!("llvm.vector.reduce.add.{mangled}"), vec![w], st);
+                Some(if st == rt { sum } else { s.cast(CastOp::ZExt, sum, rt) })
             } else if let Some(&(_, red, ext)) = reductions.iter().find(|(from, _, _)| *from == op)
                 && args.len() == 1
             {
@@ -4153,6 +4169,10 @@ fn signed_max(bits: u32) -> ApInt {
         hex.push(char::from_digit((1 << lead) - 1, 16).unwrap());
     }
     hex.push_str(&"f".repeat((ones / 4) as usize));
+    // (Of one bit: 0.)
+    if hex.is_empty() {
+        hex.push('0');
+    }
     ApInt::parse_hex(bits, &hex, false).unwrap()
 }
 

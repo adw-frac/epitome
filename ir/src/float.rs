@@ -129,10 +129,21 @@ fn special(kind: FloatKind, sign: &str, s: Special) -> Option<u128> {
         "-" => true,
         _ => return None,
     };
+    // A NaN's payload is in the type's own format: the mantissa's bits
+    // below the quiet bit (`float +nan(0x3FFFFF)` is 0x7fffffff).
+    if let (Special::QNan(_) | Special::SNan(_), Some((e, m))) = (&s, kind.ieee()) {
+        let (quiet, payload) = match s {
+            Special::QNan(p) => (1u128 << (m - 1), p),
+            Special::SNan(p) => (0, p),
+            Special::Inf => unreachable!(),
+        };
+        let below_quiet = (1u128 << (m - 1)) - 1;
+        let bits = (((1u128 << e) - 1) << m) | quiet | (payload & below_quiet);
+        return Some(if neg { bits | (1u128 << (e + m)) } else { bits });
+    }
     let v = match s {
         Special::Inf => f64::INFINITY,
         Special::QNan(0) => f64::NAN,
-        // Payloads beyond what a double carries are rare; keep the common case simple.
         Special::QNan(p) => f64::from_bits(0x7ff8_0000_0000_0000 | (p as u64 & 0x0007_ffff_ffff_ffff)),
         Special::SNan(p) => f64::from_bits(0x7ff0_0000_0000_0000 | (p as u64 & 0x0007_ffff_ffff_ffff)),
     };
@@ -344,5 +355,11 @@ mod tests {
         assert_eq!(parse(FloatKind::Float, "inf"), None);
         assert_eq!(parse(FloatKind::Half, "f0x3c00"), Some(0x3c00));
         assert_eq!(parse(FloatKind::Double, "-0x1.8p1"), Some((-3.0f64).to_bits() as u128));
+        // NaNs' payloads, in each type's own mantissa.
+        assert_eq!(parse(FloatKind::Float, "+nan(0x3FFFFF)"), Some(0x7fff_ffff));
+        assert_eq!(parse(FloatKind::Float, "-nan(0x1)"), Some(0xffc0_0001));
+        assert_eq!(parse(FloatKind::Float, "+snan(0x1)"), Some(0x7f80_0001));
+        assert_eq!(parse(FloatKind::Half, "+nan(0x1FF)"), Some(0x7fff));
+        assert_eq!(parse(FloatKind::Double, "+nan(0x1)"), Some(0x7ff8_0000_0000_0001));
     }
 }

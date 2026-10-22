@@ -7,7 +7,7 @@
 // gets, each a list of `KS*N@O` (N lanes of kind K, S bytes each, at
 // offset O): K is `i` (integer), `n` (integer, not zero), `f` (floating
 // point), `r` (floating point in the range of the integers made of it:
-// finite, not too big), `b` (a boolean in a byte), `u` (an unsigned
+// finite, not too big), `p` (as `r`, but not negative), `b` (a boolean in a byte), `u` (an unsigned
 // number below a limit, written `uS*N@O<L`). NaNs are printed as `nan`,
 // whatever their bits: which NaN an operation gives is not fixed.
 #include <stdio.h>
@@ -72,7 +72,7 @@ static void element(char kind, int size, unsigned long long limit, int r, unsign
             if ((bits & mask) == 0) bits |= 1;
         }
     } else {
-        int range = kind == 'r';
+        int range = kind == 'r' || kind == 'p';
         int pick = (int)(next() % 32);
         if (style == 0 && !range) {
             // Random bits.
@@ -107,6 +107,8 @@ static void element(char kind, int size, unsigned long long limit, int r, unsign
             }
         }
     }
+    // (Not negative: the sign bit cleared.)
+    if (kind == 'p') bits &= ~(1ull << (8 * (size < 8 ? size : 8) - 1));
     for (int k = 0; k < size; k++) p[k] = (unsigned char)(k < 8 ? bits >> (8 * k) : ((kind == 'i' || kind == 'n') && style == 1 ? (bits >> 63 ? 0xff : 0) : next()));
 }
 
@@ -147,7 +149,7 @@ static void print(const char *desc, const unsigned char *out) {
         if (*p == '<') strtoull(p + 1, (char **)&p, 10);
         for (int l = 0; l < lanes; l++) {
             const unsigned char *e = out + off + l * size;
-            if ((kind == 'f' || kind == 'r') && is_nan(e, size)) {
+            if ((kind == 'f' || kind == 'r' || kind == 'p') && is_nan(e, size)) {
                 printf(" nan");
                 continue;
             }
@@ -161,7 +163,11 @@ static void print(const char *desc, const unsigned char *out) {
 int main(int argc, char **argv) {
     int rounds = argc > 1 ? atoi(argv[1]) : 64;
     for (int c = 0; c < ncases; c++) {
-        state = 0x9e3779b97f4a7c15ull ^ (unsigned long long)c * 0x100000001b3ull;
+        // (Seeded by its name, so that each case's inputs stay the same
+        // whatever other cases there are.)
+        state = 0xcbf29ce484222325ull;
+        for (const char *p = cases[c].name; *p; p++) state = (state ^ (unsigned char)*p) * 0x100000001b3ull;
+        if (state == 0) state = 1;
         for (int r = 0; r < rounds; r++) {
             unsigned char in[512] __attribute__((aligned(16)));
             unsigned char out[512] __attribute__((aligned(16)));

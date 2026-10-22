@@ -121,3 +121,15 @@ these are for after.
 - **Address differences in data** between two globals (`sub (ptrtoint
   @a, ptrtoint @b)`): unsupported (those within one global are folded);
   they need a pair of relocations (Mach-O's `SUBTRACTOR`).
+- **Intrinsics lowered for correctness only** (`intrinsics.rs`,
+  `neon.rs`): carry-less products (`llvm.clmul`, NEON's `pmul`, `pmull`,
+  `pmull64`) bit by bit, where PMULL does bytes and 64-bit halves at
+  once; `pdep`/`pext` bit by bit; masked loads and stores and
+  compressions lane by lane through stack slots; structured stores
+  (`st3`) element by element; vectors of halves converted to single
+  precision lane by lane (where `fcvtl`/`fcvtn` do four at once); the
+  padding of `<3 x float>` reductions rebuilt lane by lane;
+  `llvm.prefetch` dropped (no `prfm`).
+- **Half-precision NEON operations** (`fabd`, `fmulx`, the pairwise ones,
+  `fmlal`...) on `<4 x half>`/`<8 x half>`: not done, as vectors of halves
+  are integers here (`prepare::half_as_int`).

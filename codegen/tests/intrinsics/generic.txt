@@ -146,7 +146,7 @@ test ; llvm.experimental.constrained.round.{0} ; 0(0, metadata !"fpexcept.ignore
 test ; llvm.experimental.constrained.roundeven.{0} ; 0(0, metadata !"fpexcept.ignore") ; fp | vfp
 test ; llvm.experimental.constrained.trunc.{0} ; 0(0, metadata !"fpexcept.ignore") ; fp | vfp
 test ; llvm.experimental.constrained.fptosi.{0}.{1} ; 0(1:r, metadata !"fpexcept.ignore") ; i32, float | i64, double | i32, double | <4 x i32>, <4 x float>
-test ; llvm.experimental.constrained.fptoui.{0}.{1} ; 0(1:r, metadata !"fpexcept.ignore") ; i64, double | i16, float
+test ; llvm.experimental.constrained.fptoui.{0}.{1} ; 0(1:p, metadata !"fpexcept.ignore") ; i64, double | i16, float
 test ; llvm.experimental.constrained.sitofp.{0}.{1} ; 0(1, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float, i32 | double, i64 | float, i64 | half, i16 | <4 x float>, <4 x i32>
 test ; llvm.experimental.constrained.uitofp.{0}.{1} ; 0(1, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float, i32 | double, i64 | float, i64 | half, i16 | <4 x float>, <4 x i32>
 test ; llvm.experimental.constrained.fptrunc.{0}.{1} ; 0(1, metadata !"round.dynamic", metadata !"fpexcept.ignore") ; float, double | half, float | half, double
@@ -266,13 +266,13 @@ test ; llvm.var.annotation.p0.p0 ; void(mem, ptr null, ptr null, i32 0, ptr null
 test ; llvm.ptr.annotation.p0.p0 ; ptr(mem, ptr null, ptr null, i32 0, ptr null)
 test ; llvm.launder.invariant.group.p0 ; ptr(mem+4)
 test ; llvm.strip.invariant.group.p0 ; ptr(mem+4)
-test ; llvm.invariant.start.p0 ; ptr(i64 8, mem)
+build ; llvm.invariant.start.p0 ; ptr(i64 8, mem)
 build ; llvm.invariant.end.p0 ; void(ptr null, i64 8, mem)
 test ; llvm.fake.use ; void(...i32)
 test ; llvm.allow.runtime.check ; i1(metadata !"check")
 test ; llvm.allow.ubsan.check ; i1(i8 1)
 test ; llvm.is.constant.{0} ; i1(0) ; i32 | double
-test ; llvm.licm.disable ; void()
+skip ; llvm.licm.disable ; the name of loops' metadata (llvm.licm.disable), not an intrinsic code is made for
 # (On allocas only, which a function here has none of; see tests/memops.rs.)
 skip ; llvm.lifetime.start ; markers of allocas' lives, which other tests cover (allocas are not made here)
 skip ; llvm.lifetime.end ; markers of allocas' lives, which other tests cover (allocas are not made here)
@@ -288,7 +288,6 @@ build ; llvm.ubsantrap ; void(i8 3)
 build ; llvm.frameaddress.p0 ; ptr(i32 0)
 build ; llvm.returnaddress ; ptr(i32 0)
 build ; llvm.addressofreturnaddress.p0 ; ptr()
-build ; llvm.sponentry.p0 ; ptr()
 build ; llvm.stackaddress.p0 ; ptr()
 build ; llvm.stacksave.p0 ; ptr()
 build ; llvm.stackrestore.p0 ; void(mem)
@@ -364,6 +363,7 @@ skip ; llvm.call.preallocated.* ; Windows x86's arguments made in place (inalloc
 skip ; llvm.seh.* ; Windows' structured exception handling (SEH)
 skip ; llvm.codeview.annotation ; Windows' debug information (CodeView)
 skip ; llvm.xray.* ; XRay's instrumentation, from its pass
+skip ; llvm.sponentry ; for Windows' setjmp (the stack pointer at the function's entry)
 skip ; llvm.localescape ; Windows' structured exception handling (SEH)
 skip ; llvm.localrecover ; Windows' structured exception handling (SEH)
 skip ; llvm.localaddress ; Windows' structured exception handling (SEH)

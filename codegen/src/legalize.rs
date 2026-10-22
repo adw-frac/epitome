@@ -1085,8 +1085,11 @@ fn expand_lanewise(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
 }
 
 /// The lane width of mask `v`: that of the comparison that made it, through
-/// logic, freezes, selects and phis. `None` for masks of any width: splats
-/// of one boolean (the whole register is ones or zeros) and constants.
+/// logic, freezes, selects and phis. A mask a lane is put into is built as
+/// `prepare::mask_lanes` builds it: of the width of the mask it is put
+/// into, or else a register's width over the lanes. `None` for masks of
+/// any width: splats of one boolean (the whole register is ones or zeros)
+/// and constants.
 pub(crate) fn mask_width(cx: &Ctx, f: &Function, v: Value, seen: &mut Vec<LocalId>) -> Option<u32> {
     let Value::Local(x) = v else { return None };
     let LocalDef::Inst(d) = f.locals[x.index()].def else { return None };
@@ -1103,6 +1106,10 @@ pub(crate) fn mask_width(cx: &Ctx, f: &Function, v: Value, seen: &mut Vec<LocalI
         }
         Op::Phi { incoming, .. } => incoming.iter().find_map(|(v, _)| mask_width(cx, f, *v, seen)),
         Op::ShuffleVector { a, .. } if !is_bool_splat(cx, f, d) => mask_width(cx, f, *a, seen),
+        Op::InsertElement { vector, .. } => mask_width(cx, f, *vector, seen).or_else(|| {
+            let (len, _, _) = vec_info(cx, cx.value_ty(f, *vector))?;
+            Some((128 / len).clamp(8, 64))
+        }),
         _ => None,
     };
     seen.pop();
