@@ -6,14 +6,16 @@
 ;
 ;   00-base.ll      registers, parameters, relocations, and the encoding
 ;                   fragments (REX, ModRM, SIB, displacements)
-;   80-asm.ll       integer instructions for assembly and disassembly
-;                   ("asmonly"), written by gen_x86.py
-;   81-vector.ll    SSE, AVX and AVX-512 instructions, the same way
+;   80-xed.ll       every instruction llvm-mc 18 assembles, for assembly and
+;                   disassembly ("asmonly"): integer, x87, MMX, SSE to 4.2,
+;                   AVX, AVX2, FMA, AVX-512 with masks, broadcasts and
+;                   rounding, AMX, and the rest; written by gen_xed.py from
+;                   Intel XED's tables
 ;
 ; Assembly is AT&T's, as clang, llvm-mc and objdump write it on Linux.
-; Encodings are from the Intel SDM and the AMD APM, and every entry is
-; checked against llvm-mc. Not yet: selection, the calling convention,
-; SSE, AVX.
+; The fragments here follow the Intel SDM and the AMD APM; the entries are
+; XED's, and every one is checked against llvm-mc (tests/x86.rs). Not yet:
+; selection and the calling convention.
 
 ; ===========================================================================
 ; Registers. The integer file, r, by hardware number: rax, rcx, rdx, rbx,
@@ -63,7 +65,7 @@
 ; ===========================================================================
 ; Parameters.
 
-!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107}
+!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109}
 !1100 = !{!"sp", !"%rsp"}
 !1101 = !{!"vector-bits", !"0"}
 !1102 = !{!"elf-machine", !"62"}
@@ -72,6 +74,10 @@
 !1105 = !{!"cpu", !"x86-64"}
 !1106 = !{!"cfi-data-align", !"-8"}
 !1107 = !{!"external-via-got", !"no"}
+; Instructions are 1 to 15 bytes; the entries are many, so their encodings
+; are read when first used.
+!1108 = !{!"instruction-unit", !"1"}
+!1109 = !{!"lazy-encodings", !"1"}
 
 !target.cpus = !{!1150}
 !1150 = !{!"x86-64"}
@@ -135,9 +141,10 @@
 ; a memory operand's index and base registers, x and b; evexr(r, b, ...)
 ; for a register b (0-31: its fifth bit is in X). R' and V' are the fifth
 ; bits of ModRM.reg and vvvv, inverted as the others are; ll: 0 128 bits,
-; 1 256, 2 512; bc broadcast; aaa the mask register; z zeroing.
+; 1 256, 2 512 (with bc, of registers: the rounding); bc broadcast, or of
+; registers, rounding or {sae}; aaa the mask register; z zeroing.
 !1504 = !{!"vex", !"r x b map w v l pp", !"{ if(x<8) if(b<8) m1:0=map-1 w0:0=w 11000101 | R:1=(r>>3)^1 vv:4=v^15 L:1=l pp:2=pp ; 11000100 | R:1=(r>>3)^1 X:1=(x>>3)^1 B:1=(b>>3)^1 mm:5=map | W:1=w vv:4=v^15 L:1=l pp:2=pp }"}
 !1505 = !{!"vexm", !"r base index map w v l pp", !"{ if(base==16) vex(r, 0, 0, map, w, v, l, pp) ; vex(r, index, base, map, w, v, l, pp) }"}
 !1506 = !{!"evex", !"r x b map w v ll pp bc aaa z", !"01100010 | R:1=((r>>3)&1)^1 X:1=((x>>3)&1)^1 B:1=((b>>3)&1)^1 R1:1=(r>>4)^1 0 mm:3=map | W:1=w vv:4=(v&15)^15 1 pp:2=pp | Z:1=z LL:2=ll bc:1=bc V1:1=(v>>4)^1 aaa:3=aaa"}
-!1507 = !{!"evexr", !"r b map w v ll pp aaa z", !"01100010 | R:1=((r>>3)&1)^1 X:1=(b>>4)^1 B:1=((b>>3)&1)^1 R1:1=(r>>4)^1 0 mm:3=map | W:1=w vv:4=(v&15)^15 1 pp:2=pp | Z:1=z LL:2=ll 0 V1:1=(v>>4)^1 aaa:3=aaa"}
+!1507 = !{!"evexr", !"r b map w v ll pp bc aaa z", !"01100010 | R:1=((r>>3)&1)^1 X:1=(b>>4)^1 B:1=((b>>3)&1)^1 R1:1=(r>>4)^1 0 mm:3=map | W:1=w vv:4=(v&15)^15 1 pp:2=pp | Z:1=z LL:2=ll bc:1=bc V1:1=(v>>4)^1 aaa:3=aaa"}
 !1508 = !{!"evexm", !"r base index map w v ll pp bc aaa z", !"{ if(base==16) evex(r, 0, 0, map, w, v, ll, pp, bc, aaa, z) ; evex(r, index, base, map, w, v, ll, pp, bc, aaa, z) }"}

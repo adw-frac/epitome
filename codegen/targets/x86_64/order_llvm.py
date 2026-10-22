@@ -14,6 +14,25 @@ import subprocess
 import sys
 import tempfile
 
+def assemble(mc, objdump, lines, prefix):
+    """Assembles `lines` with llvm-mc, each at a symbol `prefix`<k>, leaving
+    out those it rejects, and gives llvm-objdump's listing."""
+    keep = list(range(len(lines)))
+    with tempfile.TemporaryDirectory() as tmp:
+        while True:
+            src = '\t.text\n' + ''.join(f'{prefix}{k}:\n\t{lines[k]}\n' for k in keep)
+            open(f'{tmp}/s.s', 'w').write(src)
+            r = subprocess.run([mc, '-triple=x86_64-linux-gnu', '-filetype=obj', '-o', f'{tmp}/s.o', f'{tmp}/s.s'],
+                               capture_output=True, text=True)
+            bad = {int(n) for n in re.findall(r's\.s:(\d+):\d+: error', r.stderr)}
+            if not bad:
+                break
+            # Line 2 + 2j is the j-th kept line's instruction.
+            drop = {keep[(n - 3) // 2] for n in bad if n >= 3}
+            keep = [k for k in keep if k not in drop]
+        return subprocess.run([objdump, '-d', f'{tmp}/s.o'], capture_output=True, text=True).stdout
+
+
 entries_ll, mc, objdump = sys.argv[1:4]
 
 REGS = {
@@ -58,16 +77,45 @@ def opcode(alt):
         p = re.sub(r'^(if\(\S+\)\s*)+', '', p)
         if re.fullmatch(r'[01]{8}', p):
             out.append(int(p, 2))
-    # And a VEX prefix's W bit, as 0x100 + W.
-    m = re.search(r'vexm?\([^,]+, [^,]+, [^,]+, [^,]+, (\d)', alt)
+    # And a VEX or EVEX prefix's map, W and pp, as 0x100 + map, 0x200 + W,
+    # 0x300 + pp.
+    m = re.search(r'(e?vex)[mr]?\(([^()]*)\)', alt)
     if m:
-        out.append(0x100 + int(m.group(1)))
+        args = [a.strip() for a in m.group(2).split(',')]
+        # vex(r, x, b, map, w, v, l, pp); vexm(r, base, index, map, w, v, l,
+        # pp); evexr(r, b, map, w, v, ll, pp, ...); evexm(r, base, index,
+        # map, w, v, ll, pp, ...).
+        k = 2 if m.group(0).startswith('evexr') else 3
+        if args[k].isdigit() and args[k + 1].isdigit() and args[k + 4].isdigit():
+            out += [0x100 + int(args[k]), 0x200 + int(args[k + 1]), 0x300 + int(args[k + 4])]
     return out
 
 
 def contains(seq, sub):
     it = iter(seq)
     return all(b in it for b in sub)
+
+
+def sample(params, asm, high, label):
+    """A line of the entry: registers low (or, `high`, from 16 where the
+    class has 32)."""
+    text = asm
+    for p in filter(None, params.split(', ')):
+        kind, cls, op = re.match(r'\w+ "(\w+)"(?:="(\w+)")? %([\w.]+)', p).groups()
+        if kind == 'reg':
+            regs = REGS[cls]
+            k = {'m.base': 6, 'm.index': 7}.get(op, (11 + int(op[1:]) if op[1:].isdigit() else 3) % len(regs))
+            if high and len(regs) == 32 and not op.startswith('m.'):
+                k = 16 + k % 16
+            v = regs[k]
+        elif kind == 'imm':
+            v = {'m.disp': '64', 'm.scale': '4'}.get(op, '42')
+        elif kind == 'sym':
+            v = 'sym'
+        else:
+            v = label
+        text = text.replace('{' + op + '}', v)
+    return text.replace('{lb}', '{').replace('{rb}', '}')
 
 
 entries = []
@@ -79,29 +127,13 @@ for line in open(entries_ll):
     alts = alternatives(enc)
     if len(alts) < 2:
         continue
-    text = asm
-    for p in filter(None, params.split(', ')):
-        kind, cls, op = re.match(r'\w+ "(\w+)"(?:="(\w+)")? %([\w.]+)', p).groups()
-        if kind == 'reg':
-            regs = REGS[cls]
-            k = {'m.base': 6, 'm.index': 7}.get(op, (11 + int(op[1:]) if op[1:].isdigit() else 3) % len(regs))
-            v = regs[k]
-        elif kind == 'imm':
-            v = {'m.disp': '64', 'm.scale': '4'}.get(op, '42')
-        elif kind == 'sym':
-            v = 'sym'
-        else:
-            v = f'e{len(entries)}'
-        text = text.replace('{' + op + '}', v)
-    text = text.replace('{lb}', '{').replace('{rb}', '}')
-    entries.append((name, alts, text))
+    for high in (False, True):
+        if high and '"xe"' not in params and '"ye"' not in params and '"z"' not in params:
+            continue
+        k = len(entries)
+        entries.append((name, alts, sample(params, asm, high, f'e{k}')))
 
-with tempfile.TemporaryDirectory() as tmp:
-    src = '\t.text\n' + ''.join(f'e{k}:\n\t{t}\n' for k, (_, _, t) in enumerate(entries))
-    open(f'{tmp}/s.s', 'w').write(src)
-    r = subprocess.run([mc, '-triple=x86_64-linux-gnu', '-filetype=obj', '-o', f'{tmp}/s.o', f'{tmp}/s.s'],
-                       capture_output=True, text=True)
-    dump = subprocess.run([objdump, '-d', f'{tmp}/s.o'], capture_output=True, text=True).stdout
+dump = assemble(mc, objdump, [t for _, _, t in entries], 'e')
 
 got, cur = {}, None
 for l in dump.splitlines():
@@ -114,18 +146,28 @@ for l in dump.splitlines():
     if m and cur is not None:
         got[cur] += [int(b, 16) for b in m.group(1).split()]
 
+seen = set()
 for k, (name, alts, _) in enumerate(entries):
     b = got.get(k)
     if not b:
         continue
-    # llvm-mc's VEX.W, as opcode() writes it.
-    w = 0x100 + (b[2] >> 7 if b[0] == 0xc4 else 0) if b[0] in (0xc4, 0xc5) else None
+    # llvm-mc's prefix's map, W and pp, as opcode() writes them.
+    pre = None
+    if b[0] == 0xc5:
+        pre = [0x101, 0x200, 0x300 + (b[1] & 3)]
+    elif b[0] == 0xc4 and len(b) > 2:
+        pre = [0x100 + (b[1] & 31), 0x200 + (b[2] >> 7), 0x300 + (b[2] & 3)]
+    elif b[0] == 0x62 and len(b) > 2:
+        pre = [0x100 + (b[1] & 7), 0x200 + (b[2] >> 7), 0x300 + (b[2] & 3)]
     for a in alts:
         op = opcode(a)
-        if op and op[-1] >= 0x100:
-            if op[-1] != w:
-                continue
-            op = op[:-1]
+        tail = [x for x in op if x >= 0x100]
+        op = [x for x in op if x < 0x100]
+        if tail and tail != pre:
+            continue
         if op and contains(b, op):
-            print(f'{name}\t{" ".join(f"{x:02x}" for x in opcode(a))}')
+            line = f'{name}\t{" ".join(f"{x:02x}" for x in opcode(a))}'
+            if line not in seen:
+                seen.add(line)
+                print(line)
             break

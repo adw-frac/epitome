@@ -103,6 +103,13 @@ impl Report {
 /// Runs every check on `t`.
 pub fn check(t: &Target) -> Report {
     let m = &t.machine;
+    // Encodings read lazily are parsed here first: one that does not parse
+    // stops the rest.
+    let unparsed: Vec<String> = t.instrs.iter().filter_map(|i| i.enc.parsed().err()).collect();
+    if !unparsed.is_empty() {
+        let s = Section { name: "encodings", what: "encodings parsed", errors: unparsed, ..Default::default() };
+        return Report { summary: format!("{} instructions", t.instrs.len()), sections: vec![s] };
+    }
     let recipes = t.instrs.iter().filter(|i| i.enc.is_empty()).count();
     let summary = format!(
         "{} instructions, {} condition forms, {} patterns, {} convention{} ({}), {} CPU{}, {} relocations",
@@ -337,17 +344,16 @@ fn sample(t: &Target, i: usize, k: usize) -> Option<Env> {
     for o in ins.operands.iter().filter(|o| o.tied) {
         env.insert(o.name.clone(), env["d"]);
     }
-    let vals: Vec<Option<i64>> =
-        ins.operands.iter().map(|o| if o.kind == Kind::Imm { Some(env[&o.name]) } else { None }).collect();
-    if !ins.fits(&vals) {
-        return None;
-    }
-    // Registers fit as immediates do: some take only some registers (an
-    // even one, for a pair; v0-v15).
-    let fits_regs = ins.encode(&env).and_then(|b| ins.decode(&b)).is_none_or(|(back, _)| {
-        ins.operands.iter().filter(|o| matches!(o.kind, Kind::Reg(_))).all(|o| back.get(&o.name) == env.get(&o.name))
+    // The values must fit, registers as immediates do (some take only
+    // some registers: an even one, for a pair; v0-v15; a mask other than
+    // k0): they encode, and decode as themselves.
+    let (back, _) = ins.decode(&ins.encode(&env)?)?;
+    let same = ins.operands.iter().all(|o| match o.kind {
+        Kind::Imm => back[&o.name] as u64 & mask(o.bits) == env[&o.name] as u64 & mask(o.bits),
+        Kind::Reg(_) => back.get(&o.name) == env.get(&o.name),
+        _ => true,
     });
-    fits_regs.then_some(env)
+    same.then_some(env)
 }
 
 fn mask(bits: u32) -> u64 {

@@ -64,13 +64,34 @@ def records(path):
             rec[k] = v
 
 
+def instruction_files(xed):
+    """The files of instructions, as each directory's files.cfg lists them
+    (dec-instructions)."""
+    out = set()
+    for cfg in glob.glob(os.path.join(xed, 'datafiles', '**', 'files.cfg'), recursive=True):
+        for line in open(cfg):
+            m = re.match(r'\s*dec-instructions\s*:\s*(\S+)', line)
+            if m:
+                out.add(os.path.join(os.path.dirname(cfg), m.group(1)))
+    return sorted(out)
+
+
 def all_forms(xed):
-    """Every form, with a number for it unique among them."""
+    """Every form, with a number for it unique among them; not those a
+    file deletes (UDELETE, by IFORM: where another file replaces them)."""
+    files = instruction_files(xed)
+    deleted = set()
+    for path in files:
+        for line in lines(path):
+            m = re.match(r'\s*UDELETE\s*:\s*(\S+)', line)
+            if m:
+                deleted.add(m.group(1))
     n = 0
-    for path in sorted(glob.glob(os.path.join(xed, 'datafiles', '**', '*isa*.txt'), recursive=True)):
+    for path in files:
         for r in records(path):
             for f in r['forms']:
-                yield r, n, f
+                if f['IFORM'] not in deleted:
+                    yield r, n, f
                 n += 1
 
 
@@ -96,7 +117,7 @@ class Op:
 # ---------------------------------------------------------------------------
 # Encodings
 
-SKIP_TOKENS = {'not64', 'mode16', 'mode32', 'MPXMODE=1', 'VEXVALID=2', 'MAP4', 'EVAPX', 'EVAPX_SCC', 'MAP5', 'MAP6',
+SKIP_TOKENS = {'not64', 'mode16', 'mode32', 'MPXMODE=1', 'VEXVALID=2', 'MAP4', 'EVAPX', 'EVAPX_SCC',
                'REX2=1', 'rex2_refining_prefix', 'eamode16', 'eamode32', 'MODEP5=1', 'REP=2', 'REP=3',
                'MOD=0', 'MOD=1', 'MOD=2', 'no67_prefix', 'rexb4_prefix'}
 # Decoder states for CPUs without a feature: the form for those with it is
@@ -336,7 +357,7 @@ def legacy(rec, form, eosz, rexw, mem):
     return params, enc, holes
 
 
-VCLASS = {'XMM': 'x', 'YMM': 'y', 'MASK': 'k', 'VGPR32': 'r32', 'VGPR64': 'r64', 'TMM': 'tmm', 'GPR32': 'r32',
+VCLASS = {'XMM': 'xe', 'YMM': 'ye', 'ZMM': 'z', 'MASK': 'k', 'VGPR32': 'r32', 'VGPR64': 'r64', 'TMM': 'tmm', 'GPR32': 'r32',
           'GPR64': 'r64'}
 
 
@@ -427,6 +448,144 @@ def vex(rec, form, mem):
     return params, ' | '.join(pieces), holes
 
 
+ESIZE = {'ESIZE_8_BITS()': 1, 'ESIZE_16_BITS()': 2, 'ESIZE_32_BITS()': 4, 'ESIZE_64_BITS()': 8,
+         'ESIZE_128_BITS()': 16}
+ROUNDING = ['rn-sae', 'rd-sae', 'ru-sae', 'rz-sae']
+
+
+def evex_variants(rec, form):
+    """The entries an EVEX form makes: (mask, broadcast, rounding), mask
+    None, 'merge' or 'zero', rounding None, 0-3 or 'sae'."""
+    pat, ops = form['PATTERN'], form['OPERANDS']
+    p = set(pat)
+    masks = [None]
+    if 'MASK1()' in ops and 'MASK=0' not in p:
+        masks = [None, 'merge'] + ([] if 'ZEROING=0' in p else ['zero'])
+    if 'MASKNOT0()' in ops:
+        masks = ['merge']
+    mem = 'MOD!=3' in p
+    out = []
+    for mk in masks:
+        if mem:
+            bcs = [0] if 'BCRC=0' in p else [1] if 'BCRC=1' in p else [0] + ([1] if 'BCASTSTR' in ops else [])
+            out += [(mk, bc, None) for bc in bcs]
+        elif 'AVX512_ROUND()' in p:
+            out += [(mk, 1, rc) for rc in range(4)]
+        elif 'SAE()' in p:
+            out += [(mk, 1, 'sae')]
+        else:
+            out += [(mk, 0, None)]
+    return out
+
+
+def evex(rec, form, mem, variant):
+    """An EVEX form as (params, enc, holes), for `variant` (evex_variants)."""
+    mk, bc, rc = variant
+    pat = form['PATTERN']
+    p = set(pat)
+    ops = [Op(t) for t in form['OPERANDS'].split()]
+    params, holes = [], []
+    fields = {}
+    imms = []
+    memop = None
+    for o in ops:
+        if o.supp or o.kind.startswith('EMX_BROADCAST'):
+            continue
+        if o.kind == 'REG':
+            if o.val.startswith('XED_REG_'):
+                continue
+            if o.val in ('MASK1()', 'MASKNOT0()'):
+                if mk:
+                    params.append('i64 "reg"="k" %k')
+                    holes.append('{lb}{k}{rb}' + (' {lb}z{rb}' if mk == 'zero' else ''))
+                continue
+            base, _, field = o.val[:-2].rpartition('_')
+            field = field.rstrip('3')
+            cls = VCLASS.get(base)
+            if cls is None or field not in ('R', 'B', 'N'):
+                raise Unsupported(o.val)
+            name = {'R': 'r', 'B': 'b', 'N': 'n'}[field]
+            fields[field] = name
+            params.append(f'i64 "reg"="{cls}" %{name}')
+            holes.append('{' + name + '}')
+        elif o.kind == 'MEM':
+            memop = o
+            if mem is None:
+                raise Unsupported('memory')
+            params += mem[1]
+            holes.append(mem[2] + (' {lb}bcst{rb}' if bc else ''))
+        elif o.kind == 'IMM':
+            name = 'c' if not imms else 'c2'
+            imms.append(name)
+            params.append(f'i64 "imm" %{name}')
+            holes.append('${' + name + '}')
+        else:
+            raise Unsupported(o.kind)
+    if (memop is None) != (mem is None):
+        raise Unsupported('memory form')
+    if any(t.startswith('UISA_VMODRM') for t in p):
+        raise Unsupported('vector index')
+    pp = 1 if 'V66' in p else 2 if 'VF3' in p else 3 if 'VF2' in p else 0
+    mp = {'V0F': 1, 'V0F38': 2, 'V0F3A': 3, 'MAP5': 5, 'MAP6': 6}
+    mp = next((v for k, v in mp.items() if k in p), None)
+    if mp is None:
+        raise Unsupported('map')
+    w = 1 if 'W1' in p else 0
+    vl = 2 if 'VL512' in p or 'FIX_ROUND_LEN512()' in p else 1 if 'VL256' in p else 0
+    # With {sae}, L'L is 00 (as llvm-mc writes it; it is ignored).
+    ll = rc if isinstance(rc, int) else 0 if rc == 'sae' else vl
+    r = fields.get('R')
+    reg_bits = None
+    for t in pat:
+        m = re.match(r'REG\[0b([01]{3})\]$', t)
+        if m:
+            reg_bits = int(m.group(1), 2)
+    if r is None and reg_bits is None:
+        raise Unsupported('reg')
+    rr = r if r else str(reg_bits)
+    v = fields.get('N', '0')
+    aaa = 'k' if mk else '0'
+    z = 1 if mk == 'zero' else 0
+    opc = [bits8(int(t, 16)) for t in pat if re.match(r'0x[0-9A-Fa-f]{2}$', t)]
+    if len(opc) != 1:
+        raise Unsupported('opcode')
+    guard = 'if(k!=0) ' if mk else ''
+    if mem:
+        # disp8*N: the tuple type's N.
+        es = next((v for k, v in ESIZE.items() if k in p), 4)
+        vbytes = 16 << vl
+        tuple_n = {'NELEM_FULL()': es if bc else vbytes, 'NELEM_FULLMEM()': vbytes,
+                   'NELEM_HALF()': es if bc else vbytes // 2, 'NELEM_HALFMEM()': vbytes // 2,
+                   'NELEM_QUARTER()': es if bc else vbytes // 4, 'NELEM_QUARTERMEM()': vbytes // 4, 'NELEM_EIGHTHMEM()': vbytes // 8, 'NELEM_ONE()': es,
+                   'NELEM_TUPLE1_4X()': 16, 'NELEM_TUPLE2()': 2 * es, 'NELEM_TUPLE4()': 4 * es,
+                   'NELEM_TUPLE8()': 8 * es, 'NELEM_MEM128()': 16,
+                   'NELEM_MOVDDUP()': 8 if vl == 0 else vbytes}
+        n = next((v for k, v in tuple_n.items() if k in p), None)
+        if n is None:
+            raise Unsupported('tuple')
+        base, index = mem[4].split(', ')[:2]
+        rma = mem[4].rsplit(', ', 1)[0] + f', {n}'
+        prefix = f'evexm({rr}, {base}, {index}, {mp}, {w}, {v}, {ll}, {pp}, {bc}, {aaa}, {z})'
+        modrm = f'rm({rr}, {rma})'
+    else:
+        b = fields.get('B')
+        if b is None:
+            raise Unsupported('rm')
+        prefix = f'evexr({rr}, {b}, {mp}, {w}, {v}, {ll}, {pp}, {bc}, {aaa}, {z})'
+        regpart = f'reg:3={r}&7' if r else bits8(reg_bits)[5:]
+        modrm = f'11 {regpart} rm:3={b}&7'
+    pieces = [prefix, opc[0], modrm]
+    for t in pat:
+        if t == 'UIMM8()':
+            pieces.append(f'i1:8={imms[0]}')
+    if rc is not None:
+        holes.insert(0, '{lb}' + (ROUNDING[rc] if isinstance(rc, int) else 'sae') + '{rb}')
+    enc = ' | '.join(pieces)
+    if guard:
+        enc = f'{{ {guard}{enc} }}'
+    return params, enc, holes
+
+
 def forms(xed):
     """Every form, as (name, params, enc, holes, extension)."""
     seen = set()
@@ -434,20 +593,29 @@ def forms(xed):
         pat = form['PATTERN']
         if any(t in SKIP_TOKENS or OFF_FEATURES.match(t) for t in pat):
             continue
-        kind = 'vex' if 'VV1' in pat else 'legacy'
-        if any(t in ('EVV', 'XOPV') or t.startswith('VEXVALID') for t in pat):
-            continue  # EVEX, XOP: later
+        kind = 'vex' if 'VV1' in pat else 'evex' if 'EVV' in pat else 'legacy'
+        if any(t == 'XOPV' or t.startswith('VEXVALID') for t in pat):
+            continue  # XOP: later
         if 'apx' in rec['file']:
             continue
         ops = [Op(t) for t in form['OPERANDS'].split()]
         base = rec['ICLASS']
         has_mem = any(o.kind in ('MEM', 'AGEN') and not o.supp for o in ops)
-        for eosz, rexw in (sizes(pat, ops) if kind == 'legacy' else [(0, False)]):
+        variants = evex_variants(rec, form) if kind == 'evex' else [None]
+        for eosz, rexw, variant in ((e, w, v) for e, w in (sizes(pat, ops) if kind == 'legacy' else [(0, False)])
+                                    for v in variants):
             for mem in (MEMS if has_mem else [None]):
                 name = f"{base}_{k}" + (f"_{eosz}" if eosz else '') + (f"_{mem[0]}" if mem else '')
+                if variant:
+                    mk, bc, rc = variant
+                    name += f"_{mk or 'u'}{'_b' if bc and mem else ''}{'_r' + str(rc) if rc is not None else ''}"
                 name = re.sub(r'[^A-Za-z0-9_]', '_', name)
                 try:
-                    if kind == 'vex':
+                    if kind == 'evex':
+                        if mem is None and variant[1] and variant[2] is None:
+                            continue
+                        params, enc, holes = evex(rec, form, mem, variant)
+                    elif kind == 'vex':
                         params, enc, holes = vex(rec, form, mem)
                     else:
                         params, enc, holes = legacy(rec, form, eosz, rexw, mem)
@@ -494,7 +662,7 @@ def canonical(params, enc, tpl):
     kinds = {re.search(r'%([\w.]+)$', p).group(1): p for p in params}
     ren, nreg, nimm = {}, 0, 0
     for op in order:
-        if op in ren or op.startswith('m.') or op == 'dest':
+        if op in ren or op.startswith('m.') or op == 'dest' or op not in kinds:
             continue
         if '"reg"' in kinds[op]:
             ren[op] = f'o{nreg}'
@@ -507,7 +675,7 @@ def canonical(params, enc, tpl):
     tpl2 = re.sub(r'\{([\w.]+)\}', lambda m: '{' + ren.get(m.group(1), m.group(1)) + '}', tpl)
     params2 = [re.sub(r'%([\w.]+)$', lambda m: '%' + ren.get(m.group(1), m.group(1)), p) for p in params]
     # Parameters in the order the template writes them.
-    names2 = [ren.get(o, o) for o in order]
+    names2 = [ren.get(o, o) for o in order if o in kinds]
     params2.sort(key=lambda p: names2.index(re.search(r'%([\w.]+)$', p).group(1))
                  if re.search(r'%([\w.]+)$', p).group(1) in names2 else 99)
     return params2, sub(enc), tpl2
@@ -539,10 +707,17 @@ def opcode(alt):
         p = re.sub(r'^(if\(\S+\)\s*)+', '', p)
         if re.fullmatch(r'[01]{8}', p):
             out.append(int(p, 2))
-    # And a VEX prefix's W bit, as 0x100 + W.
-    m = re.search(r'vexm?\([^,]+, [^,]+, [^,]+, [^,]+, (\d)', alt)
+    # And a VEX or EVEX prefix's map, W and pp, as 0x100 + map, 0x200 + W,
+    # 0x300 + pp.
+    m = re.search(r'(e?vex)[mr]?\(([^()]*)\)', alt)
     if m:
-        out.append(0x100 + int(m.group(1)))
+        args = [a.strip() for a in m.group(2).split(',')]
+        # vex(r, x, b, map, w, v, l, pp); vexm(r, base, index, map, w, v, l,
+        # pp); evexr(r, b, map, w, v, ll, pp, ...); evexm(r, base, index,
+        # map, w, v, ll, pp, ...).
+        k = 2 if m.group(0).startswith('evexr') else 3
+        if args[k].isdigit() and args[k + 1].isdigit() and args[k + 4].isdigit():
+            out += [0x100 + int(args[k]), 0x200 + int(args[k + 1]), 0x300 + int(args[k + 4])]
     return out
 
 
@@ -636,13 +811,13 @@ def merged(xed):
     order = {}
     for line in open(os.path.join(HERE, 'order.txt')):
         name, ops = line.rstrip('\n').split('\t')
-        order[name] = [int(b, 16) for b in ops.split()]
+        order.setdefault(name, []).append([int(b, 16) for b in ops.split()])
     for (tpl, params), g in groups.items():
         if g.get('folded') or 'X_' + g['name'] in rejects:
             continue
         # Shortest first; of those as short, the one llvm-mc writes.
-        pref = order.get('X_' + g['name'])
-        alts = [e for _, e in sorted(g['alts'], key=lambda a: (a[0], opcode(a[1]) != pref))]
+        prefs = order.get('X_' + g['name'], [])
+        alts = [e for _, e in sorted(g['alts'], key=lambda a: (a[0], opcode(a[1]) not in prefs))]
         # A commutative VEX operation llvm-mc swaps the sources of, for the
         # two-byte prefix: the swapped form as an alternative.
         swapped = lambda e: re.sub(r'\bo([01])\b', lambda m: 'o' + str(1 - int(m.group(1))), e)
@@ -659,12 +834,33 @@ def merged(xed):
         if len({two_byte_vex(a) for a in short}) > 1:
             alts = [f'if({two_byte_vex(a)}<8) {a}' for a in short] + alts
         enc = alts[0] if len(alts) == 1 else '{ ' + ' ; '.join(alts) + ' }'
+        # (Without an EVEX form, only the 16 registers VEX reaches.)
+        if 'evex' not in enc:
+            params = tuple(p.replace('"xe"', '"x"').replace('"ye"', '"y"') for p in params)
         yield g['name'], list(params), enc, tpl, g['rip'] + (' "nodecode"' if g.get('nodecode') else '')
 
 
 def main():
     xed, mode = sys.argv[1], sys.argv[2]
-    out = ['; Generated by gen_xed.py from Intel XED\'s datafiles; do not edit.\n']
+    rev = os.popen(f'git -C {xed} log -1 --format=%h 2>/dev/null').read().strip() or 'unknown'
+    out = [f"""; x86-64's instructions, for assembly and disassembly ("asmonly"). Written
+; by gen_xed.py from the instruction tables of Intel XED (revision {rev},
+; https://github.com/intelxed/xed), translated into this description's
+; "enc" language, with AT&T templates read back from llvm-objdump (att.txt).
+; Do not edit: change the script. XED's tables are under this license:
+;
+;   Copyright (c) Intel Corporation
+;
+;   Licensed under the Apache License, Version 2.0 (the "License"); you may
+;   not use this file except in compliance with the License. You may obtain
+;   a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+;
+;   Unless required by applicable law or agreed to in writing, software
+;   distributed under the License is distributed on an "AS IS" BASIS,
+;   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;   See the License for the specific language governing permissions and
+;   limitations under the License.
+"""]
     if mode == 'raw':
         for k, (name, params, enc, holes, ext, iclass, rip) in enumerate(forms(xed)):
             asm = f'xf{k} ' + ', '.join(holes)

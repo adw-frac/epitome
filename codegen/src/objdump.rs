@@ -350,9 +350,10 @@ fn decode_reloc(t: &Target, bytes: &[u8], kind: RelocKind) -> Option<(usize, Env
         let d = &defs[r.0 as usize];
         r == kind || (d.macho.is_some() && d.macho == k.macho) || (d.elf.is_some() && d.elf == k.elf)
     };
-    (0..t.instrs.len())
-        .filter(|&i| t.instrs[i].reloc.is_some_and(alike))
-        .find_map(|i| t.instrs[i].decode(bytes).map(|(env, len)| (i, env, len)))
+    t.decode_candidates(bytes)
+        .into_iter()
+        .filter(|&(i, _)| t.instrs[i].reloc.is_some_and(alike))
+        .find_map(|(i, alt)| t.instrs[i].decode_alt(bytes, alt).map(|(env, len)| (i, env, len)))
 }
 
 /// `-d`: the code sections disassembled.
@@ -372,6 +373,11 @@ pub fn disassemble(t: &Target, img: &Image, show_relocs: bool) -> String {
         .collect();
     named.sort();
     named.dedup();
+    // The first named at each place, by section and address.
+    let mut at_addr: std::collections::HashMap<(usize, u64), &String> = std::collections::HashMap::new();
+    for (a, k, n) in &named {
+        at_addr.entry((*k, *a)).or_insert(n);
+    }
     for (k, s) in img.sections.iter().enumerate() {
         if !s.code || s.data.is_empty() {
             continue;
@@ -386,10 +392,15 @@ pub fn disassemble(t: &Target, img: &Image, show_relocs: bool) -> String {
             .map(|m| (m.value_in(img, k), m.name.starts_with("$d")))
             .collect();
         mapping.sort();
-        let is_data = |off: u64| mapping.iter().rev().find(|m| m.0 <= off).is_some_and(|m| m.1);
-        // A target address, with the symbol it is in.
+        let is_data = |off: u64| {
+            let k = mapping.partition_point(|m| m.0 <= off);
+            k > 0 && mapping[k - 1].1
+        };
+        // A target address, with the symbol it is in (`here` is in address
+        // order: found by halving).
         let label = |addr: u64| -> String {
-            let sym = here.iter().rev().find(|x| x.0 <= addr).or_else(|| here.first().filter(|x| x.0 == addr));
+            let k = here.partition_point(|x| x.0 <= addr);
+            let sym = if k > 0 { Some(here[k - 1]) } else { here.first().copied().filter(|x| x.0 == addr) };
             match sym {
                 Some((a, _, n)) if *a == addr => format!("{addr:#x} <{n}>"),
                 Some((a, _, n)) => format!("{addr:#x} <{n}+{:#x}>", addr - a),
@@ -399,13 +410,20 @@ pub fn disassemble(t: &Target, img: &Image, show_relocs: bool) -> String {
         if here.first().is_none_or(|x| x.0 > s.addr) {
             let _ = writeln!(out, "\n{:016x} <{}>:", s.addr, s.name);
         }
+        // The relocations by where they are.
+        let mut by_offset: Vec<&ImageReloc> = s.relocs.iter().collect();
+        by_offset.sort_by_key(|r| r.offset);
         let mut off = 0u64;
+        // The next symbol to write, as the code reaches it.
+        let mut next = 0;
         while off < s.data.len() as u64 {
             let addr = s.addr + off;
-            for (a, _, n) in &here {
-                if *a == addr {
-                    let _ = writeln!(out, "\n{addr:016x} <{n}>:");
-                }
+            while next < here.len() && here[next].0 < addr {
+                next += 1;
+            }
+            while next < here.len() && here[next].0 == addr {
+                let _ = writeln!(out, "\n{addr:016x} <{}>:", here[next].2);
+                next += 1;
             }
             let rest = &s.data[off as usize..];
             if rest.len() < unit {
@@ -419,8 +437,9 @@ pub fn disassemble(t: &Target, img: &Image, show_relocs: bool) -> String {
                 Some((_, _, n)) => n,
                 None => unit,
             };
+            let from = by_offset.partition_point(|r| r.offset < off);
             let relocs: Vec<&ImageReloc> =
-                s.relocs.iter().filter(|r| (off..off + len as u64).contains(&r.offset)).collect();
+                by_offset[from..].iter().copied().take_while(|r| r.offset < off + len as u64).collect();
             let (text, len) = if is_data(off) {
                 (format!(".word {:#010x}", enc::word(&rest[..4])), 4)
             } else {
@@ -428,10 +447,9 @@ pub fn disassemble(t: &Target, img: &Image, show_relocs: bool) -> String {
                 let named_reloc = relocs.first().map(|r| {
                     let mut r = (*r).clone();
                     if let Some(sk) = img.sections.iter().position(|x| x.name == r.target)
-                        && let Some(n) =
-                            named.iter().find(|x| x.1 == sk && x.0 == img.sections[sk].addr + r.addend as u64)
+                        && let Some(n) = at_addr.get(&(sk, img.sections[sk].addr + r.addend as u64))
                     {
-                        r.target = n.2.clone();
+                        r.target = (*n).clone();
                         r.addend = 0;
                     }
                     r

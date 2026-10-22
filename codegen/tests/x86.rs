@@ -1,5 +1,6 @@
-//! The x86-64 description's instructions (integer, SSE, AVX and AVX-512),
-//! written and read back. For every
+//! The x86-64 description's instructions (generated from Intel XED's
+//! tables: integer, x87, MMX, SSE, AVX, AVX-512 and the rest), written and
+//! read back. For every
 //! entry, lines at the edges of its operands: every register in each place,
 //! immediates and displacements at their limits, each memory form,
 //! RIP-relative symbols, branches near and far. The test:
@@ -17,21 +18,31 @@ use epitome_codegen::abi::Syntax;
 use epitome_codegen::assembler::Assembler;
 use epitome_codegen::mir::{Operand, Reg, fill_template};
 use epitome_codegen::objdump::{self, Image};
-use epitome_codegen::target::{Kind, Target};
+use epitome_codegen::target::{Instr, Kind, Target};
 
 const DISPS: &[i64] = &[0, 1, -1, 127, -128, 128, -129, i32::MAX as i64, i32::MIN as i64];
-const COUNTS: &[i64] = &[1, 0, 2, 7, 31];
 
-/// Immediates for an operation of this many bits.
-fn imms(bits: u32) -> Vec<i64> {
-    let mut v = vec![0, 1, -1, 127, -128];
-    if bits > 8 {
-        v.extend([128, -129, 32767, -32768]);
+/// Values at the edges of the widest field holding immediate `name`.
+fn imms(ins: &Instr, name: &str) -> Vec<i64> {
+    let widest = ins
+        .enc
+        .fields()
+        .filter(|f| f.names.as_slice() == [name.to_string()] && f.width > 0)
+        .max_by_key(|f| f.width)
+        .map(|f| (f.signed, f.width));
+    let Some((signed, w)) = widest else { return vec![0, 1] };
+    let (lo, hi) = match (signed, w) {
+        (_, 64..) => (i64::MIN, i64::MAX),
+        (true, w) => (-(1i64 << (w - 1)), (1i64 << (w - 1)) - 1),
+        (false, w) => (0, (1i64 << w) - 1),
+    };
+    let mut out = Vec::new();
+    for v in [0, 1, hi, lo, 127, -128, 128, -129, 255, 32767, -32768, i32::MAX as i64, i32::MIN as i64] {
+        if (lo..=hi).contains(&v) && !out.contains(&v) {
+            out.push(v);
+        }
     }
-    if bits > 16 {
-        v.extend([i32::MAX as i64, i32::MIN as i64]);
-    }
-    v
+    out
 }
 
 /// An operand's sample value.
@@ -41,41 +52,40 @@ enum V {
     Text(String),
 }
 
-/// Lines for every entry, each operand cycling through its values.
-fn samples(t: &Target) -> String {
+/// Lines for every entry (or, not `all`, those the disassembler reads as
+/// themselves: not "nodecode" ones, written another way), each operand
+/// cycling through its values.
+fn samples(t: &Target, all: bool) -> String {
     let mut out = String::from("\t.text\n");
     for (i, ins) in t.instrs.iter().enumerate() {
-        if ins.enc.is_empty() || ins.asm.is_empty() {
+        if ins.enc.is_empty() || ins.asm.is_empty() || !(all || ins.decode) {
             continue;
         }
-        let mnemonic = ins.asm.split_whitespace().next().unwrap_or("");
-        let bits = match mnemonic.chars().last() {
-            Some('l') => 32,
-            Some('w') => 16,
-            Some('b') => 8,
-            _ => 64,
-        };
         let back = format!(".Lback{}", ins.name);
         let lists: Vec<Vec<V>> = ins
             .operands
             .iter()
             .map(|o| match o.kind {
+                // (A mask, written `{%k1}`, is k1-k7: k0 is none.)
                 Kind::Reg(c) => (0..t.machine.def(c).names.len() as i64)
                     .filter(|&k| !(o.name == "m.index" && k == 4))
+                    .filter(|&k| !(k == 0 && ins.asm.contains(&format!("{{lb}}{{{}}}{{rb}}", o.name))))
                     .map(|k| V::Reg(t.machine.phys(c, k)))
                     .collect(),
                 Kind::Imm => {
                     let vals = match o.name.as_str() {
                         "m.disp" => DISPS.to_vec(),
                         "m.scale" => vec![1, 2, 4, 8],
-                        "n" => COUNTS.to_vec(),
-                        _ if mnemonic.contains("shuf") => vec![0, 1, 27, 255],
-                        _ => imms(bits),
+                        name => imms(ins, name),
                     };
                     vals.into_iter().map(V::Imm).collect()
                 }
                 Kind::Sym => vec![V::Text("sym".into()), V::Text("other".into())],
-                Kind::Label => vec![V::Text(back.clone()), V::Text(".Lfar".into())],
+                // (Branches of a byte only reach near.)
+                Kind::Label if ins.enc.fields().any(|f| f.width == 32 && f.names.contains(&o.name)) => {
+                    vec![V::Text(back.clone()), V::Text(".Lfar".into())]
+                }
+                Kind::Label => vec![V::Text(back.clone())],
                 Kind::Cond => vec![V::Imm(0)],
             })
             .collect();
@@ -99,7 +109,10 @@ fn samples(t: &Target) -> String {
     out
 }
 
-fn text_of(img: &Image) -> (&[u8], Vec<(u64, String, String, i64)>) {
+/// A relocation: where, its type, its target and addend.
+type Reloc = (u64, String, String, i64);
+
+fn text_of(img: &Image) -> (&[u8], Vec<Reloc>) {
     let s = img.sections.iter().find(|s| s.name == ".text").expect("a .text section");
     let relocs = s.relocs.iter().map(|r| (r.offset, r.type_name.clone(), r.target.clone(), r.addend)).collect();
     (&s.data, relocs)
@@ -113,15 +126,21 @@ fn x86_instructions_round_trip() {
     let report = epitome_codegen::check::check(&t);
     let enc = report.sections.iter().find(|s| s.name == "encodings").unwrap();
     assert!(enc.errors.is_empty(), "{}", enc.errors.join("\n"));
-    assert!(enc.checked > 40000, "{} checked", enc.checked);
+    assert!(enc.checked > 400000, "{} checked", enc.checked);
 
     // 2. Ours, written and read back.
-    let asm = samples(&t);
+    let read = samples(&t, false);
+    let lines = read.lines().filter(|l| l.starts_with('\t')).count() - 1;
+    let object = Assembler::new(&t).assemble(&read, Some(Syntax::Elf)).and_then(|a| a.file(&t)).unwrap();
+    let img = Image::read(&object, &t.machine).unwrap();
+    let n = objdump::reads_back(&t, &img, &read, &[]).unwrap();
+    assert_eq!(n, lines);
+
+    // Every entry, for llvm-mc.
+    let asm = samples(&t, true);
     let lines = asm.lines().filter(|l| l.starts_with('\t')).count() - 1;
     let ours = Assembler::new(&t).assemble(&asm, Some(Syntax::Elf)).and_then(|a| a.file(&t)).unwrap();
     let img = Image::read(&ours, &t.machine).unwrap();
-    let n = objdump::reads_back(&t, &img, &asm, &[]).unwrap();
-    assert_eq!(n, lines);
 
     // 3. llvm-mc's, if it is here.
     let Some(mc) = ["llvm-mc", "llvm-mc-18"].into_iter().find(|c| Command::new(c).arg("--version").output().is_ok())

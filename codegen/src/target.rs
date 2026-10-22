@@ -41,13 +41,47 @@ pub struct Operand {
     pub writeback: bool,
 }
 
+/// An instruction's encoding, from its text: parsed as the description is
+/// read, or (with "lazy-encodings") when first used, so that a description
+/// of tens of thousands of entries loads without parsing them all.
+#[derive(Clone, Debug)]
+pub struct LazyEncoding {
+    name: String,
+    text: String,
+    fragments: std::sync::Arc<enc::Fragments>,
+    cell: std::sync::OnceLock<Result<Encoding, String>>,
+}
+
+impl LazyEncoding {
+    pub fn new(name: &str, text: &str, fragments: std::sync::Arc<enc::Fragments>) -> LazyEncoding {
+        LazyEncoding { name: name.into(), text: text.into(), fragments, cell: Default::default() }
+    }
+
+    /// The encoding, or why its text does not parse.
+    pub fn parsed(&self) -> Result<&Encoding, String> {
+        self.cell
+            .get_or_init(|| enc::parse_with(&self.text, &self.fragments).map_err(|e| format!("@{}: {e}", self.name)))
+            .as_ref()
+            .map_err(Clone::clone)
+    }
+}
+
+impl std::ops::Deref for LazyEncoding {
+    type Target = Encoding;
+    /// (A description read lazily has its encodings checked by
+    /// `--check-target`; one that does not parse is a bug in it.)
+    fn deref(&self) -> &Encoding {
+        self.parsed().unwrap_or_else(|e| panic!("{e}"))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Instr {
     pub name: String,
     /// The result first, called `d`, if there is one; then the parameters.
     pub operands: Vec<Operand>,
     pub has_result: bool,
-    pub enc: Encoding,
+    pub enc: LazyEncoding,
     pub asm: String,
     pub decode: bool,
     /// The result is zero above this many bits (64: nothing known).
@@ -96,6 +130,9 @@ impl Instr {
     /// the instruction, as TLSDESC's call is marked, or a symbol added to a
     /// displacement): taken as 0 when decoding.
     pub fn free(&self) -> Vec<String> {
+        if !self.operands.iter().any(|o| o.kind == Kind::Sym) {
+            return Vec::new();
+        }
         self.operands
             .iter()
             .filter(|o| {
@@ -393,7 +430,29 @@ pub struct Target {
     fits_cache: std::sync::Mutex<HashMap<FitsKey, bool>>,
     /// Shuffle masks the description's patterns use.
     pub masks: std::sync::Mutex<Vec<Vec<i32>>>,
-    decode_index: std::sync::OnceLock<Vec<Vec<usize>>>,
+    decode_index: std::sync::OnceLock<Vec<DecodeBucket>>,
+}
+
+/// The disassembler's candidates for code starting with one byte: by the
+/// byte at an offset (the first after it with all bits literal), and those
+/// with no such byte.
+#[derive(Default)]
+struct DecodeBucket {
+    keyed: HashMap<(u8, u8), Vec<Candidate>>,
+    offsets: Vec<u8>,
+    rest: Vec<Candidate>,
+}
+
+/// An alternative to try: its place in the order tried, the entry, which
+/// alternative, and its literal bits.
+type Candidate = (usize, usize, usize, LitHead);
+
+/// An alternative's literal bits over its first bytes (up to 8).
+#[derive(Clone, Copy, Default)]
+struct LitHead {
+    mask: u64,
+    value: u64,
+    len: u8,
 }
 
 fn attr<'a>(attrs: &'a [Attr], key: &str) -> Option<Option<&'a str>> {
@@ -455,11 +514,10 @@ pub const AARCH64_FILES: &[(&str, &str)] = &[
 ];
 
 /// The x86-64 description (see docs/design/x86.md): for assembly and
-/// disassembly so far.
+/// disassembly so far, its instructions generated from Intel XED's tables.
 pub const X86_64_FILES: &[(&str, &str)] = &[
     ("00-base.ll", include_str!("../targets/x86_64/00-base.ll")),
-    ("80-asm.ll", include_str!("../targets/x86_64/80-asm.ll")),
-    ("81-vector.ll", include_str!("../targets/x86_64/81-vector.ll")),
+    ("80-xed.ll", include_str!("../targets/x86_64/80-xed.ll")),
 ];
 
 pub fn type_bits(m: &Module, ty: TypeId) -> u32 {
@@ -704,36 +762,88 @@ impl Target {
 
     /// `Instr::fits`, remembered: the same few immediates come up again
     /// and again.
-    /// The entries the disassembler tries for code starting with each byte
-    /// value, most literal bits first: those an alternative of whose first
-    /// byte's literal bits are that byte's.
-    pub fn decode_candidates(&self, first: u8) -> &[usize] {
+    /// The entries the disassembler tries for `bytes`, and which of their
+    /// alternatives, most literal bits first: those with an alternative whose first byte's literal bits are
+    /// those of `bytes`, and whose first byte after that with all its bits
+    /// literal (the opcode, after VEX's or EVEX's prefix), if it has one, is
+    /// there too.
+    pub fn decode_candidates(&self, bytes: &[u8]) -> Vec<(usize, usize)> {
         let index = self.decode_index.get_or_init(|| {
-            let mut all: Vec<usize> =
-                (0..self.instrs.len()).filter(|&i| self.instrs[i].decode && !self.instrs[i].enc.is_empty()).collect();
-            all.sort_by_key(|&i| std::cmp::Reverse(self.instrs[i].enc.fixed_bits()));
-            (0..=255u64)
-                .map(|b| {
-                    all.iter()
-                        .copied()
-                        .filter(|&i| {
-                            self.instrs[i]
-                                .enc
-                                .alts
-                                .iter()
-                                .any(|a| a.pieces.first().is_none_or(|p| (b & p.mask & 0xff) == (p.value & 0xff)))
-                        })
-                        .collect()
-                })
-                .collect()
+            // Every encoding is needed: those not yet parsed are, on every
+            // core.
+            let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+            let chunk = self.instrs.len().div_ceil(threads).max(1);
+            std::thread::scope(|scope| {
+                for part in self.instrs.chunks(chunk) {
+                    scope.spawn(move || part.iter().for_each(|i| drop(i.enc.parsed())));
+                }
+            });
+            // (Entries not to be read as themselves are here too, for reading
+            // an instruction a relocation fills in: `decode` is the caller's.)
+            let mut rank: Vec<usize> = (0..self.instrs.len()).filter(|&i| !self.instrs[i].enc.is_empty()).collect();
+            rank.sort_by_key(|&i| std::cmp::Reverse(self.instrs[i].enc.fixed_bits()));
+            let mut index: Vec<DecodeBucket> = (0..256).map(|_| DecodeBucket::default()).collect();
+            for (order, &i) in rank.iter().enumerate() {
+                for (alt, a) in self.instrs[i].enc.alts.iter().enumerate() {
+                    // Each byte's literal bits, over the first 8.
+                    let mut lit = [(0u8, 0u8); 8];
+                    for p in &a.pieces {
+                        for k in 0..p.bytes.min(8) {
+                            let at = (p.offset + k) as usize;
+                            if at < 8 {
+                                lit[at] = (((p.mask >> (8 * k)) & 0xff) as u8, ((p.value >> (8 * k)) & 0xff) as u8);
+                            }
+                        }
+                    }
+                    let key = (1..a.len.min(8) as usize).find(|&k| lit[k].0 == 0xff);
+                    // Its literal bits over the first 8 bytes, to check at once.
+                    let n = (a.len as usize).min(8);
+                    let head = lit[..n].iter().enumerate().fold(LitHead::default(), |h, (k, &(m, v))| LitHead {
+                        mask: h.mask | (m as u64) << (8 * k),
+                        value: h.value | (v as u64) << (8 * k),
+                        len: n as u8,
+                    });
+                    for (b0, bucket) in index.iter_mut().enumerate() {
+                        if (b0 as u8) & lit[0].0 != lit[0].1 {
+                            continue;
+                        }
+                        let list = match key {
+                            Some(k) => bucket.keyed.entry((k as u8, lit[k].1)).or_default(),
+                            None => &mut bucket.rest,
+                        };
+                        list.push((order, i, alt, head));
+                    }
+                }
+            }
+            for b in &mut index {
+                b.offsets = b.keyed.keys().map(|&(k, _)| k).collect();
+                b.offsets.sort();
+                b.offsets.dedup();
+            }
+            index
         });
-        &index[first as usize]
+        let Some(&b0) = bytes.first() else { return Vec::new() };
+        let bucket = &index[b0 as usize];
+        let word = enc::word(&bytes[..bytes.len().min(8)]);
+        let fits = |h: &LitHead| bytes.len() >= h.len as usize && word & h.mask == h.value;
+        let mut out: Vec<(usize, usize, usize)> =
+            bucket.rest.iter().filter(|(_, _, _, h)| fits(h)).map(|&(o, i, a, _)| (o, i, a)).collect();
+        for &k in &bucket.offsets {
+            if let Some(&b) = bytes.get(k as usize)
+                && let Some(list) = bucket.keyed.get(&(k, b))
+            {
+                out.extend(list.iter().filter(|(_, _, _, h)| fits(h)).map(|&(o, i, a, _)| (o, i, a)));
+            }
+        }
+        out.sort();
+        out.dedup();
+        out.into_iter().map(|(_, i, a)| (i, a)).collect()
     }
 
     /// The shortest instruction's length in bytes: 4 for a target whose
     /// instructions are all one word.
     pub fn unit(&self) -> usize {
-        self.instrs.iter().flat_map(|i| i.enc.alts.iter()).map(|a| a.len as usize).filter(|&n| n > 0).min().unwrap_or(4)
+        self.machine.unit as usize
     }
 
     pub fn fits_cached(&self, i: usize, vals: Vec<Option<i64>>) -> bool {
@@ -862,6 +972,7 @@ impl Target {
             let params = params.split([',', ' ']).filter(|p| !p.is_empty()).map(String::from).collect();
             fragments.insert(name.clone(), (params, body.clone()));
         }
+        let fragments = std::sync::Arc::new(fragments);
         for (g, f) in m.functions() {
             let name = m.global(g).name.clone().unwrap_or_default();
             if let Some(Some(v)) = attr(&f.fn_attrs, "cond") {
@@ -883,7 +994,10 @@ impl Target {
                 continue;
             }
             let Some(Some(enc_text)) = attr(&f.fn_attrs, "enc") else { continue };
-            let enc = enc::parse_with(enc_text, &fragments).map_err(|e| format!("@{name}: {e}"))?;
+            let enc = LazyEncoding::new(&name, enc_text, fragments.clone());
+            if !self.machine.lazy_encodings {
+                enc.parsed()?;
+            }
             let fn_ty = m.types.get(f.ty).clone();
             let Type::Function { ret, .. } = fn_ty else { unreachable!() };
             // A struct result is the flags, for a comparison ("sets"), or

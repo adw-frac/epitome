@@ -82,6 +82,7 @@ def run(todo, pick):
         for kind, cls, op in ops:
             v = f'e{k}' if kind == 'label' else value(kind, cls, op, pick)
             text = text.replace('{' + op + '}', v)
+        text = text.replace('{lb}', '{').replace('{rb}', '}')
         # A symbol at each: llvm-objdump starts reading afresh there.
         lines.append(f'e{k}:\n\t{asm.split(" ", 1)[0]} {text}')
     with tempfile.TemporaryDirectory() as tmp:
@@ -138,16 +139,18 @@ for k in failed:
 def template(text, ops, pick):
     mn, *rest = text.split(None, 1)
     rest = rest[0].strip() if rest else ''
-    while mn in ('lock', 'rep', 'repe', 'repne', 'data16', 'notrack') and rest:
+    while mn in ('lock', 'rep', 'repe', 'repne', 'data16', 'notrack', '{vex}') and rest:
         nxt, *rest = rest.split(None, 1)
         mn += ' ' + nxt
         rest = rest[0].strip() if rest else ''
+    mn = mn.replace('{vex}', '{lb}vex{rb}')
+    # Operands: split at commas outside parentheses.
     ops_text = []
     depth, cur = 0, ''
     for c in rest:
-        if c in '({':
+        if c == '(':
             depth += 1
-        if c in ')}':
+        if c == ')':
             depth -= 1
         if c == ',' and depth == 0:
             ops_text.append(cur.strip())
@@ -157,30 +160,38 @@ def template(text, ops, pick):
     if cur.strip():
         ops_text.append(cur.strip())
     vals = {op: (kind, cls) for kind, cls, op in ops}
+    mask = value('reg', 'k', 'k', pick) if 'k' in vals else None
+
+    def core_of(t0):
+        """An operand without EVEX's decorations, as a template."""
+        for kind, cls, op in ops:
+            if kind == 'reg' and not op.startswith('m.') and op != 'k' and t0 == value(kind, cls, op, pick):
+                return '{' + op + '}'
+            if kind == 'imm' and not op.startswith('m.') and re.fullmatch(r'\$(0x[0-9a-f]+|\d+)', t0) \
+                    and int(t0[1:], 0) == IMMS[op]:
+                return '${' + op + '}'
+            if kind == 'label' and re.match(r'(0x)?[0-9a-f]+( <.*>)?$', t0):
+                return '{' + op + '}'
+        if 'm.base' in vals:
+            if 'm.index' in vals and re.fullmatch(r'(%\w+:)?0x40\(%rsi,%rdi,4\)', t0):
+                return t0.split('0x40')[0] + '{m.disp}({m.base},{m.index},{m.scale})'
+            if 'm.index' not in vals and re.fullmatch(r'(%\w+:)?0x40\(%rsi\)', t0):
+                return t0.split('0x40')[0] + '{m.disp}({m.base})'
+        if 'm.sym' in vals and re.fullmatch(r'(%\w+:)?(0x0)?\(%rip\)', t0):
+            return t0.split('(')[0].replace('0x0', '') + '{m.sym}(%rip)'
+        return t0
+
     out = []
     for t in ops_text:
         star = '*' if t.startswith('*') else ''
         t0 = t.lstrip('*')
-        done = None
-        for kind, cls, op in ops:
-            if kind == 'reg' and not op.startswith('m.') and t0 == value(kind, cls, op, pick):
-                done = '{' + op + '}'
-            if kind == 'imm' and not op.startswith('m.') and re.fullmatch(r'\$(0x[0-9a-f]+|\d+)', t0) \
-                    and int(t0[1:], 0) == IMMS[op]:
-                done = '${' + op + '}'
-            if kind == 'label' and re.match(r'(0x)?[0-9a-f]+( <.*>)?$', t0):
-                done = '{' + op + '}'
-        if done is None and 'm.base' in vals:
-            if 'm.index' in vals and re.fullmatch(r'(%\w+:)?0x40\(%rsi,%rdi,4\)', t0):
-                done = t0.split('0x40')[0] + '{m.disp}({m.base},{m.index},{m.scale})'
-            elif 'm.index' not in vals and re.fullmatch(r'(%\w+:)?0x40\(%rsi\)', t0):
-                done = t0.split('0x40')[0] + '{m.disp}({m.base})'
-        if done is None and 'm.sym' in vals and re.fullmatch(r'(%\w+:)?(0x0)?\(%rip\)', t0):
-            done = t0.split('(')[0].replace('0x0', '') + '{m.sym}(%rip)'
-        if done is None and 'm.sym' in vals and re.fullmatch(r'(%\w+:)?(0x0)?\(%rip\)', t0):
-            done = '{m.sym}(%rip)'
-        out.append(star + (done if done is not None else t0))
-    used = set(re.findall(r'\{([\w.]+)\}', ' '.join(out)))
+        core = re.sub(r'\s*\{[^}]*\}', '', t0)
+        deco = t0[len(core):] if t0.startswith(core) else t0
+        mapped = core_of(core) if core else ''
+        deco = re.sub(r'\{([^}]*)\}', lambda m: '{lb}' + ('{k}' if m.group(1) == mask else m.group(1)) + '{rb}',
+                      deco)
+        out.append(star + mapped + deco)
+    used = set(re.findall(r'\{([\w.]+)\}', ' '.join(out))) - {'lb', 'rb'}
     missing = [op for _, _, op in ops if op not in used and not (op.startswith('m.') and (
         ('m.base' in used) or ('m.sym' in used)))]
     if missing:

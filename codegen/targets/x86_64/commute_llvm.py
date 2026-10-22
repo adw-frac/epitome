@@ -13,8 +13,27 @@ import subprocess
 import sys
 import tempfile
 
+def assemble(mc, objdump, lines, prefix):
+    """Assembles `lines` with llvm-mc, each at a symbol `prefix`<k>, leaving
+    out those it rejects, and gives llvm-objdump's listing."""
+    keep = list(range(len(lines)))
+    with tempfile.TemporaryDirectory() as tmp:
+        while True:
+            src = '\t.text\n' + ''.join(f'{prefix}{k}:\n\t{lines[k]}\n' for k in keep)
+            open(f'{tmp}/s.s', 'w').write(src)
+            r = subprocess.run([mc, '-triple=x86_64-linux-gnu', '-filetype=obj', '-o', f'{tmp}/s.o', f'{tmp}/s.s'],
+                               capture_output=True, text=True)
+            bad = {int(n) for n in re.findall(r's\.s:(\d+):\d+: error', r.stderr)}
+            if not bad:
+                break
+            # Line 2 + 2j is the j-th kept line's instruction.
+            drop = {keep[(n - 3) // 2] for n in bad if n >= 3}
+            keep = [k for k in keep if k not in drop]
+        return subprocess.run([objdump, '-d', f'{tmp}/s.o'], capture_output=True, text=True).stdout
+
+
 entries_ll, mc, objdump = sys.argv[1:4]
-NAMES = {'x': '%xmm{}', 'y': '%ymm{}'}
+NAMES = {'x': '%xmm{}', 'y': '%ymm{}', 'xe': '%xmm{}', 'ye': '%ymm{}'}
 
 probes = []
 for line in open(entries_ll):
@@ -33,11 +52,7 @@ for line in open(entries_ll):
         text = text.replace('{' + op + '}', NAMES[cls].format(k))
     probes.append((name, text))
 
-with tempfile.TemporaryDirectory() as tmp:
-    open(f'{tmp}/s.s', 'w').write('\t.text\n' + ''.join(f'p{k}:\n\t{t}\n' for k, (_, t) in enumerate(probes)))
-    subprocess.run([mc, '-triple=x86_64-linux-gnu', '-filetype=obj', '-o', f'{tmp}/s.o', f'{tmp}/s.s'],
-                   capture_output=True)
-    dump = subprocess.run([objdump, '-d', f'{tmp}/s.o'], capture_output=True, text=True).stdout
+dump = assemble(mc, objdump, [t for _, t in probes], 'p')
 
 cur = None
 first = {}

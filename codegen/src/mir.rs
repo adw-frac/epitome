@@ -557,7 +557,10 @@ pub fn sizes(t: &Target, f: &MFunc) -> Result<Vec<Vec<usize>>, String> {
                 .collect()
         })
         .collect();
-    let fixed = t.instrs.iter().all(|i| i.enc.alts.len() <= 1);
+    let fixed = f.blocks.iter().flat_map(|b| &b.insts).all(|i| match i.op {
+        Opcode::Instr(k) => t.instrs[k].enc.alts.len() <= 1,
+        _ => true,
+    });
     if fixed {
         return Ok(size);
     }
@@ -678,9 +681,13 @@ pub fn cfi_rules(f: &MFunc) -> Vec<(u64, crate::unwind::Cfi)> {
 /// if the description has it: the candidates whose literal bits match,
 /// most literal bits first.
 pub fn decode(t: &Target, bytes: &[u8]) -> Option<(usize, Env, usize)> {
-    for &i in t.decode_candidates(*bytes.first()?) {
+    let cands = t.decode_candidates(bytes);
+    for (i, alt) in cands {
         let ins = &t.instrs[i];
-        let Some((env, len)) = ins.decode(bytes) else { continue };
+        if !ins.decode {
+            continue;
+        }
+        let Some((env, len)) = ins.decode_alt(bytes, alt) else { continue };
         // A condition must be one the description names.
         let conds_ok =
             ins.operands.iter().all(|o| o.kind != Kind::Cond || t.conds.iter().any(|c| c.value == env[&o.name]));

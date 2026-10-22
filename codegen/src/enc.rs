@@ -161,8 +161,15 @@ pub fn parse_with(text: &str, fragments: &Fragments) -> Result<Encoding, String>
         return Err(format!("unexpected `{}` in encoding `{text}`", toks[pos]));
     }
     let mut alts = Vec::new();
+    let mut ways = 0;
     for (guards, flat) in flatten(&seq) {
-        alts.push(build_alt(guards, &flat).map_err(|e| format!("{e}: `{text}`"))?);
+        ways += 1;
+        if let Some(alt) = build_alt(guards, &flat).map_err(|e| format!("{e}: `{text}`"))? {
+            alts.push(alt);
+        }
+    }
+    if alts.is_empty() && ways > 0 {
+        return Err(format!("no alternative can be encoded: `{text}`"));
     }
     Ok(Encoding { alts })
 }
@@ -410,7 +417,10 @@ type Tokens = Vec<(Option<Field>, String)>;
 
 /// An alternative from its guards and its tokens, split into pieces at
 /// `|`. `end` (its length) is put into every expression.
-fn build_alt(guards: Vec<Expr>, items: &[Item]) -> Result<Alt, String> {
+/// Fields and guards that read no operand are settled here: a field of a
+/// constant is literal bits, a guard of one holds or the alternative is
+/// dropped (`None`), as is one with a constant its field cannot hold.
+fn build_alt(guards: Vec<Expr>, items: &[Item]) -> Result<Option<Alt>, String> {
     // Pieces: runs of tokens between separators; empty runs (around an
     // optional part left out) disappear.
     let mut runs: Vec<Vec<String>> = vec![Vec::new()];
@@ -477,13 +487,17 @@ fn build_alt(guards: Vec<Expr>, items: &[Item]) -> Result<Alt, String> {
     let len: u32 = parsed.iter().map(|(t, _)| t / 8).sum();
     let mut known = Env::new();
     known.insert("end".into(), len as i64);
-    let mut alt = Alt {
-        guards: guards.iter().map(|g| substitute(g, &known)).collect(),
-        pieces: Vec::new(),
-        fields: Vec::new(),
-        len,
-        names: Vec::new(),
-    };
+    let mut kept = Vec::new();
+    for g in guards.iter().map(|g| substitute(g, &known)) {
+        let mut names = Vec::new();
+        names_in(&g, &mut names);
+        match (names.is_empty(), eval(&g, &Env::new())) {
+            (true, Some(0)) => return Ok(None),
+            (true, Some(_)) => {}
+            _ => kept.push(g),
+        }
+    }
+    let mut alt = Alt { guards: kept, pieces: Vec::new(), fields: Vec::new(), len, names: Vec::new() };
     let mut offset = 0;
     for (k, (total, toks)) in parsed.into_iter().enumerate() {
         let mut piece = Piece { offset, bytes: total / 8, mask: 0, value: 0 };
@@ -506,6 +520,19 @@ fn build_alt(guards: Vec<Expr>, items: &[Item]) -> Result<Alt, String> {
                     f.expr = substitute(&f.expr, &known);
                     names_in(&f.expr, &mut f.names);
                     f.plain = !format!("{}", f.expr).contains(['%', '&']);
+                    if f.names.is_empty()
+                        && let Some(v) = eval(&f.expr, &Env::new())
+                    {
+                        if !holds(v, &f) {
+                            return Ok(None);
+                        }
+                        if f.width > 0 {
+                            let m = if f.width >= 64 { u64::MAX } else { (1u64 << f.width) - 1 };
+                            piece.mask |= m << f.lo;
+                            piece.value |= ((v as u64) & m) << f.lo;
+                        }
+                        continue;
+                    }
                     alt.fields.push(f);
                 }
             }
@@ -523,7 +550,7 @@ fn build_alt(guards: Vec<Expr>, items: &[Item]) -> Result<Alt, String> {
     for g in &alt.guards {
         names_in(g, &mut alt.names);
     }
-    Ok(alt)
+    Ok(Some(alt))
 }
 
 /// Parses an expression: integers, names, `+ - * / % & | ^ << >>`, the
@@ -886,8 +913,9 @@ impl Alt {
         for n in free {
             env.insert(n.clone(), 0);
         }
-        // Fields reading a free operand, with it put in as zero.
-        let fields: Vec<Field> = if free.iter().any(|n| self.mentions(n)) {
+        // Fields reading a free operand, with it put in as zero (borrowed
+        // when none do).
+        let fields: std::borrow::Cow<[Field]> = if free.iter().any(|n| self.mentions(n)) {
             self.fields
                 .iter()
                 .map(|f| {
@@ -899,10 +927,12 @@ impl Alt {
                     }
                     f
                 })
-                .collect()
+                .collect::<Vec<_>>()
+                .into()
         } else {
-            self.fields.clone()
+            std::borrow::Cow::Borrowed(&self.fields)
         };
+        let fields: &[Field] = &fields;
         let mut unsolved: Vec<&String> = Vec::new();
         for name in operands {
             if free.contains(name) {
@@ -941,7 +971,7 @@ impl Alt {
                 // A value split over fields, `name>>k` and `name&m`
                 // (adrp's immhi and immlo), or `name/k` and `name%k`: the
                 // low bits go back on.
-                for f in &fields {
+                for f in fields {
                     let Expr::Bin(op @ ('%' | '&'), a, k) = &f.expr else { continue };
                     if **a != Expr::Var(name.clone()) {
                         continue;

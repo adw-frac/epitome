@@ -261,6 +261,12 @@ pub struct Machine {
     /// How objdump names the ELF format (`elf64-littleaarch64`).
     pub elf_format: String,
     pub macho_cpu: Option<u32>,
+    /// The shortest instruction's length in bytes ("instruction-unit"; 4
+    /// unless the description says).
+    pub unit: u32,
+    /// Encodings are parsed when first used, not as the description is read
+    /// ("lazy-encodings"): for a description of tens of thousands.
+    pub lazy_encodings: bool,
     pub relocs: Vec<RelocDef>,
     /// The feature the vector registers come with, if they are optional.
     pub vector_feature: Option<String>,
@@ -407,6 +413,8 @@ impl Machine {
             elf_flags: 0,
             elf_format: String::new(),
             macho_cpu: None,
+            unit: 4,
+            lazy_encodings: false,
             relocs: Vec::new(),
             vector_feature: None,
             cpus: Vec::new(),
@@ -533,6 +541,8 @@ impl Machine {
             mc.asm_modifiers.insert(one_char(code)?, def);
         }
         mc.macho_cpu = num("macho-cpu")?.map(|v| v as u32);
+        mc.unit = num("instruction-unit")?.unwrap_or(4) as u32;
+        mc.lazy_encodings = num("lazy-encodings")?.unwrap_or(0) != 0;
         for t in tuples(m, "target.relocs") {
             let p: HashMap<&str, &str> =
                 t.chunks(2).filter_map(|c| Some((c[0].as_str(), c.get(1)?.as_str()))).collect();
