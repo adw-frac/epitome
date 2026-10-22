@@ -6,11 +6,16 @@
 ;
 ;   00-base.ll      registers, parameters, relocations, and the encoding
 ;                   fragments (REX, ModRM, SIB, displacements)
-;   80-xed.ll       every instruction llvm-mc 18 assembles, for assembly and
+;   02-xed.ll       every instruction llvm-mc 18 assembles, for assembly and
 ;                   disassembly ("asmonly"): integer, x87, MMX, SSE to 4.2,
 ;                   AVX, AVX2, FMA, AVX-512 with masks, broadcasts and
 ;                   rounding, AMX, and the rest; written by gen_xed.py from
-;                   Intel XED's tables
+;                   Intel XED's tables. First, so that the assembler prefers
+;                   its entries, which encode as llvm-mc does
+;   05-cond.ll      the flags, and the conditions that read them
+;   10-integer.ll   integer instructions for selection, with bodies;
+;                   written by gen_sel.py
+;   70-abi.ll       the System V calling convention
 ;
 ; Assembly is AT&T's, as clang, llvm-mc and objdump write it on Linux.
 ; The fragments here follow the Intel SDM and the AMD APM; the entries are
@@ -22,7 +27,7 @@
 ; rsp, rbp, rsi, rdi, r8-r15, seen as 64, 32, 16 and 8 bits. The byte
 ; registers are those REX gives (spl, bpl, sil, dil), never ah-bh.
 
-!target.registers = !{!1000, !1001, !1002, !1003, !1004, !1005, !1006, !1007, !1008, !1009, !1040, !1041, !1042, !1043, !1044, !1045}
+!target.registers = !{!1000, !1001, !1002, !1003, !1004, !1005, !1006, !1007, !1008, !1009, !1040, !1041, !1042, !1043, !1044, !1045, !1046, !1047, !1048}
 !1000 = !{!"r64", !"%rax", !"%rcx", !"%rdx", !"%rbx", !"%rsp", !"%rbp", !"%rsi", !"%rdi", !"%r{8-15}"}
 !1001 = !{!"r32", !"%eax", !"%ecx", !"%edx", !"%ebx", !"%esp", !"%ebp", !"%esi", !"%edi", !"%r{8-15}d"}
 !1002 = !{!"r16", !"%ax", !"%cx", !"%dx", !"%bx", !"%sp", !"%bp", !"%si", !"%di", !"%r{8-15}w"}
@@ -43,12 +48,17 @@
 !1043 = !{!"cr", !"%cr{0-15}"}
 !1044 = !{!"dr", !"%dr{0-15}"}
 !1045 = !{!"tmm", !"%tmm{0-7}"}
+; The registers some instructions take fixed: a division's rax and rdx, a
+; shift's count in rcx (cl).
+!1046 = !{!"rax", !"%rax", !"%rcx", !"%rdx", !"%rbx", !"%rsp", !"%rbp", !"%rsi", !"%rdi", !"%r{8-15}"}
+!1047 = !{!"rdx", !"%rax", !"%rcx", !"%rdx", !"%rbx", !"%rsp", !"%rbp", !"%rsi", !"%rdi", !"%r{8-15}"}
+!1048 = !{!"rcx", !"%rax", !"%rcx", !"%rdx", !"%rbx", !"%rsp", !"%rbp", !"%rsi", !"%rdi", !"%r{8-15}"}
 
-!target.classes = !{!1010, !1011, !1012, !1013, !1014, !1015, !1016, !1017, !1018, !1019, !1050, !1051, !1052, !1053, !1054, !1055}
+!target.classes = !{!1010, !1011, !1012, !1013, !1014, !1015, !1016, !1017, !1018, !1019, !1050, !1051, !1052, !1053, !1054, !1055, !1056, !1057, !1058}
 !1010 = !{!"r64", !"file", !"r", !"bits", !"64", !"holds", !"int"}
 !1011 = !{!"r32", !"file", !"r", !"bits", !"32", !"holds", !"int"}
-!1012 = !{!"r16", !"file", !"r", !"bits", !"16", !"holds", !"int"}
-!1013 = !{!"r8", !"file", !"r", !"bits", !"8", !"holds", !"int"}
+!1012 = !{!"r16", !"file", !"r"}
+!1013 = !{!"r8", !"file", !"r"}
 !1014 = !{!"x", !"file", !"v", !"bits", !"128", !"holds", !"vector"}
 !1015 = !{!"y", !"file", !"v", !"bits", !"256", !"holds", !"vector"}
 !1016 = !{!"xe", !"file", !"v", !"bits", !"128", !"holds", !"vector"}
@@ -61,11 +71,14 @@
 !1053 = !{!"cr", !"file", !"cr"}
 !1054 = !{!"dr", !"file", !"dr"}
 !1055 = !{!"tmm", !"file", !"tmm"}
+!1056 = !{!"rax", !"file", !"r", !"fixed", !"%rax"}
+!1057 = !{!"rdx", !"file", !"r", !"fixed", !"%rdx"}
+!1058 = !{!"rcx", !"file", !"r", !"fixed", !"%rcx"}
 
 ; ===========================================================================
 ; Parameters.
 
-!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109}
+!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110, !1111, !1112, !1113, !1114}
 !1100 = !{!"sp", !"%rsp"}
 !1101 = !{!"vector-bits", !"0"}
 !1102 = !{!"elf-machine", !"62"}
@@ -78,6 +91,14 @@
 ; are read when first used.
 !1108 = !{!"instruction-unit", !"1"}
 !1109 = !{!"lazy-encodings", !"1"}
+; A 32-bit result clears the top half; branches compare whole registers.
+!1110 = !{!"narrow-results", !"zero"}
+!1111 = !{!"boolean-branches", !"compare"}
+!1112 = !{!"flags", !"zcso"}
+; Unwind tables: the CFA is rsp + 8 on entry, the return address at CFA - 8,
+; in DWARF's column 16 (rip).
+!1113 = !{!"cfi-cfa-offset", !"8"}
+!1114 = !{!"cfi-return-column", !"16"}
 
 !target.cpus = !{!1150}
 !1150 = !{!"x86-64"}
@@ -96,10 +117,11 @@
 !1204 = !{!"name", !"abs32s", !"elf", !"11", !"elf-name", !"R_X86_64_32S"}
 !1205 = !{!"name", !"pc32x", !"elf", !"2", !"elf-name", !"R_X86_64_PC32", !"target", !"pc + v"}
 
-; DWARF's numbers for the registers: rax, rdx, rcx, rbx, rsi, rdi, rbp,
-; rsp, then r8-r15 (not the hardware order).
-!target.dwarf = !{!1400}
-!1400 = !{!"r", !"0"}
+; DWARF's numbers for the registers, by hardware number: DWARF orders them
+; rax, rdx, rcx, rbx, rsi, rdi, rbp, rsp, then r8-r15; xmm0-xmm31 from 17.
+!target.dwarf = !{!1400, !1401}
+!1400 = !{!"r", !"0", !"2", !"1", !"3", !"7", !"6", !"4", !"5", !"8", !"9", !"10", !"11", !"12", !"13", !"14", !"15"}
+!1401 = !{!"v", !"17"}
 
 ; ===========================================================================
 ; Encodings. An instruction is a list of bytes (pieces, written most

@@ -43,8 +43,6 @@ const NEEDED_ROLES: &[(&str, &str)] = &[
     ("jump", "branches"),
     ("ret", "returning"),
     ("trap", "unreachable"),
-    ("addr.hi", "the addresses of globals"),
-    ("addr.lo", "the addresses of globals"),
 ];
 
 /// One check's results.
@@ -152,11 +150,21 @@ fn structure(t: &Target) -> Section {
     for (role, why) in NEEDED_ROLES {
         need(t.role(role).is_some(), format!("no instruction has role {role} (for {why})"), &mut s);
     }
-    if m.external_via_got {
+    // A global's address: in one instruction (addr), or two.
+    if t.role("addr").is_none() {
+        for role in ["addr.hi", "addr.lo"] {
+            need(
+                t.role(role).is_some(),
+                format!("no instruction has role {role} (or addr, for the addresses of globals)"),
+                &mut s,
+            );
+        }
+    }
+    if m.external_via_got && t.role("got").is_none() {
         for role in ["got.hi", "got.lo"] {
             need(
                 t.role(role).is_some(),
-                format!("external-via-got is yes, but no instruction has role {role}"),
+                format!("external-via-got is yes, but no instruction has role {role} (or got)"),
                 &mut s,
             );
         }
@@ -545,7 +553,14 @@ fn assembly(t: &Target) -> Section {
             // Three samples that fit.
             let envs: Vec<Env> = (0..IMMS.len()).filter_map(|k| sample(t, i, k)).take(3).collect();
             for env in envs {
-                let Some(word) = ins.encode(&env) else { continue };
+                let Some((mut word, alt)) = ins.encode_alt(&env) else { continue };
+                // A symbol's field holds zero in an object (the relocation's
+                // addend has the rest), as the assembler writes it.
+                for o in ins.operands.iter().filter(|o| o.kind == Kind::Sym) {
+                    if ins.field_of(alt, &o.name, &env).1 != 0 {
+                        ins.enc.alts[alt].clear(&mut word, &o.name);
+                    }
+                }
                 let line = mir::fill_template(t, Some(abi), i, |k| {
                     let o = &ins.operands[k];
                     let v = env[&o.name];

@@ -120,6 +120,18 @@ pub struct MInst {
 }
 
 impl MInst {
+    /// Whether it is a call, for frames and register preferences: it
+    /// clobbers registers (a call's are the convention's), and not only
+    /// those its description says it writes (x86's division's rdx).
+    pub fn is_call(&self, t: &crate::target::Target) -> bool {
+        !self.imp_defs.is_empty()
+            && match self.op {
+                Opcode::Instr(i) => self.imp_defs != t.instrs[i].clobbers,
+                Opcode::Asm { .. } => false,
+                _ => true,
+            }
+    }
+
     pub fn new(op: usize, ops: Vec<MOp>) -> MInst {
         MInst {
             op: Opcode::Instr(op),

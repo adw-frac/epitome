@@ -194,7 +194,6 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool) -> Result<bool, String> 
             let (up, dp) = (2 * idx, 2 * idx + 1);
             // Inline assembly's early-clobber results are written while its
             // operands are still being read.
-            let asm = matches!(inst.op, Opcode::Asm { .. });
             let early: Vec<Reg> = match inst.op {
                 Opcode::Asm { id, .. } => f.asms[id as usize]
                     .early
@@ -227,7 +226,7 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool) -> Result<bool, String> 
                     _ => {}
                 }
             }
-            if !inst.imp_defs.is_empty() && !asm {
+            if inst.is_call(t) {
                 calls.push(dp);
             }
             if inst.op == Opcode::Copy

@@ -237,6 +237,10 @@ pub struct ClassDef {
     pub sp: bool,
     /// Its registers' names, in number order within the file.
     pub names: Vec<String>,
+    /// The one register an operand of this class is in (`"fixed"`: x86's
+    /// `rax` of a division, `cl` of a shift), by its number in the file.
+    /// Selection copies values there and back; no value is kept in it.
+    pub fixed: Option<u8>,
 }
 
 /// A register file: its registers are numbers `base` to `base + size - 1`.
@@ -293,6 +297,15 @@ pub struct Machine {
     pub asm_comment: String,
     /// DWARF's number for each file's first register (`!target.dwarf`).
     pub dwarf: HashMap<usize, u32>,
+    /// Or for each of its registers, where they are not in order (x86's).
+    pub dwarf_each: HashMap<usize, Vec<u32>>,
+    /// Unwind tables' CFA at a function's entry, from the stack pointer
+    /// (`"cfi-cfa-offset"`: x86's 8, past the return address the call
+    /// pushed, which is then at the CFA less 8), and DWARF's number for the
+    /// return address (`"cfi-return-column"`: x86's 16, rip), where it is
+    /// not the link register.
+    pub cfi_cfa_offset: i64,
+    pub cfi_return_column: Option<u32>,
     /// The data alignment factor of unwind tables, in ELF and in Mach-O
     /// (`cfi-data-align`: one value, or ELF's then Mach-O's).
     pub cfi_data_align: (i64, i64),
@@ -380,7 +393,17 @@ impl Machine {
                 return Err(format!("register class {class} holds values, but has no bits"));
             }
             let sp = p.get("sp").is_some_and(|v| v == "yes");
-            classes.push(ClassDef { name: class.clone(), file, bits, holds, sp, names });
+            let fixed = match p.get("fixed") {
+                Some(r) => Some(
+                    names.iter().position(|n| n == r).ok_or_else(|| format!("register class {class}: fixed {r}"))?
+                        as u8,
+                ),
+                None => None,
+            };
+            if fixed.is_some() && holds.is_some() {
+                return Err(format!("register class {class} is fixed, so holds no values"));
+            }
+            classes.push(ClassDef { name: class.clone(), file, bits, holds, sp, names, fixed });
         }
         if classes.is_empty() {
             return Err("the description names no registers (!target.registers)".into());
@@ -427,6 +450,9 @@ impl Machine {
             asm_modifiers: HashMap::new(),
             asm_comment: String::new(),
             dwarf: HashMap::new(),
+            dwarf_each: HashMap::new(),
+            cfi_cfa_offset: 0,
+            cfi_return_column: None,
             cfi_data_align: (-8, -8),
             asm_aliases: Vec::new(),
         };
@@ -515,15 +541,25 @@ impl Machine {
             mc.asm_constraints.insert(one_char(code)?, def);
         }
         for t in tuples(m, "target.dwarf") {
-            if let [file, base] = &t[..] {
-                let k = mc
-                    .files
-                    .iter()
-                    .position(|f| f.name == *file)
-                    .ok_or_else(|| format!("!target.dwarf: no file {file}"))?;
-                mc.dwarf.insert(k, base.parse().map_err(|_| format!("!target.dwarf: {base}"))?);
+            let Some((file, nums)) = t.split_first() else { continue };
+            let k = mc
+                .files
+                .iter()
+                .position(|f| f.name == *file)
+                .ok_or_else(|| format!("!target.dwarf: no file {file}"))?;
+            let nums: Vec<u32> =
+                nums.iter().map(|n| n.parse().map_err(|_| format!("!target.dwarf: {n}"))).collect::<Result<_, _>>()?;
+            match nums[..] {
+                [base] => {
+                    mc.dwarf.insert(k, base);
+                }
+                _ => {
+                    mc.dwarf_each.insert(k, nums);
+                }
             }
         }
+        mc.cfi_cfa_offset = num("cfi-cfa-offset")?.unwrap_or(0) as i64;
+        mc.cfi_return_column = num("cfi-return-column")?.map(|v| v as u32);
         for t in tuples(m, "target.asm-aliases") {
             if let [from, to] = &t[..] {
                 mc.asm_aliases.push((from.clone(), to.clone()));
@@ -583,6 +619,18 @@ impl Machine {
         Ok(mc)
     }
 
+    /// What a class holds: for a fixed class (one register), what its
+    /// file's classes do.
+    pub fn holds_of(&self, c: Class) -> Option<Holds> {
+        let d = self.def(c);
+        match (d.holds, d.fixed) {
+            (None, Some(_)) => {
+                self.classes.iter().find(|x| x.file == d.file && x.holds.is_some()).and_then(|x| x.holds)
+            }
+            (h, _) => h,
+        }
+    }
+
     /// The class called `name`.
     pub fn class(&self, name: &str) -> Option<Class> {
         self.classes.iter().position(|c| c.name == name).map(|k| Class(k as u8))
@@ -629,6 +677,9 @@ impl Machine {
     /// DWARF's number for register `r`, for unwind tables.
     pub fn dwarf_number(&self, r: u8) -> Option<u32> {
         let f = self.file_of(r);
+        if let Some(each) = self.dwarf_each.get(&f) {
+            return each.get(self.index(r) as usize).copied();
+        }
         self.dwarf.get(&f).map(|b| b + self.index(r) as u32)
     }
 

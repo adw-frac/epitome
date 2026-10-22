@@ -734,7 +734,7 @@ impl<'a, 'b> Sel<'a, 'b> {
                     let def = self.t.machine.def(class);
                     let holds = self.holds(ty);
                     if bits == 0
-                        || def.holds != Some(holds)
+                        || self.t.machine.holds_of(class) != Some(holds)
                         || (holds == Holds::Vector && bits != def.bits)
                         || (holds != Holds::Vector && (bits > 64 || (bits > 32) != (pp.bits > 32)))
                     {
@@ -1180,7 +1180,12 @@ impl<'a, 'b> Sel<'a, 'b> {
                     && (declared_only
                         || (!gl.props.dso_local && !matches!(gl.props.linkage, Linkage::Internal | Linkage::Private)));
                 let d = self.ivreg(true);
-                if via_got {
+                // In one instruction, where the machine has one (x86's
+                // `lea sym(%rip)`, `mov sym@GOTPCREL(%rip)`), else two.
+                let one = self.t.role(if via_got { "got" } else { "addr" });
+                if let Some(i) = one {
+                    self.push(MInst::new(i, vec![MOp::Reg(Reg::V(d)), MOp::Sym(name)]));
+                } else if via_got {
                     let adrp = self.t.by_role("got.hi");
                     let ldr = self.t.by_role("got.lo");
                     self.push(MInst::new(adrp, vec![MOp::Reg(Reg::V(d)), MOp::Sym(name.clone())]));
@@ -1537,7 +1542,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             {
                 self.set_zbits(r, z);
             }
-            self.push(MInst::new(e.instr, ops));
+            self.push_fixed(e.instr, ops);
         }
         if let Some(n) = m.next
             && Some(n) != layout_next
@@ -1547,6 +1552,37 @@ impl<'a, 'b> Sel<'a, 'b> {
             self.push(MInst::new(b, vec![MOp::Label(target)]));
         }
         Ok(())
+    }
+
+    /// Pushes instruction `instr`: operands of a fixed class (x86's
+    /// division's rax and rdx, a shift's cl) are that register, copied
+    /// into before and, for the result, out of after; and what it
+    /// clobbers is written implicitly.
+    fn push_fixed(&mut self, instr: usize, mut ops: Vec<MOp>) {
+        let ins = &self.t.instrs[instr];
+        let m = &self.t.machine;
+        let mut after = None;
+        for (j, o) in ins.operands.iter().enumerate() {
+            let Kind::Reg(c) = o.kind else { continue };
+            let Some(k) = m.def(c).fixed else { continue };
+            let p = Reg::P(m.phys(c, k as i64));
+            let MOp::Reg(v) = ops[j] else { continue };
+            if v == p {
+                continue;
+            }
+            if j == 0 && ins.has_result {
+                after = Some((v, p));
+            } else {
+                self.push(MInst::copy(p, v));
+            }
+            ops[j] = MOp::Reg(p);
+        }
+        let mut inst = MInst::new(instr, ops);
+        inst.imp_defs = ins.clobbers.clone();
+        self.push(inst);
+        if let Some((v, p)) = after {
+            self.push(MInst::copy(v, p));
+        }
     }
 
     /// How many 64-bit parts a small struct type passed in registers has:

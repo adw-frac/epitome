@@ -77,6 +77,13 @@ pub struct Abi {
     pub fp_scratch: Vec<u8>,
     pub fp: u8,
     pub lr: u8,
+    /// The return address is on the stack, pushed by the call (x86's
+    /// `"return-address"="stack"`), not in a link register: there is no
+    /// frame record, and the frame starts 8 bytes below the CFA.
+    pub ra_on_stack: bool,
+    /// The registers results come back in (`"results"`), where they are
+    /// not the result register and the argument registers after it.
+    pub result_list: Option<Vec<u8>>,
     pub stack_args: StackArgs,
     /// The stack pointer's alignment at calls, in bytes (`stack-align`).
     pub stack_align: i64,
@@ -134,8 +141,12 @@ impl Abi {
     }
 
     /// The registers a result of `n` integer parts comes back in: the
-    /// result register and the argument registers after it (x0 and x1).
+    /// result register and the argument registers after it (x0 and x1), or
+    /// the convention's list (SysV's rax, rdx).
     pub fn results(&self, n: usize) -> Vec<u8> {
+        if let Some(list) = &self.result_list {
+            return list.iter().take(n.max(1)).copied().collect();
+        }
         let at = self.args.iter().position(|&r| r == self.result).unwrap_or(0);
         let mut out = vec![self.result];
         out.extend(self.args.iter().skip(at + 1).take(n.saturating_sub(1)).copied());
@@ -382,7 +393,9 @@ pub fn read(m: &Module, prefix: &str, machine: &crate::machine::Machine) -> Resu
             fp_saved: regs(&get("fp-saved")?)?,
             fp_scratch: regs(&get("fp-scratch")?)?,
             fp: frame[0],
-            lr: frame[1],
+            lr: *frame.get(1).unwrap_or(&frame[0]),
+            ra_on_stack: props.get("return-address").is_some_and(|v| v.first().is_some_and(|x| x == "stack")),
+            result_list: props.get("results").map(|v| regs(v)).transpose()?,
             stack_align: {
                 let a: i64 = one("stack-align")?.parse().map_err(|_| format!("{name}: stack-align"))?;
                 if a <= 0 || a & (a - 1) != 0 {

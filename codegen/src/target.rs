@@ -106,6 +106,11 @@ pub struct Instr {
     pub reloc: Option<crate::object::RelocKind>,
     /// Operand 1 (`d2`) is a second register result.
     pub second_result: bool,
+    /// Registers it writes besides its operands (`"clobbers"`: x86's
+    /// division writes rdx), and whether it writes the flags (`flags` in
+    /// that list), where the machine's arithmetic does.
+    pub clobbers: Vec<u8>,
+    pub clobbers_flags: bool,
     /// The features it needs (see `features.rs`).
     pub features: Vec<String>,
     /// Operands `(base, offset)` whose address it uses is `base + offset`,
@@ -517,7 +522,10 @@ pub const AARCH64_FILES: &[(&str, &str)] = &[
 /// disassembly so far, its instructions generated from Intel XED's tables.
 pub const X86_64_FILES: &[(&str, &str)] = &[
     ("00-base.ll", include_str!("../targets/x86_64/00-base.ll")),
-    ("80-xed.ll", include_str!("../targets/x86_64/80-xed.ll")),
+    ("02-xed.ll", include_str!("../targets/x86_64/02-xed.ll")),
+    ("05-cond.ll", include_str!("../targets/x86_64/05-cond.ll")),
+    ("10-integer.ll", include_str!("../targets/x86_64/10-integer.ll")),
+    ("70-abi.ll", include_str!("../targets/x86_64/70-abi.ll")),
 ];
 
 pub fn type_bits(m: &Module, ty: TypeId) -> u32 {
@@ -1151,6 +1159,16 @@ impl Target {
                     .unwrap_or_default(),
                 base_offset: base_offset_of(m, f, has_result),
                 address_of: has_result && base_offset_of(m, f, has_result).is_some() && returns_first(f),
+                clobbers: {
+                    let list: Vec<String> = attr(&f.fn_attrs, "clobbers")
+                        .flatten()
+                        .map_or(vec![], |c| c.split(',').map(|x| x.trim().to_string()).collect());
+                    let regs: Vec<String> = list.iter().filter(|x| *x != "flags").cloned().collect();
+                    self.machine.regs(&regs).map_err(|e| format!("@{name}: clobbers: {e}"))?
+                },
+                clobbers_flags: attr(&f.fn_attrs, "clobbers")
+                    .flatten()
+                    .is_some_and(|c| c.split(',').any(|x| x.trim() == "flags")),
                 func: g,
             });
         }
