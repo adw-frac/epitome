@@ -1424,11 +1424,25 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                     );
                 }
                 Op::Freeze(v) => {
-                    let n = res_split.unwrap();
-                    let (vlen, elem, eb) = vec_info(cx, res_ty.unwrap()).unwrap();
-                    let pt = part(cx, vlen, elem, eb);
-                    let vs = parts_of(cx, &parts, bld.f, v, n, pt)?;
-                    out_parts = Some((0..n).map(|p| bld.op(Op::Freeze(vs[p]), Some(pt))).collect());
+                    // (A mask is split as the value it was made from is: its
+                    // parts', of their own types.)
+                    let vs: Vec<Value> = match (res_split, v) {
+                        (None, Value::Local(x)) if parts.contains_key(&x) => parts[&x].clone(),
+                        _ => {
+                            let n = res_split.ok_or("a freeze of a split value")?;
+                            let (vlen, elem, eb) = vec_info(cx, res_ty.unwrap()).unwrap();
+                            let pt = part(cx, vlen, elem, eb);
+                            parts_of(cx, &parts, bld.f, v, n, pt)?
+                        }
+                    };
+                    out_parts = Some(
+                        vs.iter()
+                            .map(|&p| {
+                                let pt = cx.value_ty(bld.f, p);
+                                bld.op(Op::Freeze(p), Some(pt))
+                            })
+                            .collect(),
+                    );
                 }
                 Op::Phi { fmf, .. } => {
                     let n = res_split.ok_or("a phi of split masks")?;

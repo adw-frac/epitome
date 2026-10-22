@@ -126,6 +126,15 @@ define {T} @{name}v{arr}({T} "reg"="{c}" %n, {T} "reg"="{c}" %m) "enc"="0 {Q} {U
   ret {T} %r
 }}
 ''')
+    # saturating addition and subtraction
+    for name, U, op, f in [('UQADD',1,'00001','uadd.sat'),('SQADD',0,'00001','sadd.sat'),('UQSUB',1,'00101','usub.sat'),('SQSUB',0,'00101','ssub.sat')]:
+        o.append(f'''declare {T} @llvm.{f}.v{n}i{e}({T}, {T})
+
+define {T} @{name}v{arr}({T} "reg"="{c}" %n, {T} "reg"="{c}" %m) "enc"="0 {Q} {U} 01110 {size} 1 m:5 {op} 1 n:5 d:5" "asm"="{name.lower()} {{d:{A}}}, {{n:{A}}}, {{m:{A}}}" {{
+  %r = call {T} @llvm.{f}.v{n}i{e}({T} %n, {T} %m)
+  ret {T} %r
+}}
+''')
     # splat from an integer register
     gcls = 'x' if e == 64 else 'w'
     imm5 = {8:'00001',16:'00010',32:'00100',64:'01000'}[e]

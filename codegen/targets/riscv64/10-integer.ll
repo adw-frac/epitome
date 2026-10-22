@@ -171,7 +171,7 @@ define i32 @SLLIW(i32 "reg"="w" %n, i32 "imm" %sh) "enc"="0000000 sh:5 n:5 001 d
   ret i32 %r
 }
 
-define i64 @SRLI(i64 "reg"="x" %n, i64 "imm" %sh) "enc"="000000 sh:6 n:5 101 d:5 0010011" "asm"="srli {d}, {n}, {sh}" {
+define i64 @SRLI(i64 "reg"="x" %n, i64 "imm" %sh) "enc"="000000 sh:6 n:5 101 d:5 0010011" "asm"="srli {d}, {n}, {sh}" "role"="shri" {
   %r = lshr i64 %n, %sh
   ret i64 %r
 }
@@ -181,7 +181,7 @@ define i32 @SRLIW(i32 "reg"="w" %n, i32 "imm" %sh) "enc"="0000000 sh:5 n:5 101 d
   ret i32 %r
 }
 
-define i64 @SRAI(i64 "reg"="x" %n, i64 "imm" %sh) "enc"="010000 sh:6 n:5 101 d:5 0010011" "asm"="srai {d}, {n}, {sh}" {
+define i64 @SRAI(i64 "reg"="x" %n, i64 "imm" %sh) "enc"="010000 sh:6 n:5 101 d:5 0010011" "asm"="srai {d}, {n}, {sh}" "role"="sari" {
   %r = ashr i64 %n, %sh
   ret i64 %r
 }

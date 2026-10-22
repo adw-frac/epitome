@@ -95,11 +95,12 @@
 ; ===========================================================================
 ; CPUs and their features, by LLVM's names for them (which clang's IR uses
 ; in "target-cpu" and "target-features"). Only those the description uses
-; matter: neon (Advanced SIMD; the vector entries need it) and fp-armv8.
+; matter: neon (Advanced SIMD; the vector entries need it), fp-armv8, lse
+; (atomics), and crc, aes, sha2 and sha3 (45-crypto.ll).
 
 !target.cpus = !{!1150, !1151}
 !1150 = !{!"generic", !"fp-armv8", !"neon"}
-!1151 = !{!"apple-m1", !"fp-armv8", !"neon", !"lse"}
+!1151 = !{!"apple-m1", !"fp-armv8", !"neon", !"lse", !"crc", !"aes", !"sha2", !"sha3"}
 
 ; ===========================================================================
 ; Relocations: those instructions name in "reloc" (and data's pointers),

@@ -1084,6 +1084,9 @@ impl<'a, 'b> Sel<'a, 'b> {
         if holds == Some(Holds::Float) {
             let raw = match &k.kind {
                 ConstKind::Float(raw) => *raw as u64,
+                // An integer wanted in a floating-point register (inline
+                // assembly's `w` operand of an i16): its bits.
+                ConstKind::Int(a) => a.low_u64(),
                 ConstKind::Zero | ConstKind::Undef | ConstKind::Poison => 0,
                 other => return self.err(format!("unsupported floating-point constant {other:?}")),
             };
@@ -2428,7 +2431,21 @@ impl<'a, 'b> Sel<'a, 'b> {
             _ => return Ok(r),
         };
         let d = self.ivreg(false);
-        let ext = self.t.role(role).ok_or_else(|| format!("@{}: no instruction has role {role}", self.fname))?;
+        let Some(ext) = self.t.role(role) else {
+            // Without one: shifted up to the top of the register and back,
+            // logically or arithmetically (RISC-V's slli and srli or srai).
+            let up = self.t.role("shli");
+            let down = self.t.role(if role.starts_with("zext") { "shri" } else { "sari" });
+            let (Some(up), Some(down)) = (up, down) else {
+                return self.err(format!("no instruction has role {role}"));
+            };
+            let sh = 64 - i64::from(bits);
+            let t = self.ivreg(true);
+            self.push(MInst::new(up, vec![MOp::Reg(Reg::V(t)), MOp::Reg(r), MOp::Imm(sh)]));
+            let d = self.ivreg(true);
+            self.push(MInst::new(down, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(t)), MOp::Imm(sh)]));
+            return Ok(Reg::V(d));
+        };
         self.push(MInst::new(ext, vec![MOp::Reg(Reg::V(d)), MOp::Reg(r)]));
         Ok(Reg::V(d))
     }

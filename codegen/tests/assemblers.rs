@@ -21,7 +21,7 @@ use epitome_codegen::target::Target;
 /// description's instructions need.
 const MARCH: &str = "-march=armv9.4-a+crc+crypto+sha3+sm4+rcpc+rcpc3+lse+lse128+rdm+dotprod+fp16+fp16fml+bf16+i8mm\
 +f64mm+fp8+fp8fma+fp8dot2+fp8dot4+faminmax+lut+cssc+mops+the+d128+gcs+rasv2+ite+flagm+predres+sb+ssbs+tme+ls64+wfxt\
-+hbc+brbe+pauth-lr+fprcvt+lsfe+lsui+occmo+cmpbr+pauth+bti+memtag";
++hbc+brbe+pauth-lr+fprcvt+lsfe+lsui+occmo+cmpbr+pauth+bti+memtag+rng";
 
 /// The sample lines that differ between our object and theirs.
 fn differences(t: &Target, text: &str, ours: &[u8], theirs: &[u8]) -> Vec<String> {

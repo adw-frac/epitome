@@ -161,6 +161,34 @@ define <16 x i8> @UMINv16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "feat
   ret <16 x i8> %r
 }
 
+declare <16 x i8> @llvm.uadd.sat.v16i8(<16 x i8>, <16 x i8>)
+
+define <16 x i8> @UQADDv16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 00 1 m:5 00001 1 n:5 d:5" "asm"="uqadd {d:16b}, {n:16b}, {m:16b}" {
+  %r = call <16 x i8> @llvm.uadd.sat.v16i8(<16 x i8> %n, <16 x i8> %m)
+  ret <16 x i8> %r
+}
+
+declare <16 x i8> @llvm.sadd.sat.v16i8(<16 x i8>, <16 x i8>)
+
+define <16 x i8> @SQADDv16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 00 1 m:5 00001 1 n:5 d:5" "asm"="sqadd {d:16b}, {n:16b}, {m:16b}" {
+  %r = call <16 x i8> @llvm.sadd.sat.v16i8(<16 x i8> %n, <16 x i8> %m)
+  ret <16 x i8> %r
+}
+
+declare <16 x i8> @llvm.usub.sat.v16i8(<16 x i8>, <16 x i8>)
+
+define <16 x i8> @UQSUBv16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 00 1 m:5 00101 1 n:5 d:5" "asm"="uqsub {d:16b}, {n:16b}, {m:16b}" {
+  %r = call <16 x i8> @llvm.usub.sat.v16i8(<16 x i8> %n, <16 x i8> %m)
+  ret <16 x i8> %r
+}
+
+declare <16 x i8> @llvm.ssub.sat.v16i8(<16 x i8>, <16 x i8>)
+
+define <16 x i8> @SQSUBv16b(<16 x i8> "reg"="q" %n, <16 x i8> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 00 1 m:5 00101 1 n:5 d:5" "asm"="sqsub {d:16b}, {n:16b}, {m:16b}" {
+  %r = call <16 x i8> @llvm.ssub.sat.v16i8(<16 x i8> %n, <16 x i8> %m)
+  ret <16 x i8> %r
+}
+
 define <16 x i8> @DUPv16b(i8 "reg"="w" %n) "feature"="neon" "enc"="0 1 0 01110000 00001 0 0001 1 n:5 d:5" "asm"="dup {d:16b}, {n}" "role"="dup.16b" {
   %i = insertelement <16 x i8> poison, i8 %n, i64 0
   %r = shufflevector <16 x i8> %i, <16 x i8> poison, <16 x i32> zeroinitializer
@@ -316,6 +344,34 @@ declare <8 x i16> @llvm.umin.v8i16(<8 x i16>, <8 x i16>)
 
 define <8 x i16> @UMINv8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 01 1 m:5 01101 1 n:5 d:5" "asm"="umin {d:8h}, {n:8h}, {m:8h}" {
   %r = call <8 x i16> @llvm.umin.v8i16(<8 x i16> %n, <8 x i16> %m)
+  ret <8 x i16> %r
+}
+
+declare <8 x i16> @llvm.uadd.sat.v8i16(<8 x i16>, <8 x i16>)
+
+define <8 x i16> @UQADDv8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 01 1 m:5 00001 1 n:5 d:5" "asm"="uqadd {d:8h}, {n:8h}, {m:8h}" {
+  %r = call <8 x i16> @llvm.uadd.sat.v8i16(<8 x i16> %n, <8 x i16> %m)
+  ret <8 x i16> %r
+}
+
+declare <8 x i16> @llvm.sadd.sat.v8i16(<8 x i16>, <8 x i16>)
+
+define <8 x i16> @SQADDv8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 01 1 m:5 00001 1 n:5 d:5" "asm"="sqadd {d:8h}, {n:8h}, {m:8h}" {
+  %r = call <8 x i16> @llvm.sadd.sat.v8i16(<8 x i16> %n, <8 x i16> %m)
+  ret <8 x i16> %r
+}
+
+declare <8 x i16> @llvm.usub.sat.v8i16(<8 x i16>, <8 x i16>)
+
+define <8 x i16> @UQSUBv8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 01 1 m:5 00101 1 n:5 d:5" "asm"="uqsub {d:8h}, {n:8h}, {m:8h}" {
+  %r = call <8 x i16> @llvm.usub.sat.v8i16(<8 x i16> %n, <8 x i16> %m)
+  ret <8 x i16> %r
+}
+
+declare <8 x i16> @llvm.ssub.sat.v8i16(<8 x i16>, <8 x i16>)
+
+define <8 x i16> @SQSUBv8h(<8 x i16> "reg"="q" %n, <8 x i16> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 01 1 m:5 00101 1 n:5 d:5" "asm"="sqsub {d:8h}, {n:8h}, {m:8h}" {
+  %r = call <8 x i16> @llvm.ssub.sat.v8i16(<8 x i16> %n, <8 x i16> %m)
   ret <8 x i16> %r
 }
 
@@ -477,6 +533,34 @@ define <4 x i32> @UMINv4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "featu
   ret <4 x i32> %r
 }
 
+declare <4 x i32> @llvm.uadd.sat.v4i32(<4 x i32>, <4 x i32>)
+
+define <4 x i32> @UQADDv4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 10 1 m:5 00001 1 n:5 d:5" "asm"="uqadd {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x i32> @llvm.uadd.sat.v4i32(<4 x i32> %n, <4 x i32> %m)
+  ret <4 x i32> %r
+}
+
+declare <4 x i32> @llvm.sadd.sat.v4i32(<4 x i32>, <4 x i32>)
+
+define <4 x i32> @SQADDv4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 10 1 m:5 00001 1 n:5 d:5" "asm"="sqadd {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x i32> @llvm.sadd.sat.v4i32(<4 x i32> %n, <4 x i32> %m)
+  ret <4 x i32> %r
+}
+
+declare <4 x i32> @llvm.usub.sat.v4i32(<4 x i32>, <4 x i32>)
+
+define <4 x i32> @UQSUBv4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 10 1 m:5 00101 1 n:5 d:5" "asm"="uqsub {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x i32> @llvm.usub.sat.v4i32(<4 x i32> %n, <4 x i32> %m)
+  ret <4 x i32> %r
+}
+
+declare <4 x i32> @llvm.ssub.sat.v4i32(<4 x i32>, <4 x i32>)
+
+define <4 x i32> @SQSUBv4s(<4 x i32> "reg"="q" %n, <4 x i32> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 10 1 m:5 00101 1 n:5 d:5" "asm"="sqsub {d:4s}, {n:4s}, {m:4s}" {
+  %r = call <4 x i32> @llvm.ssub.sat.v4i32(<4 x i32> %n, <4 x i32> %m)
+  ret <4 x i32> %r
+}
+
 define <4 x i32> @DUPv4s(i32 "reg"="w" %n) "feature"="neon" "enc"="0 1 0 01110000 00100 0 0001 1 n:5 d:5" "asm"="dup {d:4s}, {n}" "role"="dup.4s" {
   %i = insertelement <4 x i32> poison, i32 %n, i64 0
   %r = shufflevector <4 x i32> %i, <4 x i32> poison, <4 x i32> zeroinitializer
@@ -599,6 +683,34 @@ define <2 x i64> @BSLv2d(<2 x i1> "reg"="q" "tied" %c, <2 x i64> "reg"="q" %n, <
 ; A mask's lanes, all ones or zeros, as 1 or 0.
 define <2 x i64> @MASKv2d(<2 x i1> "reg"="q" %n) "feature"="neon" "enc"="0 1 1 011110 1000001 00000 1 n:5 d:5" "asm"="ushr {d:2d}, {n:2d}, #63" "nodecode" {
   %r = zext <2 x i1> %n to <2 x i64>
+  ret <2 x i64> %r
+}
+
+declare <2 x i64> @llvm.uadd.sat.v2i64(<2 x i64>, <2 x i64>)
+
+define <2 x i64> @UQADDv2d(<2 x i64> "reg"="q" %n, <2 x i64> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 11 1 m:5 00001 1 n:5 d:5" "asm"="uqadd {d:2d}, {n:2d}, {m:2d}" {
+  %r = call <2 x i64> @llvm.uadd.sat.v2i64(<2 x i64> %n, <2 x i64> %m)
+  ret <2 x i64> %r
+}
+
+declare <2 x i64> @llvm.sadd.sat.v2i64(<2 x i64>, <2 x i64>)
+
+define <2 x i64> @SQADDv2d(<2 x i64> "reg"="q" %n, <2 x i64> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 11 1 m:5 00001 1 n:5 d:5" "asm"="sqadd {d:2d}, {n:2d}, {m:2d}" {
+  %r = call <2 x i64> @llvm.sadd.sat.v2i64(<2 x i64> %n, <2 x i64> %m)
+  ret <2 x i64> %r
+}
+
+declare <2 x i64> @llvm.usub.sat.v2i64(<2 x i64>, <2 x i64>)
+
+define <2 x i64> @UQSUBv2d(<2 x i64> "reg"="q" %n, <2 x i64> "reg"="q" %m) "feature"="neon" "enc"="0 1 1 01110 11 1 m:5 00101 1 n:5 d:5" "asm"="uqsub {d:2d}, {n:2d}, {m:2d}" {
+  %r = call <2 x i64> @llvm.usub.sat.v2i64(<2 x i64> %n, <2 x i64> %m)
+  ret <2 x i64> %r
+}
+
+declare <2 x i64> @llvm.ssub.sat.v2i64(<2 x i64>, <2 x i64>)
+
+define <2 x i64> @SQSUBv2d(<2 x i64> "reg"="q" %n, <2 x i64> "reg"="q" %m) "feature"="neon" "enc"="0 1 0 01110 11 1 m:5 00101 1 n:5 d:5" "asm"="sqsub {d:2d}, {n:2d}, {m:2d}" {
+  %r = call <2 x i64> @llvm.ssub.sat.v2i64(<2 x i64> %n, <2 x i64> %m)
   ret <2 x i64> %r
 }
 
@@ -760,6 +872,34 @@ define <8 x i8> @UMINv8b(<8 x i8> "reg"="v" %n, <8 x i8> "reg"="v" %m) "feature"
   ret <8 x i8> %r
 }
 
+declare <8 x i8> @llvm.uadd.sat.v8i8(<8 x i8>, <8 x i8>)
+
+define <8 x i8> @UQADDv8b(<8 x i8> "reg"="v" %n, <8 x i8> "reg"="v" %m) "feature"="neon" "enc"="0 0 1 01110 00 1 m:5 00001 1 n:5 d:5" "asm"="uqadd {d:8b}, {n:8b}, {m:8b}" {
+  %r = call <8 x i8> @llvm.uadd.sat.v8i8(<8 x i8> %n, <8 x i8> %m)
+  ret <8 x i8> %r
+}
+
+declare <8 x i8> @llvm.sadd.sat.v8i8(<8 x i8>, <8 x i8>)
+
+define <8 x i8> @SQADDv8b(<8 x i8> "reg"="v" %n, <8 x i8> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 00 1 m:5 00001 1 n:5 d:5" "asm"="sqadd {d:8b}, {n:8b}, {m:8b}" {
+  %r = call <8 x i8> @llvm.sadd.sat.v8i8(<8 x i8> %n, <8 x i8> %m)
+  ret <8 x i8> %r
+}
+
+declare <8 x i8> @llvm.usub.sat.v8i8(<8 x i8>, <8 x i8>)
+
+define <8 x i8> @UQSUBv8b(<8 x i8> "reg"="v" %n, <8 x i8> "reg"="v" %m) "feature"="neon" "enc"="0 0 1 01110 00 1 m:5 00101 1 n:5 d:5" "asm"="uqsub {d:8b}, {n:8b}, {m:8b}" {
+  %r = call <8 x i8> @llvm.usub.sat.v8i8(<8 x i8> %n, <8 x i8> %m)
+  ret <8 x i8> %r
+}
+
+declare <8 x i8> @llvm.ssub.sat.v8i8(<8 x i8>, <8 x i8>)
+
+define <8 x i8> @SQSUBv8b(<8 x i8> "reg"="v" %n, <8 x i8> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 00 1 m:5 00101 1 n:5 d:5" "asm"="sqsub {d:8b}, {n:8b}, {m:8b}" {
+  %r = call <8 x i8> @llvm.ssub.sat.v8i8(<8 x i8> %n, <8 x i8> %m)
+  ret <8 x i8> %r
+}
+
 define <8 x i8> @DUPv8b(i8 "reg"="w" %n) "feature"="neon" "enc"="0 0 0 01110000 00001 0 0001 1 n:5 d:5" "asm"="dup {d:8b}, {n}" "role"="dup.8b" {
   %i = insertelement <8 x i8> poison, i8 %n, i64 0
   %r = shufflevector <8 x i8> %i, <8 x i8> poison, <8 x i32> zeroinitializer
@@ -918,6 +1058,34 @@ define <4 x i16> @UMINv4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "featu
   ret <4 x i16> %r
 }
 
+declare <4 x i16> @llvm.uadd.sat.v4i16(<4 x i16>, <4 x i16>)
+
+define <4 x i16> @UQADDv4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "feature"="neon" "enc"="0 0 1 01110 01 1 m:5 00001 1 n:5 d:5" "asm"="uqadd {d:4h}, {n:4h}, {m:4h}" {
+  %r = call <4 x i16> @llvm.uadd.sat.v4i16(<4 x i16> %n, <4 x i16> %m)
+  ret <4 x i16> %r
+}
+
+declare <4 x i16> @llvm.sadd.sat.v4i16(<4 x i16>, <4 x i16>)
+
+define <4 x i16> @SQADDv4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 01 1 m:5 00001 1 n:5 d:5" "asm"="sqadd {d:4h}, {n:4h}, {m:4h}" {
+  %r = call <4 x i16> @llvm.sadd.sat.v4i16(<4 x i16> %n, <4 x i16> %m)
+  ret <4 x i16> %r
+}
+
+declare <4 x i16> @llvm.usub.sat.v4i16(<4 x i16>, <4 x i16>)
+
+define <4 x i16> @UQSUBv4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "feature"="neon" "enc"="0 0 1 01110 01 1 m:5 00101 1 n:5 d:5" "asm"="uqsub {d:4h}, {n:4h}, {m:4h}" {
+  %r = call <4 x i16> @llvm.usub.sat.v4i16(<4 x i16> %n, <4 x i16> %m)
+  ret <4 x i16> %r
+}
+
+declare <4 x i16> @llvm.ssub.sat.v4i16(<4 x i16>, <4 x i16>)
+
+define <4 x i16> @SQSUBv4h(<4 x i16> "reg"="v" %n, <4 x i16> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 01 1 m:5 00101 1 n:5 d:5" "asm"="sqsub {d:4h}, {n:4h}, {m:4h}" {
+  %r = call <4 x i16> @llvm.ssub.sat.v4i16(<4 x i16> %n, <4 x i16> %m)
+  ret <4 x i16> %r
+}
+
 define <4 x i16> @DUPv4h(i16 "reg"="w" %n) "feature"="neon" "enc"="0 0 0 01110000 00010 0 0001 1 n:5 d:5" "asm"="dup {d:4h}, {n}" "role"="dup.4h" {
   %i = insertelement <4 x i16> poison, i16 %n, i64 0
   %r = shufflevector <4 x i16> %i, <4 x i16> poison, <4 x i32> zeroinitializer
@@ -1073,6 +1241,34 @@ declare <2 x i32> @llvm.umin.v2i32(<2 x i32>, <2 x i32>)
 
 define <2 x i32> @UMINv2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "feature"="neon" "enc"="0 0 1 01110 10 1 m:5 01101 1 n:5 d:5" "asm"="umin {d:2s}, {n:2s}, {m:2s}" {
   %r = call <2 x i32> @llvm.umin.v2i32(<2 x i32> %n, <2 x i32> %m)
+  ret <2 x i32> %r
+}
+
+declare <2 x i32> @llvm.uadd.sat.v2i32(<2 x i32>, <2 x i32>)
+
+define <2 x i32> @UQADDv2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "feature"="neon" "enc"="0 0 1 01110 10 1 m:5 00001 1 n:5 d:5" "asm"="uqadd {d:2s}, {n:2s}, {m:2s}" {
+  %r = call <2 x i32> @llvm.uadd.sat.v2i32(<2 x i32> %n, <2 x i32> %m)
+  ret <2 x i32> %r
+}
+
+declare <2 x i32> @llvm.sadd.sat.v2i32(<2 x i32>, <2 x i32>)
+
+define <2 x i32> @SQADDv2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 10 1 m:5 00001 1 n:5 d:5" "asm"="sqadd {d:2s}, {n:2s}, {m:2s}" {
+  %r = call <2 x i32> @llvm.sadd.sat.v2i32(<2 x i32> %n, <2 x i32> %m)
+  ret <2 x i32> %r
+}
+
+declare <2 x i32> @llvm.usub.sat.v2i32(<2 x i32>, <2 x i32>)
+
+define <2 x i32> @UQSUBv2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "feature"="neon" "enc"="0 0 1 01110 10 1 m:5 00101 1 n:5 d:5" "asm"="uqsub {d:2s}, {n:2s}, {m:2s}" {
+  %r = call <2 x i32> @llvm.usub.sat.v2i32(<2 x i32> %n, <2 x i32> %m)
+  ret <2 x i32> %r
+}
+
+declare <2 x i32> @llvm.ssub.sat.v2i32(<2 x i32>, <2 x i32>)
+
+define <2 x i32> @SQSUBv2s(<2 x i32> "reg"="v" %n, <2 x i32> "reg"="v" %m) "feature"="neon" "enc"="0 0 0 01110 10 1 m:5 00101 1 n:5 d:5" "asm"="sqsub {d:2s}, {n:2s}, {m:2s}" {
+  %r = call <2 x i32> @llvm.ssub.sat.v2i32(<2 x i32> %n, <2 x i32> %m)
   ret <2 x i32> %r
 }
 

@@ -143,11 +143,13 @@ impl Ctx<'_> {
 /// Puts a copy of `f` into selection form.
 pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, String> {
     let mut f = f.clone();
+    neon_intrinsics(cx, &mut f);
     thread_locals(cx, &mut f);
     const_exprs(cx, &mut f);
     half_as_int(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     identity_bitcasts(&mut f);
     one_lane_vectors(cx, &mut f);
+    odd_lane_vectors(cx, &mut f);
     vector_arguments(cx, &mut f);
     wide_mask_bits(cx, &mut f);
     vector_int_bitcasts(cx, &mut f);
@@ -158,6 +160,9 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     crate::atomics::expand_atomics(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     expand_overflow(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     wide_intrinsics(cx, &mut f);
+    // (Before wide integers are split, so that a switch of one is their
+    // comparisons.)
+    lower_switches(cx, &mut f);
     crate::wide_vectors::scalarize(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     crate::wide::split_wide(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     crate::aggregates::scalarize(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
@@ -166,7 +171,6 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     check(cx, &f, fname)?;
     lower_dynamic_allocas(cx, &mut f)?;
     drop_noop_calls(cx, &mut f);
-    lower_switches(cx, &mut f);
     expand_intrinsics(cx, &mut f);
     lane_indices(cx, &mut f);
     split_aggregate_memory(cx, &mut f);
@@ -438,6 +442,128 @@ fn split_struct_phis(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     Ok(())
 }
 
+/// NEON's intrinsics that LLVM has generic ones for (Rust's `std::arch`
+/// and C's arm_neon.h use them): element-wise ones renamed
+/// (`llvm.aarch64.neon.fmin.v4f32` is `llvm.minimum.v4f32`), and the
+/// across-lanes ones as LLVM's reductions, extended to their wider results
+/// (`uaddv.i32.v16i8`); `faddv` adds pairwise, in NEON's order.
+fn neon_intrinsics(cx: &mut Ctx, f: &mut Function) {
+    let renames: &[(&str, &str)] = &[
+        ("fmin", "minimum"),
+        ("fmax", "maximum"),
+        ("fminnm", "minnum"),
+        ("fmaxnm", "maxnum"),
+        ("umin", "umin"),
+        ("umax", "umax"),
+        ("smin", "smin"),
+        ("smax", "smax"),
+        ("uqadd", "uadd.sat"),
+        ("sqadd", "sadd.sat"),
+        ("uqsub", "usub.sat"),
+        ("sqsub", "ssub.sat"),
+        ("frintn", "roundeven"),
+    ];
+    let reductions: &[(&str, &str, Option<CastOp>)] = &[
+        ("uaddv", "add", Some(CastOp::ZExt)),
+        ("saddv", "add", Some(CastOp::SExt)),
+        ("umaxv", "umax", Some(CastOp::ZExt)),
+        ("uminv", "umin", Some(CastOp::ZExt)),
+        ("smaxv", "smax", Some(CastOp::SExt)),
+        ("sminv", "smin", Some(CastOp::SExt)),
+        ("fmaxv", "fmaximum", None),
+        ("fminv", "fminimum", None),
+        ("fmaxnmv", "fmax", None),
+        ("fminnmv", "fmin", None),
+    ];
+    let i64t = cx.m.types.int(64);
+    for b in f.layout.clone() {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let Op::Call(call) = &f.insts[i.index()].op else {
+                k += 1;
+                continue;
+            };
+            let Some(name) = callee_name(cx.m, call) else {
+                k += 1;
+                continue;
+            };
+            let Some(rest) = name.strip_prefix("llvm.aarch64.neon.") else {
+                k += 1;
+                continue;
+            };
+            let (op, suffix) = rest.split_once('.').unwrap_or((rest, ""));
+            let args: Vec<Value> = call.args.iter().map(|a| a.value).collect();
+            let Some(r) = f.insts[i.index()].result else {
+                k += 1;
+                continue;
+            };
+            let rt = f.locals[r.index()].ty;
+            let mut s = Seq { f, new: Vec::new() };
+            let v = if let Some(&(_, to)) = renames.iter().find(|(from, _)| *from == op) {
+                Some(call_intrinsic(cx, &mut s, &format!("llvm.{to}.{suffix}"), args, rt))
+            } else if op == "faddv" && args.len() == 1 {
+                let vt = cx.value_ty(s.f, args[0]);
+                let Type::Vector { len, elem, .. } = *cx.m.types.get(vt) else { unreachable!() };
+                let lane = |cx: &mut Ctx, s: &mut Seq, l: u32| {
+                    let idx = cx.int(i64t, l as i64);
+                    s.op(Op::ExtractElement { vector: args[0], index: idx }, elem)
+                };
+                let mut level: Vec<Value> = (0..len).map(|l| lane(cx, &mut s, l)).collect();
+                while level.len() > 1 {
+                    level = level
+                        .chunks(2)
+                        .map(|p| {
+                            s.op(
+                                Op::Binary {
+                                    op: BinOp::FAdd,
+                                    flags: IntFlags::NONE,
+                                    fmf: FastMath::default(),
+                                    lhs: p[0],
+                                    rhs: p[1],
+                                },
+                                elem,
+                            )
+                        })
+                        .collect();
+                }
+                Some(level[0])
+            } else if matches!(op, "uaddlv" | "saddlv") && args.len() == 1 {
+                // The lanes widened, then added: as wide as the result.
+                let vt = cx.value_ty(s.f, args[0]);
+                let Type::Vector { len, .. } = *cx.m.types.get(vt) else { unreachable!() };
+                let wt = cx.m.types.intern(Type::Vector { scalable: false, len, elem: rt });
+                let c = if op == "uaddlv" { CastOp::ZExt } else { CastOp::SExt };
+                let w = s.cast(c, args[0], wt);
+                let mangled = crate::legalize::mangle(cx, wt);
+                Some(call_intrinsic(cx, &mut s, &format!("llvm.vector.reduce.add.{mangled}"), vec![w], rt))
+            } else if let Some(&(_, red, ext)) = reductions.iter().find(|(from, _, _)| *from == op)
+                && args.len() == 1
+            {
+                let vt = cx.value_ty(s.f, args[0]);
+                let Type::Vector { elem, .. } = *cx.m.types.get(vt) else { unreachable!() };
+                let mangled = crate::legalize::mangle(cx, vt);
+                let x = call_intrinsic(cx, &mut s, &format!("llvm.vector.reduce.{red}.{mangled}"), args, elem);
+                Some(match ext {
+                    Some(c) if rt != elem => s.cast(c, x, rt),
+                    _ => x,
+                })
+            } else {
+                None
+            };
+            let Some(v) = v else {
+                k += 1;
+                continue;
+            };
+            let new = std::mem::take(&mut s.new);
+            f.replace_uses(Value::Local(r), v);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..=k, new);
+            k += n;
+        }
+    }
+}
+
 /// The address of a thread-local variable, where the machine reaches them
 /// by Mach-O's descriptors (`tlv.hi` and `tlv.lo`): its descriptor's
 /// address (`llvm.epitome.tlv`), then a call of the descriptor's first
@@ -528,6 +654,180 @@ fn thread_locals(cx: &mut Ctx, f: &mut Function) {
             let n = new.len();
             f.blocks[b.index()].insts.splice(k..=k, new);
             k += n;
+        }
+    }
+}
+
+/// Vectors of integers of odd widths (`<8 x i24>`, as SROA makes of
+/// `[u8; 3]`s), where they only live in registers: each lane in the next
+/// width (`i32`), its value in the low bits and the rest any. Operations
+/// that read the bits above (right shifts, divisions, comparisons, wider
+/// extensions) first make them the value's extension; lanes taken out are
+/// truncated back to the odd width, for `promote_odd`. A function that
+/// loads, stores, bitcasts or passes one is left as it is (and rejected).
+fn odd_lane_vectors(cx: &mut Ctx, f: &mut Function) {
+    let odd = |cx: &Ctx, ty: TypeId| -> Option<(u32, u32, u32)> {
+        let Type::Vector { len, elem, scalable: false } = *cx.m.types.get(ty) else { return None };
+        let Type::Int(b) = *cx.m.types.get(elem) else { return None };
+        container(b).map(|c| (len, b, c))
+    };
+    let mut any = false;
+    for i in f.insts_in_order().collect::<Vec<_>>() {
+        let inst = &f.insts[i.index()];
+        let mut touches = inst.result.is_some_and(|r| odd(cx, f.locals[r.index()].ty).is_some());
+        inst.op.for_each_value(|v| {
+            if !matches!(v, Value::Metadata(_)) {
+                touches |= odd(cx, cx.value_ty(f, *v)).is_some();
+            }
+        });
+        if !touches {
+            continue;
+        }
+        any = true;
+        let fine = matches!(
+            inst.op,
+            Op::Binary { .. }
+                | Op::ICmp { .. }
+                | Op::Select { .. }
+                | Op::Phi { .. }
+                | Op::Freeze(_)
+                | Op::ShuffleVector { .. }
+                | Op::ExtractElement { .. }
+                | Op::InsertElement { .. }
+                | Op::Cast { op: CastOp::ZExt | CastOp::SExt | CastOp::Trunc, .. }
+        );
+        if !fine {
+            return;
+        }
+    }
+    if !any || f.params.iter().any(|p| odd(cx, f.locals[p.local.index()].ty).is_some()) {
+        return;
+    }
+    // The widened type of each odd vector type.
+    let widen = |cx: &mut Ctx, ty: TypeId| -> Option<TypeId> {
+        let (len, _, c) = odd(cx, ty)?;
+        let e = cx.m.types.int(c);
+        Some(cx.m.types.intern(Type::Vector { scalable: false, len, elem: e }))
+    };
+    // Constants: their lanes, zero-extended.
+    let wide_const = |cx: &mut Ctx, k: ConstId| -> Option<ConstId> {
+        let c = cx.m.constant(k).clone();
+        let wt = widen(cx, c.ty)?;
+        let Type::Vector { elem: we, .. } = *cx.m.types.get(wt) else { unreachable!() };
+        let Type::Int(wb) = *cx.m.types.get(we) else { unreachable!() };
+        let lane = |cx: &mut Ctx, l: ConstId| -> ConstId {
+            let kind = match &cx.m.constant(l).kind {
+                ConstKind::Int(a) => ConstKind::Int(ApInt::from_u64(wb, a.low_u64())),
+                other => other.clone(),
+            };
+            cx.m.consts.intern(Constant { ty: we, kind })
+        };
+        let kind = match c.kind {
+            ConstKind::Vector(ls) => ConstKind::Vector(ls.iter().map(|&l| lane(cx, l)).collect()),
+            ConstKind::Splat(l) => ConstKind::Splat(lane(cx, l)),
+            other => other,
+        };
+        Some(cx.m.consts.intern(Constant { ty: wt, kind }))
+    };
+    // The odd lanes' widths, before the types change.
+    let mut bits: std::collections::HashMap<LocalId, (u32, u32)> = std::collections::HashMap::new();
+    for k in 0..f.locals.len() {
+        let t = f.locals[k].ty;
+        if let Some((_, b, c)) = odd(cx, t) {
+            bits.insert(LocalId(k as u32), (b, c));
+            f.locals[k].ty = widen(cx, t).unwrap();
+        }
+    }
+    let blocks: Vec<BlockId> = f.layout.clone();
+    for b in blocks {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            let mut op = f.insts[i.index()].op.clone();
+            op.for_each_value_mut(|v| {
+                if let Value::Const(c) = *v
+                    && let Some(w) = wide_const(cx, c)
+                {
+                    *v = Value::Const(w);
+                }
+            });
+            let width = |v: Value| match v {
+                Value::Local(x) => bits.get(&x).copied(),
+                _ => None,
+            };
+            let mut s = Seq { f, new: Vec::new() };
+            // `v` (of odd lanes `b` wide in `c`) extended properly.
+            let extend = |cx: &mut Ctx, s: &mut Seq, v: Value, b: u32, c: u32, signed: bool| -> Value {
+                let ty = cx.value_ty(s.f, v);
+                let Type::Vector { len, elem, .. } = *cx.m.types.get(ty) else { return v };
+                let splat = |cx: &mut Ctx, n: i64| {
+                    let l = cx.m.consts.intern(Constant { ty: elem, kind: ConstKind::Int(ApInt::from_i64(c, n)) });
+                    let t = cx.m.types.intern(Type::Vector { scalable: false, len, elem });
+                    Value::Const(cx.m.consts.intern(Constant { ty: t, kind: ConstKind::Splat(l) }))
+                };
+                if signed {
+                    let sh = splat(cx, (c - b) as i64);
+                    let up = s.bin(BinOp::Shl, v, sh, ty);
+                    s.bin(BinOp::AShr, up, sh, ty)
+                } else {
+                    let m = splat(cx, ((1u64 << b) - 1) as i64);
+                    s.bin(BinOp::And, v, m, ty)
+                }
+            };
+            let res_odd = s.f.insts[i.index()].result.and_then(|r| bits.get(&r).copied());
+            match op.clone() {
+                Op::Binary { op: o, flags, fmf, lhs, rhs }
+                    if matches!(
+                        o,
+                        BinOp::LShr | BinOp::AShr | BinOp::UDiv | BinOp::SDiv | BinOp::URem | BinOp::SRem
+                    ) =>
+                {
+                    if let Some((bw, cw)) = res_odd {
+                        let signed = matches!(o, BinOp::AShr | BinOp::SDiv | BinOp::SRem);
+                        let l = extend(cx, &mut s, lhs, bw, cw, signed);
+                        // (A shift's amount, a divisor: their values too.)
+                        let r = extend(cx, &mut s, rhs, bw, cw, signed && o != BinOp::AShr);
+                        op = Op::Binary { op: o, flags, fmf, lhs: l, rhs: r };
+                    }
+                }
+                Op::ICmp { pred, samesign, lhs, rhs } => {
+                    if let Some((bw, cw)) = width(lhs).or(width(rhs)) {
+                        let signed = matches!(pred, ICmpPred::Slt | ICmpPred::Sle | ICmpPred::Sgt | ICmpPred::Sge);
+                        let l = extend(cx, &mut s, lhs, bw, cw, signed);
+                        let r = extend(cx, &mut s, rhs, bw, cw, signed);
+                        op = Op::ICmp { pred, samesign, lhs: l, rhs: r };
+                    }
+                }
+                Op::Cast { op: c @ (CastOp::ZExt | CastOp::SExt), flags, fmf, value } => {
+                    if let Some((bw, cw)) = width(value) {
+                        // From odd lanes: extended within them first; to
+                        // as wide as they now are, that is all.
+                        let e = extend(cx, &mut s, value, bw, cw, c == CastOp::SExt);
+                        let rt = s.f.locals[s.f.insts[i.index()].result.unwrap().index()].ty;
+                        let et = cx.value_ty(s.f, e);
+                        op = if rt == et { Op::Freeze(e) } else { Op::Cast { op: c, flags, fmf, value: e } };
+                    }
+                }
+                Op::ExtractElement { vector, index } if width(vector).is_some() => {
+                    // The lane, back at its odd width.
+                    let (_, cw) = width(vector).unwrap();
+                    let wt = cx.m.types.int(cw);
+                    let x = s.op(Op::ExtractElement { vector, index }, wt);
+                    op = Op::Cast { op: CastOp::Trunc, flags: IntFlags::NONE, fmf: FastMath::default(), value: x };
+                }
+                Op::InsertElement { vector, element, index } if res_odd.is_some() => {
+                    let (_, cw) = res_odd.unwrap();
+                    let wt = cx.m.types.int(cw);
+                    let e = s.cast(CastOp::ZExt, element, wt);
+                    op = Op::InsertElement { vector, element: e, index };
+                }
+                _ => {}
+            }
+            s.f.insts[i.index()].op = op;
+            let new = std::mem::take(&mut s.new);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k..k, new);
+            k += n + 1;
         }
     }
 }
@@ -1487,7 +1787,11 @@ fn half_as_int(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         let op = &f.insts[i.index()].op;
         let res_half = f.insts[i.index()].result.is_some_and(|r| has_half(cx, f.locals[r.index()].ty));
         let mut uses_half = false;
-        op.for_each_value(|v| uses_half |= has_half(cx, cx.value_ty(f, *v)));
+        op.for_each_value(|v| {
+            if !matches!(v, Value::Metadata(_)) {
+                uses_half |= has_half(cx, cx.value_ty(f, *v));
+            }
+        });
         if !(res_half || uses_half) {
             continue;
         }
@@ -1708,7 +2012,11 @@ fn half_arith(cx: &mut Ctx, f: &mut Function) {
             };
             let rty = f.locals[r.index()].ty;
             let mut operand_tys = Vec::new();
-            op.for_each_value(|v| operand_tys.push(cx.value_ty(f, *v)));
+            op.for_each_value(|v| {
+                if !matches!(v, Value::Metadata(_)) {
+                    operand_tys.push(cx.value_ty(f, *v));
+                }
+            });
             // Which of the operations on halves this is.
             let of_half = match &op {
                 Op::Binary { op: BinOp::FAdd | BinOp::FSub | BinOp::FMul | BinOp::FDiv | BinOp::FRem, .. } => {
@@ -3841,7 +4149,7 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
             // Bit counts and byte swaps of vectors without an instruction
             // (NEON counts only bytes' bits): lane by lane.
             if !scalar
-                && matches!(base.as_str(), "llvm.ctpop" | "llvm.ctlz" | "llvm.cttz" | "llvm.bswap")
+                && matches!(base.as_str(), "llvm.ctpop" | "llvm.ctlz" | "llvm.cttz" | "llvm.bswap" | "llvm.bitreverse")
                 && !cx.selects_intrinsic(&name)
                 && let Type::Vector { len, elem, scalable: false } = *cx.m.types.get(ty)
                 && let Type::Int(eb) = *cx.m.types.get(elem)
@@ -3896,10 +4204,11 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 k += n;
                 continue;
             }
-            // Bit counts and byte swaps without an instruction: widened to
-            // a width that has one, or done with shifts and masks.
+            // Bit counts, byte swaps and bit reversals without an
+            // instruction: widened to a width that has one, or done with
+            // shifts and masks.
             if scalar
-                && matches!(base.as_str(), "llvm.ctpop" | "llvm.ctlz" | "llvm.cttz" | "llvm.bswap")
+                && matches!(base.as_str(), "llvm.ctpop" | "llvm.ctlz" | "llvm.cttz" | "llvm.bswap" | "llvm.bitreverse")
                 && !cx.selects_intrinsic(&name)
             {
                 let value = bit_intrinsic(cx, &mut s, &base, args[0], bits, ty);
@@ -4105,7 +4414,7 @@ fn bit_intrinsic(cx: &mut Ctx, s: &mut Seq, base: &str, x: Value, bits: u32, ty:
             let d = c(cx, (w - bits) as i64);
             v = s.bin(BinOp::Sub, v, d, wt);
         }
-        if base == "llvm.bswap" && bits < w {
+        if (base == "llvm.bswap" || base == "llvm.bitreverse") && bits < w {
             let d = c(cx, (w - bits) as i64);
             v = s.bin(BinOp::LShr, v, d, wt);
         }
@@ -4114,9 +4423,10 @@ fn bit_intrinsic(cx: &mut Ctx, s: &mut Seq, base: &str, x: Value, bits: u32, ty:
     let rep =
         |pattern: u64, every: u32| -> i64 { (0..w / every).fold(0u64, |acc, k| acc | (pattern << (every * k))) as i64 };
     let v = match base {
-        "llvm.bswap" => {
-            // Swap bytes, then pairs of them, then halves.
-            let mut step = 8;
+        "llvm.bswap" | "llvm.bitreverse" => {
+            // Swap bytes (bits, for a reversal), then pairs of them, then
+            // their pairs, to halves.
+            let mut step = if base == "llvm.bswap" { 8 } else { 1 };
             while step < w {
                 let m = c(cx, rep((1u64 << step) - 1, 2 * step));
                 let sh = c(cx, step as i64);

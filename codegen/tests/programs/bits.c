@@ -35,3 +35,9 @@ int bit_branches(u64 a, u32 b) {
     if (!(b & (1u << 31))) hit(n += 64);
     return n;
 }
+
+// Bit reversals, at each width.
+u8 rev8(u8 x) { return __builtin_bitreverse8(x); }
+u16 rev16(u16 x) { return __builtin_bitreverse16(x); }
+u32 rev32(u32 x) { return __builtin_bitreverse32(x); }
+u64 rev64(u64 x) { return __builtin_bitreverse64(x); }

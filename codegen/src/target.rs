@@ -390,10 +390,12 @@ pub const AARCH64_FILES: &[(&str, &str)] = &[
     ("25-pairs.ll", include_str!("../targets/aarch64/25-pairs.ll")),
     ("30-bits.ll", include_str!("../targets/aarch64/30-bits.ll")),
     ("40-float.ll", include_str!("../targets/aarch64/40-float.ll")),
+    ("45-crypto.ll", include_str!("../targets/aarch64/45-crypto.ll")),
     ("50-vectors.ll", include_str!("../targets/aarch64/50-vectors.ll")),
     ("60-recipes.ll", include_str!("../targets/aarch64/60-recipes.ll")),
     ("70-abi.ll", include_str!("../targets/aarch64/70-abi.ll")),
     ("80-asm.ll", include_str!("../targets/aarch64/80-asm.ll")),
+    ("85-sysregs.ll", include_str!("../targets/aarch64/85-sysregs.ll")),
 ];
 
 pub fn type_bits(m: &Module, ty: TypeId) -> u32 {

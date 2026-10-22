@@ -15,6 +15,10 @@ u32 rotl32(u32, int);
 u64 rotr64(u64, int);
 u32 funnel(u32, u32, int);
 int bit_branches(u64, u32);
+u8 rev8(u8);
+u16 rev16(u16);
+u32 rev32(u32);
+u64 rev64(u64);
 static int hits;
 void hit(int k) { hits = hits * 3 + k; }
 
@@ -34,6 +38,7 @@ int main(void) {
         printf("  bits %d %d\n", nb, hits);
         printf("  rot %x %llx %x %x %llx %x\n", rotl32((u32)v, (int)i), rotr64(v, (int)i * 5), rotl32((u32)v, -3),
                funnel((u32)v, (u32)(v >> 32), (int)i), rotr64(v, 64), funnel((u32)v, 0x87654321, 0));
+        printf("  rev %x %x %x %llx\n", rev8((u8)v), rev16((u16)v), rev32((u32)v), rev64(v));
     }
     return 0;
 }
