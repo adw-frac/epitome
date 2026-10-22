@@ -20,7 +20,7 @@
 use std::fmt::Write;
 
 use crate::abi::Syntax;
-use crate::enc::Env;
+use crate::enc::{self, Env};
 use crate::machine::Machine;
 use crate::mir::{self, Operand, Reg};
 use crate::object::RelocKind;
@@ -339,8 +339,9 @@ fn reloc_operand(m: &Machine, r: &ImageReloc, macho: bool) -> String {
     }
 }
 
-/// The instruction `word` is, when a relocation of `kind` fills it in.
-fn decode_reloc(t: &Target, word: u32, kind: RelocKind) -> Option<(usize, Env)> {
+/// The instruction at the start of `bytes`, when a relocation of `kind`
+/// fills it in.
+fn decode_reloc(t: &Target, bytes: &[u8], kind: RelocKind) -> Option<(usize, Env, usize)> {
     // Relocations an object file numbers alike are one to it (Mach-O's
     // BRANCH26 is both a call's and a tail call's).
     let defs = &t.machine.relocs;
@@ -350,13 +351,14 @@ fn decode_reloc(t: &Target, word: u32, kind: RelocKind) -> Option<(usize, Env)> 
         r == kind || (d.macho.is_some() && d.macho == k.macho) || (d.elf.is_some() && d.elf == k.elf)
     };
     (0..t.instrs.len())
-        .filter(|&i| t.instrs[i].reloc.is_some_and(alike) && word & t.instrs[i].enc.mask == t.instrs[i].enc.value)
-        .find_map(|i| t.instrs[i].decode(word).map(|env| (i, env)))
+        .filter(|&i| t.instrs[i].reloc.is_some_and(alike))
+        .find_map(|i| t.instrs[i].decode(bytes).map(|(env, len)| (i, env, len)))
 }
 
 /// `-d`: the code sections disassembled.
 pub fn disassemble(t: &Target, img: &Image, show_relocs: bool) -> String {
     let mut out = String::new();
+    let unit = t.unit();
     // Symbols to name addresses by: functions, objects and others, not
     // section or mapping symbols.
     let mut named: Vec<(u64, usize, String)> = img
@@ -406,15 +408,21 @@ pub fn disassemble(t: &Target, img: &Image, show_relocs: bool) -> String {
                 }
             }
             let rest = &s.data[off as usize..];
-            if rest.len() < 4 {
+            if rest.len() < unit {
                 let bytes: Vec<String> = rest.iter().map(|b| format!("{b:02x}")).collect();
                 let _ = writeln!(out, "{addr:>8x}: {:<8}     \t.byte {}", bytes.join(""), bytes.join(", "));
                 break;
             }
-            let word = u32::from_le_bytes(rest[..4].try_into().unwrap());
-            let relocs: Vec<&ImageReloc> = s.relocs.iter().filter(|r| r.offset == off).collect();
-            let text = if is_data(off) {
-                format!(".word {word:#010x}")
+            // Its length, then the relocations in it.
+            let len = match mir::decode(t, rest) {
+                _ if is_data(off) => 4,
+                Some((_, _, n)) => n,
+                None => unit,
+            };
+            let relocs: Vec<&ImageReloc> =
+                s.relocs.iter().filter(|r| (off..off + len as u64).contains(&r.offset)).collect();
+            let (text, len) = if is_data(off) {
+                (format!(".word {:#010x}", enc::word(&rest[..4])), 4)
             } else {
                 // Against a section: the symbol there, if one is.
                 let named_reloc = relocs.first().map(|r| {
@@ -428,15 +436,22 @@ pub fn disassemble(t: &Target, img: &Image, show_relocs: bool) -> String {
                     }
                     r
                 });
-                instruction(t, word, addr, named_reloc.as_ref(), img.macho, &label)
+                instruction(t, rest, addr, named_reloc.as_ref(), img.macho, &label)
             };
-            let _ = writeln!(out, "{addr:>8x}: {word:08x}     \t{text}");
+            // A word as a word, as other disassemblers show one; other
+            // lengths as their bytes.
+            let hex = if unit == 4 && len == 4 {
+                format!("{:08x}", enc::word(&rest[..4]))
+            } else {
+                rest[..len].iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ")
+            };
+            let _ = writeln!(out, "{addr:>8x}: {hex}     \t{text}");
             if show_relocs {
                 for r in relocs {
-                    let _ = writeln!(out, "\t\t{:016x}:  {}\t{}", addr, r.type_name, target_text(r));
+                    let _ = writeln!(out, "\t\t{:016x}:  {}\t{}", s.addr + r.offset, r.type_name, target_text(r));
                 }
             }
-            off += 4;
+            off += len as u64;
         }
     }
     out
@@ -451,30 +466,46 @@ impl ImageSymbol {
     }
 }
 
-/// One instruction, as assembly; `reloc` is the relocation that fills it
-/// in, if there is one.
+/// The instruction at the start of `bytes`, as assembly, and its length;
+/// `reloc` is the relocation that fills it in, if there is one.
 pub fn instruction(
     t: &Target,
-    word: u32,
+    bytes: &[u8],
     pc: u64,
     reloc: Option<&ImageReloc>,
     macho: bool,
     label: &dyn Fn(u64) -> String,
-) -> String {
+) -> (String, usize) {
     let decoded = match reloc.and_then(|r| r.kind) {
-        Some(k) => decode_reloc(t, word, k).or_else(|| mir::decode(t, word)),
-        None => mir::decode(t, word),
+        Some(k) => decode_reloc(t, bytes, k).or_else(|| mir::decode(t, bytes)),
+        None => mir::decode(t, bytes),
     };
-    let Some((i, env)) = decoded else { return format!(".word {word:#010x}") };
+    let Some((i, env, len)) = decoded else {
+        return match t.unit() {
+            4 if bytes.len() >= 4 => (format!(".word {:#010x}", enc::word(&bytes[..4])), 4),
+            _ => (format!(".byte {:#04x}", bytes[0]), 1),
+        };
+    };
     let ins = &t.instrs[i];
-    mir::fill_template(t, None, i, |k| {
+    let text = mir::fill_template(t, None, i, |k| {
         let o = &ins.operands[k];
         let v = env[&o.name];
         match o.kind {
             Kind::Reg(c) => Operand::Reg(Reg::P(t.machine.phys(c, v))),
             Kind::Label => Operand::Text(label(pc.wrapping_add(v as u64))),
             Kind::Sym => match reloc {
-                Some(r) => Operand::Text(reloc_operand(&t.machine, r, macho)),
+                // Less what the instruction's field adds itself (x86's
+                // PC32 addend of -4 is the field's end, not the symbol's).
+                Some(r) => {
+                    let bias = ins.encode_alt(&env).map_or(0, |(_, alt)| {
+                        let (at, a) = ins.field_of(alt, &o.name, &env);
+                        let pc_rel = r.kind.is_some_and(|k| t.machine.relocs[k.0 as usize].pc_relative());
+                        a + if pc_rel { at as i64 } else { 0 }
+                    });
+                    let mut r = r.clone();
+                    r.addend -= bias;
+                    Operand::Text(reloc_operand(&t.machine, &r, macho))
+                }
                 None => match ins.reloc.and_then(|kind| t.machine.relocs[kind.0 as usize].reaches(pc, v)) {
                     Some(a) => Operand::Text(label(a)),
                     None => Operand::Imm(v),
@@ -482,7 +513,8 @@ pub fn instruction(
             },
             Kind::Imm | Kind::Cond => Operand::Imm(v),
         }
-    })
+    });
+    (text, len)
 }
 
 /// Checks that `img`'s code disassembles as `asm` (the assembly it was

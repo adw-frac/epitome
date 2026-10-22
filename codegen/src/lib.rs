@@ -209,6 +209,7 @@ fn compile_function(t: &Target, abi: &abi::Abi, cx: &mut Ctx, job: &Job, opts: &
             let now = Instant::now();
             layout::place(t, &mut mf);
             layout::relax(t, &mut mf);
+            mir::set_sizes(t, &mut mf);
             timing::add(&timing::LAYOUT, now);
         }
     }

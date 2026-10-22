@@ -21,7 +21,7 @@ const USAGE: &str = "usage: epitome-objdump [options] <file>...
                           say the same
   --target=<name|path>    the machine description: a .ll file, a directory
                           of them (read in name order), or a name: aarch64
-                          is built in, others are directories of that name
+                          and x86_64 are built in, others are directories of that name
                           in EPITOME_TARGET_PATH (a list separated by
                           colons); by default, for an ELF file, the one with its
                           machine number, else aarch64

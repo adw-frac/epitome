@@ -103,7 +103,7 @@ impl Report {
 /// Runs every check on `t`.
 pub fn check(t: &Target) -> Report {
     let m = &t.machine;
-    let recipes = t.instrs.iter().filter(|i| i.enc.mask == 0 && i.enc.value == 0).count();
+    let recipes = t.instrs.iter().filter(|i| i.enc.is_empty()).count();
     let summary = format!(
         "{} instructions, {} condition forms, {} patterns, {} convention{} ({}), {} CPU{}, {} relocations",
         t.instrs.len() - recipes.min(t.instrs.len()),
@@ -344,7 +344,7 @@ fn sample(t: &Target, i: usize, k: usize) -> Option<Env> {
     }
     // Registers fit as immediates do: some take only some registers (an
     // even one, for a pair; v0-v15).
-    let fits_regs = ins.enc.encode(&env).and_then(|w| ins.decode(w)).is_none_or(|back| {
+    let fits_regs = ins.encode(&env).and_then(|b| ins.decode(&b)).is_none_or(|(back, _)| {
         ins.operands.iter().filter(|o| matches!(o.kind, Kind::Reg(_))).all(|o| back.get(&o.name) == env.get(&o.name))
     });
     fits_regs.then_some(env)
@@ -357,10 +357,10 @@ fn mask(bits: u32) -> u64 {
 fn encodings(t: &Target) -> Section {
     let mut s = Section { name: "encodings", what: "words encoded, decoded and disassembled", ..Default::default() };
     // Pairs of entries the disassembler confuses, reported once.
-    let mut confused: BTreeMap<(usize, usize), u32> = BTreeMap::new();
-    let mut ambiguous: BTreeMap<(usize, usize), u32> = BTreeMap::new();
+    let mut confused: BTreeMap<(usize, usize), Vec<u8>> = BTreeMap::new();
+    let mut ambiguous: BTreeMap<(usize, usize), Vec<u8>> = BTreeMap::new();
     for (i, ins) in t.instrs.iter().enumerate() {
-        if ins.enc.mask == 0 {
+        if ins.enc.is_empty() {
             continue; // A recipe, or a pseudo-instruction.
         }
         let (mut fitted, mut encoded) = (0, 0);
@@ -369,12 +369,12 @@ fn encodings(t: &Target) -> Section {
             fitted += 1;
             // A register beyond a narrow field (v0-v15 only) does not
             // encode: another sample may.
-            let Some(word) = ins.enc.encode(&env) else { continue };
+            let Some(word) = ins.encode(&env) else { continue };
             encoded += 1;
             s.checked += 1;
             // Decoding as itself gives back the operands.
-            let Some(back) = ins.decode(word) else {
-                s.errors.push(format!("{}: {word:08x} does not decode as itself", ins.name));
+            let Some((back, _)) = ins.decode(&word) else {
+                s.errors.push(format!("{}: {} does not decode as itself", ins.name, hex(&word)));
                 break;
             };
             let mut failed = false;
@@ -382,8 +382,12 @@ fn encodings(t: &Target) -> Section {
                 let mk = mask(o.bits);
                 if back[&o.name] as u64 & mk != env[&o.name] as u64 & mk {
                     s.errors.push(format!(
-                        "{}: operand {} = {} encodes in {word:08x} but decodes as {}",
-                        ins.name, o.name, env[&o.name], back[&o.name]
+                        "{}: operand {} = {} encodes in {} but decodes as {}",
+                        ins.name,
+                        o.name,
+                        env[&o.name],
+                        hex(&word),
+                        back[&o.name]
                     ));
                     failed = true;
                 }
@@ -393,21 +397,21 @@ fn encodings(t: &Target) -> Section {
             }
             // The disassembler reads it as something that encodes it again.
             if ins.decode {
-                match mir::decode(t, word) {
+                match mir::decode(t, &word) {
                     None => {
-                        s.errors.push(format!("{}: the disassembler does not read {word:08x}", ins.name));
+                        s.errors.push(format!("{}: the disassembler does not read {}", ins.name, hex(&word)));
                         failed = true;
                     }
-                    Some((j, env2)) => {
-                        let again = t.instrs[j].enc.encode(&env2);
-                        if again != Some(word) {
-                            confused.entry((i, j)).or_insert(word);
+                    Some((j, env2, _)) => {
+                        let again = t.instrs[j].encode(&env2);
+                        if again.as_ref() != Some(&word) {
+                            confused.entry((i, j)).or_insert(word.clone());
                         }
                         // Read as another entry: fine for an alias, which
                         // fixes more bits (cmp, of subs); otherwise the two
                         // cannot be told apart.
-                        if j != i && t.instrs[j].enc.mask.count_ones() <= ins.enc.mask.count_ones() {
-                            ambiguous.entry((i.min(j), i.max(j))).or_insert(word);
+                        if j != i && t.instrs[j].enc.fixed_bits() <= ins.enc.fixed_bits() {
+                            ambiguous.entry((i.min(j), i.max(j))).or_insert(word.clone());
                         }
                     }
                 }
@@ -426,35 +430,48 @@ fn encodings(t: &Target) -> Section {
         // Fine if one accepts fewer words (an alias: `mov` is `orr` with
         // both sources the same), or both write each word alike (one
         // instruction, described for several IR types).
-        let words = |k: usize| -> Vec<u32> {
-            (0..IMMS.len()).filter_map(|n| sample(t, k, n)).filter_map(|e| t.instrs[k].enc.encode(&e)).collect()
+        let words = |k: usize| -> Vec<Vec<u8>> {
+            (0..IMMS.len()).filter_map(|n| sample(t, k, n)).filter_map(|e| t.instrs[k].encode(&e)).collect()
         };
-        let takes = |k: usize, w: u32| t.instrs[k].decode(w).and_then(|e| t.instrs[k].enc.encode(&e)) == Some(w);
+        let takes =
+            |k: usize, w: &[u8]| t.instrs[k].decode(w).and_then(|(e, _)| t.instrs[k].encode(&e)).as_deref() == Some(w);
         let (wi, wj) = (words(i), words(j));
-        let narrower = wi.iter().any(|&w| !takes(j, w)) || wj.iter().any(|&w| !takes(i, w));
-        let alike = wi.iter().chain(&wj).all(|&w| text_of(t, i, w) == text_of(t, j, w));
+        let narrower = wi.iter().any(|w| !takes(j, w)) || wj.iter().any(|w| !takes(i, w));
+        let alike = wi.iter().chain(&wj).all(|w| text_of(t, i, w) == text_of(t, j, w));
         if narrower || alike {
             continue;
         }
         s.errors.push(format!(
-            "{} and {} both encode {word:08x}, and neither fixes more bits: the disassembler cannot tell them apart \
+            "{} and {} both encode {}, and neither fixes more bits: the disassembler cannot tell them apart \
              (if one is an alias, mark it \"nodecode\")",
-            t.instrs[i].name, t.instrs[j].name
+            t.instrs[i].name,
+            t.instrs[j].name,
+            hex(&word)
         ));
     }
     for ((i, j), word) in confused {
         s.errors.push(format!(
-            "{}: the disassembler reads {word:08x} as {}, which encodes it otherwise",
-            t.instrs[i].name, t.instrs[j].name
+            "{}: the disassembler reads {} as {}, which encodes it otherwise",
+            t.instrs[i].name,
+            hex(&word),
+            t.instrs[j].name
         ));
     }
     s
 }
 
-/// Word `w` as instruction `i` writes it.
-fn text_of(t: &Target, i: usize, w: u32) -> Option<String> {
+/// An encoding, for messages: a word as a word, other lengths as bytes.
+fn hex(b: &[u8]) -> String {
+    match b.len() {
+        4 => format!("{:08x}", crate::enc::word(b)),
+        _ => b.iter().map(|x| format!("{x:02x}")).collect::<Vec<_>>().join(" "),
+    }
+}
+
+/// Bytes `w` as instruction `i` writes them.
+fn text_of(t: &Target, i: usize, w: &[u8]) -> Option<String> {
     let ins = &t.instrs[i];
-    let env = ins.decode(w)?;
+    let (env, _) = ins.decode(w)?;
     Some(mir::fill_template(t, None, i, |k| {
         let o = &ins.operands[k];
         let v = env[&o.name];
@@ -489,7 +506,7 @@ fn assembly(t: &Target) -> Section {
             if ins.format.is_some_and(|f| f != abi.syntax) {
                 continue;
             }
-            if ins.enc.mask == 0 || ins.asm.is_empty() {
+            if ins.enc.is_empty() || ins.asm.is_empty() {
                 continue;
             }
             // Each operand with bits of its own is written, or assembly
@@ -506,7 +523,7 @@ fn assembly(t: &Target) -> Section {
                 .operands
                 .iter()
                 .filter(|o| !o.tied && !written(&o.name))
-                .filter(|o| ins.enc.fields.iter().any(|f| f.names.contains(&o.name)))
+                .filter(|o| ins.enc.fields().any(|f| f.names.contains(&o.name)))
                 .map(|o| o.name.clone())
                 .collect();
             if !lost.is_empty() {
@@ -522,7 +539,7 @@ fn assembly(t: &Target) -> Section {
             // Three samples that fit.
             let envs: Vec<Env> = (0..IMMS.len()).filter_map(|k| sample(t, i, k)).take(3).collect();
             for env in envs {
-                let Some(word) = ins.enc.encode(&env) else { continue };
+                let Some(word) = ins.encode(&env) else { continue };
                 let line = mir::fill_template(t, Some(abi), i, |k| {
                     let o = &ins.operands[k];
                     let v = env[&o.name];
@@ -537,8 +554,10 @@ fn assembly(t: &Target) -> Section {
                 let text = format!("\t.text\n{label}:\n\t{line}\n");
                 let got = asm.assemble(&text, Some(abi.syntax)).and_then(|a| {
                     let sec = a.object.sections.iter().find(|x| x.kind == SectionKind::Text).ok_or("no code")?;
-                    let b = sec.data.get(..4).ok_or("no instruction")?;
-                    Ok(u32::from_le_bytes(b.try_into().unwrap()))
+                    if sec.data.is_empty() {
+                        return Err("no instruction".into());
+                    }
+                    Ok(sec.data.clone())
                 });
                 match got {
                     Err(e) => {
@@ -549,18 +568,20 @@ fn assembly(t: &Target) -> Section {
                     Ok(w) => {
                         // Another entry written the same way: fine if it
                         // reads back as the same text (an alias), but say so.
-                        let other = mir::decode(t, w).map(|(j, _)| j);
-                        let back = mir::disassemble(t, w, 0);
-                        let mine = mir::disassemble(t, word, 0);
+                        let other = mir::decode(t, &w).map(|(j, _, _)| j);
+                        let back = mir::disassemble(t, &w, 0);
+                        let mine = mir::disassemble(t, &word, 0);
                         if back == mine
                             && let Some(j) = other
                         {
                             alike.entry((i, j)).or_insert(line);
                         } else {
                             s.errors.push(format!(
-                                "{} ({}): `{line}` is {word:08x}, but assembles as {w:08x} ({})",
+                                "{} ({}): `{line}` is {}, but assembles as {} ({})",
                                 ins.name,
                                 abi.name,
+                                hex(&word),
+                                hex(&w),
                                 other.map_or("nothing", |j| t.instrs[j].name.as_str())
                             ));
                             break;
@@ -736,18 +757,21 @@ fn smoke(t: &Target) -> Section {
             Err(e) => s.errors.push(format!("{label}: the assembly does not assemble: {e}")),
         }
         // Every word of code disassembles, as something that encodes it.
-        let words = compiled.funcs.iter().filter_map(|f| mir::encode_function(t, f).ok()).flat_map(|(w, _)| w);
         let mut bad = BTreeSet::new();
-        for w in words {
-            match mir::decode(t, w) {
-                Some((j, env)) if t.instrs[j].enc.encode(&env) == Some(w) => {}
-                _ => {
-                    bad.insert(w);
+        for code in compiled.funcs.iter().filter_map(|f| mir::encode_function(t, f).ok()) {
+            for (k, &start) in code.starts.iter().enumerate() {
+                let end = code.starts.get(k + 1).copied().unwrap_or(code.bytes.len());
+                let w = &code.bytes[start..end];
+                match mir::decode(t, w) {
+                    Some((j, env, n)) if n == w.len() && t.instrs[j].encode(&env).as_deref() == Some(w) => {}
+                    _ => {
+                        bad.insert(w.to_vec());
+                    }
                 }
             }
         }
         for w in bad.iter().take(5) {
-            s.errors.push(format!("{label}: the code has {w:08x}, which does not disassemble"));
+            s.errors.push(format!("{label}: the code has {}, which does not disassemble", hex(w)));
         }
     }
     // Which functions each optional feature is needed for (of those that
@@ -799,7 +823,7 @@ pub fn sample_assembly(t: &Target, syntax: Syntax, per: usize) -> String {
     let mut out = "\t.text\n\t.p2align 2\n".to_string();
     let mut n = 0;
     for (i, ins) in t.instrs.iter().enumerate() {
-        if ins.enc.mask == 0 || ins.asm.is_empty() || ins.operands.iter().any(|o| o.kind == Kind::Sym) {
+        if ins.enc.is_empty() || ins.asm.is_empty() || ins.operands.iter().any(|o| o.kind == Kind::Sym) {
             continue;
         }
         let mut written = 0;

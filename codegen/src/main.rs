@@ -21,7 +21,7 @@ const USAGE: &str = "usage: epitome-llc [options] <file.ll>
                           or ELF as the convention uses
   --target=<name|path>    the machine description: a .ll file, a directory
                           of them (read in name order), or a name: aarch64
-                          is built in, others are directories of that name
+                          and x86_64 are built in, others are directories of that name
                           in EPITOME_TARGET_PATH (a list separated by
                           colons); by default, the one the module's triple names
                           (riscv64-... is riscv64), else aarch64
@@ -259,25 +259,34 @@ fn main() -> ExitCode {
     if hex || disasm {
         text.clear();
         for f in &compiled.funcs {
-            let (words, fixups) = match mir::encode_function(&target, f) {
-                Ok(w) => w,
+            let code = match mir::encode_function(&target, f) {
+                Ok(c) => c,
                 Err(e) => {
                     eprintln!("epitome-llc: {e}");
                     return ExitCode::FAILURE;
                 }
             };
             text.push_str(&format!("{}:\n", f.name));
-            for (k, w) in words.iter().enumerate() {
-                let pc = (k * 4) as u64;
-                let fix = fixups
+            for (k, &start) in code.starts.iter().enumerate() {
+                let end = code.starts.get(k + 1).copied().unwrap_or(code.bytes.len());
+                let bytes = &code.bytes[start..end];
+                // A word as a word; other lengths as their bytes.
+                let hex = if bytes.len() == 4 {
+                    format!("{:08x}", epitome_codegen::enc::word(bytes))
+                } else {
+                    bytes.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ")
+                };
+                let fix = code
+                    .fixups
                     .iter()
-                    .find(|x| x.offset == k * 4)
+                    .find(|x| x.offset - x.at == start)
                     .map(|x| format!("  ; fixup {}", x.symbol))
                     .unwrap_or_default();
                 if disasm {
-                    text.push_str(&format!("{pc:6x}: {w:08x}  {}{fix}\n", mir::disassemble(&target, *w, pc)));
+                    let (asm, _) = mir::disassemble(&target, bytes, start as u64);
+                    text.push_str(&format!("{start:6x}: {hex}  {asm}{fix}\n"));
                 } else {
-                    text.push_str(&format!("{w:08x}\n"));
+                    text.push_str(&format!("{hex}\n"));
                 }
             }
         }

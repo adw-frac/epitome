@@ -92,22 +92,60 @@ impl Instr {
         self.operands.iter().filter(|o| !o.tied).map(|o| o.name.clone()).collect()
     }
 
-    /// Decodes `word` as this instruction, tied operands included.
-    /// A symbol no field holds (a relocation marking the instruction, as
-    /// TLSDESC's call is marked) is 0.
-    pub fn decode(&self, word: u32) -> Option<Env> {
-        let (held, marks): (Vec<&Operand>, Vec<&Operand>) =
-            self.operands.iter().filter(|o| !o.tied).partition(|o| o.kind != Kind::Sym || self.enc.mentions(&o.name));
-        let names: Vec<String> = held.iter().map(|o| o.name.clone()).collect();
-        let mut env = self.enc.decode(word, &names)?;
-        for o in marks {
-            env.insert(o.name.clone(), 0);
+    /// The symbol operands no field holds by itself (a relocation marking
+    /// the instruction, as TLSDESC's call is marked, or a symbol added to a
+    /// displacement): taken as 0 when decoding.
+    pub fn free(&self) -> Vec<String> {
+        self.operands
+            .iter()
+            .filter(|o| {
+                o.kind == Kind::Sym && !self.enc.fields().any(|f| f.names.as_slice() == std::slice::from_ref(&o.name))
+            })
+            .map(|o| o.name.clone())
+            .collect()
+    }
+
+    /// The bytes for these operand values, and which alternative of the
+    /// encoding they are, or `None` if they cannot be encoded.
+    pub fn encode_alt(&self, env: &Env) -> Option<(Vec<u8>, usize)> {
+        if let [only] = &self.enc.alts[..] {
+            return only.encode(env).map(|b| (b, 0));
         }
+        self.enc.encode_alt(env, &self.free())
+    }
+
+    /// The bytes for these operand values, or `None` if they cannot be
+    /// encoded.
+    pub fn encode(&self, env: &Env) -> Option<Vec<u8>> {
+        self.encode_alt(env).map(|(b, _)| b)
+    }
+
+    /// Where in alternative `alt` the field holding operand `name` is (its
+    /// piece's offset), and its value with these operands, `name` at 0: a
+    /// relocation's place and addend.
+    pub fn field_of(&self, alt: usize, name: &str, env: &Env) -> (usize, i64) {
+        let a = &self.enc.alts[alt];
+        match a.fields.iter().find(|x| x.names.iter().any(|n| n == name)) {
+            Some(x) => {
+                let mut env = env.clone();
+                env.insert(name.to_string(), 0);
+                (a.pieces[x.piece].offset as usize, enc::eval(&x.expr, &env).unwrap_or(0))
+            }
+            None => (0, 0),
+        }
+    }
+
+    /// Decodes the start of `bytes` as this instruction, tied operands
+    /// included, and gives its length.
+    pub fn decode(&self, bytes: &[u8]) -> Option<(Env, usize)> {
+        let free = self.free();
+        let names: Vec<String> = self.operands.iter().filter(|o| !o.tied).map(|o| o.name.clone()).collect();
+        let (mut env, len) = self.enc.decode(bytes, &names, &free)?;
         let d = env.get("d").copied();
         for o in self.operands.iter().filter(|o| o.tied) {
             env.insert(o.name.clone(), d?);
         }
-        Some(env)
+        Some((env, len))
     }
 
     /// Whether these operand values can be encoded: each immediate must
@@ -118,8 +156,8 @@ impl Instr {
         for (o, v) in self.operands.iter().zip(values) {
             env.insert(o.name.clone(), v.unwrap_or(0));
         }
-        let Some(word) = self.enc.encode(&env) else { return false };
-        let Some(back) = self.decode(word) else { return false };
+        let Some(bytes) = self.encode(&env) else { return false };
+        let Some((back, _)) = self.decode(&bytes) else { return false };
         self.operands.iter().zip(values).all(|(o, v)| match (o.kind, v) {
             (Kind::Imm, Some(v)) => {
                 let m = if o.bits >= 64 { u64::MAX } else { (1u64 << o.bits) - 1 };
@@ -338,6 +376,7 @@ pub struct Target {
     fits_cache: std::sync::Mutex<HashMap<FitsKey, bool>>,
     /// Shuffle masks the description's patterns use.
     pub masks: std::sync::Mutex<Vec<Vec<i32>>>,
+    decode_index: std::sync::OnceLock<Vec<Vec<usize>>>,
 }
 
 fn attr<'a>(attrs: &'a [Attr], key: &str) -> Option<Option<&'a str>> {
@@ -396,6 +435,13 @@ pub const AARCH64_FILES: &[(&str, &str)] = &[
     ("70-abi.ll", include_str!("../targets/aarch64/70-abi.ll")),
     ("80-asm.ll", include_str!("../targets/aarch64/80-asm.ll")),
     ("85-sysregs.ll", include_str!("../targets/aarch64/85-sysregs.ll")),
+];
+
+/// The x86-64 description (see docs/design/x86.md): for assembly and
+/// disassembly so far.
+pub const X86_64_FILES: &[(&str, &str)] = &[
+    ("00-base.ll", include_str!("../targets/x86_64/00-base.ll")),
+    ("80-asm.ll", include_str!("../targets/x86_64/80-asm.ll")),
 ];
 
 pub fn type_bits(m: &Module, ty: TypeId) -> u32 {
@@ -507,6 +553,10 @@ impl Target {
         Target::load_files(AARCH64_FILES).expect("the built-in AArch64 description is valid")
     }
 
+    pub fn x86_64() -> Target {
+        Target::load_files(X86_64_FILES).expect("the built-in x86-64 description is valid")
+    }
+
     /// A description in several files, read in order as one module; a
     /// parse error is reported by the file and line it is in.
     pub fn load_files(files: &[(&str, &str)]) -> Result<Target, String> {
@@ -539,10 +589,14 @@ impl Target {
         let built_in = |files: &mut Vec<(String, String)>| {
             files.extend(AARCH64_FILES.iter().map(|(n, t)| (n.to_string(), t.to_string())));
         };
+        let x86 = |files: &mut Vec<(String, String)>| {
+            files.extend(X86_64_FILES.iter().map(|(n, t)| (n.to_string(), t.to_string())));
+        };
         let arch = triple.split('-').next().unwrap_or("");
         match spec {
             Some(p) if std::path::Path::new(p).exists() => files.extend(read_path(p)?),
             Some("aarch64" | "arm64") => built_in(&mut files),
+            Some("x86_64" | "x86-64") => x86(&mut files),
             Some(name) => {
                 let dir = search_path(name).ok_or_else(|| {
                     format!("no target {name}: not a path, not built in, and not in EPITOME_TARGET_PATH")
@@ -550,6 +604,7 @@ impl Target {
                 files.extend(read_path(&dir)?);
             }
             None if matches!(arch, "" | "aarch64" | "arm64" | "arm64e") => built_in(&mut files),
+            None if arch == "x86_64" => x86(&mut files),
             None => match search_path(arch) {
                 Some(dir) => files.extend(read_path(&dir)?),
                 None => {
@@ -569,9 +624,10 @@ impl Target {
     /// The target whose ELF machine number is `machine`: the built-in one,
     /// or one in `EPITOME_TARGET_PATH`.
     pub fn for_elf_machine(machine: u16) -> Option<Target> {
-        let t = Target::aarch64();
-        if t.machine.elf_machine == machine {
-            return Some(t);
+        for t in [Target::aarch64(), Target::x86_64()] {
+            if t.machine.elf_machine == machine {
+                return Some(t);
+            }
         }
         for dir in target_dirs() {
             let Ok(entries) = std::fs::read_dir(&dir) else { continue };
@@ -615,6 +671,7 @@ impl Target {
             abis: Vec::new(),
             fits_cache: Default::default(),
             masks: Default::default(),
+            decode_index: Default::default(),
         };
         t.read()?;
         t.abis = crate::abi::read(&t.module, "abi.", &t.machine)?;
@@ -629,6 +686,38 @@ impl Target {
 
     /// `Instr::fits`, remembered: the same few immediates come up again
     /// and again.
+    /// The entries the disassembler tries for code starting with each byte
+    /// value, most literal bits first: those an alternative of whose first
+    /// byte's literal bits are that byte's.
+    pub fn decode_candidates(&self, first: u8) -> &[usize] {
+        let index = self.decode_index.get_or_init(|| {
+            let mut all: Vec<usize> =
+                (0..self.instrs.len()).filter(|&i| self.instrs[i].decode && !self.instrs[i].enc.is_empty()).collect();
+            all.sort_by_key(|&i| std::cmp::Reverse(self.instrs[i].enc.fixed_bits()));
+            (0..=255u64)
+                .map(|b| {
+                    all.iter()
+                        .copied()
+                        .filter(|&i| {
+                            self.instrs[i]
+                                .enc
+                                .alts
+                                .iter()
+                                .any(|a| a.pieces.first().is_none_or(|p| (b & p.mask & 0xff) == (p.value & 0xff)))
+                        })
+                        .collect()
+                })
+                .collect()
+        });
+        &index[first as usize]
+    }
+
+    /// The shortest instruction's length in bytes: 4 for a target whose
+    /// instructions are all one word.
+    pub fn unit(&self) -> usize {
+        self.instrs.iter().flat_map(|i| i.enc.alts.iter()).map(|a| a.len as usize).filter(|&n| n > 0).min().unwrap_or(4)
+    }
+
     pub fn fits_cached(&self, i: usize, vals: Vec<Option<i64>>) -> bool {
         let key = (i, vals);
         if let Some(&ok) = self.fits_cache.lock().unwrap().get(&key) {
@@ -748,6 +837,13 @@ impl Target {
         }
         let mut instrs = Vec::new();
         let mut conds = Vec::new();
+        // Named pieces of encodings, `!{!"name", !"params", !"encoding"}`.
+        let mut fragments = enc::Fragments::new();
+        for t in crate::machine::tuples(m, "target.encodings") {
+            let [name, params, body] = &t[..] else { return Err(format!("bad encoding fragment {t:?}")) };
+            let params = params.split([',', ' ']).filter(|p| !p.is_empty()).map(String::from).collect();
+            fragments.insert(name.clone(), (params, body.clone()));
+        }
         for (g, f) in m.functions() {
             let name = m.global(g).name.clone().unwrap_or_default();
             if let Some(Some(v)) = attr(&f.fn_attrs, "cond") {
@@ -769,7 +865,7 @@ impl Target {
                 continue;
             }
             let Some(Some(enc_text)) = attr(&f.fn_attrs, "enc") else { continue };
-            let enc = enc::parse(enc_text).map_err(|e| format!("@{name}: {e}"))?;
+            let enc = enc::parse_with(enc_text, &fragments).map_err(|e| format!("@{name}: {e}"))?;
             let fn_ty = m.types.get(f.ty).clone();
             let Type::Function { ret, .. } = fn_ty else { unreachable!() };
             // A struct result is the flags, for a comparison ("sets"), or

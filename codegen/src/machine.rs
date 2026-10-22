@@ -153,6 +153,15 @@ pub struct RelocDef {
 }
 
 impl RelocDef {
+    /// Whether it measures from where it is: its target reads `pc`.
+    pub fn pc_relative(&self) -> bool {
+        self.target.as_ref().is_some_and(|e| {
+            let mut names = Vec::new();
+            enc::names_in(e, &mut names);
+            names.iter().any(|n| n == "pc")
+        })
+    }
+
     /// How assembly in `syntax` writes an operand this fills in.
     pub fn spell(&self, syntax: Syntax, sym: &str) -> String {
         let tpl = match syntax {

@@ -262,15 +262,13 @@ pub fn build(
     for (f, code) in funcs.iter().zip(encoded) {
         let s = section(&mut obj, SectionKind::Text, None);
         let at = place(&mut obj, s, 4);
-        let (words, fixups) = code?;
-        for w in &words {
-            obj.sections[s].data.extend_from_slice(&w.to_le_bytes());
-        }
+        let code = code?;
+        obj.sections[s].data.extend_from_slice(&code.bytes);
         obj.symbols.push(Symbol {
             name: abi.symbol(&f.name),
             section: Some(s),
             value: at,
-            size: 4 * words.len() as u64,
+            size: code.bytes.len() as u64,
             global: f.global,
             kind: SymbolKind::Func,
         });
@@ -314,21 +312,24 @@ pub fn build(
         frames.push(crate::unwind::Frame {
             section: s,
             start: at,
-            len: 4 * words.len() as u64,
+            len: code.bytes.len() as u64,
             symbol,
             rules: mir::cfi_rules(f),
             personality: f.eh.as_ref().map(|e| abi.eh_ref(&e.personality)),
             lsda,
         });
-        for fx in fixups {
+        for fx in code.fixups {
             let i = t.by_name[&fx.instr];
             let kind = t.instrs[i].reloc.ok_or_else(|| format!("{}: {} has no \"reloc\"", f.name, fx.instr))?;
+            // The field measures from the instruction's start; a
+            // PC-relative relocation, from the field's.
+            let pc_rel = t.machine.relocs[kind.0 as usize].pc_relative();
             pending.push(Pending {
                 section: s,
                 offset: at + fx.offset as u64,
                 kind,
                 symbol: abi.symbol(&fx.symbol),
-                addend: 0,
+                addend: fx.addend + if pc_rel { fx.at as i64 } else { 0 },
                 instr: Some(i),
             });
         }
@@ -409,17 +410,27 @@ pub fn resolve(t: &Target, obj: &mut Object, pending: Vec<Pending>, macho: bool)
             && let Some(i) = p.instr
         {
             let ins = &t.instrs[i];
-            let at = p.offset as usize;
-            let data = &mut obj.sections[p.section].data;
-            let word = u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
-            let mut env = ins.decode(word).ok_or_else(|| format!("cannot decode the {} to {}", ins.name, def.name))?;
             let op = ins.operands.iter().find(|o| o.kind == Kind::Sym).ok_or("a call without a symbol operand")?;
-            env.insert(op.name.clone(), def.value as i64 + p.addend - p.offset as i64);
-            let word = ins
+            // The instruction's start: the field is `at` into it.
+            let at_in = ins
                 .enc
-                .encode(&env)
-                .ok_or_else(|| format!("{}: the call to {} is out of range", ins.name, def.name))?;
-            data[at..at + 4].copy_from_slice(&word.to_le_bytes());
+                .alts
+                .iter()
+                .find_map(|a| a.fields.iter().find(|x| x.names.contains(&op.name)).map(|x| a.pieces[x.piece].offset))
+                .unwrap_or(0) as usize;
+            let start = p.offset as usize - at_in;
+            let data = &mut obj.sections[p.section].data;
+            let (mut env, len) =
+                ins.decode(&data[start..]).ok_or_else(|| format!("cannot decode the {} to {}", ins.name, def.name))?;
+            // (A call's symbol has no addend of its own: the field's
+            // expression gives the rest.)
+            env.insert(op.name.clone(), def.value as i64 - start as i64);
+            let bytes =
+                ins.encode(&env).ok_or_else(|| format!("{}: the call to {} is out of range", ins.name, def.name))?;
+            if bytes.len() != len {
+                return Err(format!("{}: the call to {} changed size", ins.name, def.name));
+            }
+            data[start..start + len].copy_from_slice(&bytes);
             continue;
         }
         let (target, addend) = match def.section {
