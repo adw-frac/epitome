@@ -6,6 +6,8 @@
 //! target/smollm2/llm "Once upon a time, there was a little dog called"
 //! target/smollm2/llm --ids "..."   # the token ids too
 //! target/smollm2/llm --bench 10     # forward passes for 10 s, timed
+//! target/smollm2/llm --score "6403 1980 ... | 8728 ..."   # how well it predicts the ids after |
+//! target/smollm2/llm --score-text "Some text."            # and text's tokens after the first
 //! ```
 //!
 //! The model is one function, written by Epitome into `model.o`:
@@ -40,6 +42,26 @@ fn main() {
         }
         _ => None,
     };
+    if args.first().is_some_and(|a| a == "--score-text") {
+        // Text as the tokenizer splits it, predicted from its first token.
+        let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf())).unwrap_or_default();
+        let bpe = Bpe::load(&dir).unwrap_or_else(|e| {
+            eprintln!("llm: {e}");
+            std::process::exit(1)
+        });
+        let ids: Vec<i64> = bpe.encode(&args[1..].join(" ")).into_iter().map(i64::from).collect();
+        score(&ids, 1);
+        return;
+    }
+    if args.first().is_some_and(|a| a == "--score") {
+        // A prompt, then | and the ids to predict after it.
+        let text = args[1..].join(" ");
+        let (prompt, rest) = text.split_once('|').unwrap_or(("", &text));
+        let parse = |s: &str| s.split_whitespace().filter_map(|t| t.parse().ok()).collect::<Vec<i64>>();
+        let (prompt, rest) = (parse(prompt), parse(rest));
+        score(&[prompt.as_slice(), rest.as_slice()].concat(), prompt.len().max(1));
+        return;
+    }
     let prompt = if args.is_empty() { "Once upon a time".to_string() } else { args.join(" ") };
     let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf())).unwrap_or_default();
     let (bpe, config) = match Bpe::load(&dir).and_then(|b| Ok((b, Config::load(&dir)?))) {
@@ -102,6 +124,34 @@ fn main() {
         let list: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
         println!("{}", list.join(" "));
     }
+}
+
+/// One forward pass over `ids` (a window at most): how often the model's
+/// choice is the next id, and the perplexity of the ids from `from` on (the
+/// exponential of their mean negative log-probability).
+fn score(ids: &[i64], from: usize) {
+    let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf())).unwrap_or_default();
+    let Config { window: win, vocab, .. } = Config::load(&dir).unwrap_or_else(|e| {
+        eprintln!("llm: {e}");
+        std::process::exit(1)
+    });
+    let n = ids.len().min(win);
+    let mut window = vec![0i64; win];
+    window[..n].copy_from_slice(&ids[..n]);
+    let mut logits = vec![0f32; win * vocab];
+    // SAFETY: `window` and `logits` have the sizes `forward` was compiled for.
+    unsafe { forward(window.as_ptr(), logits.as_mut_ptr()) };
+    let (mut agree, mut nll) = (0, 0f64);
+    for t in from - 1..n - 1 {
+        let row = &logits[t * vocab..(t + 1) * vocab];
+        let next = ids[t + 1] as usize;
+        agree += (argmax(row) as usize == next) as usize;
+        let max = row.iter().copied().fold(f32::MIN, f32::max) as f64;
+        let sum: f64 = row.iter().map(|&x| (x as f64 - max).exp()).sum();
+        nll -= row[next] as f64 - max - sum.ln();
+    }
+    let count = n - from;
+    println!("{agree} of {count} next ids chosen; perplexity {:.4}", (nll / count as f64).exp());
 }
 
 /// The window, vocabulary and end token the model was exported with.

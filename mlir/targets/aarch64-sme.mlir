@@ -70,13 +70,17 @@ func.func private @__epitome_sme_matmul_bf16_64(%c: !llvm.ptr, %ldc: i64, %a: !l
       %tro = "llvm.mul"(%trow0, %lda) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
       %tab = "llvm.getelementptr"(%ta, %tro) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
       %ttb = "llvm.getelementptr"(%tt, %trow0) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-      "scf.for"(%c0, %c16, %c1) ({
+      // Four rows at a time.
+      "scf.for"(%c0, %c16, %c4) ({
       ^bb0(%tr: index):
         %tri = arith.index_cast %tr : index to i64
         %ts = arith.trunci %tri : i64 to i32
         %tro2 = "llvm.mul"(%tri, %lda) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
         %tp = "llvm.getelementptr"(%tab, %tro2) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-        "llvm.call_intrinsic"(%tp, %ts) <{intrin = "llvm.epitome.sme.bf16.row.za0h"}> : (!llvm.ptr, i32) -> ()
+        %tp1 = "llvm.getelementptr"(%tp, %lda) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+        %tp2 = "llvm.getelementptr"(%tp1, %lda) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+        %tp3 = "llvm.getelementptr"(%tp2, %lda) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+        "llvm.call_intrinsic"(%tp, %tp1, %tp2, %tp3, %ts) <{intrin = "llvm.epitome.sme.bf16.rows4.za0h"}> : (!llvm.ptr, !llvm.ptr, !llvm.ptr, !llvm.ptr, i32) -> ()
         "scf.yield"() : () -> ()
       }) : (index, index, index) -> ()
       "scf.for"(%c0, %c16, %c1) ({
@@ -366,13 +370,17 @@ func.func private @__epitome_sme_matmul_fp8_64(%c: !llvm.ptr, %ldc: i64, %a: !ll
       %tro = "llvm.mul"(%trow0, %lda) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
       %tab = "llvm.getelementptr"(%ta, %tro) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
       %ttb = "llvm.getelementptr"(%tt, %trow0) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-      "scf.for"(%c0, %c16, %c1) ({
+      // Four rows at a time.
+      "scf.for"(%c0, %c16, %c4) ({
       ^bb0(%tr: index):
         %tri = arith.index_cast %tr : index to i64
         %ts = arith.trunci %tri : i64 to i32
         %tro2 = "llvm.mul"(%tri, %lda) <{overflowFlags = 0 : i32}> : (i64, i64) -> i64
         %tp = "llvm.getelementptr"(%tab, %tro2) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
-        "llvm.call_intrinsic"(%tp, %ts) <{intrin = "llvm.epitome.sme.bf16.row.za0h"}> : (!llvm.ptr, i32) -> ()
+        %tp1 = "llvm.getelementptr"(%tp, %lda) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+        %tp2 = "llvm.getelementptr"(%tp1, %lda) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+        %tp3 = "llvm.getelementptr"(%tp2, %lda) <{elem_type = f32, noWrapFlags = 0 : i32, rawConstantIndices = array<i32: -2147483648>}> : (!llvm.ptr, i64) -> !llvm.ptr
+        "llvm.call_intrinsic"(%tp, %tp1, %tp2, %tp3, %ts) <{intrin = "llvm.epitome.sme.bf16.rows4.za0h"}> : (!llvm.ptr, !llvm.ptr, !llvm.ptr, !llvm.ptr, i32) -> ()
         "scf.yield"() : () -> ()
       }) : (index, index, index) -> ()
       "scf.for"(%c0, %c16, %c1) ({

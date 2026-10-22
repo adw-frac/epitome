@@ -605,6 +605,53 @@ from 2.1 to 32 tokens a second, with the same tokens. `mlir/tests/sme.rs`
 checks a 70 x 40 by 40 x 50 product, which has rows past the last whole
 tile and a narrow last tile of columns, against a plain one on an M4.
 
+### 5.9 Weights in BF16, int8 and FP8
+
+`linalg-to-kernels=aarch64-sme:<format>` also allows the kernels whose
+`epitome.kernel` says `weights = "<format>"`. Such a kernel takes B only
+when B is a constant, which the pass converts and packs when compiling
+(`pack` in `linalg_kernels.rs`); otherwise the f32 kernels are used, as
+they are for attention. The formats round, so they are used only when
+asked for (`examples/llm.rs --weights=bf16` builds `llm-bf16`).
+
+| Format | Weights packed as | A, in the kernel | Products |
+| --- | --- | --- | --- |
+| `bf16` | pairs of rows, rounded to nearest even | rounded to BF16 as it is transposed (`ld2w`, `bfcvt`, `bfcvtnt`, `mova`) | `bfmopa` into f32 |
+| `i8` | four rows a word, each column -127..127 times a scale | each row quantised by its largest magnitude (`fmaxv`, `fdivr`, `frintn`, `fcvtzs`, `st1b`) | `smopa` into int32, then scaled into C (`mova`, `scvtf`, `fmul`) |
+| `fp8` | E4M3 bytes as BF16's pairs, each column scaled by a power of two | as for `bf16` | each panel made BF16, then `bfmopa` |
+
+The FP8 conversion is the table of (FP8 value, scale) to BF16, worked out:
+`(t << 4) + bias + (t & 0x80) * 0xF0`, the bias `(120 + e) << 7` for a
+column scaled by 2^e (zero and subnormal codes are never stored). A gather
+from a table is not possible here: SVE's gathers fault in streaming mode
+on a machine without `FEAT_SME_FA64`, as M4 is, and M4 has no SVE outside
+streaming mode.
+
+SmolLM2-135M on an M4 Pro, a window of 64 tokens; perplexity of PyTorch's
+own continuation of the prompt, and of a paragraph of other text:
+
+| Weights | ms a window | kernel ms | tokens/s generating | binary | continuation, chosen / perplexity | other text |
+| --- | --- | --- | --- | --- | --- | --- |
+| f32 | 25.8 | 17.5 | 35.9 | 657 MB | 53 of 53 / 2.461 | 27.37 |
+| bf16 | 21.7 | 12.8 | 42.6 | 386 MB | 52 of 53 / 2.458 | 27.38 |
+| int8 | 19.1 | 11.0 | 47.4 | 252 MB | 45 of 53 / 2.592 | 37.57 |
+| fp8 | 27.5 | 19.0 | 34.0 | 252 MB | 50 of 53 / 2.431 | 28.34 |
+
+What decides it is that M4's SME unit does about the same multiply-adds a
+cycle whatever the format: a step of four outer products takes about 4.6
+cycles with `fmopa` (1 k), 9.4 with `bfmopa` (2 k) and 14.5 with `smopa`
+(4 k), so in cache all reach 1.7 to 2.2 TFLOP/s. Smaller weights only save
+memory: streaming them, f32 reaches 1.1 TFLOP/s at 35 GB/s, BF16 1.4 at
+22 GB/s, int8 1.5 to 2.0. FP8's conversion costs more than the memory it
+saves (it is instructions on the same unit: about 0.2 a weight). Int8's
+accuracy suffers from quantising each row of activations to one scale:
+Llama's activations have channels far larger than the rest.
+
+Streaming SVE instructions wait for the one before when it is their input,
+so the recipes for quantising, scaling and conversion work on four vectors
+in registers of their own (z20-z31); int8 went from 32 to 19 ms a window
+when its output step did.
+
 ## 6. Dialect descriptions
 
 A description is written in the dialect it lowers to. `torch` lowers to

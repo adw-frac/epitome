@@ -1772,3 +1772,114 @@ define void @sme.fp8.dequant4m.expand(ptr %src, ptr %dst) {
   call void @ST1HZ27VL3(ptr %dst)
   ret void
 }
+
+; Four rows of f32 as BF16 pairs into slices w12 to w12 + 3 of za0.s, the
+; rows side by side in registers of their own.
+
+define void @LD2WZ20Z21P0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010100100000111000 a:5 10100" "asm"="ld2w {lb}z20.s, z21.s{rb}, p0/z, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @BFCVTZ28Z20() "feature"="sme" "enc"="01100101100010101010001010011100" "asm"="bfcvt z28.h, p0/m, z20.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @BFCVTNTZ28Z21() "feature"="sme" "enc"="01100100100010101010001010111100" "asm"="bfcvtnt z28.h, p0/m, z21.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MOVAZA0HW12O0Z28() "feature"="sme" "enc"="11000000100000000000001110000000" "asm"="mova za0h.s[w12, 0], p0/m, z28.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD2WZ22Z23P0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010100100000111000 a:5 10110" "asm"="ld2w {lb}z22.s, z23.s{rb}, p0/z, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @BFCVTZ29Z22() "feature"="sme" "enc"="01100101100010101010001011011101" "asm"="bfcvt z29.h, p0/m, z22.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @BFCVTNTZ29Z23() "feature"="sme" "enc"="01100100100010101010001011111101" "asm"="bfcvtnt z29.h, p0/m, z23.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MOVAZA0HW12O1Z29() "feature"="sme" "enc"="11000000100000000000001110100001" "asm"="mova za0h.s[w12, 1], p0/m, z29.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD2WZ24Z25P0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010100100000111000 a:5 11000" "asm"="ld2w {lb}z24.s, z25.s{rb}, p0/z, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @BFCVTZ30Z24() "feature"="sme" "enc"="01100101100010101010001100011110" "asm"="bfcvt z30.h, p0/m, z24.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @BFCVTNTZ30Z25() "feature"="sme" "enc"="01100100100010101010001100111110" "asm"="bfcvtnt z30.h, p0/m, z25.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MOVAZA0HW12O2Z30() "feature"="sme" "enc"="11000000100000000000001111000010" "asm"="mova za0h.s[w12, 2], p0/m, z30.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @LD2WZ26Z27P0(ptr "reg"="xsp" %a) "feature"="sme" "enc"="1010010100100000111000 a:5 11010" "asm"="ld2w {lb}z26.s, z27.s{rb}, p0/z, [{a}]" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @BFCVTZ31Z26() "feature"="sme" "enc"="01100101100010101010001101011111" "asm"="bfcvt z31.h, p0/m, z26.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @BFCVTNTZ31Z27() "feature"="sme" "enc"="01100100100010101010001101111111" "asm"="bfcvtnt z31.h, p0/m, z27.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+define void @MOVAZA0HW12O3Z31() "feature"="sme" "enc"="11000000100000000000001111100011" "asm"="mova za0h.s[w12, 3], p0/m, z31.s" "nomatch" {
+  call void @llvm.epitome.sme.piece()
+  ret void
+}
+
+declare void @llvm.epitome.sme.bf16.rows4.za0h(ptr, ptr, ptr, ptr, i32)
+
+define void @sme.bf16.rows4(ptr "reg"="xsp" %p0, ptr "reg"="xsp" %p1, ptr "reg"="xsp" %p2, ptr "reg"="xsp" %p3, i32 "reg"="w" %slice) "feature"="sme" "recipe"="sme.bf16.rows4.expand" {
+  call void @llvm.epitome.sme.bf16.rows4.za0h(ptr %p0, ptr %p1, ptr %p2, ptr %p3, i32 %slice)
+  ret void
+}
+
+define void @sme.bf16.rows4.expand(ptr %p0, ptr %p1, ptr %p2, ptr %p3, i32 %slice) {
+  call void @LD2WZ20Z21P0(ptr %p0)
+  call void @LD2WZ22Z23P0(ptr %p1)
+  call void @LD2WZ24Z25P0(ptr %p2)
+  call void @LD2WZ26Z27P0(ptr %p3)
+  call void @BFCVTZ28Z20()
+  call void @BFCVTZ29Z22()
+  call void @BFCVTZ30Z24()
+  call void @BFCVTZ31Z26()
+  call void @BFCVTNTZ28Z21()
+  call void @BFCVTNTZ29Z23()
+  call void @BFCVTNTZ30Z25()
+  call void @BFCVTNTZ31Z27()
+  call void @MOVW12(i32 %slice)
+  call void @MOVAZA0HW12O0Z28()
+  call void @MOVAZA0HW12O1Z29()
+  call void @MOVAZA0HW12O2Z30()
+  call void @MOVAZA0HW12O3Z31()
+  ret void
+}
