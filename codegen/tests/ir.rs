@@ -9,8 +9,34 @@ use std::process::Command;
 use epitome_codegen::target::Target;
 use epitome_codegen::{Options, compile};
 
+/// What a test whose driver says `// links: compiler-builtins` links too:
+/// the runtime's functions (quad precision's `__addtf3`...) from Rust's
+/// compiler_builtins, and the symbol it expects of a Rust program.
+fn runtime(main: &std::path::Path, tmp: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let text = std::fs::read_to_string(main).unwrap_or_default();
+    if !text.contains("// links: compiler-builtins") {
+        return Vec::new();
+    }
+    let Ok(o) = Command::new("rustc").arg("--print").arg("sysroot").output() else { return Vec::new() };
+    let lib = PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()).join("lib/rustlib/aarch64-apple-darwin/lib");
+    let Some(rlib) = std::fs::read_dir(&lib).ok().and_then(|d| {
+        d.filter_map(|e| e.ok().map(|e| e.path())).find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("libcompiler_builtins-") && n.ends_with(".rlib"))
+        })
+    }) else {
+        return Vec::new();
+    };
+    let stub = tmp.join("rust_eh_personality.c");
+    std::fs::write(&stub, "void rust_eh_personality(void) {}\n").unwrap();
+    vec![stub, rlib]
+}
+
 fn output(obj: &std::path::Path, main: &std::path::Path, exe: &std::path::Path) -> Result<String, String> {
-    let st = Command::new("clang").arg(obj).arg(main).arg("-o").arg(exe).status().map_err(|e| e.to_string())?;
+    let extra = runtime(main, exe.parent().unwrap());
+    let st =
+        Command::new("clang").arg(obj).arg(main).args(&extra).arg("-o").arg(exe).status().map_err(|e| e.to_string())?;
     if !st.success() {
         return Err(format!("linking {} failed", exe.display()));
     }

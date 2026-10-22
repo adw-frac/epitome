@@ -147,6 +147,10 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     crate::neon::lower(cx, &mut f);
     number_min_max(cx, &mut f);
     crate::intrinsics::lower(cx, &mut f);
+    // What the runtime does, then types no register holds as what holds
+    // them (fp128 as <2 x i64>), as the description says.
+    crate::runtime::lower(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
+    crate::runtime::hold(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     thread_locals(cx, &mut f);
     const_exprs(cx, &mut f);
     addresses_as_ints(&mut f);

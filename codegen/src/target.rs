@@ -393,6 +393,7 @@ pub const AARCH64_FILES: &[(&str, &str)] = &[
     ("45-crypto.ll", include_str!("../targets/aarch64/45-crypto.ll")),
     ("50-vectors.ll", include_str!("../targets/aarch64/50-vectors.ll")),
     ("60-recipes.ll", include_str!("../targets/aarch64/60-recipes.ll")),
+    ("65-runtime.ll", include_str!("../targets/aarch64/65-runtime.ll")),
     ("70-abi.ll", include_str!("../targets/aarch64/70-abi.ll")),
     ("80-asm.ll", include_str!("../targets/aarch64/80-asm.ll")),
     ("85-sysregs.ll", include_str!("../targets/aarch64/85-sysregs.ll")),

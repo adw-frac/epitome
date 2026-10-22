@@ -1,7 +1,5 @@
 # The generic intrinsics' cases we get wrong or cannot build yet (see tests/intrinsics.rs).
 llvm.addressofreturnaddress.p0()
-llvm.copysign.f128(f128,f128)
-llvm.fabs.f128(f128)
 llvm.frameaddress.p0(i32=0)
 llvm.frexp.f16.i32(f16)
 llvm.looptrap()

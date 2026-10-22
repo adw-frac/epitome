@@ -27,6 +27,7 @@ pub mod object;
 pub mod peephole;
 pub mod prepare;
 pub mod regalloc;
+pub mod runtime;
 pub mod target;
 pub mod unwind;
 pub mod wide;

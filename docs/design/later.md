@@ -147,3 +147,7 @@ these are for after.
   some operations), and a compilation should report, at the source line,
   each thing the program asks for that the machine lacks, all of them
   rather than the first, so that the program can be changed to fit.
+- **Quad precision's code** (`runtime.rs`, `65-runtime.ll`): every fp128
+  value is spilled around each runtime call (q registers are all the
+  callee's), and its sign is changed through a stack slot and two `eor`s
+  (one with `xzr`) where `eor v.16b` with a constant would do.
