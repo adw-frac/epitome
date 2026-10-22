@@ -58,6 +58,10 @@ def opcode(alt):
         p = re.sub(r'^(if\(\S+\)\s*)+', '', p)
         if re.fullmatch(r'[01]{8}', p):
             out.append(int(p, 2))
+    # And a VEX prefix's W bit, as 0x100 + W.
+    m = re.search(r'vexm?\([^,]+, [^,]+, [^,]+, [^,]+, (\d)', alt)
+    if m:
+        out.append(0x100 + int(m.group(1)))
     return out
 
 
@@ -114,8 +118,14 @@ for k, (name, alts, _) in enumerate(entries):
     b = got.get(k)
     if not b:
         continue
+    # llvm-mc's VEX.W, as opcode() writes it.
+    w = 0x100 + (b[2] >> 7 if b[0] == 0xc4 else 0) if b[0] in (0xc4, 0xc5) else None
     for a in alts:
         op = opcode(a)
+        if op and op[-1] >= 0x100:
+            if op[-1] != w:
+                continue
+            op = op[:-1]
         if op and contains(b, op):
-            print(f'{name}\t{" ".join(f"{x:02x}" for x in op)}')
+            print(f'{name}\t{" ".join(f"{x:02x}" for x in opcode(a))}')
             break

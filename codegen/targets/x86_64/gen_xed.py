@@ -336,6 +336,97 @@ def legacy(rec, form, eosz, rexw, mem):
     return params, enc, holes
 
 
+VCLASS = {'XMM': 'x', 'YMM': 'y', 'MASK': 'k', 'VGPR32': 'r32', 'VGPR64': 'r64', 'TMM': 'tmm', 'GPR32': 'r32',
+          'GPR64': 'r64'}
+
+
+def vex(rec, form, mem):
+    """A VEX form as (params, enc, holes)."""
+    pat = form['PATTERN']
+    p = set(pat)
+    ops = [Op(t) for t in form['OPERANDS'].split()]
+    params, holes = [], []
+    fields = {}
+    imms = []
+    memop = None
+    for o in ops:
+        if o.supp or o.kind.startswith('EMX_BROADCAST'):
+            continue
+        if o.kind == 'REG':
+            if o.val.startswith('XED_REG_'):
+                continue
+            base, _, field = o.val[:-2].rpartition('_')
+            cls = VCLASS.get(base)
+            if cls is None or field not in ('R', 'B', 'N', 'SE'):
+                raise Unsupported(o.val)
+            name = {'R': 'r', 'B': 'b', 'N': 'n', 'SE': 'e'}[field]
+            fields[field] = name
+            params.append(f'i64 "reg"="{cls}" %{name}')
+            holes.append('{' + name + '}')
+        elif o.kind == 'MEM':
+            memop = o
+            if mem is None:
+                raise Unsupported('memory')
+            params += mem[1]
+            holes.append(mem[2])
+        elif o.kind == 'IMM':
+            name = 'c' if not imms else 'c2'
+            imms.append(name)
+            params.append(f'i64 "imm" %{name}')
+            holes.append('${' + name + '}')
+        else:
+            raise Unsupported(o.kind)
+    if (memop is None) != (mem is None):
+        raise Unsupported('memory form')
+    if any(t in p for t in ('VMODRM_XMM()', 'VMODRM_YMM()', 'SIB', 'MAP7')):
+        raise Unsupported('vector index, sibmem or map 7')
+    pp = 1 if 'V66' in p else 2 if 'VF3' in p else 3 if 'VF2' in p else 0
+    mp = 1 if 'V0F' in p else 2 if 'V0F38' in p else 3 if 'V0F3A' in p else None
+    if mp is None:
+        raise Unsupported('map')
+    w = 1 if p & {'W1', 'rexw_prefix'} else 0
+    l = 1 if 'VL256' in p else 0
+    r = fields.get('R')
+    reg_bits = None
+    for t in pat:
+        m = re.match(r'REG\[0b([01]{3})\]$', t)
+        if m:
+            reg_bits = int(m.group(1), 2)
+    if r is None and reg_bits is None:
+        raise Unsupported('reg')
+    rr = r if r else str(reg_bits)
+    v = fields.get('N', '0')
+    opc = [bits8(int(t, 16)) for t in pat if re.match(r'0x[0-9A-Fa-f]{2}$', t)]
+    if len(opc) != 1:
+        raise Unsupported('opcode')
+    if mem:
+        base, index = mem[4].split(', ')[:2]
+        prefix = f'vexm({rr}, {base}, {index}, {mp}, {w}, {v}, {l}, {pp})'
+        modrm = f'rm({rr}, {mem[4]})'
+    else:
+        b = fields.get('B')
+        rm_bits = None
+        for t in pat:
+            m = re.match(r'RM\[0b([01]{3})\]$', t)
+            if m:
+                rm_bits = int(m.group(1), 2)
+        if b is None and rm_bits is None:
+            raise Unsupported('rm')
+        prefix = f'vex({rr}, 0, {b or 0}, {mp}, {w}, {v}, {l}, {pp})'
+        regpart = f'reg:3={r}&7' if r else bits8(reg_bits)[5:]
+        rmpart = f'rm:3={b}&7' if b else bits8(rm_bits)[5:]
+        modrm = f'11 {regpart} {rmpart}'
+    pieces = [prefix, opc[0], modrm]
+    for t in pat:
+        if t == 'UIMM8()':
+            pieces.append(f'i1:8={imms[0]}')
+        elif t == 'SE_IMM8()':
+            # is4: a register in the top four bits, an immediate below.
+            low = f'i1:4={imms[0]}' if imms else '0000'
+            pieces.append(f'is4:4={fields["SE"]} {low}')
+    return params, ' | '.join(pieces), holes
+
+
 def forms(xed):
     """Every form, as (name, params, enc, holes, extension)."""
     seen = set()
@@ -343,19 +434,23 @@ def forms(xed):
         pat = form['PATTERN']
         if any(t in SKIP_TOKENS or OFF_FEATURES.match(t) for t in pat):
             continue
-        if any(t in ('VV1', 'EVV', 'XOPV') or t.startswith('VEXVALID') for t in pat):
-            continue  # VEX, EVEX, XOP: later
+        kind = 'vex' if 'VV1' in pat else 'legacy'
+        if any(t in ('EVV', 'XOPV') or t.startswith('VEXVALID') for t in pat):
+            continue  # EVEX, XOP: later
         if 'apx' in rec['file']:
             continue
         ops = [Op(t) for t in form['OPERANDS'].split()]
         base = rec['ICLASS']
         has_mem = any(o.kind in ('MEM', 'AGEN') and not o.supp for o in ops)
-        for eosz, rexw in sizes(pat, ops):
+        for eosz, rexw in (sizes(pat, ops) if kind == 'legacy' else [(0, False)]):
             for mem in (MEMS if has_mem else [None]):
                 name = f"{base}_{k}" + (f"_{eosz}" if eosz else '') + (f"_{mem[0]}" if mem else '')
                 name = re.sub(r'[^A-Za-z0-9_]', '_', name)
                 try:
-                    params, enc, holes = legacy(rec, form, eosz, rexw, mem)
+                    if kind == 'vex':
+                        params, enc, holes = vex(rec, form, mem)
+                    else:
+                        params, enc, holes = legacy(rec, form, eosz, rexw, mem)
                 except Unsupported as e:
                     sys.stderr.write(f'skipped {name}: {e}\n')
                     continue
@@ -426,6 +521,15 @@ def class_of(params, op):
     return None
 
 
+def two_byte_vex(alt):
+    """The operand in ModRM.rm of a VEX register form that may have the
+    two-byte prefix (map 0F, W0), or None."""
+    m = re.match(r'(?:if\(\S+\) )*vex\((\w+), 0, (\w+), (\w+), (\w+),', alt)
+    if m and m.group(3) == '1' and m.group(4) == '0' and not m.group(2).isdigit():
+        return m.group(2)
+    return None
+
+
 def opcode(alt):
     """The bytes of an alternative's pieces that are literal bits only (as
     order_llvm.py reads them)."""
@@ -435,6 +539,10 @@ def opcode(alt):
         p = re.sub(r'^(if\(\S+\)\s*)+', '', p)
         if re.fullmatch(r'[01]{8}', p):
             out.append(int(p, 2))
+    # And a VEX prefix's W bit, as 0x100 + W.
+    m = re.search(r'vexm?\([^,]+, [^,]+, [^,]+, [^,]+, (\d)', alt)
+    if m:
+        out.append(0x100 + int(m.group(1)))
     return out
 
 
@@ -524,6 +632,7 @@ def merged(xed):
     # Those llvm-mc 18 does not assemble (rejects.txt): newer than it, or
     # forms only newer disassemblers write.
     rejects = set(open(os.path.join(HERE, 'rejects.txt')).read().split())
+    commute = set(open(os.path.join(HERE, 'commute.txt')).read().split())
     order = {}
     for line in open(os.path.join(HERE, 'order.txt')):
         name, ops = line.rstrip('\n').split('\t')
@@ -534,6 +643,21 @@ def merged(xed):
         # Shortest first; of those as short, the one llvm-mc writes.
         pref = order.get('X_' + g['name'])
         alts = [e for _, e in sorted(g['alts'], key=lambda a: (a[0], opcode(a[1]) != pref))]
+        # A commutative VEX operation llvm-mc swaps the sources of, for the
+        # two-byte prefix: the swapped form as an alternative.
+        swapped = lambda e: re.sub(r'\bo([01])\b', lambda m: 'o' + str(1 - int(m.group(1))), e)
+        if 'X_' + g['name'] in commute:
+            alts.append(swapped(alts[0]))
+        # A packed compare is commuted when its predicate is symmetric (equal,
+        # unordered, their negations, false, true: low bits 00 or 11).
+        elif re.match(r'vcmpp[sd] \$\{c\}, \{o0\}, \{o1\}, \{o2\}$', tpl):
+            alts.append('if(((c&3)==0)|((c&3)==3)) ' + swapped(alts[0]))
+        # Where VEX forms differ in which register is in ModRM.rm (a move's
+        # load and store forms, or a swap), each that can have the two-byte
+        # prefix (ModRM.rm below 8) goes before any with three.
+        short = [a for a in alts if two_byte_vex(a)]
+        if len({two_byte_vex(a) for a in short}) > 1:
+            alts = [f'if({two_byte_vex(a)}<8) {a}' for a in short] + alts
         enc = alts[0] if len(alts) == 1 else '{ ' + ' ; '.join(alts) + ' }'
         yield g['name'], list(params), enc, tpl, g['rip'] + (' "nodecode"' if g.get('nodecode') else '')
 

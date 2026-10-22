@@ -1,3 +1,1917 @@
+X_VFMADDSUBPS_31_m	vfmaddsubps {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMADDSUBPS_31_x	vfmaddsubps {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMADDSUBPS_31_p	vfmaddsubps {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMADDSUBPS_32	vfmaddsubps {e}, {b}, {n}, {r}	6
+X_VFMADDSUBPS_33_m	vfmaddsubps {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMADDSUBPS_33_x	vfmaddsubps {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMADDSUBPS_33_p	vfmaddsubps {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMADDSUBPS_34	vfmaddsubps {b}, {e}, {n}, {r}	6
+X_VFMADDSUBPS_35_m	vfmaddsubps {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMADDSUBPS_35_x	vfmaddsubps {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMADDSUBPS_35_p	vfmaddsubps {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMADDSUBPS_36	vfmaddsubps {e}, {b}, {n}, {r}	6
+X_VFMADDSUBPS_37_m	vfmaddsubps {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMADDSUBPS_37_x	vfmaddsubps {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMADDSUBPS_37_p	vfmaddsubps {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMADDSUBPS_38	vfmaddsubps {b}, {e}, {n}, {r}	6
+X_VFMADDSUBPD_39_m	vfmaddsubpd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMADDSUBPD_39_x	vfmaddsubpd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMADDSUBPD_39_p	vfmaddsubpd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMADDSUBPD_40	vfmaddsubpd {e}, {b}, {n}, {r}	6
+X_VFMADDSUBPD_41_m	vfmaddsubpd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMADDSUBPD_41_x	vfmaddsubpd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMADDSUBPD_41_p	vfmaddsubpd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMADDSUBPD_42	vfmaddsubpd {b}, {e}, {n}, {r}	6
+X_VFMADDSUBPD_43_m	vfmaddsubpd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMADDSUBPD_43_x	vfmaddsubpd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMADDSUBPD_43_p	vfmaddsubpd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMADDSUBPD_44	vfmaddsubpd {e}, {b}, {n}, {r}	6
+X_VFMADDSUBPD_45_m	vfmaddsubpd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMADDSUBPD_45_x	vfmaddsubpd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMADDSUBPD_45_p	vfmaddsubpd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMADDSUBPD_46	vfmaddsubpd {b}, {e}, {n}, {r}	6
+X_VFMSUBADDPS_47_m	vfmsubaddps {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMSUBADDPS_47_x	vfmsubaddps {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMSUBADDPS_47_p	vfmsubaddps {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMSUBADDPS_48	vfmsubaddps {e}, {b}, {n}, {r}	6
+X_VFMSUBADDPS_49_m	vfmsubaddps {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMSUBADDPS_49_x	vfmsubaddps {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMSUBADDPS_49_p	vfmsubaddps {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMSUBADDPS_50	vfmsubaddps {b}, {e}, {n}, {r}	6
+X_VFMSUBADDPS_51_m	vfmsubaddps {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMSUBADDPS_51_x	vfmsubaddps {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMSUBADDPS_51_p	vfmsubaddps {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMSUBADDPS_52	vfmsubaddps {e}, {b}, {n}, {r}	6
+X_VFMSUBADDPS_53_m	vfmsubaddps {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMSUBADDPS_53_x	vfmsubaddps {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMSUBADDPS_53_p	vfmsubaddps {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMSUBADDPS_54	vfmsubaddps {b}, {e}, {n}, {r}	6
+X_VFMSUBADDPD_55_m	vfmsubaddpd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMSUBADDPD_55_x	vfmsubaddpd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMSUBADDPD_55_p	vfmsubaddpd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMSUBADDPD_56	vfmsubaddpd {e}, {b}, {n}, {r}	6
+X_VFMSUBADDPD_57_m	vfmsubaddpd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMSUBADDPD_57_x	vfmsubaddpd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMSUBADDPD_57_p	vfmsubaddpd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMSUBADDPD_58	vfmsubaddpd {b}, {e}, {n}, {r}	6
+X_VFMSUBADDPD_59_m	vfmsubaddpd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMSUBADDPD_59_x	vfmsubaddpd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMSUBADDPD_59_p	vfmsubaddpd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMSUBADDPD_60	vfmsubaddpd {e}, {b}, {n}, {r}	6
+X_VFMSUBADDPD_61_m	vfmsubaddpd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMSUBADDPD_61_x	vfmsubaddpd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMSUBADDPD_61_p	vfmsubaddpd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMSUBADDPD_62	vfmsubaddpd {b}, {e}, {n}, {r}	6
+X_VFMADDPS_63_m	vfmaddps {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMADDPS_63_x	vfmaddps {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMADDPS_63_p	vfmaddps {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMADDPS_64	vfmaddps {e}, {b}, {n}, {r}	6
+X_VFMADDPS_65_m	vfmaddps {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMADDPS_65_x	vfmaddps {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMADDPS_65_p	vfmaddps {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMADDPS_66	vfmaddps {b}, {e}, {n}, {r}	6
+X_VFMADDPS_67_m	vfmaddps {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMADDPS_67_x	vfmaddps {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMADDPS_67_p	vfmaddps {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMADDPS_68	vfmaddps {e}, {b}, {n}, {r}	6
+X_VFMADDPS_69_m	vfmaddps {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMADDPS_69_x	vfmaddps {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMADDPS_69_p	vfmaddps {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMADDPS_70	vfmaddps {b}, {e}, {n}, {r}	6
+X_VFMADDPD_71_m	vfmaddpd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMADDPD_71_x	vfmaddpd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMADDPD_71_p	vfmaddpd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMADDPD_72	vfmaddpd {e}, {b}, {n}, {r}	6
+X_VFMADDPD_73_m	vfmaddpd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMADDPD_73_x	vfmaddpd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMADDPD_73_p	vfmaddpd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMADDPD_74	vfmaddpd {b}, {e}, {n}, {r}	6
+X_VFMADDPD_75_m	vfmaddpd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMADDPD_75_x	vfmaddpd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMADDPD_75_p	vfmaddpd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMADDPD_76	vfmaddpd {e}, {b}, {n}, {r}	6
+X_VFMADDPD_77_m	vfmaddpd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMADDPD_77_x	vfmaddpd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMADDPD_77_p	vfmaddpd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMADDPD_78	vfmaddpd {b}, {e}, {n}, {r}	6
+X_VFMADDSS_79_m	vfmaddss {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMADDSS_79_x	vfmaddss {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMADDSS_79_p	vfmaddss {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMADDSS_80	vfmaddss {e}, {b}, {n}, {r}	6
+X_VFMADDSS_81_m	vfmaddss {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMADDSS_81_x	vfmaddss {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMADDSS_81_p	vfmaddss {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMADDSS_82	vfmaddss {b}, {e}, {n}, {r}	6
+X_VFMADDSD_83_m	vfmaddsd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMADDSD_83_x	vfmaddsd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMADDSD_83_p	vfmaddsd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMADDSD_84	vfmaddsd {e}, {b}, {n}, {r}	6
+X_VFMADDSD_85_m	vfmaddsd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMADDSD_85_x	vfmaddsd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMADDSD_85_p	vfmaddsd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMADDSD_86	vfmaddsd {b}, {e}, {n}, {r}	6
+X_VFMSUBPS_87_m	vfmsubps {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMSUBPS_87_x	vfmsubps {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMSUBPS_87_p	vfmsubps {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMSUBPS_88	vfmsubps {e}, {b}, {n}, {r}	6
+X_VFMSUBPS_89_m	vfmsubps {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMSUBPS_89_x	vfmsubps {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMSUBPS_89_p	vfmsubps {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMSUBPS_90	vfmsubps {b}, {e}, {n}, {r}	6
+X_VFMSUBPS_91_m	vfmsubps {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMSUBPS_91_x	vfmsubps {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMSUBPS_91_p	vfmsubps {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMSUBPS_92	vfmsubps {e}, {b}, {n}, {r}	6
+X_VFMSUBPS_93_m	vfmsubps {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMSUBPS_93_x	vfmsubps {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMSUBPS_93_p	vfmsubps {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMSUBPS_94	vfmsubps {b}, {e}, {n}, {r}	6
+X_VFMSUBPD_95_m	vfmsubpd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMSUBPD_95_x	vfmsubpd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMSUBPD_95_p	vfmsubpd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMSUBPD_96	vfmsubpd {e}, {b}, {n}, {r}	6
+X_VFMSUBPD_97_m	vfmsubpd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMSUBPD_97_x	vfmsubpd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMSUBPD_97_p	vfmsubpd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMSUBPD_98	vfmsubpd {b}, {e}, {n}, {r}	6
+X_VFMSUBPD_99_m	vfmsubpd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMSUBPD_99_x	vfmsubpd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMSUBPD_99_p	vfmsubpd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMSUBPD_100	vfmsubpd {e}, {b}, {n}, {r}	6
+X_VFMSUBPD_101_m	vfmsubpd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMSUBPD_101_x	vfmsubpd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMSUBPD_101_p	vfmsubpd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMSUBPD_102	vfmsubpd {b}, {e}, {n}, {r}	6
+X_VFMSUBSS_103_m	vfmsubss {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMSUBSS_103_x	vfmsubss {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMSUBSS_103_p	vfmsubss {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMSUBSS_104	vfmsubss {e}, {b}, {n}, {r}	6
+X_VFMSUBSS_105_m	vfmsubss {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMSUBSS_105_x	vfmsubss {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMSUBSS_105_p	vfmsubss {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMSUBSS_106	vfmsubss {b}, {e}, {n}, {r}	6
+X_VFMSUBSD_107_m	vfmsubsd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFMSUBSD_107_x	vfmsubsd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFMSUBSD_107_p	vfmsubsd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFMSUBSD_108	vfmsubsd {e}, {b}, {n}, {r}	6
+X_VFMSUBSD_109_m	vfmsubsd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFMSUBSD_109_x	vfmsubsd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFMSUBSD_109_p	vfmsubsd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFMSUBSD_110	vfmsubsd {b}, {e}, {n}, {r}	6
+X_VFNMADDPS_111_m	vfnmaddps {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFNMADDPS_111_x	vfnmaddps {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFNMADDPS_111_p	vfnmaddps {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFNMADDPS_112	vfnmaddps {e}, {b}, {n}, {r}	6
+X_VFNMADDPS_113_m	vfnmaddps {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFNMADDPS_113_x	vfnmaddps {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFNMADDPS_113_p	vfnmaddps {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFNMADDPS_114	vfnmaddps {b}, {e}, {n}, {r}	6
+X_VFNMADDPS_115_m	vfnmaddps {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFNMADDPS_115_x	vfnmaddps {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFNMADDPS_115_p	vfnmaddps {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFNMADDPS_116	vfnmaddps {e}, {b}, {n}, {r}	6
+X_VFNMADDPS_117_m	vfnmaddps {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFNMADDPS_117_x	vfnmaddps {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFNMADDPS_117_p	vfnmaddps {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFNMADDPS_118	vfnmaddps {b}, {e}, {n}, {r}	6
+X_VFNMADDPD_119_m	vfnmaddpd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFNMADDPD_119_x	vfnmaddpd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFNMADDPD_119_p	vfnmaddpd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFNMADDPD_120	vfnmaddpd {e}, {b}, {n}, {r}	6
+X_VFNMADDPD_121_m	vfnmaddpd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFNMADDPD_121_x	vfnmaddpd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFNMADDPD_121_p	vfnmaddpd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFNMADDPD_122	vfnmaddpd {b}, {e}, {n}, {r}	6
+X_VFNMADDPD_123_m	vfnmaddpd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFNMADDPD_123_x	vfnmaddpd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFNMADDPD_123_p	vfnmaddpd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFNMADDPD_124	vfnmaddpd {e}, {b}, {n}, {r}	6
+X_VFNMADDPD_125_m	vfnmaddpd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFNMADDPD_125_x	vfnmaddpd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFNMADDPD_125_p	vfnmaddpd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFNMADDPD_126	vfnmaddpd {b}, {e}, {n}, {r}	6
+X_VFNMADDSS_127_m	vfnmaddss {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFNMADDSS_127_x	vfnmaddss {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFNMADDSS_127_p	vfnmaddss {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFNMADDSS_128	vfnmaddss {e}, {b}, {n}, {r}	6
+X_VFNMADDSS_129_m	vfnmaddss {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFNMADDSS_129_x	vfnmaddss {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFNMADDSS_129_p	vfnmaddss {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFNMADDSS_130	vfnmaddss {b}, {e}, {n}, {r}	6
+X_VFNMADDSD_131_m	vfnmaddsd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFNMADDSD_131_x	vfnmaddsd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFNMADDSD_131_p	vfnmaddsd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFNMADDSD_132	vfnmaddsd {e}, {b}, {n}, {r}	6
+X_VFNMADDSD_133_m	vfnmaddsd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFNMADDSD_133_x	vfnmaddsd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFNMADDSD_133_p	vfnmaddsd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFNMADDSD_134	vfnmaddsd {b}, {e}, {n}, {r}	6
+X_VFNMSUBPS_135_m	vfnmsubps {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFNMSUBPS_135_x	vfnmsubps {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFNMSUBPS_135_p	vfnmsubps {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFNMSUBPS_136	vfnmsubps {e}, {b}, {n}, {r}	6
+X_VFNMSUBPS_137_m	vfnmsubps {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFNMSUBPS_137_x	vfnmsubps {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFNMSUBPS_137_p	vfnmsubps {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFNMSUBPS_138	vfnmsubps {b}, {e}, {n}, {r}	6
+X_VFNMSUBPS_139_m	vfnmsubps {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFNMSUBPS_139_x	vfnmsubps {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFNMSUBPS_139_p	vfnmsubps {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFNMSUBPS_140	vfnmsubps {e}, {b}, {n}, {r}	6
+X_VFNMSUBPS_141_m	vfnmsubps {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFNMSUBPS_141_x	vfnmsubps {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFNMSUBPS_141_p	vfnmsubps {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFNMSUBPS_142	vfnmsubps {b}, {e}, {n}, {r}	6
+X_VFNMSUBPD_143_m	vfnmsubpd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFNMSUBPD_143_x	vfnmsubpd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFNMSUBPD_143_p	vfnmsubpd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFNMSUBPD_144	vfnmsubpd {e}, {b}, {n}, {r}	6
+X_VFNMSUBPD_145_m	vfnmsubpd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFNMSUBPD_145_x	vfnmsubpd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFNMSUBPD_145_p	vfnmsubpd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFNMSUBPD_146	vfnmsubpd {b}, {e}, {n}, {r}	6
+X_VFNMSUBPD_147_m	vfnmsubpd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFNMSUBPD_147_x	vfnmsubpd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFNMSUBPD_147_p	vfnmsubpd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFNMSUBPD_148	vfnmsubpd {e}, {b}, {n}, {r}	6
+X_VFNMSUBPD_149_m	vfnmsubpd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFNMSUBPD_149_x	vfnmsubpd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFNMSUBPD_149_p	vfnmsubpd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFNMSUBPD_150	vfnmsubpd {b}, {e}, {n}, {r}	6
+X_VFNMSUBSS_151_m	vfnmsubss {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFNMSUBSS_151_x	vfnmsubss {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFNMSUBSS_151_p	vfnmsubss {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFNMSUBSS_152	vfnmsubss {e}, {b}, {n}, {r}	6
+X_VFNMSUBSS_153_m	vfnmsubss {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFNMSUBSS_153_x	vfnmsubss {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFNMSUBSS_153_p	vfnmsubss {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFNMSUBSS_154	vfnmsubss {b}, {e}, {n}, {r}	6
+X_VFNMSUBSD_155_m	vfnmsubsd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VFNMSUBSD_155_x	vfnmsubsd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VFNMSUBSD_155_p	vfnmsubsd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VFNMSUBSD_156	vfnmsubsd {e}, {b}, {n}, {r}	6
+X_VFNMSUBSD_157_m	vfnmsubsd {m.disp}({m.base}), {e}, {n}, {r}	7
+X_VFNMSUBSD_157_x	vfnmsubsd {m.disp}({m.base},{m.index},{m.scale}), {e}, {n}, {r}	8
+X_VFNMSUBSD_157_p	vfnmsubsd {m.sym}(%rip), {e}, {n}, {r}	10
+X_VFNMSUBSD_158	vfnmsubsd {b}, {e}, {n}, {r}	6
+X_TCMMIMFP16PS_371	tcmmimfp16ps {n}, {b}, {r}	5
+X_TCMMRLFP16PS_372	tcmmrlfp16ps {n}, {b}, {r}	5
+X_TDPFP16PS_391	tdpfp16ps {n}, {b}, {r}	5
+X_LDTILECFG_392_m	ldtilecfg {m.disp}({m.base})	6
+X_LDTILECFG_392_x	ldtilecfg {m.disp}({m.base},{m.index},{m.scale})	7
+X_LDTILECFG_392_p	ldtilecfg {m.sym}(%rip)	9
+X_STTILECFG_393_m	sttilecfg {m.disp}({m.base})	6
+X_STTILECFG_393_x	sttilecfg {m.disp}({m.base},{m.index},{m.scale})	7
+X_STTILECFG_393_p	sttilecfg {m.sym}(%rip)	9
+X_TDPBF16PS_394	tdpbf16ps {n}, {b}, {r}	5
+X_TDPBSSD_395	tdpbssd {n}, {b}, {r}	5
+X_TDPBSUD_396	tdpbsud {n}, {b}, {r}	5
+X_TDPBUSD_397	tdpbusd {n}, {b}, {r}	5
+X_TDPBUUD_398	tdpbuud {n}, {b}, {r}	5
+X_TILERELEASE_401	tilerelease	5
+X_TILEZERO_403	tilezero {r}	5
+X_VBCSTNEBF162PS_2872_m	vbcstnebf162ps {m.disp}({m.base}), {r}	6
+X_VBCSTNEBF162PS_2872_x	vbcstnebf162ps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VBCSTNEBF162PS_2872_p	vbcstnebf162ps {m.sym}(%rip), {r}	9
+X_VBCSTNEBF162PS_2873_m	vbcstnebf162ps {m.disp}({m.base}), {r}	6
+X_VBCSTNEBF162PS_2873_x	vbcstnebf162ps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VBCSTNEBF162PS_2873_p	vbcstnebf162ps {m.sym}(%rip), {r}	9
+X_VBCSTNESH2PS_2874_m	vbcstnesh2ps {m.disp}({m.base}), {r}	6
+X_VBCSTNESH2PS_2874_x	vbcstnesh2ps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VBCSTNESH2PS_2874_p	vbcstnesh2ps {m.sym}(%rip), {r}	9
+X_VBCSTNESH2PS_2875_m	vbcstnesh2ps {m.disp}({m.base}), {r}	6
+X_VBCSTNESH2PS_2875_x	vbcstnesh2ps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VBCSTNESH2PS_2875_p	vbcstnesh2ps {m.sym}(%rip), {r}	9
+X_VCVTNEEBF162PS_2876_m	vcvtneebf162ps {m.disp}({m.base}), {r}	6
+X_VCVTNEEBF162PS_2876_x	vcvtneebf162ps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VCVTNEEBF162PS_2876_p	vcvtneebf162ps {m.sym}(%rip), {r}	9
+X_VCVTNEEBF162PS_2877_m	vcvtneebf162ps {m.disp}({m.base}), {r}	6
+X_VCVTNEEBF162PS_2877_x	vcvtneebf162ps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VCVTNEEBF162PS_2877_p	vcvtneebf162ps {m.sym}(%rip), {r}	9
+X_VCVTNEEPH2PS_2878_m	vcvtneeph2ps {m.disp}({m.base}), {r}	6
+X_VCVTNEEPH2PS_2878_x	vcvtneeph2ps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VCVTNEEPH2PS_2878_p	vcvtneeph2ps {m.sym}(%rip), {r}	9
+X_VCVTNEEPH2PS_2879_m	vcvtneeph2ps {m.disp}({m.base}), {r}	6
+X_VCVTNEEPH2PS_2879_x	vcvtneeph2ps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VCVTNEEPH2PS_2879_p	vcvtneeph2ps {m.sym}(%rip), {r}	9
+X_VCVTNEOBF162PS_2880_m	vcvtneobf162ps {m.disp}({m.base}), {r}	6
+X_VCVTNEOBF162PS_2880_x	vcvtneobf162ps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VCVTNEOBF162PS_2880_p	vcvtneobf162ps {m.sym}(%rip), {r}	9
+X_VCVTNEOBF162PS_2881_m	vcvtneobf162ps {m.disp}({m.base}), {r}	6
+X_VCVTNEOBF162PS_2881_x	vcvtneobf162ps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VCVTNEOBF162PS_2881_p	vcvtneobf162ps {m.sym}(%rip), {r}	9
+X_VCVTNEOPH2PS_2882_m	vcvtneoph2ps {m.disp}({m.base}), {r}	6
+X_VCVTNEOPH2PS_2882_x	vcvtneoph2ps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VCVTNEOPH2PS_2882_p	vcvtneoph2ps {m.sym}(%rip), {r}	9
+X_VCVTNEOPH2PS_2883_m	vcvtneoph2ps {m.disp}({m.base}), {r}	6
+X_VCVTNEOPH2PS_2883_x	vcvtneoph2ps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VCVTNEOPH2PS_2883_p	vcvtneoph2ps {m.sym}(%rip), {r}	9
+X_VPDPWSUD_2888	vpdpwsud {b}, {n}, {r}	5
+X_VPDPWSUD_2889_m	vpdpwsud {m.disp}({m.base}), {n}, {r}	6
+X_VPDPWSUD_2889_x	vpdpwsud {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPWSUD_2889_p	vpdpwsud {m.sym}(%rip), {n}, {r}	9
+X_VPDPWSUD_2890	vpdpwsud {b}, {n}, {r}	5
+X_VPDPWSUD_2891_m	vpdpwsud {m.disp}({m.base}), {n}, {r}	6
+X_VPDPWSUD_2891_x	vpdpwsud {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPWSUD_2891_p	vpdpwsud {m.sym}(%rip), {n}, {r}	9
+X_VPDPWSUDS_2892	vpdpwsuds {b}, {n}, {r}	5
+X_VPDPWSUDS_2893_m	vpdpwsuds {m.disp}({m.base}), {n}, {r}	6
+X_VPDPWSUDS_2893_x	vpdpwsuds {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPWSUDS_2893_p	vpdpwsuds {m.sym}(%rip), {n}, {r}	9
+X_VPDPWSUDS_2894	vpdpwsuds {b}, {n}, {r}	5
+X_VPDPWSUDS_2895_m	vpdpwsuds {m.disp}({m.base}), {n}, {r}	6
+X_VPDPWSUDS_2895_x	vpdpwsuds {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPWSUDS_2895_p	vpdpwsuds {m.sym}(%rip), {n}, {r}	9
+X_VPDPWUSD_2896	vpdpwusd {b}, {n}, {r}	5
+X_VPDPWUSD_2897_m	vpdpwusd {m.disp}({m.base}), {n}, {r}	6
+X_VPDPWUSD_2897_x	vpdpwusd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPWUSD_2897_p	vpdpwusd {m.sym}(%rip), {n}, {r}	9
+X_VPDPWUSD_2898	vpdpwusd {b}, {n}, {r}	5
+X_VPDPWUSD_2899_m	vpdpwusd {m.disp}({m.base}), {n}, {r}	6
+X_VPDPWUSD_2899_x	vpdpwusd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPWUSD_2899_p	vpdpwusd {m.sym}(%rip), {n}, {r}	9
+X_VPDPWUSDS_2900	vpdpwusds {b}, {n}, {r}	5
+X_VPDPWUSDS_2901_m	vpdpwusds {m.disp}({m.base}), {n}, {r}	6
+X_VPDPWUSDS_2901_x	vpdpwusds {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPWUSDS_2901_p	vpdpwusds {m.sym}(%rip), {n}, {r}	9
+X_VPDPWUSDS_2902	vpdpwusds {b}, {n}, {r}	5
+X_VPDPWUSDS_2903_m	vpdpwusds {m.disp}({m.base}), {n}, {r}	6
+X_VPDPWUSDS_2903_x	vpdpwusds {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPWUSDS_2903_p	vpdpwusds {m.sym}(%rip), {n}, {r}	9
+X_VPDPWUUD_2904	vpdpwuud {b}, {n}, {r}	5
+X_VPDPWUUD_2905_m	vpdpwuud {m.disp}({m.base}), {n}, {r}	6
+X_VPDPWUUD_2905_x	vpdpwuud {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPWUUD_2905_p	vpdpwuud {m.sym}(%rip), {n}, {r}	9
+X_VPDPWUUD_2906	vpdpwuud {b}, {n}, {r}	5
+X_VPDPWUUD_2907_m	vpdpwuud {m.disp}({m.base}), {n}, {r}	6
+X_VPDPWUUD_2907_x	vpdpwuud {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPWUUD_2907_p	vpdpwuud {m.sym}(%rip), {n}, {r}	9
+X_VPDPWUUDS_2908	vpdpwuuds {b}, {n}, {r}	5
+X_VPDPWUUDS_2909_m	vpdpwuuds {m.disp}({m.base}), {n}, {r}	6
+X_VPDPWUUDS_2909_x	vpdpwuuds {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPWUUDS_2909_p	vpdpwuuds {m.sym}(%rip), {n}, {r}	9
+X_VPDPWUUDS_2910	vpdpwuuds {b}, {n}, {r}	5
+X_VPDPWUUDS_2911_m	vpdpwuuds {m.disp}({m.base}), {n}, {r}	6
+X_VPDPWUUDS_2911_x	vpdpwuuds {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPWUUDS_2911_p	vpdpwuuds {m.sym}(%rip), {n}, {r}	9
+X_VPDPBSSD_2912	vpdpbssd {b}, {n}, {r}	5
+X_VPDPBSSD_2913_m	vpdpbssd {m.disp}({m.base}), {n}, {r}	6
+X_VPDPBSSD_2913_x	vpdpbssd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPBSSD_2913_p	vpdpbssd {m.sym}(%rip), {n}, {r}	9
+X_VPDPBSSD_2914	vpdpbssd {b}, {n}, {r}	5
+X_VPDPBSSD_2915_m	vpdpbssd {m.disp}({m.base}), {n}, {r}	6
+X_VPDPBSSD_2915_x	vpdpbssd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPBSSD_2915_p	vpdpbssd {m.sym}(%rip), {n}, {r}	9
+X_VPDPBSSDS_2916	vpdpbssds {b}, {n}, {r}	5
+X_VPDPBSSDS_2917_m	vpdpbssds {m.disp}({m.base}), {n}, {r}	6
+X_VPDPBSSDS_2917_x	vpdpbssds {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPBSSDS_2917_p	vpdpbssds {m.sym}(%rip), {n}, {r}	9
+X_VPDPBSSDS_2918	vpdpbssds {b}, {n}, {r}	5
+X_VPDPBSSDS_2919_m	vpdpbssds {m.disp}({m.base}), {n}, {r}	6
+X_VPDPBSSDS_2919_x	vpdpbssds {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPBSSDS_2919_p	vpdpbssds {m.sym}(%rip), {n}, {r}	9
+X_VPDPBSUD_2920	vpdpbsud {b}, {n}, {r}	5
+X_VPDPBSUD_2921_m	vpdpbsud {m.disp}({m.base}), {n}, {r}	6
+X_VPDPBSUD_2921_x	vpdpbsud {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPBSUD_2921_p	vpdpbsud {m.sym}(%rip), {n}, {r}	9
+X_VPDPBSUD_2922	vpdpbsud {b}, {n}, {r}	5
+X_VPDPBSUD_2923_m	vpdpbsud {m.disp}({m.base}), {n}, {r}	6
+X_VPDPBSUD_2923_x	vpdpbsud {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPBSUD_2923_p	vpdpbsud {m.sym}(%rip), {n}, {r}	9
+X_VPDPBSUDS_2924	vpdpbsuds {b}, {n}, {r}	5
+X_VPDPBSUDS_2925_m	vpdpbsuds {m.disp}({m.base}), {n}, {r}	6
+X_VPDPBSUDS_2925_x	vpdpbsuds {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPBSUDS_2925_p	vpdpbsuds {m.sym}(%rip), {n}, {r}	9
+X_VPDPBSUDS_2926	vpdpbsuds {b}, {n}, {r}	5
+X_VPDPBSUDS_2927_m	vpdpbsuds {m.disp}({m.base}), {n}, {r}	6
+X_VPDPBSUDS_2927_x	vpdpbsuds {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPBSUDS_2927_p	vpdpbsuds {m.sym}(%rip), {n}, {r}	9
+X_VPDPBUUD_2928	vpdpbuud {b}, {n}, {r}	5
+X_VPDPBUUD_2929_m	vpdpbuud {m.disp}({m.base}), {n}, {r}	6
+X_VPDPBUUD_2929_x	vpdpbuud {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPBUUD_2929_p	vpdpbuud {m.sym}(%rip), {n}, {r}	9
+X_VPDPBUUD_2930	vpdpbuud {b}, {n}, {r}	5
+X_VPDPBUUD_2931_m	vpdpbuud {m.disp}({m.base}), {n}, {r}	6
+X_VPDPBUUD_2931_x	vpdpbuud {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPBUUD_2931_p	vpdpbuud {m.sym}(%rip), {n}, {r}	9
+X_VPDPBUUDS_2932	vpdpbuuds {b}, {n}, {r}	5
+X_VPDPBUUDS_2933_m	vpdpbuuds {m.disp}({m.base}), {n}, {r}	6
+X_VPDPBUUDS_2933_x	vpdpbuuds {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPBUUDS_2933_p	vpdpbuuds {m.sym}(%rip), {n}, {r}	9
+X_VPDPBUUDS_2934	vpdpbuuds {b}, {n}, {r}	5
+X_VPDPBUUDS_2935_m	vpdpbuuds {m.disp}({m.base}), {n}, {r}	6
+X_VPDPBUUDS_2935_x	vpdpbuuds {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPDPBUUDS_2935_p	vpdpbuuds {m.sym}(%rip), {n}, {r}	9
+X_VAESKEYGENASSIST_2952	vaeskeygenassist ${c}, {b}, {r}	6
+X_VAESKEYGENASSIST_2953_m	vaeskeygenassist ${c}, {m.disp}({m.base}), {r}	7
+X_VAESKEYGENASSIST_2953_x	vaeskeygenassist ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VAESKEYGENASSIST_2953_p	vaeskeygenassist ${c}, {m.sym}(%rip), {r}	10
+X_VAESENC_2954	vaesenc {b}, {n}, {r}	5
+X_VAESENC_2955_m	vaesenc {m.disp}({m.base}), {n}, {r}	6
+X_VAESENC_2955_x	vaesenc {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VAESENC_2955_p	vaesenc {m.sym}(%rip), {n}, {r}	9
+X_VAESENCLAST_2956	vaesenclast {b}, {n}, {r}	5
+X_VAESENCLAST_2957_m	vaesenclast {m.disp}({m.base}), {n}, {r}	6
+X_VAESENCLAST_2957_x	vaesenclast {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VAESENCLAST_2957_p	vaesenclast {m.sym}(%rip), {n}, {r}	9
+X_VAESDEC_2958	vaesdec {b}, {n}, {r}	5
+X_VAESDEC_2959_m	vaesdec {m.disp}({m.base}), {n}, {r}	6
+X_VAESDEC_2959_x	vaesdec {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VAESDEC_2959_p	vaesdec {m.sym}(%rip), {n}, {r}	9
+X_VAESDECLAST_2960	vaesdeclast {b}, {n}, {r}	5
+X_VAESDECLAST_2961_m	vaesdeclast {m.disp}({m.base}), {n}, {r}	6
+X_VAESDECLAST_2961_x	vaesdeclast {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VAESDECLAST_2961_p	vaesdeclast {m.sym}(%rip), {n}, {r}	9
+X_VAESIMC_2962	vaesimc {b}, {r}	5
+X_VAESIMC_2963_m	vaesimc {m.disp}({m.base}), {r}	6
+X_VAESIMC_2963_x	vaesimc {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VAESIMC_2963_p	vaesimc {m.sym}(%rip), {r}	9
+X_VADDPD_2964_m	vaddpd {m.disp}({m.base}), {n}, {r}	5
+X_VADDPD_2964_x	vaddpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VADDPD_2964_p	vaddpd {m.sym}(%rip), {n}, {r}	8
+X_VADDPD_2965	vaddpd {b}, {n}, {r}	4
+X_VADDPD_2966_m	vaddpd {m.disp}({m.base}), {n}, {r}	5
+X_VADDPD_2966_x	vaddpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VADDPD_2966_p	vaddpd {m.sym}(%rip), {n}, {r}	8
+X_VADDPD_2967	vaddpd {b}, {n}, {r}	4
+X_VADDPS_2968_m	vaddps {m.disp}({m.base}), {n}, {r}	5
+X_VADDPS_2968_x	vaddps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VADDPS_2968_p	vaddps {m.sym}(%rip), {n}, {r}	8
+X_VADDPS_2969	vaddps {b}, {n}, {r}	4
+X_VADDPS_2970_m	vaddps {m.disp}({m.base}), {n}, {r}	5
+X_VADDPS_2970_x	vaddps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VADDPS_2970_p	vaddps {m.sym}(%rip), {n}, {r}	8
+X_VADDPS_2971	vaddps {b}, {n}, {r}	4
+X_VADDSD_2972_m	vaddsd {m.disp}({m.base}), {n}, {r}	5
+X_VADDSD_2972_x	vaddsd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VADDSD_2972_p	vaddsd {m.sym}(%rip), {n}, {r}	8
+X_VADDSD_2973	vaddsd {b}, {n}, {r}	4
+X_VADDSS_2974_m	vaddss {m.disp}({m.base}), {n}, {r}	5
+X_VADDSS_2974_x	vaddss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VADDSS_2974_p	vaddss {m.sym}(%rip), {n}, {r}	8
+X_VADDSS_2975	vaddss {b}, {n}, {r}	4
+X_VADDSUBPD_2976_m	vaddsubpd {m.disp}({m.base}), {n}, {r}	5
+X_VADDSUBPD_2976_x	vaddsubpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VADDSUBPD_2976_p	vaddsubpd {m.sym}(%rip), {n}, {r}	8
+X_VADDSUBPD_2977	vaddsubpd {b}, {n}, {r}	4
+X_VADDSUBPD_2978_m	vaddsubpd {m.disp}({m.base}), {n}, {r}	5
+X_VADDSUBPD_2978_x	vaddsubpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VADDSUBPD_2978_p	vaddsubpd {m.sym}(%rip), {n}, {r}	8
+X_VADDSUBPD_2979	vaddsubpd {b}, {n}, {r}	4
+X_VADDSUBPS_2980_m	vaddsubps {m.disp}({m.base}), {n}, {r}	5
+X_VADDSUBPS_2980_x	vaddsubps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VADDSUBPS_2980_p	vaddsubps {m.sym}(%rip), {n}, {r}	8
+X_VADDSUBPS_2981	vaddsubps {b}, {n}, {r}	4
+X_VADDSUBPS_2982_m	vaddsubps {m.disp}({m.base}), {n}, {r}	5
+X_VADDSUBPS_2982_x	vaddsubps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VADDSUBPS_2982_p	vaddsubps {m.sym}(%rip), {n}, {r}	8
+X_VADDSUBPS_2983	vaddsubps {b}, {n}, {r}	4
+X_VANDPD_2984_m	vandpd {m.disp}({m.base}), {n}, {r}	5
+X_VANDPD_2984_x	vandpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VANDPD_2984_p	vandpd {m.sym}(%rip), {n}, {r}	8
+X_VANDPD_2985	vandpd {b}, {n}, {r}	4
+X_VANDPD_2986_m	vandpd {m.disp}({m.base}), {n}, {r}	5
+X_VANDPD_2986_x	vandpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VANDPD_2986_p	vandpd {m.sym}(%rip), {n}, {r}	8
+X_VANDPD_2987	vandpd {b}, {n}, {r}	4
+X_VANDPS_2988_m	vandps {m.disp}({m.base}), {n}, {r}	5
+X_VANDPS_2988_x	vandps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VANDPS_2988_p	vandps {m.sym}(%rip), {n}, {r}	8
+X_VANDPS_2989	vandps {b}, {n}, {r}	4
+X_VANDPS_2990_m	vandps {m.disp}({m.base}), {n}, {r}	5
+X_VANDPS_2990_x	vandps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VANDPS_2990_p	vandps {m.sym}(%rip), {n}, {r}	8
+X_VANDPS_2991	vandps {b}, {n}, {r}	4
+X_VANDNPD_2992_m	vandnpd {m.disp}({m.base}), {n}, {r}	5
+X_VANDNPD_2992_x	vandnpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VANDNPD_2992_p	vandnpd {m.sym}(%rip), {n}, {r}	8
+X_VANDNPD_2993	vandnpd {b}, {n}, {r}	4
+X_VANDNPD_2994_m	vandnpd {m.disp}({m.base}), {n}, {r}	5
+X_VANDNPD_2994_x	vandnpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VANDNPD_2994_p	vandnpd {m.sym}(%rip), {n}, {r}	8
+X_VANDNPD_2995	vandnpd {b}, {n}, {r}	4
+X_VANDNPS_2996_m	vandnps {m.disp}({m.base}), {n}, {r}	5
+X_VANDNPS_2996_x	vandnps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VANDNPS_2996_p	vandnps {m.sym}(%rip), {n}, {r}	8
+X_VANDNPS_2997	vandnps {b}, {n}, {r}	4
+X_VANDNPS_2998_m	vandnps {m.disp}({m.base}), {n}, {r}	5
+X_VANDNPS_2998_x	vandnps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VANDNPS_2998_p	vandnps {m.sym}(%rip), {n}, {r}	8
+X_VANDNPS_2999	vandnps {b}, {n}, {r}	4
+X_VBLENDPD_3000_m	vblendpd ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VBLENDPD_3000_x	vblendpd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VBLENDPD_3000_p	vblendpd ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VBLENDPD_3001	vblendpd ${c}, {b}, {n}, {r}	6
+X_VBLENDPD_3002_m	vblendpd ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VBLENDPD_3002_x	vblendpd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VBLENDPD_3002_p	vblendpd ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VBLENDPD_3003	vblendpd ${c}, {b}, {n}, {r}	6
+X_VBLENDPS_3004_m	vblendps ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VBLENDPS_3004_x	vblendps ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VBLENDPS_3004_p	vblendps ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VBLENDPS_3005	vblendps ${c}, {b}, {n}, {r}	6
+X_VBLENDPS_3006_m	vblendps ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VBLENDPS_3006_x	vblendps ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VBLENDPS_3006_p	vblendps ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VBLENDPS_3007	vblendps ${c}, {b}, {n}, {r}	6
+X_VCMPPD_3008_m	vcmppd ${c}, {m.disp}({m.base}), {n}, {r}	6
+X_VCMPPD_3008_x	vcmppd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VCMPPD_3008_p	vcmppd ${c}, {m.sym}(%rip), {n}, {r}	9
+X_VCMPPD_3009	vcmppd ${c}, {b}, {n}, {r}	5
+X_VCMPPD_3010_m	vcmppd ${c}, {m.disp}({m.base}), {n}, {r}	6
+X_VCMPPD_3010_x	vcmppd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VCMPPD_3010_p	vcmppd ${c}, {m.sym}(%rip), {n}, {r}	9
+X_VCMPPD_3011	vcmppd ${c}, {b}, {n}, {r}	5
+X_VCMPPS_3012_m	vcmpps ${c}, {m.disp}({m.base}), {n}, {r}	6
+X_VCMPPS_3012_x	vcmpps ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VCMPPS_3012_p	vcmpps ${c}, {m.sym}(%rip), {n}, {r}	9
+X_VCMPPS_3013	vcmpps ${c}, {b}, {n}, {r}	5
+X_VCMPPS_3014_m	vcmpps ${c}, {m.disp}({m.base}), {n}, {r}	6
+X_VCMPPS_3014_x	vcmpps ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VCMPPS_3014_p	vcmpps ${c}, {m.sym}(%rip), {n}, {r}	9
+X_VCMPPS_3015	vcmpps ${c}, {b}, {n}, {r}	5
+X_VCMPSD_3016_m	vcmpsd ${c}, {m.disp}({m.base}), {n}, {r}	6
+X_VCMPSD_3016_x	vcmpsd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VCMPSD_3016_p	vcmpsd ${c}, {m.sym}(%rip), {n}, {r}	9
+X_VCMPSD_3017	vcmpsd ${c}, {b}, {n}, {r}	5
+X_VCMPSS_3018_m	vcmpss ${c}, {m.disp}({m.base}), {n}, {r}	6
+X_VCMPSS_3018_x	vcmpss ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VCMPSS_3018_p	vcmpss ${c}, {m.sym}(%rip), {n}, {r}	9
+X_VCMPSS_3019	vcmpss ${c}, {b}, {n}, {r}	5
+X_VCOMISD_3020_m	vcomisd {m.disp}({m.base}), {r}	5
+X_VCOMISD_3020_x	vcomisd {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCOMISD_3020_p	vcomisd {m.sym}(%rip), {r}	8
+X_VCOMISD_3021	vcomisd {b}, {r}	4
+X_VCOMISS_3022_m	vcomiss {m.disp}({m.base}), {r}	5
+X_VCOMISS_3022_x	vcomiss {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCOMISS_3022_p	vcomiss {m.sym}(%rip), {r}	8
+X_VCOMISS_3023	vcomiss {b}, {r}	4
+X_VCVTDQ2PD_3024_m	vcvtdq2pd {m.disp}({m.base}), {r}	5
+X_VCVTDQ2PD_3024_x	vcvtdq2pd {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTDQ2PD_3024_p	vcvtdq2pd {m.sym}(%rip), {r}	8
+X_VCVTDQ2PD_3025	vcvtdq2pd {b}, {r}	4
+X_VCVTDQ2PD_3026_m	vcvtdq2pd {m.disp}({m.base}), {r}	5
+X_VCVTDQ2PD_3026_x	vcvtdq2pd {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTDQ2PD_3026_p	vcvtdq2pd {m.sym}(%rip), {r}	8
+X_VCVTDQ2PD_3027	vcvtdq2pd {b}, {r}	4
+X_VCVTDQ2PS_3028_m	vcvtdq2ps {m.disp}({m.base}), {r}	5
+X_VCVTDQ2PS_3028_x	vcvtdq2ps {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTDQ2PS_3028_p	vcvtdq2ps {m.sym}(%rip), {r}	8
+X_VCVTDQ2PS_3029	vcvtdq2ps {b}, {r}	4
+X_VCVTDQ2PS_3030_m	vcvtdq2ps {m.disp}({m.base}), {r}	5
+X_VCVTDQ2PS_3030_x	vcvtdq2ps {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTDQ2PS_3030_p	vcvtdq2ps {m.sym}(%rip), {r}	8
+X_VCVTDQ2PS_3031	vcvtdq2ps {b}, {r}	4
+X_VCVTPD2DQ_3032_m	vcvtpd2dqx {m.disp}({m.base}), {r}	5
+X_VCVTPD2DQ_3032_x	vcvtpd2dqx {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTPD2DQ_3032_p	vcvtpd2dqx {m.sym}(%rip), {r}	8
+X_VCVTPD2DQ_3033	vcvtpd2dq {b}, {r}	4
+X_VCVTPD2DQ_3034_m	vcvtpd2dqy {m.disp}({m.base}), {r}	5
+X_VCVTPD2DQ_3034_x	vcvtpd2dqy {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTPD2DQ_3034_p	vcvtpd2dqy {m.sym}(%rip), {r}	8
+X_VCVTPD2DQ_3035	vcvtpd2dq {b}, {r}	4
+X_VCVTTPD2DQ_3036_m	vcvttpd2dqx {m.disp}({m.base}), {r}	5
+X_VCVTTPD2DQ_3036_x	vcvttpd2dqx {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTTPD2DQ_3036_p	vcvttpd2dqx {m.sym}(%rip), {r}	8
+X_VCVTTPD2DQ_3037	vcvttpd2dq {b}, {r}	4
+X_VCVTTPD2DQ_3038_m	vcvttpd2dqy {m.disp}({m.base}), {r}	5
+X_VCVTTPD2DQ_3038_x	vcvttpd2dqy {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTTPD2DQ_3038_p	vcvttpd2dqy {m.sym}(%rip), {r}	8
+X_VCVTTPD2DQ_3039	vcvttpd2dq {b}, {r}	4
+X_VCVTPD2PS_3040_m	vcvtpd2psx {m.disp}({m.base}), {r}	5
+X_VCVTPD2PS_3040_x	vcvtpd2psx {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTPD2PS_3040_p	vcvtpd2psx {m.sym}(%rip), {r}	8
+X_VCVTPD2PS_3041	vcvtpd2ps {b}, {r}	4
+X_VCVTPD2PS_3042_m	vcvtpd2psy {m.disp}({m.base}), {r}	5
+X_VCVTPD2PS_3042_x	vcvtpd2psy {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTPD2PS_3042_p	vcvtpd2psy {m.sym}(%rip), {r}	8
+X_VCVTPD2PS_3043	vcvtpd2ps {b}, {r}	4
+X_VCVTPS2DQ_3044_m	vcvtps2dq {m.disp}({m.base}), {r}	5
+X_VCVTPS2DQ_3044_x	vcvtps2dq {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTPS2DQ_3044_p	vcvtps2dq {m.sym}(%rip), {r}	8
+X_VCVTPS2DQ_3045	vcvtps2dq {b}, {r}	4
+X_VCVTPS2DQ_3046_m	vcvtps2dq {m.disp}({m.base}), {r}	5
+X_VCVTPS2DQ_3046_x	vcvtps2dq {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTPS2DQ_3046_p	vcvtps2dq {m.sym}(%rip), {r}	8
+X_VCVTPS2DQ_3047	vcvtps2dq {b}, {r}	4
+X_VCVTTPS2DQ_3048_m	vcvttps2dq {m.disp}({m.base}), {r}	5
+X_VCVTTPS2DQ_3048_x	vcvttps2dq {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTTPS2DQ_3048_p	vcvttps2dq {m.sym}(%rip), {r}	8
+X_VCVTTPS2DQ_3049	vcvttps2dq {b}, {r}	4
+X_VCVTTPS2DQ_3050_m	vcvttps2dq {m.disp}({m.base}), {r}	5
+X_VCVTTPS2DQ_3050_x	vcvttps2dq {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTTPS2DQ_3050_p	vcvttps2dq {m.sym}(%rip), {r}	8
+X_VCVTTPS2DQ_3051	vcvttps2dq {b}, {r}	4
+X_VCVTPS2PD_3052_m	vcvtps2pd {m.disp}({m.base}), {r}	5
+X_VCVTPS2PD_3052_x	vcvtps2pd {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTPS2PD_3052_p	vcvtps2pd {m.sym}(%rip), {r}	8
+X_VCVTPS2PD_3053	vcvtps2pd {b}, {r}	4
+X_VCVTPS2PD_3054_m	vcvtps2pd {m.disp}({m.base}), {r}	5
+X_VCVTPS2PD_3054_x	vcvtps2pd {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTPS2PD_3054_p	vcvtps2pd {m.sym}(%rip), {r}	8
+X_VCVTPS2PD_3055	vcvtps2pd {b}, {r}	4
+X_VCVTSD2SI_3058_m	vcvtsd2si {m.disp}({m.base}), {r}	5
+X_VCVTSD2SI_3058_x	vcvtsd2si {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTSD2SI_3058_p	vcvtsd2si {m.sym}(%rip), {r}	8
+X_VCVTSD2SI_3059	vcvtsd2si {b}, {r}	4
+X_VCVTSD2SI_3060_m	vcvtsd2si {m.disp}({m.base}), {r}	6
+X_VCVTSD2SI_3060_x	vcvtsd2si {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VCVTSD2SI_3060_p	vcvtsd2si {m.sym}(%rip), {r}	9
+X_VCVTSD2SI_3061	vcvtsd2si {b}, {r}	5
+X_VCVTTSD2SI_3064_m	vcvttsd2si {m.disp}({m.base}), {r}	5
+X_VCVTTSD2SI_3064_x	vcvttsd2si {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTTSD2SI_3064_p	vcvttsd2si {m.sym}(%rip), {r}	8
+X_VCVTTSD2SI_3065	vcvttsd2si {b}, {r}	4
+X_VCVTTSD2SI_3066_m	vcvttsd2si {m.disp}({m.base}), {r}	6
+X_VCVTTSD2SI_3066_x	vcvttsd2si {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VCVTTSD2SI_3066_p	vcvttsd2si {m.sym}(%rip), {r}	9
+X_VCVTTSD2SI_3067	vcvttsd2si {b}, {r}	5
+X_VCVTSS2SI_3070_m	vcvtss2si {m.disp}({m.base}), {r}	5
+X_VCVTSS2SI_3070_x	vcvtss2si {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTSS2SI_3070_p	vcvtss2si {m.sym}(%rip), {r}	8
+X_VCVTSS2SI_3071	vcvtss2si {b}, {r}	4
+X_VCVTSS2SI_3072_m	vcvtss2si {m.disp}({m.base}), {r}	6
+X_VCVTSS2SI_3072_x	vcvtss2si {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VCVTSS2SI_3072_p	vcvtss2si {m.sym}(%rip), {r}	9
+X_VCVTSS2SI_3073	vcvtss2si {b}, {r}	5
+X_VCVTTSS2SI_3076_m	vcvttss2si {m.disp}({m.base}), {r}	5
+X_VCVTTSS2SI_3076_x	vcvttss2si {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VCVTTSS2SI_3076_p	vcvttss2si {m.sym}(%rip), {r}	8
+X_VCVTTSS2SI_3077	vcvttss2si {b}, {r}	4
+X_VCVTTSS2SI_3078_m	vcvttss2si {m.disp}({m.base}), {r}	6
+X_VCVTTSS2SI_3078_x	vcvttss2si {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VCVTTSS2SI_3078_p	vcvttss2si {m.sym}(%rip), {r}	9
+X_VCVTTSS2SI_3079	vcvttss2si {b}, {r}	5
+X_VCVTSD2SS_3080_m	vcvtsd2ss {m.disp}({m.base}), {n}, {r}	5
+X_VCVTSD2SS_3080_x	vcvtsd2ss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VCVTSD2SS_3080_p	vcvtsd2ss {m.sym}(%rip), {n}, {r}	8
+X_VCVTSD2SS_3081	vcvtsd2ss {b}, {n}, {r}	4
+X_VCVTSI2SD_3084_m	vcvtsi2sdl {m.disp}({m.base}), {n}, {r}	5
+X_VCVTSI2SD_3084_x	vcvtsi2sdl {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VCVTSI2SD_3084_p	vcvtsi2sdl {m.sym}(%rip), {n}, {r}	8
+X_VCVTSI2SD_3085	vcvtsi2sd {b}, {n}, {r}	4
+X_VCVTSI2SD_3086_m	vcvtsi2sdq {m.disp}({m.base}), {n}, {r}	6
+X_VCVTSI2SD_3086_x	vcvtsi2sdq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VCVTSI2SD_3086_p	vcvtsi2sdq {m.sym}(%rip), {n}, {r}	9
+X_VCVTSI2SD_3087	vcvtsi2sd {b}, {n}, {r}	5
+X_VCVTSI2SS_3090_m	vcvtsi2ssl {m.disp}({m.base}), {n}, {r}	5
+X_VCVTSI2SS_3090_x	vcvtsi2ssl {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VCVTSI2SS_3090_p	vcvtsi2ssl {m.sym}(%rip), {n}, {r}	8
+X_VCVTSI2SS_3091	vcvtsi2ss {b}, {n}, {r}	4
+X_VCVTSI2SS_3092_m	vcvtsi2ssq {m.disp}({m.base}), {n}, {r}	6
+X_VCVTSI2SS_3092_x	vcvtsi2ssq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VCVTSI2SS_3092_p	vcvtsi2ssq {m.sym}(%rip), {n}, {r}	9
+X_VCVTSI2SS_3093	vcvtsi2ss {b}, {n}, {r}	5
+X_VCVTSS2SD_3094_m	vcvtss2sd {m.disp}({m.base}), {n}, {r}	5
+X_VCVTSS2SD_3094_x	vcvtss2sd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VCVTSS2SD_3094_p	vcvtss2sd {m.sym}(%rip), {n}, {r}	8
+X_VCVTSS2SD_3095	vcvtss2sd {b}, {n}, {r}	4
+X_VDIVPD_3096_m	vdivpd {m.disp}({m.base}), {n}, {r}	5
+X_VDIVPD_3096_x	vdivpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VDIVPD_3096_p	vdivpd {m.sym}(%rip), {n}, {r}	8
+X_VDIVPD_3097	vdivpd {b}, {n}, {r}	4
+X_VDIVPD_3098_m	vdivpd {m.disp}({m.base}), {n}, {r}	5
+X_VDIVPD_3098_x	vdivpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VDIVPD_3098_p	vdivpd {m.sym}(%rip), {n}, {r}	8
+X_VDIVPD_3099	vdivpd {b}, {n}, {r}	4
+X_VDIVPS_3100_m	vdivps {m.disp}({m.base}), {n}, {r}	5
+X_VDIVPS_3100_x	vdivps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VDIVPS_3100_p	vdivps {m.sym}(%rip), {n}, {r}	8
+X_VDIVPS_3101	vdivps {b}, {n}, {r}	4
+X_VDIVPS_3102_m	vdivps {m.disp}({m.base}), {n}, {r}	5
+X_VDIVPS_3102_x	vdivps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VDIVPS_3102_p	vdivps {m.sym}(%rip), {n}, {r}	8
+X_VDIVPS_3103	vdivps {b}, {n}, {r}	4
+X_VDIVSD_3104_m	vdivsd {m.disp}({m.base}), {n}, {r}	5
+X_VDIVSD_3104_x	vdivsd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VDIVSD_3104_p	vdivsd {m.sym}(%rip), {n}, {r}	8
+X_VDIVSD_3105	vdivsd {b}, {n}, {r}	4
+X_VDIVSS_3106_m	vdivss {m.disp}({m.base}), {n}, {r}	5
+X_VDIVSS_3106_x	vdivss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VDIVSS_3106_p	vdivss {m.sym}(%rip), {n}, {r}	8
+X_VDIVSS_3107	vdivss {b}, {n}, {r}	4
+X_VEXTRACTF128_3108_m	vextractf128 ${c}, {r}, {m.disp}({m.base})	7
+X_VEXTRACTF128_3108_x	vextractf128 ${c}, {r}, {m.disp}({m.base},{m.index},{m.scale})	8
+X_VEXTRACTF128_3108_p	vextractf128 ${c}, {r}, {m.sym}(%rip)	10
+X_VEXTRACTF128_3109	vextractf128 ${c}, {r}, {b}	6
+X_VDPPD_3110_m	vdppd ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VDPPD_3110_x	vdppd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VDPPD_3110_p	vdppd ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VDPPD_3111	vdppd ${c}, {b}, {n}, {r}	6
+X_VDPPS_3112_m	vdpps ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VDPPS_3112_x	vdpps ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VDPPS_3112_p	vdpps ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VDPPS_3113	vdpps ${c}, {b}, {n}, {r}	6
+X_VDPPS_3114_m	vdpps ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VDPPS_3114_x	vdpps ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VDPPS_3114_p	vdpps ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VDPPS_3115	vdpps ${c}, {b}, {n}, {r}	6
+X_VEXTRACTPS_3116_m	vextractps ${c}, {r}, {m.disp}({m.base})	7
+X_VEXTRACTPS_3116_x	vextractps ${c}, {r}, {m.disp}({m.base},{m.index},{m.scale})	8
+X_VEXTRACTPS_3116_p	vextractps ${c}, {r}, {m.sym}(%rip)	10
+X_VEXTRACTPS_3117	vextractps ${c}, {r}, {b}	6
+X_VHADDPD_3120_m	vhaddpd {m.disp}({m.base}), {n}, {r}	5
+X_VHADDPD_3120_x	vhaddpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VHADDPD_3120_p	vhaddpd {m.sym}(%rip), {n}, {r}	8
+X_VHADDPD_3121	vhaddpd {b}, {n}, {r}	4
+X_VHADDPD_3122_m	vhaddpd {m.disp}({m.base}), {n}, {r}	5
+X_VHADDPD_3122_x	vhaddpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VHADDPD_3122_p	vhaddpd {m.sym}(%rip), {n}, {r}	8
+X_VHADDPD_3123	vhaddpd {b}, {n}, {r}	4
+X_VHADDPS_3124_m	vhaddps {m.disp}({m.base}), {n}, {r}	5
+X_VHADDPS_3124_x	vhaddps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VHADDPS_3124_p	vhaddps {m.sym}(%rip), {n}, {r}	8
+X_VHADDPS_3125	vhaddps {b}, {n}, {r}	4
+X_VHADDPS_3126_m	vhaddps {m.disp}({m.base}), {n}, {r}	5
+X_VHADDPS_3126_x	vhaddps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VHADDPS_3126_p	vhaddps {m.sym}(%rip), {n}, {r}	8
+X_VHADDPS_3127	vhaddps {b}, {n}, {r}	4
+X_VHSUBPD_3128_m	vhsubpd {m.disp}({m.base}), {n}, {r}	5
+X_VHSUBPD_3128_x	vhsubpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VHSUBPD_3128_p	vhsubpd {m.sym}(%rip), {n}, {r}	8
+X_VHSUBPD_3129	vhsubpd {b}, {n}, {r}	4
+X_VHSUBPD_3130_m	vhsubpd {m.disp}({m.base}), {n}, {r}	5
+X_VHSUBPD_3130_x	vhsubpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VHSUBPD_3130_p	vhsubpd {m.sym}(%rip), {n}, {r}	8
+X_VHSUBPD_3131	vhsubpd {b}, {n}, {r}	4
+X_VHSUBPS_3132_m	vhsubps {m.disp}({m.base}), {n}, {r}	5
+X_VHSUBPS_3132_x	vhsubps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VHSUBPS_3132_p	vhsubps {m.sym}(%rip), {n}, {r}	8
+X_VHSUBPS_3133	vhsubps {b}, {n}, {r}	4
+X_VHSUBPS_3134_m	vhsubps {m.disp}({m.base}), {n}, {r}	5
+X_VHSUBPS_3134_x	vhsubps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VHSUBPS_3134_p	vhsubps {m.sym}(%rip), {n}, {r}	8
+X_VHSUBPS_3135	vhsubps {b}, {n}, {r}	4
+X_VPERMILPD_3136_m	vpermilpd {m.disp}({m.base}), {n}, {r}	6
+X_VPERMILPD_3136_x	vpermilpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPERMILPD_3136_p	vpermilpd {m.sym}(%rip), {n}, {r}	9
+X_VPERMILPD_3137	vpermilpd {b}, {n}, {r}	5
+X_VPERMILPD_3138_m	vpermilpd {m.disp}({m.base}), {n}, {r}	6
+X_VPERMILPD_3138_x	vpermilpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPERMILPD_3138_p	vpermilpd {m.sym}(%rip), {n}, {r}	9
+X_VPERMILPD_3139	vpermilpd {b}, {n}, {r}	5
+X_VPERMILPD_3140_m	vpermilpd ${c}, {m.disp}({m.base}), {r}	7
+X_VPERMILPD_3140_x	vpermilpd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VPERMILPD_3140_p	vpermilpd ${c}, {m.sym}(%rip), {r}	10
+X_VPERMILPD_3141	vpermilpd ${c}, {b}, {r}	6
+X_VPERMILPD_3142_m	vpermilpd ${c}, {m.disp}({m.base}), {r}	7
+X_VPERMILPD_3142_x	vpermilpd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VPERMILPD_3142_p	vpermilpd ${c}, {m.sym}(%rip), {r}	10
+X_VPERMILPD_3143	vpermilpd ${c}, {b}, {r}	6
+X_VPERMILPS_3144_m	vpermilps {m.disp}({m.base}), {n}, {r}	6
+X_VPERMILPS_3144_x	vpermilps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPERMILPS_3144_p	vpermilps {m.sym}(%rip), {n}, {r}	9
+X_VPERMILPS_3145	vpermilps {b}, {n}, {r}	5
+X_VPERMILPS_3146_m	vpermilps {m.disp}({m.base}), {n}, {r}	6
+X_VPERMILPS_3146_x	vpermilps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPERMILPS_3146_p	vpermilps {m.sym}(%rip), {n}, {r}	9
+X_VPERMILPS_3147	vpermilps {b}, {n}, {r}	5
+X_VPERMILPS_3148_m	vpermilps ${c}, {m.disp}({m.base}), {r}	7
+X_VPERMILPS_3148_x	vpermilps ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VPERMILPS_3148_p	vpermilps ${c}, {m.sym}(%rip), {r}	10
+X_VPERMILPS_3149	vpermilps ${c}, {b}, {r}	6
+X_VPERMILPS_3150_m	vpermilps ${c}, {m.disp}({m.base}), {r}	7
+X_VPERMILPS_3150_x	vpermilps ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VPERMILPS_3150_p	vpermilps ${c}, {m.sym}(%rip), {r}	10
+X_VPERMILPS_3151	vpermilps ${c}, {b}, {r}	6
+X_VPERM2F128_3152_m	vperm2f128 ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VPERM2F128_3152_x	vperm2f128 ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VPERM2F128_3152_p	vperm2f128 ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VPERM2F128_3153	vperm2f128 ${c}, {b}, {n}, {r}	6
+X_VBROADCASTSS_3154_m	vbroadcastss {m.disp}({m.base}), {r}	6
+X_VBROADCASTSS_3154_x	vbroadcastss {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VBROADCASTSS_3154_p	vbroadcastss {m.sym}(%rip), {r}	9
+X_VBROADCASTSS_3155_m	vbroadcastss {m.disp}({m.base}), {r}	6
+X_VBROADCASTSS_3155_x	vbroadcastss {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VBROADCASTSS_3155_p	vbroadcastss {m.sym}(%rip), {r}	9
+X_VBROADCASTSD_3156_m	vbroadcastsd {m.disp}({m.base}), {r}	6
+X_VBROADCASTSD_3156_x	vbroadcastsd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VBROADCASTSD_3156_p	vbroadcastsd {m.sym}(%rip), {r}	9
+X_VBROADCASTF128_3157_m	vbroadcastf128 {m.disp}({m.base}), {r}	6
+X_VBROADCASTF128_3157_x	vbroadcastf128 {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VBROADCASTF128_3157_p	vbroadcastf128 {m.sym}(%rip), {r}	9
+X_VINSERTF128_3158_m	vinsertf128 ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VINSERTF128_3158_x	vinsertf128 ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VINSERTF128_3158_p	vinsertf128 ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VINSERTF128_3159	vinsertf128 ${c}, {b}, {n}, {r}	6
+X_VINSERTPS_3160_m	vinsertps ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VINSERTPS_3160_x	vinsertps ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VINSERTPS_3160_p	vinsertps ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VINSERTPS_3161	vinsertps ${c}, {b}, {n}, {r}	6
+X_VLDDQU_3162_m	vlddqu {m.disp}({m.base}), {r}	5
+X_VLDDQU_3162_x	vlddqu {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VLDDQU_3162_p	vlddqu {m.sym}(%rip), {r}	8
+X_VLDDQU_3163_m	vlddqu {m.disp}({m.base}), {r}	5
+X_VLDDQU_3163_x	vlddqu {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VLDDQU_3163_p	vlddqu {m.sym}(%rip), {r}	8
+X_VMASKMOVPS_3164_m	vmaskmovps {m.disp}({m.base}), {n}, {r}	6
+X_VMASKMOVPS_3164_x	vmaskmovps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VMASKMOVPS_3164_p	vmaskmovps {m.sym}(%rip), {n}, {r}	9
+X_VMASKMOVPS_3165_m	vmaskmovps {m.disp}({m.base}), {n}, {r}	6
+X_VMASKMOVPS_3165_x	vmaskmovps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VMASKMOVPS_3165_p	vmaskmovps {m.sym}(%rip), {n}, {r}	9
+X_VMASKMOVPS_3166_m	vmaskmovps {r}, {n}, {m.disp}({m.base})	6
+X_VMASKMOVPS_3166_x	vmaskmovps {r}, {n}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_VMASKMOVPS_3166_p	vmaskmovps {r}, {n}, {m.sym}(%rip)	9
+X_VMASKMOVPS_3167_m	vmaskmovps {r}, {n}, {m.disp}({m.base})	6
+X_VMASKMOVPS_3167_x	vmaskmovps {r}, {n}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_VMASKMOVPS_3167_p	vmaskmovps {r}, {n}, {m.sym}(%rip)	9
+X_VMASKMOVPD_3168_m	vmaskmovpd {m.disp}({m.base}), {n}, {r}	6
+X_VMASKMOVPD_3168_x	vmaskmovpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VMASKMOVPD_3168_p	vmaskmovpd {m.sym}(%rip), {n}, {r}	9
+X_VMASKMOVPD_3169_m	vmaskmovpd {m.disp}({m.base}), {n}, {r}	6
+X_VMASKMOVPD_3169_x	vmaskmovpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VMASKMOVPD_3169_p	vmaskmovpd {m.sym}(%rip), {n}, {r}	9
+X_VMASKMOVPD_3170_m	vmaskmovpd {r}, {n}, {m.disp}({m.base})	6
+X_VMASKMOVPD_3170_x	vmaskmovpd {r}, {n}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_VMASKMOVPD_3170_p	vmaskmovpd {r}, {n}, {m.sym}(%rip)	9
+X_VMASKMOVPD_3171_m	vmaskmovpd {r}, {n}, {m.disp}({m.base})	6
+X_VMASKMOVPD_3171_x	vmaskmovpd {r}, {n}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_VMASKMOVPD_3171_p	vmaskmovpd {r}, {n}, {m.sym}(%rip)	9
+X_VPTEST_3172_m	vptest {m.disp}({m.base}), {r}	6
+X_VPTEST_3172_x	vptest {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPTEST_3172_p	vptest {m.sym}(%rip), {r}	9
+X_VPTEST_3173	vptest {b}, {r}	5
+X_VPTEST_3174_m	vptest {m.disp}({m.base}), {r}	6
+X_VPTEST_3174_x	vptest {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPTEST_3174_p	vptest {m.sym}(%rip), {r}	9
+X_VPTEST_3175	vptest {b}, {r}	5
+X_VTESTPS_3176_m	vtestps {m.disp}({m.base}), {r}	6
+X_VTESTPS_3176_x	vtestps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VTESTPS_3176_p	vtestps {m.sym}(%rip), {r}	9
+X_VTESTPS_3177	vtestps {b}, {r}	5
+X_VTESTPS_3178_m	vtestps {m.disp}({m.base}), {r}	6
+X_VTESTPS_3178_x	vtestps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VTESTPS_3178_p	vtestps {m.sym}(%rip), {r}	9
+X_VTESTPS_3179	vtestps {b}, {r}	5
+X_VTESTPD_3180_m	vtestpd {m.disp}({m.base}), {r}	6
+X_VTESTPD_3180_x	vtestpd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VTESTPD_3180_p	vtestpd {m.sym}(%rip), {r}	9
+X_VTESTPD_3181	vtestpd {b}, {r}	5
+X_VTESTPD_3182_m	vtestpd {m.disp}({m.base}), {r}	6
+X_VTESTPD_3182_x	vtestpd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VTESTPD_3182_p	vtestpd {m.sym}(%rip), {r}	9
+X_VTESTPD_3183	vtestpd {b}, {r}	5
+X_VMAXPD_3184_m	vmaxpd {m.disp}({m.base}), {n}, {r}	5
+X_VMAXPD_3184_x	vmaxpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMAXPD_3184_p	vmaxpd {m.sym}(%rip), {n}, {r}	8
+X_VMAXPD_3185	vmaxpd {b}, {n}, {r}	4
+X_VMAXPD_3186_m	vmaxpd {m.disp}({m.base}), {n}, {r}	5
+X_VMAXPD_3186_x	vmaxpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMAXPD_3186_p	vmaxpd {m.sym}(%rip), {n}, {r}	8
+X_VMAXPD_3187	vmaxpd {b}, {n}, {r}	4
+X_VMAXPS_3188_m	vmaxps {m.disp}({m.base}), {n}, {r}	5
+X_VMAXPS_3188_x	vmaxps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMAXPS_3188_p	vmaxps {m.sym}(%rip), {n}, {r}	8
+X_VMAXPS_3189	vmaxps {b}, {n}, {r}	4
+X_VMAXPS_3190_m	vmaxps {m.disp}({m.base}), {n}, {r}	5
+X_VMAXPS_3190_x	vmaxps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMAXPS_3190_p	vmaxps {m.sym}(%rip), {n}, {r}	8
+X_VMAXPS_3191	vmaxps {b}, {n}, {r}	4
+X_VMAXSD_3192_m	vmaxsd {m.disp}({m.base}), {n}, {r}	5
+X_VMAXSD_3192_x	vmaxsd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMAXSD_3192_p	vmaxsd {m.sym}(%rip), {n}, {r}	8
+X_VMAXSD_3193	vmaxsd {b}, {n}, {r}	4
+X_VMAXSS_3194_m	vmaxss {m.disp}({m.base}), {n}, {r}	5
+X_VMAXSS_3194_x	vmaxss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMAXSS_3194_p	vmaxss {m.sym}(%rip), {n}, {r}	8
+X_VMAXSS_3195	vmaxss {b}, {n}, {r}	4
+X_VMINPD_3196_m	vminpd {m.disp}({m.base}), {n}, {r}	5
+X_VMINPD_3196_x	vminpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMINPD_3196_p	vminpd {m.sym}(%rip), {n}, {r}	8
+X_VMINPD_3197	vminpd {b}, {n}, {r}	4
+X_VMINPD_3198_m	vminpd {m.disp}({m.base}), {n}, {r}	5
+X_VMINPD_3198_x	vminpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMINPD_3198_p	vminpd {m.sym}(%rip), {n}, {r}	8
+X_VMINPD_3199	vminpd {b}, {n}, {r}	4
+X_VMINPS_3200_m	vminps {m.disp}({m.base}), {n}, {r}	5
+X_VMINPS_3200_x	vminps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMINPS_3200_p	vminps {m.sym}(%rip), {n}, {r}	8
+X_VMINPS_3201	vminps {b}, {n}, {r}	4
+X_VMINPS_3202_m	vminps {m.disp}({m.base}), {n}, {r}	5
+X_VMINPS_3202_x	vminps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMINPS_3202_p	vminps {m.sym}(%rip), {n}, {r}	8
+X_VMINPS_3203	vminps {b}, {n}, {r}	4
+X_VMINSD_3204_m	vminsd {m.disp}({m.base}), {n}, {r}	5
+X_VMINSD_3204_x	vminsd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMINSD_3204_p	vminsd {m.sym}(%rip), {n}, {r}	8
+X_VMINSD_3205	vminsd {b}, {n}, {r}	4
+X_VMINSS_3206_m	vminss {m.disp}({m.base}), {n}, {r}	5
+X_VMINSS_3206_x	vminss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMINSS_3206_p	vminss {m.sym}(%rip), {n}, {r}	8
+X_VMINSS_3207	vminss {b}, {n}, {r}	4
+X_VMOVAPD_3208_m	vmovapd {m.disp}({m.base}), {r}	5
+X_VMOVAPD_3208_x	vmovapd {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVAPD_3208_p	vmovapd {m.sym}(%rip), {r}	8
+X_VMOVAPD_3209	vmovapd {b}, {r}	4
+X_VMOVAPD_3210_m	vmovapd {r}, {m.disp}({m.base})	5
+X_VMOVAPD_3210_x	vmovapd {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVAPD_3210_p	vmovapd {r}, {m.sym}(%rip)	8
+X_VMOVAPD_3211	vmovapd {r}, {b}	4
+X_VMOVAPD_3212_m	vmovapd {m.disp}({m.base}), {r}	5
+X_VMOVAPD_3212_x	vmovapd {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVAPD_3212_p	vmovapd {m.sym}(%rip), {r}	8
+X_VMOVAPD_3213	vmovapd {b}, {r}	4
+X_VMOVAPD_3214_m	vmovapd {r}, {m.disp}({m.base})	5
+X_VMOVAPD_3214_x	vmovapd {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVAPD_3214_p	vmovapd {r}, {m.sym}(%rip)	8
+X_VMOVAPD_3215	vmovapd {r}, {b}	4
+X_VMOVAPS_3216_m	vmovaps {m.disp}({m.base}), {r}	5
+X_VMOVAPS_3216_x	vmovaps {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVAPS_3216_p	vmovaps {m.sym}(%rip), {r}	8
+X_VMOVAPS_3217	vmovaps {b}, {r}	4
+X_VMOVAPS_3218_m	vmovaps {r}, {m.disp}({m.base})	5
+X_VMOVAPS_3218_x	vmovaps {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVAPS_3218_p	vmovaps {r}, {m.sym}(%rip)	8
+X_VMOVAPS_3219	vmovaps {r}, {b}	4
+X_VMOVAPS_3220_m	vmovaps {m.disp}({m.base}), {r}	5
+X_VMOVAPS_3220_x	vmovaps {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVAPS_3220_p	vmovaps {m.sym}(%rip), {r}	8
+X_VMOVAPS_3221	vmovaps {b}, {r}	4
+X_VMOVAPS_3222_m	vmovaps {r}, {m.disp}({m.base})	5
+X_VMOVAPS_3222_x	vmovaps {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVAPS_3222_p	vmovaps {r}, {m.sym}(%rip)	8
+X_VMOVAPS_3223	vmovaps {r}, {b}	4
+X_VMOVD_3225_m	vmovd {m.disp}({m.base}), {r}	5
+X_VMOVD_3225_x	vmovd {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVD_3225_p	vmovd {m.sym}(%rip), {r}	8
+X_VMOVD_3227_m	vmovd {r}, {m.disp}({m.base})	5
+X_VMOVD_3227_x	vmovd {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVD_3227_p	vmovd {r}, {m.sym}(%rip)	8
+X_VMOVD_3230	vmovd {b}, {r}	4
+X_VMOVD_3231	vmovd {r}, {b}	4
+X_VMOVQ_3232_m	vmovq {m.disp}({m.base}), {r}	6
+X_VMOVQ_3232_x	vmovq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VMOVQ_3232_p	vmovq {m.sym}(%rip), {r}	9
+X_VMOVQ_3233_m	vmovq {r}, {m.disp}({m.base})	6
+X_VMOVQ_3233_x	vmovq {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_VMOVQ_3233_p	vmovq {r}, {m.sym}(%rip)	9
+X_VMOVQ_3234_m	vmovq {m.disp}({m.base}), {r}	5
+X_VMOVQ_3234_x	vmovq {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVQ_3234_p	vmovq {m.sym}(%rip), {r}	8
+X_VMOVQ_3235_m	vmovq {r}, {m.disp}({m.base})	5
+X_VMOVQ_3235_x	vmovq {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVQ_3235_p	vmovq {r}, {m.sym}(%rip)	8
+X_VMOVQ_3236	vmovq {b}, {r}	5
+X_VMOVQ_3237	vmovq {r}, {b}	5
+X_VMOVQ_3238	vmovq {b}, {r}	4
+X_VMOVQ_3239	vmovq {r}, {b}	4
+X_VMOVDDUP_3240_m	vmovddup {m.disp}({m.base}), {r}	5
+X_VMOVDDUP_3240_x	vmovddup {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVDDUP_3240_p	vmovddup {m.sym}(%rip), {r}	8
+X_VMOVDDUP_3241	vmovddup {b}, {r}	4
+X_VMOVDDUP_3242_m	vmovddup {m.disp}({m.base}), {r}	5
+X_VMOVDDUP_3242_x	vmovddup {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVDDUP_3242_p	vmovddup {m.sym}(%rip), {r}	8
+X_VMOVDDUP_3243	vmovddup {b}, {r}	4
+X_VMOVDQA_3244_m	vmovdqa {m.disp}({m.base}), {r}	5
+X_VMOVDQA_3244_x	vmovdqa {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVDQA_3244_p	vmovdqa {m.sym}(%rip), {r}	8
+X_VMOVDQA_3245	vmovdqa {b}, {r}	4
+X_VMOVDQA_3246_m	vmovdqa {r}, {m.disp}({m.base})	5
+X_VMOVDQA_3246_x	vmovdqa {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVDQA_3246_p	vmovdqa {r}, {m.sym}(%rip)	8
+X_VMOVDQA_3247	vmovdqa {r}, {b}	4
+X_VMOVDQA_3248_m	vmovdqa {m.disp}({m.base}), {r}	5
+X_VMOVDQA_3248_x	vmovdqa {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVDQA_3248_p	vmovdqa {m.sym}(%rip), {r}	8
+X_VMOVDQA_3249	vmovdqa {b}, {r}	4
+X_VMOVDQA_3250_m	vmovdqa {r}, {m.disp}({m.base})	5
+X_VMOVDQA_3250_x	vmovdqa {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVDQA_3250_p	vmovdqa {r}, {m.sym}(%rip)	8
+X_VMOVDQA_3251	vmovdqa {r}, {b}	4
+X_VMOVDQU_3252_m	vmovdqu {m.disp}({m.base}), {r}	5
+X_VMOVDQU_3252_x	vmovdqu {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVDQU_3252_p	vmovdqu {m.sym}(%rip), {r}	8
+X_VMOVDQU_3253	vmovdqu {b}, {r}	4
+X_VMOVDQU_3254_m	vmovdqu {m.disp}({m.base}), {r}	5
+X_VMOVDQU_3254_x	vmovdqu {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVDQU_3254_p	vmovdqu {m.sym}(%rip), {r}	8
+X_VMOVDQU_3255	vmovdqu {b}, {r}	4
+X_VMOVDQU_3256_m	vmovdqu {r}, {m.disp}({m.base})	5
+X_VMOVDQU_3256_x	vmovdqu {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVDQU_3256_p	vmovdqu {r}, {m.sym}(%rip)	8
+X_VMOVDQU_3257	vmovdqu {r}, {b}	4
+X_VMOVDQU_3258_m	vmovdqu {r}, {m.disp}({m.base})	5
+X_VMOVDQU_3258_x	vmovdqu {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVDQU_3258_p	vmovdqu {r}, {m.sym}(%rip)	8
+X_VMOVDQU_3259	vmovdqu {r}, {b}	4
+X_VMOVSHDUP_3260_m	vmovshdup {m.disp}({m.base}), {r}	5
+X_VMOVSHDUP_3260_x	vmovshdup {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVSHDUP_3260_p	vmovshdup {m.sym}(%rip), {r}	8
+X_VMOVSHDUP_3261	vmovshdup {b}, {r}	4
+X_VMOVSHDUP_3262_m	vmovshdup {m.disp}({m.base}), {r}	5
+X_VMOVSHDUP_3262_x	vmovshdup {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVSHDUP_3262_p	vmovshdup {m.sym}(%rip), {r}	8
+X_VMOVSHDUP_3263	vmovshdup {b}, {r}	4
+X_VMOVSLDUP_3264_m	vmovsldup {m.disp}({m.base}), {r}	5
+X_VMOVSLDUP_3264_x	vmovsldup {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVSLDUP_3264_p	vmovsldup {m.sym}(%rip), {r}	8
+X_VMOVSLDUP_3265	vmovsldup {b}, {r}	4
+X_VMOVSLDUP_3266_m	vmovsldup {m.disp}({m.base}), {r}	5
+X_VMOVSLDUP_3266_x	vmovsldup {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVSLDUP_3266_p	vmovsldup {m.sym}(%rip), {r}	8
+X_VMOVSLDUP_3267	vmovsldup {b}, {r}	4
+X_VPOR_3268_m	vpor {m.disp}({m.base}), {n}, {r}	5
+X_VPOR_3268_x	vpor {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPOR_3268_p	vpor {m.sym}(%rip), {n}, {r}	8
+X_VPOR_3269	vpor {b}, {n}, {r}	4
+X_VPAND_3270_m	vpand {m.disp}({m.base}), {n}, {r}	5
+X_VPAND_3270_x	vpand {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPAND_3270_p	vpand {m.sym}(%rip), {n}, {r}	8
+X_VPAND_3271	vpand {b}, {n}, {r}	4
+X_VPANDN_3272_m	vpandn {m.disp}({m.base}), {n}, {r}	5
+X_VPANDN_3272_x	vpandn {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPANDN_3272_p	vpandn {m.sym}(%rip), {n}, {r}	8
+X_VPANDN_3273	vpandn {b}, {n}, {r}	4
+X_VPXOR_3274_m	vpxor {m.disp}({m.base}), {n}, {r}	5
+X_VPXOR_3274_x	vpxor {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPXOR_3274_p	vpxor {m.sym}(%rip), {n}, {r}	8
+X_VPXOR_3275	vpxor {b}, {n}, {r}	4
+X_VPABSB_3276_m	vpabsb {m.disp}({m.base}), {r}	6
+X_VPABSB_3276_x	vpabsb {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPABSB_3276_p	vpabsb {m.sym}(%rip), {r}	9
+X_VPABSB_3277	vpabsb {b}, {r}	5
+X_VPABSW_3278_m	vpabsw {m.disp}({m.base}), {r}	6
+X_VPABSW_3278_x	vpabsw {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPABSW_3278_p	vpabsw {m.sym}(%rip), {r}	9
+X_VPABSW_3279	vpabsw {b}, {r}	5
+X_VPABSD_3280_m	vpabsd {m.disp}({m.base}), {r}	6
+X_VPABSD_3280_x	vpabsd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPABSD_3280_p	vpabsd {m.sym}(%rip), {r}	9
+X_VPABSD_3281	vpabsd {b}, {r}	5
+X_VPHMINPOSUW_3282_m	vphminposuw {m.disp}({m.base}), {r}	6
+X_VPHMINPOSUW_3282_x	vphminposuw {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPHMINPOSUW_3282_p	vphminposuw {m.sym}(%rip), {r}	9
+X_VPHMINPOSUW_3283	vphminposuw {b}, {r}	5
+X_VPSHUFD_3284_m	vpshufd ${c}, {m.disp}({m.base}), {r}	6
+X_VPSHUFD_3284_x	vpshufd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPSHUFD_3284_p	vpshufd ${c}, {m.sym}(%rip), {r}	9
+X_VPSHUFD_3285	vpshufd ${c}, {b}, {r}	5
+X_VPSHUFHW_3286_m	vpshufhw ${c}, {m.disp}({m.base}), {r}	6
+X_VPSHUFHW_3286_x	vpshufhw ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPSHUFHW_3286_p	vpshufhw ${c}, {m.sym}(%rip), {r}	9
+X_VPSHUFHW_3287	vpshufhw ${c}, {b}, {r}	5
+X_VPSHUFLW_3288_m	vpshuflw ${c}, {m.disp}({m.base}), {r}	6
+X_VPSHUFLW_3288_x	vpshuflw ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPSHUFLW_3288_p	vpshuflw ${c}, {m.sym}(%rip), {r}	9
+X_VPSHUFLW_3289	vpshuflw ${c}, {b}, {r}	5
+X_VPACKSSWB_3290_m	vpacksswb {m.disp}({m.base}), {n}, {r}	5
+X_VPACKSSWB_3290_x	vpacksswb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPACKSSWB_3290_p	vpacksswb {m.sym}(%rip), {n}, {r}	8
+X_VPACKSSWB_3291	vpacksswb {b}, {n}, {r}	4
+X_VPACKSSDW_3292_m	vpackssdw {m.disp}({m.base}), {n}, {r}	5
+X_VPACKSSDW_3292_x	vpackssdw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPACKSSDW_3292_p	vpackssdw {m.sym}(%rip), {n}, {r}	8
+X_VPACKSSDW_3293	vpackssdw {b}, {n}, {r}	4
+X_VPACKUSWB_3294_m	vpackuswb {m.disp}({m.base}), {n}, {r}	5
+X_VPACKUSWB_3294_x	vpackuswb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPACKUSWB_3294_p	vpackuswb {m.sym}(%rip), {n}, {r}	8
+X_VPACKUSWB_3295	vpackuswb {b}, {n}, {r}	4
+X_VPACKUSDW_3296_m	vpackusdw {m.disp}({m.base}), {n}, {r}	6
+X_VPACKUSDW_3296_x	vpackusdw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPACKUSDW_3296_p	vpackusdw {m.sym}(%rip), {n}, {r}	9
+X_VPACKUSDW_3297	vpackusdw {b}, {n}, {r}	5
+X_VPSLLW_3298_m	vpsllw {m.disp}({m.base}), {n}, {r}	5
+X_VPSLLW_3298_x	vpsllw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSLLW_3298_p	vpsllw {m.sym}(%rip), {n}, {r}	8
+X_VPSLLW_3299	vpsllw {b}, {n}, {r}	4
+X_VPSLLD_3300_m	vpslld {m.disp}({m.base}), {n}, {r}	5
+X_VPSLLD_3300_x	vpslld {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSLLD_3300_p	vpslld {m.sym}(%rip), {n}, {r}	8
+X_VPSLLD_3301	vpslld {b}, {n}, {r}	4
+X_VPSLLQ_3302_m	vpsllq {m.disp}({m.base}), {n}, {r}	5
+X_VPSLLQ_3302_x	vpsllq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSLLQ_3302_p	vpsllq {m.sym}(%rip), {n}, {r}	8
+X_VPSLLQ_3303	vpsllq {b}, {n}, {r}	4
+X_VPSRLW_3304_m	vpsrlw {m.disp}({m.base}), {n}, {r}	5
+X_VPSRLW_3304_x	vpsrlw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSRLW_3304_p	vpsrlw {m.sym}(%rip), {n}, {r}	8
+X_VPSRLW_3305	vpsrlw {b}, {n}, {r}	4
+X_VPSRLD_3306_m	vpsrld {m.disp}({m.base}), {n}, {r}	5
+X_VPSRLD_3306_x	vpsrld {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSRLD_3306_p	vpsrld {m.sym}(%rip), {n}, {r}	8
+X_VPSRLD_3307	vpsrld {b}, {n}, {r}	4
+X_VPSRLQ_3308_m	vpsrlq {m.disp}({m.base}), {n}, {r}	5
+X_VPSRLQ_3308_x	vpsrlq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSRLQ_3308_p	vpsrlq {m.sym}(%rip), {n}, {r}	8
+X_VPSRLQ_3309	vpsrlq {b}, {n}, {r}	4
+X_VPSRAW_3310_m	vpsraw {m.disp}({m.base}), {n}, {r}	5
+X_VPSRAW_3310_x	vpsraw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSRAW_3310_p	vpsraw {m.sym}(%rip), {n}, {r}	8
+X_VPSRAW_3311	vpsraw {b}, {n}, {r}	4
+X_VPSRAD_3312_m	vpsrad {m.disp}({m.base}), {n}, {r}	5
+X_VPSRAD_3312_x	vpsrad {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSRAD_3312_p	vpsrad {m.sym}(%rip), {n}, {r}	8
+X_VPSRAD_3313	vpsrad {b}, {n}, {r}	4
+X_VPADDB_3314_m	vpaddb {m.disp}({m.base}), {n}, {r}	5
+X_VPADDB_3314_x	vpaddb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDB_3314_p	vpaddb {m.sym}(%rip), {n}, {r}	8
+X_VPADDB_3315	vpaddb {b}, {n}, {r}	4
+X_VPADDW_3316_m	vpaddw {m.disp}({m.base}), {n}, {r}	5
+X_VPADDW_3316_x	vpaddw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDW_3316_p	vpaddw {m.sym}(%rip), {n}, {r}	8
+X_VPADDW_3317	vpaddw {b}, {n}, {r}	4
+X_VPADDD_3318_m	vpaddd {m.disp}({m.base}), {n}, {r}	5
+X_VPADDD_3318_x	vpaddd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDD_3318_p	vpaddd {m.sym}(%rip), {n}, {r}	8
+X_VPADDD_3319	vpaddd {b}, {n}, {r}	4
+X_VPADDQ_3320_m	vpaddq {m.disp}({m.base}), {n}, {r}	5
+X_VPADDQ_3320_x	vpaddq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDQ_3320_p	vpaddq {m.sym}(%rip), {n}, {r}	8
+X_VPADDQ_3321	vpaddq {b}, {n}, {r}	4
+X_VPADDSB_3322_m	vpaddsb {m.disp}({m.base}), {n}, {r}	5
+X_VPADDSB_3322_x	vpaddsb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDSB_3322_p	vpaddsb {m.sym}(%rip), {n}, {r}	8
+X_VPADDSB_3323	vpaddsb {b}, {n}, {r}	4
+X_VPADDSW_3324_m	vpaddsw {m.disp}({m.base}), {n}, {r}	5
+X_VPADDSW_3324_x	vpaddsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDSW_3324_p	vpaddsw {m.sym}(%rip), {n}, {r}	8
+X_VPADDSW_3325	vpaddsw {b}, {n}, {r}	4
+X_VPADDUSB_3326_m	vpaddusb {m.disp}({m.base}), {n}, {r}	5
+X_VPADDUSB_3326_x	vpaddusb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDUSB_3326_p	vpaddusb {m.sym}(%rip), {n}, {r}	8
+X_VPADDUSB_3327	vpaddusb {b}, {n}, {r}	4
+X_VPADDUSW_3328_m	vpaddusw {m.disp}({m.base}), {n}, {r}	5
+X_VPADDUSW_3328_x	vpaddusw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDUSW_3328_p	vpaddusw {m.sym}(%rip), {n}, {r}	8
+X_VPADDUSW_3329	vpaddusw {b}, {n}, {r}	4
+X_VPAVGB_3330_m	vpavgb {m.disp}({m.base}), {n}, {r}	5
+X_VPAVGB_3330_x	vpavgb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPAVGB_3330_p	vpavgb {m.sym}(%rip), {n}, {r}	8
+X_VPAVGB_3331	vpavgb {b}, {n}, {r}	4
+X_VPAVGW_3332_m	vpavgw {m.disp}({m.base}), {n}, {r}	5
+X_VPAVGW_3332_x	vpavgw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPAVGW_3332_p	vpavgw {m.sym}(%rip), {n}, {r}	8
+X_VPAVGW_3333	vpavgw {b}, {n}, {r}	4
+X_VPCMPEQB_3334_m	vpcmpeqb {m.disp}({m.base}), {n}, {r}	5
+X_VPCMPEQB_3334_x	vpcmpeqb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPCMPEQB_3334_p	vpcmpeqb {m.sym}(%rip), {n}, {r}	8
+X_VPCMPEQB_3335	vpcmpeqb {b}, {n}, {r}	4
+X_VPCMPEQW_3336_m	vpcmpeqw {m.disp}({m.base}), {n}, {r}	5
+X_VPCMPEQW_3336_x	vpcmpeqw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPCMPEQW_3336_p	vpcmpeqw {m.sym}(%rip), {n}, {r}	8
+X_VPCMPEQW_3337	vpcmpeqw {b}, {n}, {r}	4
+X_VPCMPEQD_3338_m	vpcmpeqd {m.disp}({m.base}), {n}, {r}	5
+X_VPCMPEQD_3338_x	vpcmpeqd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPCMPEQD_3338_p	vpcmpeqd {m.sym}(%rip), {n}, {r}	8
+X_VPCMPEQD_3339	vpcmpeqd {b}, {n}, {r}	4
+X_VPCMPEQQ_3340_m	vpcmpeqq {m.disp}({m.base}), {n}, {r}	6
+X_VPCMPEQQ_3340_x	vpcmpeqq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPCMPEQQ_3340_p	vpcmpeqq {m.sym}(%rip), {n}, {r}	9
+X_VPCMPEQQ_3341	vpcmpeqq {b}, {n}, {r}	5
+X_VPCMPGTB_3342_m	vpcmpgtb {m.disp}({m.base}), {n}, {r}	5
+X_VPCMPGTB_3342_x	vpcmpgtb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPCMPGTB_3342_p	vpcmpgtb {m.sym}(%rip), {n}, {r}	8
+X_VPCMPGTB_3343	vpcmpgtb {b}, {n}, {r}	4
+X_VPCMPGTW_3344_m	vpcmpgtw {m.disp}({m.base}), {n}, {r}	5
+X_VPCMPGTW_3344_x	vpcmpgtw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPCMPGTW_3344_p	vpcmpgtw {m.sym}(%rip), {n}, {r}	8
+X_VPCMPGTW_3345	vpcmpgtw {b}, {n}, {r}	4
+X_VPCMPGTD_3346_m	vpcmpgtd {m.disp}({m.base}), {n}, {r}	5
+X_VPCMPGTD_3346_x	vpcmpgtd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPCMPGTD_3346_p	vpcmpgtd {m.sym}(%rip), {n}, {r}	8
+X_VPCMPGTD_3347	vpcmpgtd {b}, {n}, {r}	4
+X_VPCMPGTQ_3348_m	vpcmpgtq {m.disp}({m.base}), {n}, {r}	6
+X_VPCMPGTQ_3348_x	vpcmpgtq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPCMPGTQ_3348_p	vpcmpgtq {m.sym}(%rip), {n}, {r}	9
+X_VPCMPGTQ_3349	vpcmpgtq {b}, {n}, {r}	5
+X_VPHADDW_3350_m	vphaddw {m.disp}({m.base}), {n}, {r}	6
+X_VPHADDW_3350_x	vphaddw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPHADDW_3350_p	vphaddw {m.sym}(%rip), {n}, {r}	9
+X_VPHADDW_3351	vphaddw {b}, {n}, {r}	5
+X_VPHADDD_3352_m	vphaddd {m.disp}({m.base}), {n}, {r}	6
+X_VPHADDD_3352_x	vphaddd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPHADDD_3352_p	vphaddd {m.sym}(%rip), {n}, {r}	9
+X_VPHADDD_3353	vphaddd {b}, {n}, {r}	5
+X_VPHADDSW_3354_m	vphaddsw {m.disp}({m.base}), {n}, {r}	6
+X_VPHADDSW_3354_x	vphaddsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPHADDSW_3354_p	vphaddsw {m.sym}(%rip), {n}, {r}	9
+X_VPHADDSW_3355	vphaddsw {b}, {n}, {r}	5
+X_VPHSUBW_3356_m	vphsubw {m.disp}({m.base}), {n}, {r}	6
+X_VPHSUBW_3356_x	vphsubw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPHSUBW_3356_p	vphsubw {m.sym}(%rip), {n}, {r}	9
+X_VPHSUBW_3357	vphsubw {b}, {n}, {r}	5
+X_VPHSUBD_3358_m	vphsubd {m.disp}({m.base}), {n}, {r}	6
+X_VPHSUBD_3358_x	vphsubd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPHSUBD_3358_p	vphsubd {m.sym}(%rip), {n}, {r}	9
+X_VPHSUBD_3359	vphsubd {b}, {n}, {r}	5
+X_VPHSUBSW_3360_m	vphsubsw {m.disp}({m.base}), {n}, {r}	6
+X_VPHSUBSW_3360_x	vphsubsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPHSUBSW_3360_p	vphsubsw {m.sym}(%rip), {n}, {r}	9
+X_VPHSUBSW_3361	vphsubsw {b}, {n}, {r}	5
+X_VPMULHUW_3362_m	vpmulhuw {m.disp}({m.base}), {n}, {r}	5
+X_VPMULHUW_3362_x	vpmulhuw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMULHUW_3362_p	vpmulhuw {m.sym}(%rip), {n}, {r}	8
+X_VPMULHUW_3363	vpmulhuw {b}, {n}, {r}	4
+X_VPMULHRSW_3364_m	vpmulhrsw {m.disp}({m.base}), {n}, {r}	6
+X_VPMULHRSW_3364_x	vpmulhrsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMULHRSW_3364_p	vpmulhrsw {m.sym}(%rip), {n}, {r}	9
+X_VPMULHRSW_3365	vpmulhrsw {b}, {n}, {r}	5
+X_VPMULHW_3366_m	vpmulhw {m.disp}({m.base}), {n}, {r}	5
+X_VPMULHW_3366_x	vpmulhw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMULHW_3366_p	vpmulhw {m.sym}(%rip), {n}, {r}	8
+X_VPMULHW_3367	vpmulhw {b}, {n}, {r}	4
+X_VPMULLW_3368_m	vpmullw {m.disp}({m.base}), {n}, {r}	5
+X_VPMULLW_3368_x	vpmullw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMULLW_3368_p	vpmullw {m.sym}(%rip), {n}, {r}	8
+X_VPMULLW_3369	vpmullw {b}, {n}, {r}	4
+X_VPMULLD_3370_m	vpmulld {m.disp}({m.base}), {n}, {r}	6
+X_VPMULLD_3370_x	vpmulld {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMULLD_3370_p	vpmulld {m.sym}(%rip), {n}, {r}	9
+X_VPMULLD_3371	vpmulld {b}, {n}, {r}	5
+X_VPMULUDQ_3372_m	vpmuludq {m.disp}({m.base}), {n}, {r}	5
+X_VPMULUDQ_3372_x	vpmuludq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMULUDQ_3372_p	vpmuludq {m.sym}(%rip), {n}, {r}	8
+X_VPMULUDQ_3373	vpmuludq {b}, {n}, {r}	4
+X_VPMULDQ_3374_m	vpmuldq {m.disp}({m.base}), {n}, {r}	6
+X_VPMULDQ_3374_x	vpmuldq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMULDQ_3374_p	vpmuldq {m.sym}(%rip), {n}, {r}	9
+X_VPMULDQ_3375	vpmuldq {b}, {n}, {r}	5
+X_VPSADBW_3376_m	vpsadbw {m.disp}({m.base}), {n}, {r}	5
+X_VPSADBW_3376_x	vpsadbw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSADBW_3376_p	vpsadbw {m.sym}(%rip), {n}, {r}	8
+X_VPSADBW_3377	vpsadbw {b}, {n}, {r}	4
+X_VPSHUFB_3378_m	vpshufb {m.disp}({m.base}), {n}, {r}	6
+X_VPSHUFB_3378_x	vpshufb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSHUFB_3378_p	vpshufb {m.sym}(%rip), {n}, {r}	9
+X_VPSHUFB_3379	vpshufb {b}, {n}, {r}	5
+X_VPSIGNB_3380_m	vpsignb {m.disp}({m.base}), {n}, {r}	6
+X_VPSIGNB_3380_x	vpsignb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSIGNB_3380_p	vpsignb {m.sym}(%rip), {n}, {r}	9
+X_VPSIGNB_3381	vpsignb {b}, {n}, {r}	5
+X_VPSIGNW_3382_m	vpsignw {m.disp}({m.base}), {n}, {r}	6
+X_VPSIGNW_3382_x	vpsignw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSIGNW_3382_p	vpsignw {m.sym}(%rip), {n}, {r}	9
+X_VPSIGNW_3383	vpsignw {b}, {n}, {r}	5
+X_VPSIGND_3384_m	vpsignd {m.disp}({m.base}), {n}, {r}	6
+X_VPSIGND_3384_x	vpsignd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSIGND_3384_p	vpsignd {m.sym}(%rip), {n}, {r}	9
+X_VPSIGND_3385	vpsignd {b}, {n}, {r}	5
+X_VPSUBSB_3386_m	vpsubsb {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBSB_3386_x	vpsubsb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBSB_3386_p	vpsubsb {m.sym}(%rip), {n}, {r}	8
+X_VPSUBSB_3387	vpsubsb {b}, {n}, {r}	4
+X_VPSUBSW_3388_m	vpsubsw {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBSW_3388_x	vpsubsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBSW_3388_p	vpsubsw {m.sym}(%rip), {n}, {r}	8
+X_VPSUBSW_3389	vpsubsw {b}, {n}, {r}	4
+X_VPSUBUSB_3390_m	vpsubusb {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBUSB_3390_x	vpsubusb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBUSB_3390_p	vpsubusb {m.sym}(%rip), {n}, {r}	8
+X_VPSUBUSB_3391	vpsubusb {b}, {n}, {r}	4
+X_VPSUBUSW_3392_m	vpsubusw {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBUSW_3392_x	vpsubusw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBUSW_3392_p	vpsubusw {m.sym}(%rip), {n}, {r}	8
+X_VPSUBUSW_3393	vpsubusw {b}, {n}, {r}	4
+X_VPSUBB_3394_m	vpsubb {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBB_3394_x	vpsubb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBB_3394_p	vpsubb {m.sym}(%rip), {n}, {r}	8
+X_VPSUBB_3395	vpsubb {b}, {n}, {r}	4
+X_VPSUBW_3396_m	vpsubw {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBW_3396_x	vpsubw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBW_3396_p	vpsubw {m.sym}(%rip), {n}, {r}	8
+X_VPSUBW_3397	vpsubw {b}, {n}, {r}	4
+X_VPSUBD_3398_m	vpsubd {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBD_3398_x	vpsubd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBD_3398_p	vpsubd {m.sym}(%rip), {n}, {r}	8
+X_VPSUBD_3399	vpsubd {b}, {n}, {r}	4
+X_VPSUBQ_3400_m	vpsubq {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBQ_3400_x	vpsubq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBQ_3400_p	vpsubq {m.sym}(%rip), {n}, {r}	8
+X_VPSUBQ_3401	vpsubq {b}, {n}, {r}	4
+X_VPUNPCKHBW_3402_m	vpunpckhbw {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKHBW_3402_x	vpunpckhbw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKHBW_3402_p	vpunpckhbw {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKHBW_3403	vpunpckhbw {b}, {n}, {r}	4
+X_VPUNPCKHWD_3404_m	vpunpckhwd {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKHWD_3404_x	vpunpckhwd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKHWD_3404_p	vpunpckhwd {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKHWD_3405	vpunpckhwd {b}, {n}, {r}	4
+X_VPUNPCKHDQ_3406_m	vpunpckhdq {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKHDQ_3406_x	vpunpckhdq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKHDQ_3406_p	vpunpckhdq {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKHDQ_3407	vpunpckhdq {b}, {n}, {r}	4
+X_VPUNPCKHQDQ_3408_m	vpunpckhqdq {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKHQDQ_3408_x	vpunpckhqdq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKHQDQ_3408_p	vpunpckhqdq {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKHQDQ_3409	vpunpckhqdq {b}, {n}, {r}	4
+X_VPUNPCKLBW_3410_m	vpunpcklbw {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKLBW_3410_x	vpunpcklbw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKLBW_3410_p	vpunpcklbw {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKLBW_3411	vpunpcklbw {b}, {n}, {r}	4
+X_VPUNPCKLWD_3412_m	vpunpcklwd {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKLWD_3412_x	vpunpcklwd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKLWD_3412_p	vpunpcklwd {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKLWD_3413	vpunpcklwd {b}, {n}, {r}	4
+X_VPUNPCKLDQ_3414_m	vpunpckldq {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKLDQ_3414_x	vpunpckldq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKLDQ_3414_p	vpunpckldq {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKLDQ_3415	vpunpckldq {b}, {n}, {r}	4
+X_VPUNPCKLQDQ_3416_m	vpunpcklqdq {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKLQDQ_3416_x	vpunpcklqdq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKLQDQ_3416_p	vpunpcklqdq {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKLQDQ_3417	vpunpcklqdq {b}, {n}, {r}	4
+X_VPSRLDQ_3418	vpsrldq ${c}, {b}, {n}	5
+X_VPSLLDQ_3419	vpslldq ${c}, {b}, {n}	5
+X_VMOVLHPS_3420	vmovlhps {b}, {n}, {r}	4
+X_VMOVHLPS_3421	vmovhlps {b}, {n}, {r}	4
+X_VPALIGNR_3422_m	vpalignr ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VPALIGNR_3422_x	vpalignr ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VPALIGNR_3422_p	vpalignr ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VPALIGNR_3423	vpalignr ${c}, {b}, {n}, {r}	6
+X_VPBLENDW_3424_m	vpblendw ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VPBLENDW_3424_x	vpblendw ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VPBLENDW_3424_p	vpblendw ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VPBLENDW_3425	vpblendw ${c}, {b}, {n}, {r}	6
+X_VROUNDPD_3426_m	vroundpd ${c}, {m.disp}({m.base}), {r}	7
+X_VROUNDPD_3426_x	vroundpd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VROUNDPD_3426_p	vroundpd ${c}, {m.sym}(%rip), {r}	10
+X_VROUNDPD_3427	vroundpd ${c}, {b}, {r}	6
+X_VROUNDPD_3428_m	vroundpd ${c}, {m.disp}({m.base}), {r}	7
+X_VROUNDPD_3428_x	vroundpd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VROUNDPD_3428_p	vroundpd ${c}, {m.sym}(%rip), {r}	10
+X_VROUNDPD_3429	vroundpd ${c}, {b}, {r}	6
+X_VROUNDPS_3430_m	vroundps ${c}, {m.disp}({m.base}), {r}	7
+X_VROUNDPS_3430_x	vroundps ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VROUNDPS_3430_p	vroundps ${c}, {m.sym}(%rip), {r}	10
+X_VROUNDPS_3431	vroundps ${c}, {b}, {r}	6
+X_VROUNDPS_3432_m	vroundps ${c}, {m.disp}({m.base}), {r}	7
+X_VROUNDPS_3432_x	vroundps ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VROUNDPS_3432_p	vroundps ${c}, {m.sym}(%rip), {r}	10
+X_VROUNDPS_3433	vroundps ${c}, {b}, {r}	6
+X_VROUNDSD_3434_m	vroundsd ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VROUNDSD_3434_x	vroundsd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VROUNDSD_3434_p	vroundsd ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VROUNDSD_3435	vroundsd ${c}, {b}, {n}, {r}	6
+X_VROUNDSS_3436_m	vroundss ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VROUNDSS_3436_x	vroundss ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VROUNDSS_3436_p	vroundss ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VROUNDSS_3437	vroundss ${c}, {b}, {n}, {r}	6
+X_VSHUFPD_3438_m	vshufpd ${c}, {m.disp}({m.base}), {n}, {r}	6
+X_VSHUFPD_3438_x	vshufpd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VSHUFPD_3438_p	vshufpd ${c}, {m.sym}(%rip), {n}, {r}	9
+X_VSHUFPD_3439	vshufpd ${c}, {b}, {n}, {r}	5
+X_VSHUFPD_3440_m	vshufpd ${c}, {m.disp}({m.base}), {n}, {r}	6
+X_VSHUFPD_3440_x	vshufpd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VSHUFPD_3440_p	vshufpd ${c}, {m.sym}(%rip), {n}, {r}	9
+X_VSHUFPD_3441	vshufpd ${c}, {b}, {n}, {r}	5
+X_VSHUFPS_3442_m	vshufps ${c}, {m.disp}({m.base}), {n}, {r}	6
+X_VSHUFPS_3442_x	vshufps ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VSHUFPS_3442_p	vshufps ${c}, {m.sym}(%rip), {n}, {r}	9
+X_VSHUFPS_3443	vshufps ${c}, {b}, {n}, {r}	5
+X_VSHUFPS_3444_m	vshufps ${c}, {m.disp}({m.base}), {n}, {r}	6
+X_VSHUFPS_3444_x	vshufps ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VSHUFPS_3444_p	vshufps ${c}, {m.sym}(%rip), {n}, {r}	9
+X_VSHUFPS_3445	vshufps ${c}, {b}, {n}, {r}	5
+X_VRCPPS_3446_m	vrcpps {m.disp}({m.base}), {r}	5
+X_VRCPPS_3446_x	vrcpps {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VRCPPS_3446_p	vrcpps {m.sym}(%rip), {r}	8
+X_VRCPPS_3447	vrcpps {b}, {r}	4
+X_VRCPPS_3448_m	vrcpps {m.disp}({m.base}), {r}	5
+X_VRCPPS_3448_x	vrcpps {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VRCPPS_3448_p	vrcpps {m.sym}(%rip), {r}	8
+X_VRCPPS_3449	vrcpps {b}, {r}	4
+X_VRCPSS_3450_m	vrcpss {m.disp}({m.base}), {n}, {r}	5
+X_VRCPSS_3450_x	vrcpss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VRCPSS_3450_p	vrcpss {m.sym}(%rip), {n}, {r}	8
+X_VRCPSS_3451	vrcpss {b}, {n}, {r}	4
+X_VRSQRTPS_3452_m	vrsqrtps {m.disp}({m.base}), {r}	5
+X_VRSQRTPS_3452_x	vrsqrtps {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VRSQRTPS_3452_p	vrsqrtps {m.sym}(%rip), {r}	8
+X_VRSQRTPS_3453	vrsqrtps {b}, {r}	4
+X_VRSQRTPS_3454_m	vrsqrtps {m.disp}({m.base}), {r}	5
+X_VRSQRTPS_3454_x	vrsqrtps {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VRSQRTPS_3454_p	vrsqrtps {m.sym}(%rip), {r}	8
+X_VRSQRTPS_3455	vrsqrtps {b}, {r}	4
+X_VRSQRTSS_3456_m	vrsqrtss {m.disp}({m.base}), {n}, {r}	5
+X_VRSQRTSS_3456_x	vrsqrtss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VRSQRTSS_3456_p	vrsqrtss {m.sym}(%rip), {n}, {r}	8
+X_VRSQRTSS_3457	vrsqrtss {b}, {n}, {r}	4
+X_VSQRTPD_3458_m	vsqrtpd {m.disp}({m.base}), {r}	5
+X_VSQRTPD_3458_x	vsqrtpd {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VSQRTPD_3458_p	vsqrtpd {m.sym}(%rip), {r}	8
+X_VSQRTPD_3459	vsqrtpd {b}, {r}	4
+X_VSQRTPD_3460_m	vsqrtpd {m.disp}({m.base}), {r}	5
+X_VSQRTPD_3460_x	vsqrtpd {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VSQRTPD_3460_p	vsqrtpd {m.sym}(%rip), {r}	8
+X_VSQRTPD_3461	vsqrtpd {b}, {r}	4
+X_VSQRTPS_3462_m	vsqrtps {m.disp}({m.base}), {r}	5
+X_VSQRTPS_3462_x	vsqrtps {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VSQRTPS_3462_p	vsqrtps {m.sym}(%rip), {r}	8
+X_VSQRTPS_3463	vsqrtps {b}, {r}	4
+X_VSQRTPS_3464_m	vsqrtps {m.disp}({m.base}), {r}	5
+X_VSQRTPS_3464_x	vsqrtps {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VSQRTPS_3464_p	vsqrtps {m.sym}(%rip), {r}	8
+X_VSQRTPS_3465	vsqrtps {b}, {r}	4
+X_VSQRTSD_3466_m	vsqrtsd {m.disp}({m.base}), {n}, {r}	5
+X_VSQRTSD_3466_x	vsqrtsd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VSQRTSD_3466_p	vsqrtsd {m.sym}(%rip), {n}, {r}	8
+X_VSQRTSD_3467	vsqrtsd {b}, {n}, {r}	4
+X_VSQRTSS_3468_m	vsqrtss {m.disp}({m.base}), {n}, {r}	5
+X_VSQRTSS_3468_x	vsqrtss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VSQRTSS_3468_p	vsqrtss {m.sym}(%rip), {n}, {r}	8
+X_VSQRTSS_3469	vsqrtss {b}, {n}, {r}	4
+X_VUNPCKHPD_3470_m	vunpckhpd {m.disp}({m.base}), {n}, {r}	5
+X_VUNPCKHPD_3470_x	vunpckhpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VUNPCKHPD_3470_p	vunpckhpd {m.sym}(%rip), {n}, {r}	8
+X_VUNPCKHPD_3471	vunpckhpd {b}, {n}, {r}	4
+X_VUNPCKHPD_3472_m	vunpckhpd {m.disp}({m.base}), {n}, {r}	5
+X_VUNPCKHPD_3472_x	vunpckhpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VUNPCKHPD_3472_p	vunpckhpd {m.sym}(%rip), {n}, {r}	8
+X_VUNPCKHPD_3473	vunpckhpd {b}, {n}, {r}	4
+X_VUNPCKHPS_3474_m	vunpckhps {m.disp}({m.base}), {n}, {r}	5
+X_VUNPCKHPS_3474_x	vunpckhps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VUNPCKHPS_3474_p	vunpckhps {m.sym}(%rip), {n}, {r}	8
+X_VUNPCKHPS_3475	vunpckhps {b}, {n}, {r}	4
+X_VUNPCKHPS_3476_m	vunpckhps {m.disp}({m.base}), {n}, {r}	5
+X_VUNPCKHPS_3476_x	vunpckhps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VUNPCKHPS_3476_p	vunpckhps {m.sym}(%rip), {n}, {r}	8
+X_VUNPCKHPS_3477	vunpckhps {b}, {n}, {r}	4
+X_VSUBPD_3478_m	vsubpd {m.disp}({m.base}), {n}, {r}	5
+X_VSUBPD_3478_x	vsubpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VSUBPD_3478_p	vsubpd {m.sym}(%rip), {n}, {r}	8
+X_VSUBPD_3479	vsubpd {b}, {n}, {r}	4
+X_VSUBPD_3480_m	vsubpd {m.disp}({m.base}), {n}, {r}	5
+X_VSUBPD_3480_x	vsubpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VSUBPD_3480_p	vsubpd {m.sym}(%rip), {n}, {r}	8
+X_VSUBPD_3481	vsubpd {b}, {n}, {r}	4
+X_VSUBPS_3482_m	vsubps {m.disp}({m.base}), {n}, {r}	5
+X_VSUBPS_3482_x	vsubps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VSUBPS_3482_p	vsubps {m.sym}(%rip), {n}, {r}	8
+X_VSUBPS_3483	vsubps {b}, {n}, {r}	4
+X_VSUBPS_3484_m	vsubps {m.disp}({m.base}), {n}, {r}	5
+X_VSUBPS_3484_x	vsubps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VSUBPS_3484_p	vsubps {m.sym}(%rip), {n}, {r}	8
+X_VSUBPS_3485	vsubps {b}, {n}, {r}	4
+X_VSUBSD_3486_m	vsubsd {m.disp}({m.base}), {n}, {r}	5
+X_VSUBSD_3486_x	vsubsd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VSUBSD_3486_p	vsubsd {m.sym}(%rip), {n}, {r}	8
+X_VSUBSD_3487	vsubsd {b}, {n}, {r}	4
+X_VSUBSS_3488_m	vsubss {m.disp}({m.base}), {n}, {r}	5
+X_VSUBSS_3488_x	vsubss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VSUBSS_3488_p	vsubss {m.sym}(%rip), {n}, {r}	8
+X_VSUBSS_3489	vsubss {b}, {n}, {r}	4
+X_VMULPD_3490_m	vmulpd {m.disp}({m.base}), {n}, {r}	5
+X_VMULPD_3490_x	vmulpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMULPD_3490_p	vmulpd {m.sym}(%rip), {n}, {r}	8
+X_VMULPD_3491	vmulpd {b}, {n}, {r}	4
+X_VMULPD_3492_m	vmulpd {m.disp}({m.base}), {n}, {r}	5
+X_VMULPD_3492_x	vmulpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMULPD_3492_p	vmulpd {m.sym}(%rip), {n}, {r}	8
+X_VMULPD_3493	vmulpd {b}, {n}, {r}	4
+X_VMULPS_3494_m	vmulps {m.disp}({m.base}), {n}, {r}	5
+X_VMULPS_3494_x	vmulps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMULPS_3494_p	vmulps {m.sym}(%rip), {n}, {r}	8
+X_VMULPS_3495	vmulps {b}, {n}, {r}	4
+X_VMULPS_3496_m	vmulps {m.disp}({m.base}), {n}, {r}	5
+X_VMULPS_3496_x	vmulps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMULPS_3496_p	vmulps {m.sym}(%rip), {n}, {r}	8
+X_VMULPS_3497	vmulps {b}, {n}, {r}	4
+X_VMULSD_3498_m	vmulsd {m.disp}({m.base}), {n}, {r}	5
+X_VMULSD_3498_x	vmulsd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMULSD_3498_p	vmulsd {m.sym}(%rip), {n}, {r}	8
+X_VMULSD_3499	vmulsd {b}, {n}, {r}	4
+X_VMULSS_3500_m	vmulss {m.disp}({m.base}), {n}, {r}	5
+X_VMULSS_3500_x	vmulss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMULSS_3500_p	vmulss {m.sym}(%rip), {n}, {r}	8
+X_VMULSS_3501	vmulss {b}, {n}, {r}	4
+X_VORPD_3502_m	vorpd {m.disp}({m.base}), {n}, {r}	5
+X_VORPD_3502_x	vorpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VORPD_3502_p	vorpd {m.sym}(%rip), {n}, {r}	8
+X_VORPD_3503	vorpd {b}, {n}, {r}	4
+X_VORPD_3504_m	vorpd {m.disp}({m.base}), {n}, {r}	5
+X_VORPD_3504_x	vorpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VORPD_3504_p	vorpd {m.sym}(%rip), {n}, {r}	8
+X_VORPD_3505	vorpd {b}, {n}, {r}	4
+X_VORPS_3506_m	vorps {m.disp}({m.base}), {n}, {r}	5
+X_VORPS_3506_x	vorps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VORPS_3506_p	vorps {m.sym}(%rip), {n}, {r}	8
+X_VORPS_3507	vorps {b}, {n}, {r}	4
+X_VORPS_3508_m	vorps {m.disp}({m.base}), {n}, {r}	5
+X_VORPS_3508_x	vorps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VORPS_3508_p	vorps {m.sym}(%rip), {n}, {r}	8
+X_VORPS_3509	vorps {b}, {n}, {r}	4
+X_VPMAXSB_3510_m	vpmaxsb {m.disp}({m.base}), {n}, {r}	6
+X_VPMAXSB_3510_x	vpmaxsb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMAXSB_3510_p	vpmaxsb {m.sym}(%rip), {n}, {r}	9
+X_VPMAXSB_3511	vpmaxsb {b}, {n}, {r}	5
+X_VPMAXSW_3512_m	vpmaxsw {m.disp}({m.base}), {n}, {r}	5
+X_VPMAXSW_3512_x	vpmaxsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMAXSW_3512_p	vpmaxsw {m.sym}(%rip), {n}, {r}	8
+X_VPMAXSW_3513	vpmaxsw {b}, {n}, {r}	4
+X_VPMAXSD_3514_m	vpmaxsd {m.disp}({m.base}), {n}, {r}	6
+X_VPMAXSD_3514_x	vpmaxsd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMAXSD_3514_p	vpmaxsd {m.sym}(%rip), {n}, {r}	9
+X_VPMAXSD_3515	vpmaxsd {b}, {n}, {r}	5
+X_VPMAXUB_3516_m	vpmaxub {m.disp}({m.base}), {n}, {r}	5
+X_VPMAXUB_3516_x	vpmaxub {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMAXUB_3516_p	vpmaxub {m.sym}(%rip), {n}, {r}	8
+X_VPMAXUB_3517	vpmaxub {b}, {n}, {r}	4
+X_VPMAXUW_3518_m	vpmaxuw {m.disp}({m.base}), {n}, {r}	6
+X_VPMAXUW_3518_x	vpmaxuw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMAXUW_3518_p	vpmaxuw {m.sym}(%rip), {n}, {r}	9
+X_VPMAXUW_3519	vpmaxuw {b}, {n}, {r}	5
+X_VPMAXUD_3520_m	vpmaxud {m.disp}({m.base}), {n}, {r}	6
+X_VPMAXUD_3520_x	vpmaxud {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMAXUD_3520_p	vpmaxud {m.sym}(%rip), {n}, {r}	9
+X_VPMAXUD_3521	vpmaxud {b}, {n}, {r}	5
+X_VPMINSB_3522_m	vpminsb {m.disp}({m.base}), {n}, {r}	6
+X_VPMINSB_3522_x	vpminsb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMINSB_3522_p	vpminsb {m.sym}(%rip), {n}, {r}	9
+X_VPMINSB_3523	vpminsb {b}, {n}, {r}	5
+X_VPMINSW_3524_m	vpminsw {m.disp}({m.base}), {n}, {r}	5
+X_VPMINSW_3524_x	vpminsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMINSW_3524_p	vpminsw {m.sym}(%rip), {n}, {r}	8
+X_VPMINSW_3525	vpminsw {b}, {n}, {r}	4
+X_VPMINSD_3526_m	vpminsd {m.disp}({m.base}), {n}, {r}	6
+X_VPMINSD_3526_x	vpminsd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMINSD_3526_p	vpminsd {m.sym}(%rip), {n}, {r}	9
+X_VPMINSD_3527	vpminsd {b}, {n}, {r}	5
+X_VPMINUB_3528_m	vpminub {m.disp}({m.base}), {n}, {r}	5
+X_VPMINUB_3528_x	vpminub {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMINUB_3528_p	vpminub {m.sym}(%rip), {n}, {r}	8
+X_VPMINUB_3529	vpminub {b}, {n}, {r}	4
+X_VPMINUW_3530_m	vpminuw {m.disp}({m.base}), {n}, {r}	6
+X_VPMINUW_3530_x	vpminuw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMINUW_3530_p	vpminuw {m.sym}(%rip), {n}, {r}	9
+X_VPMINUW_3531	vpminuw {b}, {n}, {r}	5
+X_VPMINUD_3532_m	vpminud {m.disp}({m.base}), {n}, {r}	6
+X_VPMINUD_3532_x	vpminud {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMINUD_3532_p	vpminud {m.sym}(%rip), {n}, {r}	9
+X_VPMINUD_3533	vpminud {b}, {n}, {r}	5
+X_VPMADDWD_3534_m	vpmaddwd {m.disp}({m.base}), {n}, {r}	5
+X_VPMADDWD_3534_x	vpmaddwd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMADDWD_3534_p	vpmaddwd {m.sym}(%rip), {n}, {r}	8
+X_VPMADDWD_3535	vpmaddwd {b}, {n}, {r}	4
+X_VPMADDUBSW_3536_m	vpmaddubsw {m.disp}({m.base}), {n}, {r}	6
+X_VPMADDUBSW_3536_x	vpmaddubsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMADDUBSW_3536_p	vpmaddubsw {m.sym}(%rip), {n}, {r}	9
+X_VPMADDUBSW_3537	vpmaddubsw {b}, {n}, {r}	5
+X_VMPSADBW_3538_m	vmpsadbw ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VMPSADBW_3538_x	vmpsadbw ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VMPSADBW_3538_p	vmpsadbw ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VMPSADBW_3539	vmpsadbw ${c}, {b}, {n}, {r}	6
+X_VPSLLW_3540	vpsllw ${c}, {b}, {n}	5
+X_VPSLLD_3541	vpslld ${c}, {b}, {n}	5
+X_VPSLLQ_3542	vpsllq ${c}, {b}, {n}	5
+X_VPSRAW_3543	vpsraw ${c}, {b}, {n}	5
+X_VPSRAD_3544	vpsrad ${c}, {b}, {n}	5
+X_VPSRLW_3545	vpsrlw ${c}, {b}, {n}	5
+X_VPSRLD_3546	vpsrld ${c}, {b}, {n}	5
+X_VPSRLQ_3547	vpsrlq ${c}, {b}, {n}	5
+X_VUCOMISD_3548_m	vucomisd {m.disp}({m.base}), {r}	5
+X_VUCOMISD_3548_x	vucomisd {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VUCOMISD_3548_p	vucomisd {m.sym}(%rip), {r}	8
+X_VUCOMISD_3549	vucomisd {b}, {r}	4
+X_VUCOMISS_3550_m	vucomiss {m.disp}({m.base}), {r}	5
+X_VUCOMISS_3550_x	vucomiss {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VUCOMISS_3550_p	vucomiss {m.sym}(%rip), {r}	8
+X_VUCOMISS_3551	vucomiss {b}, {r}	4
+X_VUNPCKLPD_3552_m	vunpcklpd {m.disp}({m.base}), {n}, {r}	5
+X_VUNPCKLPD_3552_x	vunpcklpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VUNPCKLPD_3552_p	vunpcklpd {m.sym}(%rip), {n}, {r}	8
+X_VUNPCKLPD_3553	vunpcklpd {b}, {n}, {r}	4
+X_VUNPCKLPD_3554_m	vunpcklpd {m.disp}({m.base}), {n}, {r}	5
+X_VUNPCKLPD_3554_x	vunpcklpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VUNPCKLPD_3554_p	vunpcklpd {m.sym}(%rip), {n}, {r}	8
+X_VUNPCKLPD_3555	vunpcklpd {b}, {n}, {r}	4
+X_VUNPCKLPS_3556_m	vunpcklps {m.disp}({m.base}), {n}, {r}	5
+X_VUNPCKLPS_3556_x	vunpcklps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VUNPCKLPS_3556_p	vunpcklps {m.sym}(%rip), {n}, {r}	8
+X_VUNPCKLPS_3557	vunpcklps {b}, {n}, {r}	4
+X_VUNPCKLPS_3558_m	vunpcklps {m.disp}({m.base}), {n}, {r}	5
+X_VUNPCKLPS_3558_x	vunpcklps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VUNPCKLPS_3558_p	vunpcklps {m.sym}(%rip), {n}, {r}	8
+X_VUNPCKLPS_3559	vunpcklps {b}, {n}, {r}	4
+X_VXORPD_3560_m	vxorpd {m.disp}({m.base}), {n}, {r}	5
+X_VXORPD_3560_x	vxorpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VXORPD_3560_p	vxorpd {m.sym}(%rip), {n}, {r}	8
+X_VXORPD_3561	vxorpd {b}, {n}, {r}	4
+X_VXORPD_3562_m	vxorpd {m.disp}({m.base}), {n}, {r}	5
+X_VXORPD_3562_x	vxorpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VXORPD_3562_p	vxorpd {m.sym}(%rip), {n}, {r}	8
+X_VXORPD_3563	vxorpd {b}, {n}, {r}	4
+X_VXORPS_3564_m	vxorps {m.disp}({m.base}), {n}, {r}	5
+X_VXORPS_3564_x	vxorps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VXORPS_3564_p	vxorps {m.sym}(%rip), {n}, {r}	8
+X_VXORPS_3565	vxorps {b}, {n}, {r}	4
+X_VXORPS_3566_m	vxorps {m.disp}({m.base}), {n}, {r}	5
+X_VXORPS_3566_x	vxorps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VXORPS_3566_p	vxorps {m.sym}(%rip), {n}, {r}	8
+X_VXORPS_3567	vxorps {b}, {n}, {r}	4
+X_VMOVSS_3568_m	vmovss {m.disp}({m.base}), {r}	5
+X_VMOVSS_3568_x	vmovss {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVSS_3568_p	vmovss {m.sym}(%rip), {r}	8
+X_VMOVSS_3569_m	vmovss {r}, {m.disp}({m.base})	5
+X_VMOVSS_3569_x	vmovss {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVSS_3569_p	vmovss {r}, {m.sym}(%rip)	8
+X_VMOVSS_3570	vmovss {b}, {n}, {r}	4
+X_VMOVSS_3571	vmovss {r}, {n}, {b}	4
+X_VMOVSD_3572_m	vmovsd {m.disp}({m.base}), {r}	5
+X_VMOVSD_3572_x	vmovsd {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVSD_3572_p	vmovsd {m.sym}(%rip), {r}	8
+X_VMOVSD_3573_m	vmovsd {r}, {m.disp}({m.base})	5
+X_VMOVSD_3573_x	vmovsd {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVSD_3573_p	vmovsd {r}, {m.sym}(%rip)	8
+X_VMOVSD_3574	vmovsd {b}, {n}, {r}	4
+X_VMOVSD_3575	vmovsd {r}, {n}, {b}	4
+X_VMOVUPD_3576_m	vmovupd {m.disp}({m.base}), {r}	5
+X_VMOVUPD_3576_x	vmovupd {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVUPD_3576_p	vmovupd {m.sym}(%rip), {r}	8
+X_VMOVUPD_3577	vmovupd {b}, {r}	4
+X_VMOVUPD_3578_m	vmovupd {r}, {m.disp}({m.base})	5
+X_VMOVUPD_3578_x	vmovupd {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVUPD_3578_p	vmovupd {r}, {m.sym}(%rip)	8
+X_VMOVUPD_3579	vmovupd {r}, {b}	4
+X_VMOVUPD_3580_m	vmovupd {m.disp}({m.base}), {r}	5
+X_VMOVUPD_3580_x	vmovupd {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVUPD_3580_p	vmovupd {m.sym}(%rip), {r}	8
+X_VMOVUPD_3581	vmovupd {b}, {r}	4
+X_VMOVUPD_3582_m	vmovupd {r}, {m.disp}({m.base})	5
+X_VMOVUPD_3582_x	vmovupd {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVUPD_3582_p	vmovupd {r}, {m.sym}(%rip)	8
+X_VMOVUPD_3583	vmovupd {r}, {b}	4
+X_VMOVUPS_3584_m	vmovups {m.disp}({m.base}), {r}	5
+X_VMOVUPS_3584_x	vmovups {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVUPS_3584_p	vmovups {m.sym}(%rip), {r}	8
+X_VMOVUPS_3585	vmovups {b}, {r}	4
+X_VMOVUPS_3586_m	vmovups {r}, {m.disp}({m.base})	5
+X_VMOVUPS_3586_x	vmovups {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVUPS_3586_p	vmovups {r}, {m.sym}(%rip)	8
+X_VMOVUPS_3587	vmovups {r}, {b}	4
+X_VMOVUPS_3588_m	vmovups {m.disp}({m.base}), {r}	5
+X_VMOVUPS_3588_x	vmovups {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_VMOVUPS_3588_p	vmovups {m.sym}(%rip), {r}	8
+X_VMOVUPS_3589	vmovups {b}, {r}	4
+X_VMOVUPS_3590_m	vmovups {r}, {m.disp}({m.base})	5
+X_VMOVUPS_3590_x	vmovups {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVUPS_3590_p	vmovups {r}, {m.sym}(%rip)	8
+X_VMOVUPS_3591	vmovups {r}, {b}	4
+X_VMOVLPD_3592_m	vmovlpd {m.disp}({m.base}), {n}, {r}	5
+X_VMOVLPD_3592_x	vmovlpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMOVLPD_3592_p	vmovlpd {m.sym}(%rip), {n}, {r}	8
+X_VMOVLPD_3593_m	vmovlpd {r}, {m.disp}({m.base})	5
+X_VMOVLPD_3593_x	vmovlpd {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVLPD_3593_p	vmovlpd {r}, {m.sym}(%rip)	8
+X_VMOVLPS_3594_m	vmovlps {m.disp}({m.base}), {n}, {r}	5
+X_VMOVLPS_3594_x	vmovlps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMOVLPS_3594_p	vmovlps {m.sym}(%rip), {n}, {r}	8
+X_VMOVLPS_3595_m	vmovlps {r}, {m.disp}({m.base})	5
+X_VMOVLPS_3595_x	vmovlps {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVLPS_3595_p	vmovlps {r}, {m.sym}(%rip)	8
+X_VMOVHPD_3596_m	vmovhpd {m.disp}({m.base}), {n}, {r}	5
+X_VMOVHPD_3596_x	vmovhpd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMOVHPD_3596_p	vmovhpd {m.sym}(%rip), {n}, {r}	8
+X_VMOVHPD_3597_m	vmovhpd {r}, {m.disp}({m.base})	5
+X_VMOVHPD_3597_x	vmovhpd {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVHPD_3597_p	vmovhpd {r}, {m.sym}(%rip)	8
+X_VMOVHPS_3598_m	vmovhps {m.disp}({m.base}), {n}, {r}	5
+X_VMOVHPS_3598_x	vmovhps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VMOVHPS_3598_p	vmovhps {m.sym}(%rip), {n}, {r}	8
+X_VMOVHPS_3599_m	vmovhps {r}, {m.disp}({m.base})	5
+X_VMOVHPS_3599_x	vmovhps {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVHPS_3599_p	vmovhps {r}, {m.sym}(%rip)	8
+X_VMOVMSKPD_3600	vmovmskpd {b}, {r}	4
+X_VMOVMSKPD_3601	vmovmskpd {b}, {r}	4
+X_VMOVMSKPS_3602	vmovmskps {b}, {r}	4
+X_VMOVMSKPS_3603	vmovmskps {b}, {r}	4
+X_VPMOVMSKB_3604	vpmovmskb {b}, {r}	4
+X_VPMOVSXBW_3605	vpmovsxbw {b}, {r}	5
+X_VPMOVSXBW_3606_m	vpmovsxbw {m.disp}({m.base}), {r}	6
+X_VPMOVSXBW_3606_x	vpmovsxbw {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVSXBW_3606_p	vpmovsxbw {m.sym}(%rip), {r}	9
+X_VPMOVSXBD_3607	vpmovsxbd {b}, {r}	5
+X_VPMOVSXBD_3608_m	vpmovsxbd {m.disp}({m.base}), {r}	6
+X_VPMOVSXBD_3608_x	vpmovsxbd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVSXBD_3608_p	vpmovsxbd {m.sym}(%rip), {r}	9
+X_VPMOVSXBQ_3609	vpmovsxbq {b}, {r}	5
+X_VPMOVSXBQ_3610_m	vpmovsxbq {m.disp}({m.base}), {r}	6
+X_VPMOVSXBQ_3610_x	vpmovsxbq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVSXBQ_3610_p	vpmovsxbq {m.sym}(%rip), {r}	9
+X_VPMOVSXWD_3611	vpmovsxwd {b}, {r}	5
+X_VPMOVSXWD_3612_m	vpmovsxwd {m.disp}({m.base}), {r}	6
+X_VPMOVSXWD_3612_x	vpmovsxwd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVSXWD_3612_p	vpmovsxwd {m.sym}(%rip), {r}	9
+X_VPMOVSXWQ_3613	vpmovsxwq {b}, {r}	5
+X_VPMOVSXWQ_3614_m	vpmovsxwq {m.disp}({m.base}), {r}	6
+X_VPMOVSXWQ_3614_x	vpmovsxwq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVSXWQ_3614_p	vpmovsxwq {m.sym}(%rip), {r}	9
+X_VPMOVSXDQ_3615	vpmovsxdq {b}, {r}	5
+X_VPMOVSXDQ_3616_m	vpmovsxdq {m.disp}({m.base}), {r}	6
+X_VPMOVSXDQ_3616_x	vpmovsxdq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVSXDQ_3616_p	vpmovsxdq {m.sym}(%rip), {r}	9
+X_VPMOVZXBW_3617	vpmovzxbw {b}, {r}	5
+X_VPMOVZXBW_3618_m	vpmovzxbw {m.disp}({m.base}), {r}	6
+X_VPMOVZXBW_3618_x	vpmovzxbw {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVZXBW_3618_p	vpmovzxbw {m.sym}(%rip), {r}	9
+X_VPMOVZXBD_3619	vpmovzxbd {b}, {r}	5
+X_VPMOVZXBD_3620_m	vpmovzxbd {m.disp}({m.base}), {r}	6
+X_VPMOVZXBD_3620_x	vpmovzxbd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVZXBD_3620_p	vpmovzxbd {m.sym}(%rip), {r}	9
+X_VPMOVZXBQ_3621	vpmovzxbq {b}, {r}	5
+X_VPMOVZXBQ_3622_m	vpmovzxbq {m.disp}({m.base}), {r}	6
+X_VPMOVZXBQ_3622_x	vpmovzxbq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVZXBQ_3622_p	vpmovzxbq {m.sym}(%rip), {r}	9
+X_VPMOVZXWD_3623	vpmovzxwd {b}, {r}	5
+X_VPMOVZXWD_3624_m	vpmovzxwd {m.disp}({m.base}), {r}	6
+X_VPMOVZXWD_3624_x	vpmovzxwd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVZXWD_3624_p	vpmovzxwd {m.sym}(%rip), {r}	9
+X_VPMOVZXWQ_3625	vpmovzxwq {b}, {r}	5
+X_VPMOVZXWQ_3626_m	vpmovzxwq {m.disp}({m.base}), {r}	6
+X_VPMOVZXWQ_3626_x	vpmovzxwq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVZXWQ_3626_p	vpmovzxwq {m.sym}(%rip), {r}	9
+X_VPMOVZXDQ_3627	vpmovzxdq {b}, {r}	5
+X_VPMOVZXDQ_3628_m	vpmovzxdq {m.disp}({m.base}), {r}	6
+X_VPMOVZXDQ_3628_x	vpmovzxdq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVZXDQ_3628_p	vpmovzxdq {m.sym}(%rip), {r}	9
+X_VPEXTRB_3629_m	vpextrb ${c}, {r}, {m.disp}({m.base})	7
+X_VPEXTRB_3629_x	vpextrb ${c}, {r}, {m.disp}({m.base},{m.index},{m.scale})	8
+X_VPEXTRB_3629_p	vpextrb ${c}, {r}, {m.sym}(%rip)	10
+X_VPEXTRB_3630	vpextrb ${c}, {r}, {b}	6
+X_VPEXTRW_3631_m	vpextrw ${c}, {r}, {m.disp}({m.base})	7
+X_VPEXTRW_3631_x	vpextrw ${c}, {r}, {m.disp}({m.base},{m.index},{m.scale})	8
+X_VPEXTRW_3631_p	vpextrw ${c}, {r}, {m.sym}(%rip)	10
+X_VPEXTRW_3632	vpextrw ${c}, {r}, {b}	6
+X_VPEXTRW_3633	vpextrw ${c}, {b}, {r}	5
+X_VPEXTRQ_3634_m	vpextrq ${c}, {r}, {m.disp}({m.base})	7
+X_VPEXTRQ_3634_x	vpextrq ${c}, {r}, {m.disp}({m.base},{m.index},{m.scale})	8
+X_VPEXTRQ_3634_p	vpextrq ${c}, {r}, {m.sym}(%rip)	10
+X_VPEXTRQ_3635	vpextrq ${c}, {r}, {b}	6
+X_VPEXTRD_3636_m	vpextrd ${c}, {r}, {m.disp}({m.base})	7
+X_VPEXTRD_3636_x	vpextrd ${c}, {r}, {m.disp}({m.base},{m.index},{m.scale})	8
+X_VPEXTRD_3636_p	vpextrd ${c}, {r}, {m.sym}(%rip)	10
+X_VPEXTRD_3637	vpextrd ${c}, {r}, {b}	6
+X_VPINSRB_3640_m	vpinsrb ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VPINSRB_3640_x	vpinsrb ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VPINSRB_3640_p	vpinsrb ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VPINSRB_3641	vpinsrb ${c}, {b}, {n}, {r}	6
+X_VPINSRW_3642_m	vpinsrw ${c}, {m.disp}({m.base}), {n}, {r}	6
+X_VPINSRW_3642_x	vpinsrw ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPINSRW_3642_p	vpinsrw ${c}, {m.sym}(%rip), {n}, {r}	9
+X_VPINSRW_3643	vpinsrw ${c}, {b}, {n}, {r}	5
+X_VPINSRD_3644_m	vpinsrd ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VPINSRD_3644_x	vpinsrd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VPINSRD_3644_p	vpinsrd ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VPINSRD_3645	vpinsrd ${c}, {b}, {n}, {r}	6
+X_VPINSRQ_3648_m	vpinsrq ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VPINSRQ_3648_x	vpinsrq ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VPINSRQ_3648_p	vpinsrq ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VPINSRQ_3649	vpinsrq ${c}, {b}, {n}, {r}	6
+X_VPCMPESTRI_3652_m	vpcmpestri ${c}, {m.disp}({m.base}), {r}	7
+X_VPCMPESTRI_3652_x	vpcmpestri ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VPCMPESTRI_3652_p	vpcmpestri ${c}, {m.sym}(%rip), {r}	10
+X_VPCMPESTRI_3653	vpcmpestri ${c}, {b}, {r}	6
+X_VPCMPESTRI64_3654_m	vpcmpestri ${c}, {m.disp}({m.base}), {r}	7
+X_VPCMPESTRI64_3654_x	vpcmpestri ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VPCMPESTRI64_3654_p	vpcmpestri ${c}, {m.sym}(%rip), {r}	10
+X_VPCMPESTRI64_3655	vpcmpestri ${c}, {b}, {r}	6
+X_VPCMPISTRI_3658_m	vpcmpistri ${c}, {m.disp}({m.base}), {r}	7
+X_VPCMPISTRI_3658_x	vpcmpistri ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VPCMPISTRI_3658_p	vpcmpistri ${c}, {m.sym}(%rip), {r}	10
+X_VPCMPISTRI_3659	vpcmpistri ${c}, {b}, {r}	6
+X_VPCMPISTRI64_3660_m	vpcmpistri ${c}, {m.disp}({m.base}), {r}	7
+X_VPCMPISTRI64_3660_x	vpcmpistri ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VPCMPISTRI64_3660_p	vpcmpistri ${c}, {m.sym}(%rip), {r}	10
+X_VPCMPISTRI64_3661	vpcmpistri ${c}, {b}, {r}	6
+X_VPCMPESTRM_3664_m	vpcmpestrm ${c}, {m.disp}({m.base}), {r}	7
+X_VPCMPESTRM_3664_x	vpcmpestrm ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VPCMPESTRM_3664_p	vpcmpestrm ${c}, {m.sym}(%rip), {r}	10
+X_VPCMPESTRM_3665	vpcmpestrm ${c}, {b}, {r}	6
+X_VPCMPESTRM64_3666_m	vpcmpestrm ${c}, {m.disp}({m.base}), {r}	7
+X_VPCMPESTRM64_3666_x	vpcmpestrm ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VPCMPESTRM64_3666_p	vpcmpestrm ${c}, {m.sym}(%rip), {r}	10
+X_VPCMPESTRM64_3667	vpcmpestrm ${c}, {b}, {r}	6
+X_VPCMPISTRM_3668_m	vpcmpistrm ${c}, {m.disp}({m.base}), {r}	7
+X_VPCMPISTRM_3668_x	vpcmpistrm ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VPCMPISTRM_3668_p	vpcmpistrm ${c}, {m.sym}(%rip), {r}	10
+X_VPCMPISTRM_3669	vpcmpistrm ${c}, {b}, {r}	6
+X_VMASKMOVDQU_3670	vmaskmovdqu {b}, {r}	4
+X_VLDMXCSR_3671_m	vldmxcsr {m.disp}({m.base})	5
+X_VLDMXCSR_3671_x	vldmxcsr {m.disp}({m.base},{m.index},{m.scale})	6
+X_VLDMXCSR_3671_p	vldmxcsr {m.sym}(%rip)	8
+X_VSTMXCSR_3672_m	vstmxcsr {m.disp}({m.base})	5
+X_VSTMXCSR_3672_x	vstmxcsr {m.disp}({m.base},{m.index},{m.scale})	6
+X_VSTMXCSR_3672_p	vstmxcsr {m.sym}(%rip)	8
+X_VPBLENDVB_3673_m	vpblendvb {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VPBLENDVB_3673_x	vpblendvb {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VPBLENDVB_3673_p	vpblendvb {e}, {m.sym}(%rip), {n}, {r}	10
+X_VPBLENDVB_3674	vpblendvb {e}, {b}, {n}, {r}	6
+X_VBLENDVPD_3675_m	vblendvpd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VBLENDVPD_3675_x	vblendvpd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VBLENDVPD_3675_p	vblendvpd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VBLENDVPD_3676	vblendvpd {e}, {b}, {n}, {r}	6
+X_VBLENDVPD_3677_m	vblendvpd {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VBLENDVPD_3677_x	vblendvpd {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VBLENDVPD_3677_p	vblendvpd {e}, {m.sym}(%rip), {n}, {r}	10
+X_VBLENDVPD_3678	vblendvpd {e}, {b}, {n}, {r}	6
+X_VBLENDVPS_3679_m	vblendvps {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VBLENDVPS_3679_x	vblendvps {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VBLENDVPS_3679_p	vblendvps {e}, {m.sym}(%rip), {n}, {r}	10
+X_VBLENDVPS_3680	vblendvps {e}, {b}, {n}, {r}	6
+X_VBLENDVPS_3681_m	vblendvps {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VBLENDVPS_3681_x	vblendvps {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VBLENDVPS_3681_p	vblendvps {e}, {m.sym}(%rip), {n}, {r}	10
+X_VBLENDVPS_3682	vblendvps {e}, {b}, {n}, {r}	6
+X_VMOVNTDQA_3683_m	vmovntdqa {m.disp}({m.base}), {r}	6
+X_VMOVNTDQA_3683_x	vmovntdqa {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VMOVNTDQA_3683_p	vmovntdqa {m.sym}(%rip), {r}	9
+X_VMOVNTDQ_3684_m	vmovntdq {r}, {m.disp}({m.base})	5
+X_VMOVNTDQ_3684_x	vmovntdq {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVNTDQ_3684_p	vmovntdq {r}, {m.sym}(%rip)	8
+X_VMOVNTPD_3685_m	vmovntpd {r}, {m.disp}({m.base})	5
+X_VMOVNTPD_3685_x	vmovntpd {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVNTPD_3685_p	vmovntpd {r}, {m.sym}(%rip)	8
+X_VMOVNTPS_3686_m	vmovntps {r}, {m.disp}({m.base})	5
+X_VMOVNTPS_3686_x	vmovntps {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_VMOVNTPS_3686_p	vmovntps {r}, {m.sym}(%rip)	8
+X_VPCLMULQDQ_3687	vpclmulqdq ${c}, {b}, {n}, {r}	6
+X_VPCLMULQDQ_3688_m	vpclmulqdq ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VPCLMULQDQ_3688_x	vpclmulqdq ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VPCLMULQDQ_3688_p	vpclmulqdq ${c}, {m.sym}(%rip), {n}, {r}	10
+X_KADDB_6792	kaddb {b}, {n}, {r}	4
+X_KADDD_6793	kaddd {b}, {n}, {r}	5
+X_KADDQ_6794	kaddq {b}, {n}, {r}	5
+X_KADDW_6795	kaddw {b}, {n}, {r}	4
+X_KANDB_6796	kandb {b}, {n}, {r}	4
+X_KANDD_6797	kandd {b}, {n}, {r}	5
+X_KANDNB_6798	kandnb {b}, {n}, {r}	4
+X_KANDND_6799	kandnd {b}, {n}, {r}	5
+X_KANDNQ_6800	kandnq {b}, {n}, {r}	5
+X_KANDQ_6801	kandq {b}, {n}, {r}	5
+X_KMOVB_6802	kmovb {b}, {r}	4
+X_KMOVB_6803_m	kmovb {m.disp}({m.base}), {r}	5
+X_KMOVB_6803_x	kmovb {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_KMOVB_6803_p	kmovb {m.sym}(%rip), {r}	8
+X_KMOVB_6804_m	kmovb {r}, {m.disp}({m.base})	5
+X_KMOVB_6804_x	kmovb {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_KMOVB_6804_p	kmovb {r}, {m.sym}(%rip)	8
+X_KMOVB_6805	kmovb {b}, {r}	4
+X_KMOVB_6806	kmovb {b}, {r}	4
+X_KMOVD_6807	kmovd {b}, {r}	5
+X_KMOVD_6808_m	kmovd {m.disp}({m.base}), {r}	6
+X_KMOVD_6808_x	kmovd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_KMOVD_6808_p	kmovd {m.sym}(%rip), {r}	9
+X_KMOVD_6809_m	kmovd {r}, {m.disp}({m.base})	6
+X_KMOVD_6809_x	kmovd {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_KMOVD_6809_p	kmovd {r}, {m.sym}(%rip)	9
+X_KMOVD_6810	kmovd {b}, {r}	4
+X_KMOVD_6812	kmovd {b}, {r}	4
+X_KMOVQ_6814	kmovq {b}, {r}	5
+X_KMOVQ_6815_m	kmovq {m.disp}({m.base}), {r}	6
+X_KMOVQ_6815_x	kmovq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_KMOVQ_6815_p	kmovq {m.sym}(%rip), {r}	9
+X_KMOVQ_6816_m	kmovq {r}, {m.disp}({m.base})	6
+X_KMOVQ_6816_x	kmovq {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_KMOVQ_6816_p	kmovq {r}, {m.sym}(%rip)	9
+X_KMOVQ_6817	kmovq {b}, {r}	5
+X_KMOVQ_6818	kmovq {b}, {r}	5
+X_KNOTB_6819	knotb {b}, {r}	4
+X_KNOTD_6820	knotd {b}, {r}	5
+X_KNOTQ_6821	knotq {b}, {r}	5
+X_KORB_6822	korb {b}, {n}, {r}	4
+X_KORD_6823	kord {b}, {n}, {r}	5
+X_KORQ_6824	korq {b}, {n}, {r}	5
+X_KORTESTB_6825	kortestb {b}, {r}	4
+X_KORTESTD_6826	kortestd {b}, {r}	5
+X_KORTESTQ_6827	kortestq {b}, {r}	5
+X_KSHIFTLB_6828	kshiftlb ${c}, {b}, {r}	6
+X_KSHIFTLD_6829	kshiftld ${c}, {b}, {r}	6
+X_KSHIFTLQ_6830	kshiftlq ${c}, {b}, {r}	6
+X_KSHIFTRB_6831	kshiftrb ${c}, {b}, {r}	6
+X_KSHIFTRD_6832	kshiftrd ${c}, {b}, {r}	6
+X_KSHIFTRQ_6833	kshiftrq ${c}, {b}, {r}	6
+X_KTESTB_6834	ktestb {b}, {r}	4
+X_KTESTD_6835	ktestd {b}, {r}	5
+X_KTESTQ_6836	ktestq {b}, {r}	5
+X_KTESTW_6837	ktestw {b}, {r}	4
+X_KUNPCKDQ_6838	kunpckdq {b}, {n}, {r}	5
+X_KUNPCKWD_6839	kunpckwd {b}, {n}, {r}	4
+X_KXNORB_6840	kxnorb {b}, {n}, {r}	4
+X_KXNORD_6841	kxnord {b}, {n}, {r}	5
+X_KXNORQ_6842	kxnorq {b}, {n}, {r}	5
+X_KXORB_6843	kxorb {b}, {n}, {r}	4
+X_KXORD_6844	kxord {b}, {n}, {r}	5
+X_KXORQ_6845	kxorq {b}, {n}, {r}	5
+X_KANDNW_7779	kandnw {b}, {n}, {r}	4
+X_KANDW_7780	kandw {b}, {n}, {r}	4
+X_KMOVW_7781	kmovw {b}, {r}	4
+X_KMOVW_7782_m	kmovw {m.disp}({m.base}), {r}	5
+X_KMOVW_7782_x	kmovw {m.disp}({m.base},{m.index},{m.scale}), {r}	6
+X_KMOVW_7782_p	kmovw {m.sym}(%rip), {r}	8
+X_KMOVW_7783_m	kmovw {r}, {m.disp}({m.base})	5
+X_KMOVW_7783_x	kmovw {r}, {m.disp}({m.base},{m.index},{m.scale})	6
+X_KMOVW_7783_p	kmovw {r}, {m.sym}(%rip)	8
+X_KMOVW_7784	kmovw {b}, {r}	4
+X_KMOVW_7785	kmovw {b}, {r}	4
+X_KNOTW_7786	knotw {b}, {r}	4
+X_KORTESTW_7787	kortestw {b}, {r}	4
+X_KORW_7788	korw {b}, {n}, {r}	4
+X_KSHIFTLW_7789	kshiftlw ${c}, {b}, {r}	6
+X_KSHIFTRW_7790	kshiftrw ${c}, {b}, {r}	6
+X_KUNPCKBW_7791	kunpckbw {b}, {n}, {r}	4
+X_KXNORW_7792	kxnorw {b}, {n}, {r}	4
+X_KXORW_7793	kxorw {b}, {n}, {r}	4
 X_ADCX_7830	adcxl {b}, {r}	5
 X_ADCX_7831_m	adcxl {m.disp}({m.base}), {r}	6
 X_ADCX_7831_x	adcxl {m.disp}({m.base},{m.index},{m.scale}), {r}	7
@@ -43,6 +1957,102 @@ X_WRUSSQ_7869_64_p	wrussq {r}, {m.sym}(%rip)	10
 X_CLDEMOTE_7870_m	cldemote {m.disp}({m.base})	4
 X_CLDEMOTE_7870_x	cldemote {m.disp}({m.base},{m.index},{m.scale})	5
 X_CLDEMOTE_7870_p	cldemote {m.sym}(%rip)	7
+X_CMPBEXADD_7871_m	cmpbexadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPBEXADD_7871_x	cmpbexadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPBEXADD_7871_p	cmpbexadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPBEXADD_7872_m	cmpbexadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPBEXADD_7872_x	cmpbexadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPBEXADD_7872_p	cmpbexadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPBXADD_7873_m	cmpbxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPBXADD_7873_x	cmpbxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPBXADD_7873_p	cmpbxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPBXADD_7874_m	cmpbxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPBXADD_7874_x	cmpbxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPBXADD_7874_p	cmpbxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPLEXADD_7875_m	cmplexadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPLEXADD_7875_x	cmplexadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPLEXADD_7875_p	cmplexadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPLEXADD_7876_m	cmplexadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPLEXADD_7876_x	cmplexadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPLEXADD_7876_p	cmplexadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPLXADD_7877_m	cmplxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPLXADD_7877_x	cmplxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPLXADD_7877_p	cmplxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPLXADD_7878_m	cmplxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPLXADD_7878_x	cmplxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPLXADD_7878_p	cmplxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNBEXADD_7879_m	cmpaxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNBEXADD_7879_x	cmpaxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNBEXADD_7879_p	cmpaxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNBEXADD_7880_m	cmpaxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNBEXADD_7880_x	cmpaxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNBEXADD_7880_p	cmpaxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNBXADD_7881_m	cmpaexadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNBXADD_7881_x	cmpaexadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNBXADD_7881_p	cmpaexadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNBXADD_7882_m	cmpaexadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNBXADD_7882_x	cmpaexadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNBXADD_7882_p	cmpaexadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNLEXADD_7883_m	cmpgxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNLEXADD_7883_x	cmpgxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNLEXADD_7883_p	cmpgxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNLEXADD_7884_m	cmpgxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNLEXADD_7884_x	cmpgxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNLEXADD_7884_p	cmpgxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNLXADD_7885_m	cmpgexadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNLXADD_7885_x	cmpgexadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNLXADD_7885_p	cmpgexadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNLXADD_7886_m	cmpgexadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNLXADD_7886_x	cmpgexadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNLXADD_7886_p	cmpgexadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNOXADD_7887_m	cmpnoxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNOXADD_7887_x	cmpnoxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNOXADD_7887_p	cmpnoxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNOXADD_7888_m	cmpnoxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNOXADD_7888_x	cmpnoxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNOXADD_7888_p	cmpnoxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNPXADD_7889_m	cmpnpxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNPXADD_7889_x	cmpnpxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNPXADD_7889_p	cmpnpxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNPXADD_7890_m	cmpnpxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNPXADD_7890_x	cmpnpxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNPXADD_7890_p	cmpnpxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNSXADD_7891_m	cmpnsxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNSXADD_7891_x	cmpnsxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNSXADD_7891_p	cmpnsxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNSXADD_7892_m	cmpnsxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNSXADD_7892_x	cmpnsxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNSXADD_7892_p	cmpnsxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNZXADD_7893_m	cmpnexadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNZXADD_7893_x	cmpnexadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNZXADD_7893_p	cmpnexadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPNZXADD_7894_m	cmpnexadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPNZXADD_7894_x	cmpnexadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPNZXADD_7894_p	cmpnexadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPOXADD_7895_m	cmpoxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPOXADD_7895_x	cmpoxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPOXADD_7895_p	cmpoxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPOXADD_7896_m	cmpoxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPOXADD_7896_x	cmpoxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPOXADD_7896_p	cmpoxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPPXADD_7897_m	cmppxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPPXADD_7897_x	cmppxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPPXADD_7897_p	cmppxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPPXADD_7898_m	cmppxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPPXADD_7898_x	cmppxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPPXADD_7898_p	cmppxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPSXADD_7899_m	cmpsxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPSXADD_7899_x	cmpsxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPSXADD_7899_p	cmpsxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPSXADD_7900_m	cmpsxadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPSXADD_7900_x	cmpsxadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPSXADD_7900_p	cmpsxadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPZXADD_7901_m	cmpexadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPZXADD_7901_x	cmpexadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPZXADD_7901_p	cmpexadd {n}, {r}, {m.sym}(%rip)	9
+X_CMPZXADD_7902_m	cmpexadd {n}, {r}, {m.disp}({m.base})	6
+X_CMPZXADD_7902_x	cmpexadd {n}, {r}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_CMPZXADD_7902_p	cmpexadd {n}, {r}, {m.sym}(%rip)	9
 X_ENQCMD_7903_m	enqcmd {m.disp}({m.base}), {r}	6
 X_ENQCMD_7903_x	enqcmd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
 X_ENQCMD_7903_p	enqcmd {m.sym}(%rip), {r}	9
@@ -77,6 +2087,50 @@ X_GF2P8MULB_7935	gf2p8mulb {b}, {r}	5
 X_GF2P8MULB_7936_m	gf2p8mulb {m.disp}({m.base}), {r}	6
 X_GF2P8MULB_7936_x	gf2p8mulb {m.disp}({m.base},{m.index},{m.scale}), {r}	7
 X_GF2P8MULB_7936_p	gf2p8mulb {m.sym}(%rip), {r}	9
+X_VGF2P8AFFINEINVQB_7937	vgf2p8affineinvqb ${c}, {b}, {n}, {r}	6
+X_VGF2P8AFFINEINVQB_7938_m	vgf2p8affineinvqb ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VGF2P8AFFINEINVQB_7938_x	vgf2p8affineinvqb ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VGF2P8AFFINEINVQB_7938_p	vgf2p8affineinvqb ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VGF2P8AFFINEINVQB_7939	vgf2p8affineinvqb ${c}, {b}, {n}, {r}	6
+X_VGF2P8AFFINEINVQB_7940_m	vgf2p8affineinvqb ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VGF2P8AFFINEINVQB_7940_x	vgf2p8affineinvqb ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VGF2P8AFFINEINVQB_7940_p	vgf2p8affineinvqb ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VGF2P8AFFINEQB_7941	vgf2p8affineqb ${c}, {b}, {n}, {r}	6
+X_VGF2P8AFFINEQB_7942_m	vgf2p8affineqb ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VGF2P8AFFINEQB_7942_x	vgf2p8affineqb ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VGF2P8AFFINEQB_7942_p	vgf2p8affineqb ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VGF2P8AFFINEQB_7943	vgf2p8affineqb ${c}, {b}, {n}, {r}	6
+X_VGF2P8AFFINEQB_7944_m	vgf2p8affineqb ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VGF2P8AFFINEQB_7944_x	vgf2p8affineqb ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VGF2P8AFFINEQB_7944_p	vgf2p8affineqb ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VGF2P8MULB_7945	vgf2p8mulb {b}, {n}, {r}	5
+X_VGF2P8MULB_7946_m	vgf2p8mulb {m.disp}({m.base}), {n}, {r}	6
+X_VGF2P8MULB_7946_x	vgf2p8mulb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VGF2P8MULB_7946_p	vgf2p8mulb {m.sym}(%rip), {n}, {r}	9
+X_VGF2P8MULB_7947	vgf2p8mulb {b}, {n}, {r}	5
+X_VGF2P8MULB_7948_m	vgf2p8mulb {m.disp}({m.base}), {n}, {r}	6
+X_VGF2P8MULB_7948_x	vgf2p8mulb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VGF2P8MULB_7948_p	vgf2p8mulb {m.sym}(%rip), {n}, {r}	9
+X_VAESDEC_7979	vaesdec {b}, {n}, {r}	5
+X_VAESDEC_7980_m	vaesdec {m.disp}({m.base}), {n}, {r}	6
+X_VAESDEC_7980_x	vaesdec {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VAESDEC_7980_p	vaesdec {m.sym}(%rip), {n}, {r}	9
+X_VAESDECLAST_7981	vaesdeclast {b}, {n}, {r}	5
+X_VAESDECLAST_7982_m	vaesdeclast {m.disp}({m.base}), {n}, {r}	6
+X_VAESDECLAST_7982_x	vaesdeclast {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VAESDECLAST_7982_p	vaesdeclast {m.sym}(%rip), {n}, {r}	9
+X_VAESENC_7983	vaesenc {b}, {n}, {r}	5
+X_VAESENC_7984_m	vaesenc {m.disp}({m.base}), {n}, {r}	6
+X_VAESENC_7984_x	vaesenc {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VAESENC_7984_p	vaesenc {m.sym}(%rip), {n}, {r}	9
+X_VAESENCLAST_7985	vaesenclast {b}, {n}, {r}	5
+X_VAESENCLAST_7986_m	vaesenclast {m.disp}({m.base}), {n}, {r}	6
+X_VAESENCLAST_7986_x	vaesenclast {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VAESENCLAST_7986_p	vaesenclast {m.sym}(%rip), {n}, {r}	9
+X_VPCLMULQDQ_7987	vpclmulqdq ${c}, {b}, {n}, {r}	6
+X_VPCLMULQDQ_7988_m	vpclmulqdq ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VPCLMULQDQ_7988_x	vpclmulqdq ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VPCLMULQDQ_7988_p	vpclmulqdq ${c}, {m.sym}(%rip), {n}, {r}	10
 X_HRESET_7989	hreset ${c}	6
 X_INVPCID_7990_m	invpcid {m.disp}({m.base}), {r}	6
 X_INVPCID_7990_x	invpcid {m.disp}({m.base},{m.index},{m.scale}), {r}	7
@@ -111,6 +2165,1062 @@ X_XEND_7999	xend	3
 X_XABORT_8000	xabort ${c}	3
 X_XTEST_8001	xtest	3
 X_VMFUNC_8002	vmfunc	3
+X_VFMADD132PD_8003_m	vfmadd132pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD132PD_8003_x	vfmadd132pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD132PD_8003_p	vfmadd132pd {m.sym}(%rip), {n}, {r}	9
+X_VFMADD132PD_8004	vfmadd132pd {b}, {n}, {r}	5
+X_VFMADD132PD_8005_m	vfmadd132pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD132PD_8005_x	vfmadd132pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD132PD_8005_p	vfmadd132pd {m.sym}(%rip), {n}, {r}	9
+X_VFMADD132PD_8006	vfmadd132pd {b}, {n}, {r}	5
+X_VFMADD132PS_8007_m	vfmadd132ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD132PS_8007_x	vfmadd132ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD132PS_8007_p	vfmadd132ps {m.sym}(%rip), {n}, {r}	9
+X_VFMADD132PS_8008	vfmadd132ps {b}, {n}, {r}	5
+X_VFMADD132PS_8009_m	vfmadd132ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD132PS_8009_x	vfmadd132ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD132PS_8009_p	vfmadd132ps {m.sym}(%rip), {n}, {r}	9
+X_VFMADD132PS_8010	vfmadd132ps {b}, {n}, {r}	5
+X_VFMADD132SD_8011_m	vfmadd132sd {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD132SD_8011_x	vfmadd132sd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD132SD_8011_p	vfmadd132sd {m.sym}(%rip), {n}, {r}	9
+X_VFMADD132SD_8012	vfmadd132sd {b}, {n}, {r}	5
+X_VFMADD132SS_8013_m	vfmadd132ss {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD132SS_8013_x	vfmadd132ss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD132SS_8013_p	vfmadd132ss {m.sym}(%rip), {n}, {r}	9
+X_VFMADD132SS_8014	vfmadd132ss {b}, {n}, {r}	5
+X_VFMADD213PD_8015_m	vfmadd213pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD213PD_8015_x	vfmadd213pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD213PD_8015_p	vfmadd213pd {m.sym}(%rip), {n}, {r}	9
+X_VFMADD213PD_8016	vfmadd213pd {b}, {n}, {r}	5
+X_VFMADD213PD_8017_m	vfmadd213pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD213PD_8017_x	vfmadd213pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD213PD_8017_p	vfmadd213pd {m.sym}(%rip), {n}, {r}	9
+X_VFMADD213PD_8018	vfmadd213pd {b}, {n}, {r}	5
+X_VFMADD213PS_8019_m	vfmadd213ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD213PS_8019_x	vfmadd213ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD213PS_8019_p	vfmadd213ps {m.sym}(%rip), {n}, {r}	9
+X_VFMADD213PS_8020	vfmadd213ps {b}, {n}, {r}	5
+X_VFMADD213PS_8021_m	vfmadd213ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD213PS_8021_x	vfmadd213ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD213PS_8021_p	vfmadd213ps {m.sym}(%rip), {n}, {r}	9
+X_VFMADD213PS_8022	vfmadd213ps {b}, {n}, {r}	5
+X_VFMADD213SD_8023_m	vfmadd213sd {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD213SD_8023_x	vfmadd213sd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD213SD_8023_p	vfmadd213sd {m.sym}(%rip), {n}, {r}	9
+X_VFMADD213SD_8024	vfmadd213sd {b}, {n}, {r}	5
+X_VFMADD213SS_8025_m	vfmadd213ss {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD213SS_8025_x	vfmadd213ss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD213SS_8025_p	vfmadd213ss {m.sym}(%rip), {n}, {r}	9
+X_VFMADD213SS_8026	vfmadd213ss {b}, {n}, {r}	5
+X_VFMADD231PD_8027_m	vfmadd231pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD231PD_8027_x	vfmadd231pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD231PD_8027_p	vfmadd231pd {m.sym}(%rip), {n}, {r}	9
+X_VFMADD231PD_8028	vfmadd231pd {b}, {n}, {r}	5
+X_VFMADD231PD_8029_m	vfmadd231pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD231PD_8029_x	vfmadd231pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD231PD_8029_p	vfmadd231pd {m.sym}(%rip), {n}, {r}	9
+X_VFMADD231PD_8030	vfmadd231pd {b}, {n}, {r}	5
+X_VFMADD231PS_8031_m	vfmadd231ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD231PS_8031_x	vfmadd231ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD231PS_8031_p	vfmadd231ps {m.sym}(%rip), {n}, {r}	9
+X_VFMADD231PS_8032	vfmadd231ps {b}, {n}, {r}	5
+X_VFMADD231PS_8033_m	vfmadd231ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD231PS_8033_x	vfmadd231ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD231PS_8033_p	vfmadd231ps {m.sym}(%rip), {n}, {r}	9
+X_VFMADD231PS_8034	vfmadd231ps {b}, {n}, {r}	5
+X_VFMADD231SD_8035_m	vfmadd231sd {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD231SD_8035_x	vfmadd231sd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD231SD_8035_p	vfmadd231sd {m.sym}(%rip), {n}, {r}	9
+X_VFMADD231SD_8036	vfmadd231sd {b}, {n}, {r}	5
+X_VFMADD231SS_8037_m	vfmadd231ss {m.disp}({m.base}), {n}, {r}	6
+X_VFMADD231SS_8037_x	vfmadd231ss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADD231SS_8037_p	vfmadd231ss {m.sym}(%rip), {n}, {r}	9
+X_VFMADD231SS_8038	vfmadd231ss {b}, {n}, {r}	5
+X_VFMADDSUB132PD_8039_m	vfmaddsub132pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMADDSUB132PD_8039_x	vfmaddsub132pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADDSUB132PD_8039_p	vfmaddsub132pd {m.sym}(%rip), {n}, {r}	9
+X_VFMADDSUB132PD_8040	vfmaddsub132pd {b}, {n}, {r}	5
+X_VFMADDSUB132PD_8041_m	vfmaddsub132pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMADDSUB132PD_8041_x	vfmaddsub132pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADDSUB132PD_8041_p	vfmaddsub132pd {m.sym}(%rip), {n}, {r}	9
+X_VFMADDSUB132PD_8042	vfmaddsub132pd {b}, {n}, {r}	5
+X_VFMADDSUB213PD_8043_m	vfmaddsub213pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMADDSUB213PD_8043_x	vfmaddsub213pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADDSUB213PD_8043_p	vfmaddsub213pd {m.sym}(%rip), {n}, {r}	9
+X_VFMADDSUB213PD_8044	vfmaddsub213pd {b}, {n}, {r}	5
+X_VFMADDSUB213PD_8045_m	vfmaddsub213pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMADDSUB213PD_8045_x	vfmaddsub213pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADDSUB213PD_8045_p	vfmaddsub213pd {m.sym}(%rip), {n}, {r}	9
+X_VFMADDSUB213PD_8046	vfmaddsub213pd {b}, {n}, {r}	5
+X_VFMADDSUB231PD_8047_m	vfmaddsub231pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMADDSUB231PD_8047_x	vfmaddsub231pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADDSUB231PD_8047_p	vfmaddsub231pd {m.sym}(%rip), {n}, {r}	9
+X_VFMADDSUB231PD_8048	vfmaddsub231pd {b}, {n}, {r}	5
+X_VFMADDSUB231PD_8049_m	vfmaddsub231pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMADDSUB231PD_8049_x	vfmaddsub231pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADDSUB231PD_8049_p	vfmaddsub231pd {m.sym}(%rip), {n}, {r}	9
+X_VFMADDSUB231PD_8050	vfmaddsub231pd {b}, {n}, {r}	5
+X_VFMADDSUB132PS_8051_m	vfmaddsub132ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMADDSUB132PS_8051_x	vfmaddsub132ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADDSUB132PS_8051_p	vfmaddsub132ps {m.sym}(%rip), {n}, {r}	9
+X_VFMADDSUB132PS_8052	vfmaddsub132ps {b}, {n}, {r}	5
+X_VFMADDSUB132PS_8053_m	vfmaddsub132ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMADDSUB132PS_8053_x	vfmaddsub132ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADDSUB132PS_8053_p	vfmaddsub132ps {m.sym}(%rip), {n}, {r}	9
+X_VFMADDSUB132PS_8054	vfmaddsub132ps {b}, {n}, {r}	5
+X_VFMADDSUB213PS_8055_m	vfmaddsub213ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMADDSUB213PS_8055_x	vfmaddsub213ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADDSUB213PS_8055_p	vfmaddsub213ps {m.sym}(%rip), {n}, {r}	9
+X_VFMADDSUB213PS_8056	vfmaddsub213ps {b}, {n}, {r}	5
+X_VFMADDSUB213PS_8057_m	vfmaddsub213ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMADDSUB213PS_8057_x	vfmaddsub213ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADDSUB213PS_8057_p	vfmaddsub213ps {m.sym}(%rip), {n}, {r}	9
+X_VFMADDSUB213PS_8058	vfmaddsub213ps {b}, {n}, {r}	5
+X_VFMADDSUB231PS_8059_m	vfmaddsub231ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMADDSUB231PS_8059_x	vfmaddsub231ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADDSUB231PS_8059_p	vfmaddsub231ps {m.sym}(%rip), {n}, {r}	9
+X_VFMADDSUB231PS_8060	vfmaddsub231ps {b}, {n}, {r}	5
+X_VFMADDSUB231PS_8061_m	vfmaddsub231ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMADDSUB231PS_8061_x	vfmaddsub231ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMADDSUB231PS_8061_p	vfmaddsub231ps {m.sym}(%rip), {n}, {r}	9
+X_VFMADDSUB231PS_8062	vfmaddsub231ps {b}, {n}, {r}	5
+X_VFMSUBADD132PD_8063_m	vfmsubadd132pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUBADD132PD_8063_x	vfmsubadd132pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUBADD132PD_8063_p	vfmsubadd132pd {m.sym}(%rip), {n}, {r}	9
+X_VFMSUBADD132PD_8064	vfmsubadd132pd {b}, {n}, {r}	5
+X_VFMSUBADD132PD_8065_m	vfmsubadd132pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUBADD132PD_8065_x	vfmsubadd132pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUBADD132PD_8065_p	vfmsubadd132pd {m.sym}(%rip), {n}, {r}	9
+X_VFMSUBADD132PD_8066	vfmsubadd132pd {b}, {n}, {r}	5
+X_VFMSUBADD213PD_8067_m	vfmsubadd213pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUBADD213PD_8067_x	vfmsubadd213pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUBADD213PD_8067_p	vfmsubadd213pd {m.sym}(%rip), {n}, {r}	9
+X_VFMSUBADD213PD_8068	vfmsubadd213pd {b}, {n}, {r}	5
+X_VFMSUBADD213PD_8069_m	vfmsubadd213pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUBADD213PD_8069_x	vfmsubadd213pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUBADD213PD_8069_p	vfmsubadd213pd {m.sym}(%rip), {n}, {r}	9
+X_VFMSUBADD213PD_8070	vfmsubadd213pd {b}, {n}, {r}	5
+X_VFMSUBADD231PD_8071_m	vfmsubadd231pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUBADD231PD_8071_x	vfmsubadd231pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUBADD231PD_8071_p	vfmsubadd231pd {m.sym}(%rip), {n}, {r}	9
+X_VFMSUBADD231PD_8072	vfmsubadd231pd {b}, {n}, {r}	5
+X_VFMSUBADD231PD_8073_m	vfmsubadd231pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUBADD231PD_8073_x	vfmsubadd231pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUBADD231PD_8073_p	vfmsubadd231pd {m.sym}(%rip), {n}, {r}	9
+X_VFMSUBADD231PD_8074	vfmsubadd231pd {b}, {n}, {r}	5
+X_VFMSUBADD132PS_8075_m	vfmsubadd132ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUBADD132PS_8075_x	vfmsubadd132ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUBADD132PS_8075_p	vfmsubadd132ps {m.sym}(%rip), {n}, {r}	9
+X_VFMSUBADD132PS_8076	vfmsubadd132ps {b}, {n}, {r}	5
+X_VFMSUBADD132PS_8077_m	vfmsubadd132ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUBADD132PS_8077_x	vfmsubadd132ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUBADD132PS_8077_p	vfmsubadd132ps {m.sym}(%rip), {n}, {r}	9
+X_VFMSUBADD132PS_8078	vfmsubadd132ps {b}, {n}, {r}	5
+X_VFMSUBADD213PS_8079_m	vfmsubadd213ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUBADD213PS_8079_x	vfmsubadd213ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUBADD213PS_8079_p	vfmsubadd213ps {m.sym}(%rip), {n}, {r}	9
+X_VFMSUBADD213PS_8080	vfmsubadd213ps {b}, {n}, {r}	5
+X_VFMSUBADD213PS_8081_m	vfmsubadd213ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUBADD213PS_8081_x	vfmsubadd213ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUBADD213PS_8081_p	vfmsubadd213ps {m.sym}(%rip), {n}, {r}	9
+X_VFMSUBADD213PS_8082	vfmsubadd213ps {b}, {n}, {r}	5
+X_VFMSUBADD231PS_8083_m	vfmsubadd231ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUBADD231PS_8083_x	vfmsubadd231ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUBADD231PS_8083_p	vfmsubadd231ps {m.sym}(%rip), {n}, {r}	9
+X_VFMSUBADD231PS_8084	vfmsubadd231ps {b}, {n}, {r}	5
+X_VFMSUBADD231PS_8085_m	vfmsubadd231ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUBADD231PS_8085_x	vfmsubadd231ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUBADD231PS_8085_p	vfmsubadd231ps {m.sym}(%rip), {n}, {r}	9
+X_VFMSUBADD231PS_8086	vfmsubadd231ps {b}, {n}, {r}	5
+X_VFMSUB132PD_8087_m	vfmsub132pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB132PD_8087_x	vfmsub132pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB132PD_8087_p	vfmsub132pd {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB132PD_8088	vfmsub132pd {b}, {n}, {r}	5
+X_VFMSUB132PD_8089_m	vfmsub132pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB132PD_8089_x	vfmsub132pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB132PD_8089_p	vfmsub132pd {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB132PD_8090	vfmsub132pd {b}, {n}, {r}	5
+X_VFMSUB132PS_8091_m	vfmsub132ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB132PS_8091_x	vfmsub132ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB132PS_8091_p	vfmsub132ps {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB132PS_8092	vfmsub132ps {b}, {n}, {r}	5
+X_VFMSUB132PS_8093_m	vfmsub132ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB132PS_8093_x	vfmsub132ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB132PS_8093_p	vfmsub132ps {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB132PS_8094	vfmsub132ps {b}, {n}, {r}	5
+X_VFMSUB132SD_8095_m	vfmsub132sd {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB132SD_8095_x	vfmsub132sd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB132SD_8095_p	vfmsub132sd {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB132SD_8096	vfmsub132sd {b}, {n}, {r}	5
+X_VFMSUB132SS_8097_m	vfmsub132ss {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB132SS_8097_x	vfmsub132ss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB132SS_8097_p	vfmsub132ss {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB132SS_8098	vfmsub132ss {b}, {n}, {r}	5
+X_VFMSUB213PD_8099_m	vfmsub213pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB213PD_8099_x	vfmsub213pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB213PD_8099_p	vfmsub213pd {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB213PD_8100	vfmsub213pd {b}, {n}, {r}	5
+X_VFMSUB213PD_8101_m	vfmsub213pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB213PD_8101_x	vfmsub213pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB213PD_8101_p	vfmsub213pd {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB213PD_8102	vfmsub213pd {b}, {n}, {r}	5
+X_VFMSUB213PS_8103_m	vfmsub213ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB213PS_8103_x	vfmsub213ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB213PS_8103_p	vfmsub213ps {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB213PS_8104	vfmsub213ps {b}, {n}, {r}	5
+X_VFMSUB213PS_8105_m	vfmsub213ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB213PS_8105_x	vfmsub213ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB213PS_8105_p	vfmsub213ps {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB213PS_8106	vfmsub213ps {b}, {n}, {r}	5
+X_VFMSUB213SD_8107_m	vfmsub213sd {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB213SD_8107_x	vfmsub213sd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB213SD_8107_p	vfmsub213sd {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB213SD_8108	vfmsub213sd {b}, {n}, {r}	5
+X_VFMSUB213SS_8109_m	vfmsub213ss {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB213SS_8109_x	vfmsub213ss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB213SS_8109_p	vfmsub213ss {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB213SS_8110	vfmsub213ss {b}, {n}, {r}	5
+X_VFMSUB231PD_8111_m	vfmsub231pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB231PD_8111_x	vfmsub231pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB231PD_8111_p	vfmsub231pd {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB231PD_8112	vfmsub231pd {b}, {n}, {r}	5
+X_VFMSUB231PD_8113_m	vfmsub231pd {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB231PD_8113_x	vfmsub231pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB231PD_8113_p	vfmsub231pd {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB231PD_8114	vfmsub231pd {b}, {n}, {r}	5
+X_VFMSUB231PS_8115_m	vfmsub231ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB231PS_8115_x	vfmsub231ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB231PS_8115_p	vfmsub231ps {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB231PS_8116	vfmsub231ps {b}, {n}, {r}	5
+X_VFMSUB231PS_8117_m	vfmsub231ps {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB231PS_8117_x	vfmsub231ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB231PS_8117_p	vfmsub231ps {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB231PS_8118	vfmsub231ps {b}, {n}, {r}	5
+X_VFMSUB231SD_8119_m	vfmsub231sd {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB231SD_8119_x	vfmsub231sd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB231SD_8119_p	vfmsub231sd {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB231SD_8120	vfmsub231sd {b}, {n}, {r}	5
+X_VFMSUB231SS_8121_m	vfmsub231ss {m.disp}({m.base}), {n}, {r}	6
+X_VFMSUB231SS_8121_x	vfmsub231ss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFMSUB231SS_8121_p	vfmsub231ss {m.sym}(%rip), {n}, {r}	9
+X_VFMSUB231SS_8122	vfmsub231ss {b}, {n}, {r}	5
+X_VFNMADD132PD_8123_m	vfnmadd132pd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD132PD_8123_x	vfnmadd132pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD132PD_8123_p	vfnmadd132pd {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD132PD_8124	vfnmadd132pd {b}, {n}, {r}	5
+X_VFNMADD132PD_8125_m	vfnmadd132pd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD132PD_8125_x	vfnmadd132pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD132PD_8125_p	vfnmadd132pd {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD132PD_8126	vfnmadd132pd {b}, {n}, {r}	5
+X_VFNMADD132PS_8127_m	vfnmadd132ps {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD132PS_8127_x	vfnmadd132ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD132PS_8127_p	vfnmadd132ps {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD132PS_8128	vfnmadd132ps {b}, {n}, {r}	5
+X_VFNMADD132PS_8129_m	vfnmadd132ps {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD132PS_8129_x	vfnmadd132ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD132PS_8129_p	vfnmadd132ps {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD132PS_8130	vfnmadd132ps {b}, {n}, {r}	5
+X_VFNMADD132SD_8131_m	vfnmadd132sd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD132SD_8131_x	vfnmadd132sd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD132SD_8131_p	vfnmadd132sd {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD132SD_8132	vfnmadd132sd {b}, {n}, {r}	5
+X_VFNMADD132SS_8133_m	vfnmadd132ss {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD132SS_8133_x	vfnmadd132ss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD132SS_8133_p	vfnmadd132ss {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD132SS_8134	vfnmadd132ss {b}, {n}, {r}	5
+X_VFNMADD213PD_8135_m	vfnmadd213pd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD213PD_8135_x	vfnmadd213pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD213PD_8135_p	vfnmadd213pd {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD213PD_8136	vfnmadd213pd {b}, {n}, {r}	5
+X_VFNMADD213PD_8137_m	vfnmadd213pd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD213PD_8137_x	vfnmadd213pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD213PD_8137_p	vfnmadd213pd {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD213PD_8138	vfnmadd213pd {b}, {n}, {r}	5
+X_VFNMADD213PS_8139_m	vfnmadd213ps {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD213PS_8139_x	vfnmadd213ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD213PS_8139_p	vfnmadd213ps {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD213PS_8140	vfnmadd213ps {b}, {n}, {r}	5
+X_VFNMADD213PS_8141_m	vfnmadd213ps {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD213PS_8141_x	vfnmadd213ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD213PS_8141_p	vfnmadd213ps {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD213PS_8142	vfnmadd213ps {b}, {n}, {r}	5
+X_VFNMADD213SD_8143_m	vfnmadd213sd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD213SD_8143_x	vfnmadd213sd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD213SD_8143_p	vfnmadd213sd {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD213SD_8144	vfnmadd213sd {b}, {n}, {r}	5
+X_VFNMADD213SS_8145_m	vfnmadd213ss {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD213SS_8145_x	vfnmadd213ss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD213SS_8145_p	vfnmadd213ss {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD213SS_8146	vfnmadd213ss {b}, {n}, {r}	5
+X_VFNMADD231PD_8147_m	vfnmadd231pd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD231PD_8147_x	vfnmadd231pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD231PD_8147_p	vfnmadd231pd {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD231PD_8148	vfnmadd231pd {b}, {n}, {r}	5
+X_VFNMADD231PD_8149_m	vfnmadd231pd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD231PD_8149_x	vfnmadd231pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD231PD_8149_p	vfnmadd231pd {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD231PD_8150	vfnmadd231pd {b}, {n}, {r}	5
+X_VFNMADD231PS_8151_m	vfnmadd231ps {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD231PS_8151_x	vfnmadd231ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD231PS_8151_p	vfnmadd231ps {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD231PS_8152	vfnmadd231ps {b}, {n}, {r}	5
+X_VFNMADD231PS_8153_m	vfnmadd231ps {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD231PS_8153_x	vfnmadd231ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD231PS_8153_p	vfnmadd231ps {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD231PS_8154	vfnmadd231ps {b}, {n}, {r}	5
+X_VFNMADD231SD_8155_m	vfnmadd231sd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD231SD_8155_x	vfnmadd231sd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD231SD_8155_p	vfnmadd231sd {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD231SD_8156	vfnmadd231sd {b}, {n}, {r}	5
+X_VFNMADD231SS_8157_m	vfnmadd231ss {m.disp}({m.base}), {n}, {r}	6
+X_VFNMADD231SS_8157_x	vfnmadd231ss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMADD231SS_8157_p	vfnmadd231ss {m.sym}(%rip), {n}, {r}	9
+X_VFNMADD231SS_8158	vfnmadd231ss {b}, {n}, {r}	5
+X_VFNMSUB132PD_8159_m	vfnmsub132pd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB132PD_8159_x	vfnmsub132pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB132PD_8159_p	vfnmsub132pd {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB132PD_8160	vfnmsub132pd {b}, {n}, {r}	5
+X_VFNMSUB132PD_8161_m	vfnmsub132pd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB132PD_8161_x	vfnmsub132pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB132PD_8161_p	vfnmsub132pd {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB132PD_8162	vfnmsub132pd {b}, {n}, {r}	5
+X_VFNMSUB132PS_8163_m	vfnmsub132ps {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB132PS_8163_x	vfnmsub132ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB132PS_8163_p	vfnmsub132ps {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB132PS_8164	vfnmsub132ps {b}, {n}, {r}	5
+X_VFNMSUB132PS_8165_m	vfnmsub132ps {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB132PS_8165_x	vfnmsub132ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB132PS_8165_p	vfnmsub132ps {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB132PS_8166	vfnmsub132ps {b}, {n}, {r}	5
+X_VFNMSUB132SD_8167_m	vfnmsub132sd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB132SD_8167_x	vfnmsub132sd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB132SD_8167_p	vfnmsub132sd {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB132SD_8168	vfnmsub132sd {b}, {n}, {r}	5
+X_VFNMSUB132SS_8169_m	vfnmsub132ss {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB132SS_8169_x	vfnmsub132ss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB132SS_8169_p	vfnmsub132ss {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB132SS_8170	vfnmsub132ss {b}, {n}, {r}	5
+X_VFNMSUB213PD_8171_m	vfnmsub213pd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB213PD_8171_x	vfnmsub213pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB213PD_8171_p	vfnmsub213pd {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB213PD_8172	vfnmsub213pd {b}, {n}, {r}	5
+X_VFNMSUB213PD_8173_m	vfnmsub213pd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB213PD_8173_x	vfnmsub213pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB213PD_8173_p	vfnmsub213pd {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB213PD_8174	vfnmsub213pd {b}, {n}, {r}	5
+X_VFNMSUB213PS_8175_m	vfnmsub213ps {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB213PS_8175_x	vfnmsub213ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB213PS_8175_p	vfnmsub213ps {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB213PS_8176	vfnmsub213ps {b}, {n}, {r}	5
+X_VFNMSUB213PS_8177_m	vfnmsub213ps {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB213PS_8177_x	vfnmsub213ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB213PS_8177_p	vfnmsub213ps {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB213PS_8178	vfnmsub213ps {b}, {n}, {r}	5
+X_VFNMSUB213SD_8179_m	vfnmsub213sd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB213SD_8179_x	vfnmsub213sd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB213SD_8179_p	vfnmsub213sd {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB213SD_8180	vfnmsub213sd {b}, {n}, {r}	5
+X_VFNMSUB213SS_8181_m	vfnmsub213ss {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB213SS_8181_x	vfnmsub213ss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB213SS_8181_p	vfnmsub213ss {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB213SS_8182	vfnmsub213ss {b}, {n}, {r}	5
+X_VFNMSUB231PD_8183_m	vfnmsub231pd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB231PD_8183_x	vfnmsub231pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB231PD_8183_p	vfnmsub231pd {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB231PD_8184	vfnmsub231pd {b}, {n}, {r}	5
+X_VFNMSUB231PD_8185_m	vfnmsub231pd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB231PD_8185_x	vfnmsub231pd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB231PD_8185_p	vfnmsub231pd {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB231PD_8186	vfnmsub231pd {b}, {n}, {r}	5
+X_VFNMSUB231PS_8187_m	vfnmsub231ps {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB231PS_8187_x	vfnmsub231ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB231PS_8187_p	vfnmsub231ps {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB231PS_8188	vfnmsub231ps {b}, {n}, {r}	5
+X_VFNMSUB231PS_8189_m	vfnmsub231ps {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB231PS_8189_x	vfnmsub231ps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB231PS_8189_p	vfnmsub231ps {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB231PS_8190	vfnmsub231ps {b}, {n}, {r}	5
+X_VFNMSUB231SD_8191_m	vfnmsub231sd {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB231SD_8191_x	vfnmsub231sd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB231SD_8191_p	vfnmsub231sd {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB231SD_8192	vfnmsub231sd {b}, {n}, {r}	5
+X_VFNMSUB231SS_8193_m	vfnmsub231ss {m.disp}({m.base}), {n}, {r}	6
+X_VFNMSUB231SS_8193_x	vfnmsub231ss {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VFNMSUB231SS_8193_p	vfnmsub231ss {m.sym}(%rip), {n}, {r}	9
+X_VFNMSUB231SS_8194	vfnmsub231ss {b}, {n}, {r}	5
+X_VPABSB_8211_m	vpabsb {m.disp}({m.base}), {r}	6
+X_VPABSB_8211_x	vpabsb {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPABSB_8211_p	vpabsb {m.sym}(%rip), {r}	9
+X_VPABSB_8212	vpabsb {b}, {r}	5
+X_VPABSW_8213_m	vpabsw {m.disp}({m.base}), {r}	6
+X_VPABSW_8213_x	vpabsw {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPABSW_8213_p	vpabsw {m.sym}(%rip), {r}	9
+X_VPABSW_8214	vpabsw {b}, {r}	5
+X_VPABSD_8215_m	vpabsd {m.disp}({m.base}), {r}	6
+X_VPABSD_8215_x	vpabsd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPABSD_8215_p	vpabsd {m.sym}(%rip), {r}	9
+X_VPABSD_8216	vpabsd {b}, {r}	5
+X_VPACKSSWB_8217_m	vpacksswb {m.disp}({m.base}), {n}, {r}	5
+X_VPACKSSWB_8217_x	vpacksswb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPACKSSWB_8217_p	vpacksswb {m.sym}(%rip), {n}, {r}	8
+X_VPACKSSWB_8218	vpacksswb {b}, {n}, {r}	4
+X_VPACKSSDW_8219_m	vpackssdw {m.disp}({m.base}), {n}, {r}	5
+X_VPACKSSDW_8219_x	vpackssdw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPACKSSDW_8219_p	vpackssdw {m.sym}(%rip), {n}, {r}	8
+X_VPACKSSDW_8220	vpackssdw {b}, {n}, {r}	4
+X_VPACKUSWB_8221_m	vpackuswb {m.disp}({m.base}), {n}, {r}	5
+X_VPACKUSWB_8221_x	vpackuswb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPACKUSWB_8221_p	vpackuswb {m.sym}(%rip), {n}, {r}	8
+X_VPACKUSWB_8222	vpackuswb {b}, {n}, {r}	4
+X_VPACKUSDW_8223_m	vpackusdw {m.disp}({m.base}), {n}, {r}	6
+X_VPACKUSDW_8223_x	vpackusdw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPACKUSDW_8223_p	vpackusdw {m.sym}(%rip), {n}, {r}	9
+X_VPACKUSDW_8224	vpackusdw {b}, {n}, {r}	5
+X_VPSLLW_8225_m	vpsllw {m.disp}({m.base}), {n}, {r}	5
+X_VPSLLW_8225_x	vpsllw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSLLW_8225_p	vpsllw {m.sym}(%rip), {n}, {r}	8
+X_VPSLLW_8226	vpsllw {b}, {n}, {r}	4
+X_VPSLLD_8227_m	vpslld {m.disp}({m.base}), {n}, {r}	5
+X_VPSLLD_8227_x	vpslld {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSLLD_8227_p	vpslld {m.sym}(%rip), {n}, {r}	8
+X_VPSLLD_8228	vpslld {b}, {n}, {r}	4
+X_VPSLLQ_8229_m	vpsllq {m.disp}({m.base}), {n}, {r}	5
+X_VPSLLQ_8229_x	vpsllq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSLLQ_8229_p	vpsllq {m.sym}(%rip), {n}, {r}	8
+X_VPSLLQ_8230	vpsllq {b}, {n}, {r}	4
+X_VPSRLW_8231_m	vpsrlw {m.disp}({m.base}), {n}, {r}	5
+X_VPSRLW_8231_x	vpsrlw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSRLW_8231_p	vpsrlw {m.sym}(%rip), {n}, {r}	8
+X_VPSRLW_8232	vpsrlw {b}, {n}, {r}	4
+X_VPSRLD_8233_m	vpsrld {m.disp}({m.base}), {n}, {r}	5
+X_VPSRLD_8233_x	vpsrld {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSRLD_8233_p	vpsrld {m.sym}(%rip), {n}, {r}	8
+X_VPSRLD_8234	vpsrld {b}, {n}, {r}	4
+X_VPSRLQ_8235_m	vpsrlq {m.disp}({m.base}), {n}, {r}	5
+X_VPSRLQ_8235_x	vpsrlq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSRLQ_8235_p	vpsrlq {m.sym}(%rip), {n}, {r}	8
+X_VPSRLQ_8236	vpsrlq {b}, {n}, {r}	4
+X_VPSRAW_8237_m	vpsraw {m.disp}({m.base}), {n}, {r}	5
+X_VPSRAW_8237_x	vpsraw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSRAW_8237_p	vpsraw {m.sym}(%rip), {n}, {r}	8
+X_VPSRAW_8238	vpsraw {b}, {n}, {r}	4
+X_VPSRAD_8239_m	vpsrad {m.disp}({m.base}), {n}, {r}	5
+X_VPSRAD_8239_x	vpsrad {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSRAD_8239_p	vpsrad {m.sym}(%rip), {n}, {r}	8
+X_VPSRAD_8240	vpsrad {b}, {n}, {r}	4
+X_VPADDB_8241_m	vpaddb {m.disp}({m.base}), {n}, {r}	5
+X_VPADDB_8241_x	vpaddb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDB_8241_p	vpaddb {m.sym}(%rip), {n}, {r}	8
+X_VPADDB_8242	vpaddb {b}, {n}, {r}	4
+X_VPADDW_8243_m	vpaddw {m.disp}({m.base}), {n}, {r}	5
+X_VPADDW_8243_x	vpaddw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDW_8243_p	vpaddw {m.sym}(%rip), {n}, {r}	8
+X_VPADDW_8244	vpaddw {b}, {n}, {r}	4
+X_VPADDD_8245_m	vpaddd {m.disp}({m.base}), {n}, {r}	5
+X_VPADDD_8245_x	vpaddd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDD_8245_p	vpaddd {m.sym}(%rip), {n}, {r}	8
+X_VPADDD_8246	vpaddd {b}, {n}, {r}	4
+X_VPADDQ_8247_m	vpaddq {m.disp}({m.base}), {n}, {r}	5
+X_VPADDQ_8247_x	vpaddq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDQ_8247_p	vpaddq {m.sym}(%rip), {n}, {r}	8
+X_VPADDQ_8248	vpaddq {b}, {n}, {r}	4
+X_VPADDSB_8249_m	vpaddsb {m.disp}({m.base}), {n}, {r}	5
+X_VPADDSB_8249_x	vpaddsb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDSB_8249_p	vpaddsb {m.sym}(%rip), {n}, {r}	8
+X_VPADDSB_8250	vpaddsb {b}, {n}, {r}	4
+X_VPADDSW_8251_m	vpaddsw {m.disp}({m.base}), {n}, {r}	5
+X_VPADDSW_8251_x	vpaddsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDSW_8251_p	vpaddsw {m.sym}(%rip), {n}, {r}	8
+X_VPADDSW_8252	vpaddsw {b}, {n}, {r}	4
+X_VPADDUSB_8253_m	vpaddusb {m.disp}({m.base}), {n}, {r}	5
+X_VPADDUSB_8253_x	vpaddusb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDUSB_8253_p	vpaddusb {m.sym}(%rip), {n}, {r}	8
+X_VPADDUSB_8254	vpaddusb {b}, {n}, {r}	4
+X_VPADDUSW_8255_m	vpaddusw {m.disp}({m.base}), {n}, {r}	5
+X_VPADDUSW_8255_x	vpaddusw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPADDUSW_8255_p	vpaddusw {m.sym}(%rip), {n}, {r}	8
+X_VPADDUSW_8256	vpaddusw {b}, {n}, {r}	4
+X_VPAVGB_8257_m	vpavgb {m.disp}({m.base}), {n}, {r}	5
+X_VPAVGB_8257_x	vpavgb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPAVGB_8257_p	vpavgb {m.sym}(%rip), {n}, {r}	8
+X_VPAVGB_8258	vpavgb {b}, {n}, {r}	4
+X_VPAVGW_8259_m	vpavgw {m.disp}({m.base}), {n}, {r}	5
+X_VPAVGW_8259_x	vpavgw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPAVGW_8259_p	vpavgw {m.sym}(%rip), {n}, {r}	8
+X_VPAVGW_8260	vpavgw {b}, {n}, {r}	4
+X_VPCMPEQB_8261_m	vpcmpeqb {m.disp}({m.base}), {n}, {r}	5
+X_VPCMPEQB_8261_x	vpcmpeqb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPCMPEQB_8261_p	vpcmpeqb {m.sym}(%rip), {n}, {r}	8
+X_VPCMPEQB_8262	vpcmpeqb {b}, {n}, {r}	4
+X_VPCMPEQW_8263_m	vpcmpeqw {m.disp}({m.base}), {n}, {r}	5
+X_VPCMPEQW_8263_x	vpcmpeqw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPCMPEQW_8263_p	vpcmpeqw {m.sym}(%rip), {n}, {r}	8
+X_VPCMPEQW_8264	vpcmpeqw {b}, {n}, {r}	4
+X_VPCMPEQD_8265_m	vpcmpeqd {m.disp}({m.base}), {n}, {r}	5
+X_VPCMPEQD_8265_x	vpcmpeqd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPCMPEQD_8265_p	vpcmpeqd {m.sym}(%rip), {n}, {r}	8
+X_VPCMPEQD_8266	vpcmpeqd {b}, {n}, {r}	4
+X_VPCMPEQQ_8267_m	vpcmpeqq {m.disp}({m.base}), {n}, {r}	6
+X_VPCMPEQQ_8267_x	vpcmpeqq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPCMPEQQ_8267_p	vpcmpeqq {m.sym}(%rip), {n}, {r}	9
+X_VPCMPEQQ_8268	vpcmpeqq {b}, {n}, {r}	5
+X_VPCMPGTB_8269_m	vpcmpgtb {m.disp}({m.base}), {n}, {r}	5
+X_VPCMPGTB_8269_x	vpcmpgtb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPCMPGTB_8269_p	vpcmpgtb {m.sym}(%rip), {n}, {r}	8
+X_VPCMPGTB_8270	vpcmpgtb {b}, {n}, {r}	4
+X_VPCMPGTW_8271_m	vpcmpgtw {m.disp}({m.base}), {n}, {r}	5
+X_VPCMPGTW_8271_x	vpcmpgtw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPCMPGTW_8271_p	vpcmpgtw {m.sym}(%rip), {n}, {r}	8
+X_VPCMPGTW_8272	vpcmpgtw {b}, {n}, {r}	4
+X_VPCMPGTD_8273_m	vpcmpgtd {m.disp}({m.base}), {n}, {r}	5
+X_VPCMPGTD_8273_x	vpcmpgtd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPCMPGTD_8273_p	vpcmpgtd {m.sym}(%rip), {n}, {r}	8
+X_VPCMPGTD_8274	vpcmpgtd {b}, {n}, {r}	4
+X_VPCMPGTQ_8275_m	vpcmpgtq {m.disp}({m.base}), {n}, {r}	6
+X_VPCMPGTQ_8275_x	vpcmpgtq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPCMPGTQ_8275_p	vpcmpgtq {m.sym}(%rip), {n}, {r}	9
+X_VPCMPGTQ_8276	vpcmpgtq {b}, {n}, {r}	5
+X_VPHADDW_8277_m	vphaddw {m.disp}({m.base}), {n}, {r}	6
+X_VPHADDW_8277_x	vphaddw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPHADDW_8277_p	vphaddw {m.sym}(%rip), {n}, {r}	9
+X_VPHADDW_8278	vphaddw {b}, {n}, {r}	5
+X_VPHADDD_8279_m	vphaddd {m.disp}({m.base}), {n}, {r}	6
+X_VPHADDD_8279_x	vphaddd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPHADDD_8279_p	vphaddd {m.sym}(%rip), {n}, {r}	9
+X_VPHADDD_8280	vphaddd {b}, {n}, {r}	5
+X_VPHADDSW_8281_m	vphaddsw {m.disp}({m.base}), {n}, {r}	6
+X_VPHADDSW_8281_x	vphaddsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPHADDSW_8281_p	vphaddsw {m.sym}(%rip), {n}, {r}	9
+X_VPHADDSW_8282	vphaddsw {b}, {n}, {r}	5
+X_VPHSUBW_8283_m	vphsubw {m.disp}({m.base}), {n}, {r}	6
+X_VPHSUBW_8283_x	vphsubw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPHSUBW_8283_p	vphsubw {m.sym}(%rip), {n}, {r}	9
+X_VPHSUBW_8284	vphsubw {b}, {n}, {r}	5
+X_VPHSUBD_8285_m	vphsubd {m.disp}({m.base}), {n}, {r}	6
+X_VPHSUBD_8285_x	vphsubd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPHSUBD_8285_p	vphsubd {m.sym}(%rip), {n}, {r}	9
+X_VPHSUBD_8286	vphsubd {b}, {n}, {r}	5
+X_VPHSUBSW_8287_m	vphsubsw {m.disp}({m.base}), {n}, {r}	6
+X_VPHSUBSW_8287_x	vphsubsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPHSUBSW_8287_p	vphsubsw {m.sym}(%rip), {n}, {r}	9
+X_VPHSUBSW_8288	vphsubsw {b}, {n}, {r}	5
+X_VPMADDWD_8289_m	vpmaddwd {m.disp}({m.base}), {n}, {r}	5
+X_VPMADDWD_8289_x	vpmaddwd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMADDWD_8289_p	vpmaddwd {m.sym}(%rip), {n}, {r}	8
+X_VPMADDWD_8290	vpmaddwd {b}, {n}, {r}	4
+X_VPMADDUBSW_8291_m	vpmaddubsw {m.disp}({m.base}), {n}, {r}	6
+X_VPMADDUBSW_8291_x	vpmaddubsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMADDUBSW_8291_p	vpmaddubsw {m.sym}(%rip), {n}, {r}	9
+X_VPMADDUBSW_8292	vpmaddubsw {b}, {n}, {r}	5
+X_VPMAXSB_8293_m	vpmaxsb {m.disp}({m.base}), {n}, {r}	6
+X_VPMAXSB_8293_x	vpmaxsb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMAXSB_8293_p	vpmaxsb {m.sym}(%rip), {n}, {r}	9
+X_VPMAXSB_8294	vpmaxsb {b}, {n}, {r}	5
+X_VPMAXSW_8295_m	vpmaxsw {m.disp}({m.base}), {n}, {r}	5
+X_VPMAXSW_8295_x	vpmaxsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMAXSW_8295_p	vpmaxsw {m.sym}(%rip), {n}, {r}	8
+X_VPMAXSW_8296	vpmaxsw {b}, {n}, {r}	4
+X_VPMAXSD_8297_m	vpmaxsd {m.disp}({m.base}), {n}, {r}	6
+X_VPMAXSD_8297_x	vpmaxsd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMAXSD_8297_p	vpmaxsd {m.sym}(%rip), {n}, {r}	9
+X_VPMAXSD_8298	vpmaxsd {b}, {n}, {r}	5
+X_VPMAXUB_8299_m	vpmaxub {m.disp}({m.base}), {n}, {r}	5
+X_VPMAXUB_8299_x	vpmaxub {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMAXUB_8299_p	vpmaxub {m.sym}(%rip), {n}, {r}	8
+X_VPMAXUB_8300	vpmaxub {b}, {n}, {r}	4
+X_VPMAXUW_8301_m	vpmaxuw {m.disp}({m.base}), {n}, {r}	6
+X_VPMAXUW_8301_x	vpmaxuw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMAXUW_8301_p	vpmaxuw {m.sym}(%rip), {n}, {r}	9
+X_VPMAXUW_8302	vpmaxuw {b}, {n}, {r}	5
+X_VPMAXUD_8303_m	vpmaxud {m.disp}({m.base}), {n}, {r}	6
+X_VPMAXUD_8303_x	vpmaxud {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMAXUD_8303_p	vpmaxud {m.sym}(%rip), {n}, {r}	9
+X_VPMAXUD_8304	vpmaxud {b}, {n}, {r}	5
+X_VPMINSB_8305_m	vpminsb {m.disp}({m.base}), {n}, {r}	6
+X_VPMINSB_8305_x	vpminsb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMINSB_8305_p	vpminsb {m.sym}(%rip), {n}, {r}	9
+X_VPMINSB_8306	vpminsb {b}, {n}, {r}	5
+X_VPMINSW_8307_m	vpminsw {m.disp}({m.base}), {n}, {r}	5
+X_VPMINSW_8307_x	vpminsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMINSW_8307_p	vpminsw {m.sym}(%rip), {n}, {r}	8
+X_VPMINSW_8308	vpminsw {b}, {n}, {r}	4
+X_VPMINSD_8309_m	vpminsd {m.disp}({m.base}), {n}, {r}	6
+X_VPMINSD_8309_x	vpminsd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMINSD_8309_p	vpminsd {m.sym}(%rip), {n}, {r}	9
+X_VPMINSD_8310	vpminsd {b}, {n}, {r}	5
+X_VPMINUB_8311_m	vpminub {m.disp}({m.base}), {n}, {r}	5
+X_VPMINUB_8311_x	vpminub {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMINUB_8311_p	vpminub {m.sym}(%rip), {n}, {r}	8
+X_VPMINUB_8312	vpminub {b}, {n}, {r}	4
+X_VPMINUW_8313_m	vpminuw {m.disp}({m.base}), {n}, {r}	6
+X_VPMINUW_8313_x	vpminuw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMINUW_8313_p	vpminuw {m.sym}(%rip), {n}, {r}	9
+X_VPMINUW_8314	vpminuw {b}, {n}, {r}	5
+X_VPMINUD_8315_m	vpminud {m.disp}({m.base}), {n}, {r}	6
+X_VPMINUD_8315_x	vpminud {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMINUD_8315_p	vpminud {m.sym}(%rip), {n}, {r}	9
+X_VPMINUD_8316	vpminud {b}, {n}, {r}	5
+X_VPMULHUW_8317_m	vpmulhuw {m.disp}({m.base}), {n}, {r}	5
+X_VPMULHUW_8317_x	vpmulhuw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMULHUW_8317_p	vpmulhuw {m.sym}(%rip), {n}, {r}	8
+X_VPMULHUW_8318	vpmulhuw {b}, {n}, {r}	4
+X_VPMULHRSW_8319_m	vpmulhrsw {m.disp}({m.base}), {n}, {r}	6
+X_VPMULHRSW_8319_x	vpmulhrsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMULHRSW_8319_p	vpmulhrsw {m.sym}(%rip), {n}, {r}	9
+X_VPMULHRSW_8320	vpmulhrsw {b}, {n}, {r}	5
+X_VPMULHW_8321_m	vpmulhw {m.disp}({m.base}), {n}, {r}	5
+X_VPMULHW_8321_x	vpmulhw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMULHW_8321_p	vpmulhw {m.sym}(%rip), {n}, {r}	8
+X_VPMULHW_8322	vpmulhw {b}, {n}, {r}	4
+X_VPMULLW_8323_m	vpmullw {m.disp}({m.base}), {n}, {r}	5
+X_VPMULLW_8323_x	vpmullw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMULLW_8323_p	vpmullw {m.sym}(%rip), {n}, {r}	8
+X_VPMULLW_8324	vpmullw {b}, {n}, {r}	4
+X_VPMULLD_8325_m	vpmulld {m.disp}({m.base}), {n}, {r}	6
+X_VPMULLD_8325_x	vpmulld {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMULLD_8325_p	vpmulld {m.sym}(%rip), {n}, {r}	9
+X_VPMULLD_8326	vpmulld {b}, {n}, {r}	5
+X_VPMULUDQ_8327_m	vpmuludq {m.disp}({m.base}), {n}, {r}	5
+X_VPMULUDQ_8327_x	vpmuludq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPMULUDQ_8327_p	vpmuludq {m.sym}(%rip), {n}, {r}	8
+X_VPMULUDQ_8328	vpmuludq {b}, {n}, {r}	4
+X_VPMULDQ_8329_m	vpmuldq {m.disp}({m.base}), {n}, {r}	6
+X_VPMULDQ_8329_x	vpmuldq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMULDQ_8329_p	vpmuldq {m.sym}(%rip), {n}, {r}	9
+X_VPMULDQ_8330	vpmuldq {b}, {n}, {r}	5
+X_VPSADBW_8331_m	vpsadbw {m.disp}({m.base}), {n}, {r}	5
+X_VPSADBW_8331_x	vpsadbw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSADBW_8331_p	vpsadbw {m.sym}(%rip), {n}, {r}	8
+X_VPSADBW_8332	vpsadbw {b}, {n}, {r}	4
+X_VPSHUFB_8333_m	vpshufb {m.disp}({m.base}), {n}, {r}	6
+X_VPSHUFB_8333_x	vpshufb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSHUFB_8333_p	vpshufb {m.sym}(%rip), {n}, {r}	9
+X_VPSHUFB_8334	vpshufb {b}, {n}, {r}	5
+X_VPSIGNB_8335_m	vpsignb {m.disp}({m.base}), {n}, {r}	6
+X_VPSIGNB_8335_x	vpsignb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSIGNB_8335_p	vpsignb {m.sym}(%rip), {n}, {r}	9
+X_VPSIGNB_8336	vpsignb {b}, {n}, {r}	5
+X_VPSIGNW_8337_m	vpsignw {m.disp}({m.base}), {n}, {r}	6
+X_VPSIGNW_8337_x	vpsignw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSIGNW_8337_p	vpsignw {m.sym}(%rip), {n}, {r}	9
+X_VPSIGNW_8338	vpsignw {b}, {n}, {r}	5
+X_VPSIGND_8339_m	vpsignd {m.disp}({m.base}), {n}, {r}	6
+X_VPSIGND_8339_x	vpsignd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSIGND_8339_p	vpsignd {m.sym}(%rip), {n}, {r}	9
+X_VPSIGND_8340	vpsignd {b}, {n}, {r}	5
+X_VPSUBSB_8341_m	vpsubsb {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBSB_8341_x	vpsubsb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBSB_8341_p	vpsubsb {m.sym}(%rip), {n}, {r}	8
+X_VPSUBSB_8342	vpsubsb {b}, {n}, {r}	4
+X_VPSUBSW_8343_m	vpsubsw {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBSW_8343_x	vpsubsw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBSW_8343_p	vpsubsw {m.sym}(%rip), {n}, {r}	8
+X_VPSUBSW_8344	vpsubsw {b}, {n}, {r}	4
+X_VPSUBUSB_8345_m	vpsubusb {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBUSB_8345_x	vpsubusb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBUSB_8345_p	vpsubusb {m.sym}(%rip), {n}, {r}	8
+X_VPSUBUSB_8346	vpsubusb {b}, {n}, {r}	4
+X_VPSUBUSW_8347_m	vpsubusw {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBUSW_8347_x	vpsubusw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBUSW_8347_p	vpsubusw {m.sym}(%rip), {n}, {r}	8
+X_VPSUBUSW_8348	vpsubusw {b}, {n}, {r}	4
+X_VPSUBB_8349_m	vpsubb {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBB_8349_x	vpsubb {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBB_8349_p	vpsubb {m.sym}(%rip), {n}, {r}	8
+X_VPSUBB_8350	vpsubb {b}, {n}, {r}	4
+X_VPSUBW_8351_m	vpsubw {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBW_8351_x	vpsubw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBW_8351_p	vpsubw {m.sym}(%rip), {n}, {r}	8
+X_VPSUBW_8352	vpsubw {b}, {n}, {r}	4
+X_VPSUBD_8353_m	vpsubd {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBD_8353_x	vpsubd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBD_8353_p	vpsubd {m.sym}(%rip), {n}, {r}	8
+X_VPSUBD_8354	vpsubd {b}, {n}, {r}	4
+X_VPSUBQ_8355_m	vpsubq {m.disp}({m.base}), {n}, {r}	5
+X_VPSUBQ_8355_x	vpsubq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPSUBQ_8355_p	vpsubq {m.sym}(%rip), {n}, {r}	8
+X_VPSUBQ_8356	vpsubq {b}, {n}, {r}	4
+X_VPUNPCKHBW_8357_m	vpunpckhbw {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKHBW_8357_x	vpunpckhbw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKHBW_8357_p	vpunpckhbw {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKHBW_8358	vpunpckhbw {b}, {n}, {r}	4
+X_VPUNPCKHWD_8359_m	vpunpckhwd {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKHWD_8359_x	vpunpckhwd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKHWD_8359_p	vpunpckhwd {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKHWD_8360	vpunpckhwd {b}, {n}, {r}	4
+X_VPUNPCKHDQ_8361_m	vpunpckhdq {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKHDQ_8361_x	vpunpckhdq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKHDQ_8361_p	vpunpckhdq {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKHDQ_8362	vpunpckhdq {b}, {n}, {r}	4
+X_VPUNPCKHQDQ_8363_m	vpunpckhqdq {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKHQDQ_8363_x	vpunpckhqdq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKHQDQ_8363_p	vpunpckhqdq {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKHQDQ_8364	vpunpckhqdq {b}, {n}, {r}	4
+X_VPUNPCKLBW_8365_m	vpunpcklbw {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKLBW_8365_x	vpunpcklbw {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKLBW_8365_p	vpunpcklbw {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKLBW_8366	vpunpcklbw {b}, {n}, {r}	4
+X_VPUNPCKLWD_8367_m	vpunpcklwd {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKLWD_8367_x	vpunpcklwd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKLWD_8367_p	vpunpcklwd {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKLWD_8368	vpunpcklwd {b}, {n}, {r}	4
+X_VPUNPCKLDQ_8369_m	vpunpckldq {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKLDQ_8369_x	vpunpckldq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKLDQ_8369_p	vpunpckldq {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKLDQ_8370	vpunpckldq {b}, {n}, {r}	4
+X_VPUNPCKLQDQ_8371_m	vpunpcklqdq {m.disp}({m.base}), {n}, {r}	5
+X_VPUNPCKLQDQ_8371_x	vpunpcklqdq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPUNPCKLQDQ_8371_p	vpunpcklqdq {m.sym}(%rip), {n}, {r}	8
+X_VPUNPCKLQDQ_8372	vpunpcklqdq {b}, {n}, {r}	4
+X_VPALIGNR_8373_m	vpalignr ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VPALIGNR_8373_x	vpalignr ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VPALIGNR_8373_p	vpalignr ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VPALIGNR_8374	vpalignr ${c}, {b}, {n}, {r}	6
+X_VPBLENDW_8375_m	vpblendw ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VPBLENDW_8375_x	vpblendw ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VPBLENDW_8375_p	vpblendw ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VPBLENDW_8376	vpblendw ${c}, {b}, {n}, {r}	6
+X_VMPSADBW_8377_m	vmpsadbw ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VMPSADBW_8377_x	vmpsadbw ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VMPSADBW_8377_p	vmpsadbw ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VMPSADBW_8378	vmpsadbw ${c}, {b}, {n}, {r}	6
+X_VPOR_8379_m	vpor {m.disp}({m.base}), {n}, {r}	5
+X_VPOR_8379_x	vpor {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPOR_8379_p	vpor {m.sym}(%rip), {n}, {r}	8
+X_VPOR_8380	vpor {b}, {n}, {r}	4
+X_VPAND_8381_m	vpand {m.disp}({m.base}), {n}, {r}	5
+X_VPAND_8381_x	vpand {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPAND_8381_p	vpand {m.sym}(%rip), {n}, {r}	8
+X_VPAND_8382	vpand {b}, {n}, {r}	4
+X_VPANDN_8383_m	vpandn {m.disp}({m.base}), {n}, {r}	5
+X_VPANDN_8383_x	vpandn {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPANDN_8383_p	vpandn {m.sym}(%rip), {n}, {r}	8
+X_VPANDN_8384	vpandn {b}, {n}, {r}	4
+X_VPXOR_8385_m	vpxor {m.disp}({m.base}), {n}, {r}	5
+X_VPXOR_8385_x	vpxor {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	6
+X_VPXOR_8385_p	vpxor {m.sym}(%rip), {n}, {r}	8
+X_VPXOR_8386	vpxor {b}, {n}, {r}	4
+X_VPBLENDVB_8387_m	vpblendvb {e}, {m.disp}({m.base}), {n}, {r}	7
+X_VPBLENDVB_8387_x	vpblendvb {e}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VPBLENDVB_8387_p	vpblendvb {e}, {m.sym}(%rip), {n}, {r}	10
+X_VPBLENDVB_8388	vpblendvb {e}, {b}, {n}, {r}	6
+X_VPMOVMSKB_8389	vpmovmskb {b}, {r}	4
+X_VPSHUFD_8390_m	vpshufd ${c}, {m.disp}({m.base}), {r}	6
+X_VPSHUFD_8390_x	vpshufd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPSHUFD_8390_p	vpshufd ${c}, {m.sym}(%rip), {r}	9
+X_VPSHUFD_8391	vpshufd ${c}, {b}, {r}	5
+X_VPSHUFHW_8392_m	vpshufhw ${c}, {m.disp}({m.base}), {r}	6
+X_VPSHUFHW_8392_x	vpshufhw ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPSHUFHW_8392_p	vpshufhw ${c}, {m.sym}(%rip), {r}	9
+X_VPSHUFHW_8393	vpshufhw ${c}, {b}, {r}	5
+X_VPSHUFLW_8394_m	vpshuflw ${c}, {m.disp}({m.base}), {r}	6
+X_VPSHUFLW_8394_x	vpshuflw ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPSHUFLW_8394_p	vpshuflw ${c}, {m.sym}(%rip), {r}	9
+X_VPSHUFLW_8395	vpshuflw ${c}, {b}, {r}	5
+X_VPSRLDQ_8396	vpsrldq ${c}, {b}, {n}	5
+X_VPSLLDQ_8397	vpslldq ${c}, {b}, {n}	5
+X_VPSLLW_8398	vpsllw ${c}, {b}, {n}	5
+X_VPSLLD_8399	vpslld ${c}, {b}, {n}	5
+X_VPSLLQ_8400	vpsllq ${c}, {b}, {n}	5
+X_VPSRAW_8401	vpsraw ${c}, {b}, {n}	5
+X_VPSRAD_8402	vpsrad ${c}, {b}, {n}	5
+X_VPSRLW_8403	vpsrlw ${c}, {b}, {n}	5
+X_VPSRLD_8404	vpsrld ${c}, {b}, {n}	5
+X_VPSRLQ_8405	vpsrlq ${c}, {b}, {n}	5
+X_VPMOVSXBW_8406	vpmovsxbw {b}, {r}	5
+X_VPMOVSXBW_8407_m	vpmovsxbw {m.disp}({m.base}), {r}	6
+X_VPMOVSXBW_8407_x	vpmovsxbw {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVSXBW_8407_p	vpmovsxbw {m.sym}(%rip), {r}	9
+X_VPMOVSXBD_8408	vpmovsxbd {b}, {r}	5
+X_VPMOVSXBD_8409_m	vpmovsxbd {m.disp}({m.base}), {r}	6
+X_VPMOVSXBD_8409_x	vpmovsxbd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVSXBD_8409_p	vpmovsxbd {m.sym}(%rip), {r}	9
+X_VPMOVSXBQ_8410	vpmovsxbq {b}, {r}	5
+X_VPMOVSXBQ_8411_m	vpmovsxbq {m.disp}({m.base}), {r}	6
+X_VPMOVSXBQ_8411_x	vpmovsxbq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVSXBQ_8411_p	vpmovsxbq {m.sym}(%rip), {r}	9
+X_VPMOVSXWD_8412	vpmovsxwd {b}, {r}	5
+X_VPMOVSXWD_8413_m	vpmovsxwd {m.disp}({m.base}), {r}	6
+X_VPMOVSXWD_8413_x	vpmovsxwd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVSXWD_8413_p	vpmovsxwd {m.sym}(%rip), {r}	9
+X_VPMOVSXWQ_8414	vpmovsxwq {b}, {r}	5
+X_VPMOVSXWQ_8415_m	vpmovsxwq {m.disp}({m.base}), {r}	6
+X_VPMOVSXWQ_8415_x	vpmovsxwq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVSXWQ_8415_p	vpmovsxwq {m.sym}(%rip), {r}	9
+X_VPMOVSXDQ_8416	vpmovsxdq {b}, {r}	5
+X_VPMOVSXDQ_8417_m	vpmovsxdq {m.disp}({m.base}), {r}	6
+X_VPMOVSXDQ_8417_x	vpmovsxdq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVSXDQ_8417_p	vpmovsxdq {m.sym}(%rip), {r}	9
+X_VPMOVZXBW_8418	vpmovzxbw {b}, {r}	5
+X_VPMOVZXBW_8419_m	vpmovzxbw {m.disp}({m.base}), {r}	6
+X_VPMOVZXBW_8419_x	vpmovzxbw {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVZXBW_8419_p	vpmovzxbw {m.sym}(%rip), {r}	9
+X_VPMOVZXBD_8420	vpmovzxbd {b}, {r}	5
+X_VPMOVZXBD_8421_m	vpmovzxbd {m.disp}({m.base}), {r}	6
+X_VPMOVZXBD_8421_x	vpmovzxbd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVZXBD_8421_p	vpmovzxbd {m.sym}(%rip), {r}	9
+X_VPMOVZXBQ_8422	vpmovzxbq {b}, {r}	5
+X_VPMOVZXBQ_8423_m	vpmovzxbq {m.disp}({m.base}), {r}	6
+X_VPMOVZXBQ_8423_x	vpmovzxbq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVZXBQ_8423_p	vpmovzxbq {m.sym}(%rip), {r}	9
+X_VPMOVZXWD_8424	vpmovzxwd {b}, {r}	5
+X_VPMOVZXWD_8425_m	vpmovzxwd {m.disp}({m.base}), {r}	6
+X_VPMOVZXWD_8425_x	vpmovzxwd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVZXWD_8425_p	vpmovzxwd {m.sym}(%rip), {r}	9
+X_VPMOVZXWQ_8426	vpmovzxwq {b}, {r}	5
+X_VPMOVZXWQ_8427_m	vpmovzxwq {m.disp}({m.base}), {r}	6
+X_VPMOVZXWQ_8427_x	vpmovzxwq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVZXWQ_8427_p	vpmovzxwq {m.sym}(%rip), {r}	9
+X_VPMOVZXDQ_8428	vpmovzxdq {b}, {r}	5
+X_VPMOVZXDQ_8429_m	vpmovzxdq {m.disp}({m.base}), {r}	6
+X_VPMOVZXDQ_8429_x	vpmovzxdq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPMOVZXDQ_8429_p	vpmovzxdq {m.sym}(%rip), {r}	9
+X_VINSERTI128_8430_m	vinserti128 ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VINSERTI128_8430_x	vinserti128 ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VINSERTI128_8430_p	vinserti128 ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VINSERTI128_8431	vinserti128 ${c}, {b}, {n}, {r}	6
+X_VEXTRACTI128_8432_m	vextracti128 ${c}, {r}, {m.disp}({m.base})	7
+X_VEXTRACTI128_8432_x	vextracti128 ${c}, {r}, {m.disp}({m.base},{m.index},{m.scale})	8
+X_VEXTRACTI128_8432_p	vextracti128 ${c}, {r}, {m.sym}(%rip)	10
+X_VEXTRACTI128_8433	vextracti128 ${c}, {r}, {b}	6
+X_VPMASKMOVD_8434_m	vpmaskmovd {m.disp}({m.base}), {n}, {r}	6
+X_VPMASKMOVD_8434_x	vpmaskmovd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMASKMOVD_8434_p	vpmaskmovd {m.sym}(%rip), {n}, {r}	9
+X_VPMASKMOVD_8435_m	vpmaskmovd {m.disp}({m.base}), {n}, {r}	6
+X_VPMASKMOVD_8435_x	vpmaskmovd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMASKMOVD_8435_p	vpmaskmovd {m.sym}(%rip), {n}, {r}	9
+X_VPMASKMOVQ_8436_m	vpmaskmovq {m.disp}({m.base}), {n}, {r}	6
+X_VPMASKMOVQ_8436_x	vpmaskmovq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMASKMOVQ_8436_p	vpmaskmovq {m.sym}(%rip), {n}, {r}	9
+X_VPMASKMOVQ_8437_m	vpmaskmovq {m.disp}({m.base}), {n}, {r}	6
+X_VPMASKMOVQ_8437_x	vpmaskmovq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPMASKMOVQ_8437_p	vpmaskmovq {m.sym}(%rip), {n}, {r}	9
+X_VPMASKMOVD_8438_m	vpmaskmovd {r}, {n}, {m.disp}({m.base})	6
+X_VPMASKMOVD_8438_x	vpmaskmovd {r}, {n}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_VPMASKMOVD_8438_p	vpmaskmovd {r}, {n}, {m.sym}(%rip)	9
+X_VPMASKMOVD_8439_m	vpmaskmovd {r}, {n}, {m.disp}({m.base})	6
+X_VPMASKMOVD_8439_x	vpmaskmovd {r}, {n}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_VPMASKMOVD_8439_p	vpmaskmovd {r}, {n}, {m.sym}(%rip)	9
+X_VPMASKMOVQ_8440_m	vpmaskmovq {r}, {n}, {m.disp}({m.base})	6
+X_VPMASKMOVQ_8440_x	vpmaskmovq {r}, {n}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_VPMASKMOVQ_8440_p	vpmaskmovq {r}, {n}, {m.sym}(%rip)	9
+X_VPMASKMOVQ_8441_m	vpmaskmovq {r}, {n}, {m.disp}({m.base})	6
+X_VPMASKMOVQ_8441_x	vpmaskmovq {r}, {n}, {m.disp}({m.base},{m.index},{m.scale})	7
+X_VPMASKMOVQ_8441_p	vpmaskmovq {r}, {n}, {m.sym}(%rip)	9
+X_VPERM2I128_8442_m	vperm2i128 ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VPERM2I128_8442_x	vperm2i128 ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VPERM2I128_8442_p	vperm2i128 ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VPERM2I128_8443	vperm2i128 ${c}, {b}, {n}, {r}	6
+X_VPERMQ_8444_m	vpermq ${c}, {m.disp}({m.base}), {r}	7
+X_VPERMQ_8444_x	vpermq ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VPERMQ_8444_p	vpermq ${c}, {m.sym}(%rip), {r}	10
+X_VPERMQ_8445	vpermq ${c}, {b}, {r}	6
+X_VPERMPD_8446_m	vpermpd ${c}, {m.disp}({m.base}), {r}	7
+X_VPERMPD_8446_x	vpermpd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_VPERMPD_8446_p	vpermpd ${c}, {m.sym}(%rip), {r}	10
+X_VPERMPD_8447	vpermpd ${c}, {b}, {r}	6
+X_VPERMD_8448_m	vpermd {m.disp}({m.base}), {n}, {r}	6
+X_VPERMD_8448_x	vpermd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPERMD_8448_p	vpermd {m.sym}(%rip), {n}, {r}	9
+X_VPERMD_8449	vpermd {b}, {n}, {r}	5
+X_VPERMPS_8450_m	vpermps {m.disp}({m.base}), {n}, {r}	6
+X_VPERMPS_8450_x	vpermps {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPERMPS_8450_p	vpermps {m.sym}(%rip), {n}, {r}	9
+X_VPERMPS_8451	vpermps {b}, {n}, {r}	5
+X_VPBLENDD_8452_m	vpblendd ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VPBLENDD_8452_x	vpblendd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VPBLENDD_8452_p	vpblendd ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VPBLENDD_8453	vpblendd ${c}, {b}, {n}, {r}	6
+X_VPBLENDD_8454_m	vpblendd ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VPBLENDD_8454_x	vpblendd ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VPBLENDD_8454_p	vpblendd ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VPBLENDD_8455	vpblendd ${c}, {b}, {n}, {r}	6
+X_VPBROADCASTB_8456_m	vpbroadcastb {m.disp}({m.base}), {r}	6
+X_VPBROADCASTB_8456_x	vpbroadcastb {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPBROADCASTB_8456_p	vpbroadcastb {m.sym}(%rip), {r}	9
+X_VPBROADCASTB_8457	vpbroadcastb {b}, {r}	5
+X_VPBROADCASTB_8458_m	vpbroadcastb {m.disp}({m.base}), {r}	6
+X_VPBROADCASTB_8458_x	vpbroadcastb {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPBROADCASTB_8458_p	vpbroadcastb {m.sym}(%rip), {r}	9
+X_VPBROADCASTB_8459	vpbroadcastb {b}, {r}	5
+X_VPBROADCASTW_8460_m	vpbroadcastw {m.disp}({m.base}), {r}	6
+X_VPBROADCASTW_8460_x	vpbroadcastw {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPBROADCASTW_8460_p	vpbroadcastw {m.sym}(%rip), {r}	9
+X_VPBROADCASTW_8461	vpbroadcastw {b}, {r}	5
+X_VPBROADCASTW_8462_m	vpbroadcastw {m.disp}({m.base}), {r}	6
+X_VPBROADCASTW_8462_x	vpbroadcastw {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPBROADCASTW_8462_p	vpbroadcastw {m.sym}(%rip), {r}	9
+X_VPBROADCASTW_8463	vpbroadcastw {b}, {r}	5
+X_VPBROADCASTD_8464_m	vpbroadcastd {m.disp}({m.base}), {r}	6
+X_VPBROADCASTD_8464_x	vpbroadcastd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPBROADCASTD_8464_p	vpbroadcastd {m.sym}(%rip), {r}	9
+X_VPBROADCASTD_8465	vpbroadcastd {b}, {r}	5
+X_VPBROADCASTD_8466_m	vpbroadcastd {m.disp}({m.base}), {r}	6
+X_VPBROADCASTD_8466_x	vpbroadcastd {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPBROADCASTD_8466_p	vpbroadcastd {m.sym}(%rip), {r}	9
+X_VPBROADCASTD_8467	vpbroadcastd {b}, {r}	5
+X_VPBROADCASTQ_8468_m	vpbroadcastq {m.disp}({m.base}), {r}	6
+X_VPBROADCASTQ_8468_x	vpbroadcastq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPBROADCASTQ_8468_p	vpbroadcastq {m.sym}(%rip), {r}	9
+X_VPBROADCASTQ_8469	vpbroadcastq {b}, {r}	5
+X_VPBROADCASTQ_8470_m	vpbroadcastq {m.disp}({m.base}), {r}	6
+X_VPBROADCASTQ_8470_x	vpbroadcastq {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VPBROADCASTQ_8470_p	vpbroadcastq {m.sym}(%rip), {r}	9
+X_VPBROADCASTQ_8471	vpbroadcastq {b}, {r}	5
+X_VBROADCASTSS_8472	vbroadcastss {b}, {r}	5
+X_VBROADCASTSS_8473	vbroadcastss {b}, {r}	5
+X_VBROADCASTSD_8474	vbroadcastsd {b}, {r}	5
+X_VBROADCASTI128_8475_m	vbroadcasti128 {m.disp}({m.base}), {r}	6
+X_VBROADCASTI128_8475_x	vbroadcasti128 {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VBROADCASTI128_8475_p	vbroadcasti128 {m.sym}(%rip), {r}	9
+X_VPSLLVD_8476_m	vpsllvd {m.disp}({m.base}), {n}, {r}	6
+X_VPSLLVD_8476_x	vpsllvd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSLLVD_8476_p	vpsllvd {m.sym}(%rip), {n}, {r}	9
+X_VPSLLVD_8477	vpsllvd {b}, {n}, {r}	5
+X_VPSLLVD_8478_m	vpsllvd {m.disp}({m.base}), {n}, {r}	6
+X_VPSLLVD_8478_x	vpsllvd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSLLVD_8478_p	vpsllvd {m.sym}(%rip), {n}, {r}	9
+X_VPSLLVD_8479	vpsllvd {b}, {n}, {r}	5
+X_VPSLLVQ_8480_m	vpsllvq {m.disp}({m.base}), {n}, {r}	6
+X_VPSLLVQ_8480_x	vpsllvq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSLLVQ_8480_p	vpsllvq {m.sym}(%rip), {n}, {r}	9
+X_VPSLLVQ_8481	vpsllvq {b}, {n}, {r}	5
+X_VPSLLVQ_8482_m	vpsllvq {m.disp}({m.base}), {n}, {r}	6
+X_VPSLLVQ_8482_x	vpsllvq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSLLVQ_8482_p	vpsllvq {m.sym}(%rip), {n}, {r}	9
+X_VPSLLVQ_8483	vpsllvq {b}, {n}, {r}	5
+X_VPSRLVD_8484_m	vpsrlvd {m.disp}({m.base}), {n}, {r}	6
+X_VPSRLVD_8484_x	vpsrlvd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSRLVD_8484_p	vpsrlvd {m.sym}(%rip), {n}, {r}	9
+X_VPSRLVD_8485	vpsrlvd {b}, {n}, {r}	5
+X_VPSRLVD_8486_m	vpsrlvd {m.disp}({m.base}), {n}, {r}	6
+X_VPSRLVD_8486_x	vpsrlvd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSRLVD_8486_p	vpsrlvd {m.sym}(%rip), {n}, {r}	9
+X_VPSRLVD_8487	vpsrlvd {b}, {n}, {r}	5
+X_VPSRLVQ_8488_m	vpsrlvq {m.disp}({m.base}), {n}, {r}	6
+X_VPSRLVQ_8488_x	vpsrlvq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSRLVQ_8488_p	vpsrlvq {m.sym}(%rip), {n}, {r}	9
+X_VPSRLVQ_8489	vpsrlvq {b}, {n}, {r}	5
+X_VPSRLVQ_8490_m	vpsrlvq {m.disp}({m.base}), {n}, {r}	6
+X_VPSRLVQ_8490_x	vpsrlvq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSRLVQ_8490_p	vpsrlvq {m.sym}(%rip), {n}, {r}	9
+X_VPSRLVQ_8491	vpsrlvq {b}, {n}, {r}	5
+X_VPSRAVD_8492_m	vpsravd {m.disp}({m.base}), {n}, {r}	6
+X_VPSRAVD_8492_x	vpsravd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSRAVD_8492_p	vpsravd {m.sym}(%rip), {n}, {r}	9
+X_VPSRAVD_8493	vpsravd {b}, {n}, {r}	5
+X_VPSRAVD_8494_m	vpsravd {m.disp}({m.base}), {n}, {r}	6
+X_VPSRAVD_8494_x	vpsravd {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VPSRAVD_8494_p	vpsravd {m.sym}(%rip), {n}, {r}	9
+X_VPSRAVD_8495	vpsravd {b}, {n}, {r}	5
+X_VMOVNTDQA_8496_m	vmovntdqa {m.disp}({m.base}), {r}	6
+X_VMOVNTDQA_8496_x	vmovntdqa {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VMOVNTDQA_8496_p	vmovntdqa {m.sym}(%rip), {r}	9
+X_PDEP_8498_m	pdepl {m.disp}({m.base}), {n}, {r}	6
+X_PDEP_8498_x	pdepl {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_PDEP_8498_p	pdepl {m.sym}(%rip), {n}, {r}	9
+X_PDEP_8500	pdepl {b}, {n}, {r}	5
+X_PDEP_8501_m	pdepq {m.disp}({m.base}), {n}, {r}	6
+X_PDEP_8501_x	pdepq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_PDEP_8501_p	pdepq {m.sym}(%rip), {n}, {r}	9
+X_PDEP_8502	pdepq {b}, {n}, {r}	5
+X_PEXT_8504_m	pextl {m.disp}({m.base}), {n}, {r}	6
+X_PEXT_8504_x	pextl {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_PEXT_8504_p	pextl {m.sym}(%rip), {n}, {r}	9
+X_PEXT_8506	pextl {b}, {n}, {r}	5
+X_PEXT_8507_m	pextq {m.disp}({m.base}), {n}, {r}	6
+X_PEXT_8507_x	pextq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_PEXT_8507_p	pextq {m.sym}(%rip), {n}, {r}	9
+X_PEXT_8508	pextq {b}, {n}, {r}	5
+X_ANDN_8510_m	andnl {m.disp}({m.base}), {n}, {r}	6
+X_ANDN_8510_x	andnl {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_ANDN_8510_p	andnl {m.sym}(%rip), {n}, {r}	9
+X_ANDN_8512	andnl {b}, {n}, {r}	5
+X_ANDN_8513_m	andnq {m.disp}({m.base}), {n}, {r}	6
+X_ANDN_8513_x	andnq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_ANDN_8513_p	andnq {m.sym}(%rip), {n}, {r}	9
+X_ANDN_8514	andnq {b}, {n}, {r}	5
+X_BLSR_8516_m	blsrl {m.disp}({m.base}), {n}	6
+X_BLSR_8516_x	blsrl {m.disp}({m.base},{m.index},{m.scale}), {n}	7
+X_BLSR_8516_p	blsrl {m.sym}(%rip), {n}	9
+X_BLSR_8518	blsrl {b}, {n}	5
+X_BLSR_8519_m	blsrq {m.disp}({m.base}), {n}	6
+X_BLSR_8519_x	blsrq {m.disp}({m.base},{m.index},{m.scale}), {n}	7
+X_BLSR_8519_p	blsrq {m.sym}(%rip), {n}	9
+X_BLSR_8520	blsrq {b}, {n}	5
+X_BLSMSK_8522_m	blsmskl {m.disp}({m.base}), {n}	6
+X_BLSMSK_8522_x	blsmskl {m.disp}({m.base},{m.index},{m.scale}), {n}	7
+X_BLSMSK_8522_p	blsmskl {m.sym}(%rip), {n}	9
+X_BLSMSK_8524	blsmskl {b}, {n}	5
+X_BLSMSK_8525_m	blsmskq {m.disp}({m.base}), {n}	6
+X_BLSMSK_8525_x	blsmskq {m.disp}({m.base},{m.index},{m.scale}), {n}	7
+X_BLSMSK_8525_p	blsmskq {m.sym}(%rip), {n}	9
+X_BLSMSK_8526	blsmskq {b}, {n}	5
+X_BLSI_8528_m	blsil {m.disp}({m.base}), {n}	6
+X_BLSI_8528_x	blsil {m.disp}({m.base},{m.index},{m.scale}), {n}	7
+X_BLSI_8528_p	blsil {m.sym}(%rip), {n}	9
+X_BLSI_8530	blsil {b}, {n}	5
+X_BLSI_8531_m	blsiq {m.disp}({m.base}), {n}	6
+X_BLSI_8531_x	blsiq {m.disp}({m.base},{m.index},{m.scale}), {n}	7
+X_BLSI_8531_p	blsiq {m.sym}(%rip), {n}	9
+X_BLSI_8532	blsiq {b}, {n}	5
+X_BZHI_8534_m	bzhil {n}, {m.disp}({m.base}), {r}	6
+X_BZHI_8534_x	bzhil {n}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_BZHI_8534_p	bzhil {n}, {m.sym}(%rip), {r}	9
+X_BZHI_8536	bzhil {n}, {b}, {r}	5
+X_BZHI_8537_m	bzhiq {n}, {m.disp}({m.base}), {r}	6
+X_BZHI_8537_x	bzhiq {n}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_BZHI_8537_p	bzhiq {n}, {m.sym}(%rip), {r}	9
+X_BZHI_8538	bzhiq {n}, {b}, {r}	5
+X_BEXTR_8540_m	bextrl {n}, {m.disp}({m.base}), {r}	6
+X_BEXTR_8540_x	bextrl {n}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_BEXTR_8540_p	bextrl {n}, {m.sym}(%rip), {r}	9
+X_BEXTR_8542	bextrl {n}, {b}, {r}	5
+X_BEXTR_8543_m	bextrq {n}, {m.disp}({m.base}), {r}	6
+X_BEXTR_8543_x	bextrq {n}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_BEXTR_8543_p	bextrq {n}, {m.sym}(%rip), {r}	9
+X_BEXTR_8544	bextrq {n}, {b}, {r}	5
+X_SHLX_8546_m	shlxl {n}, {m.disp}({m.base}), {r}	6
+X_SHLX_8546_x	shlxl {n}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_SHLX_8546_p	shlxl {n}, {m.sym}(%rip), {r}	9
+X_SHLX_8548	shlxl {n}, {b}, {r}	5
+X_SHLX_8549_m	shlxq {n}, {m.disp}({m.base}), {r}	6
+X_SHLX_8549_x	shlxq {n}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_SHLX_8549_p	shlxq {n}, {m.sym}(%rip), {r}	9
+X_SHLX_8550	shlxq {n}, {b}, {r}	5
+X_SARX_8552_m	sarxl {n}, {m.disp}({m.base}), {r}	6
+X_SARX_8552_x	sarxl {n}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_SARX_8552_p	sarxl {n}, {m.sym}(%rip), {r}	9
+X_SARX_8554	sarxl {n}, {b}, {r}	5
+X_SARX_8555_m	sarxq {n}, {m.disp}({m.base}), {r}	6
+X_SARX_8555_x	sarxq {n}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_SARX_8555_p	sarxq {n}, {m.sym}(%rip), {r}	9
+X_SARX_8556	sarxq {n}, {b}, {r}	5
+X_SHRX_8558_m	shrxl {n}, {m.disp}({m.base}), {r}	6
+X_SHRX_8558_x	shrxl {n}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_SHRX_8558_p	shrxl {n}, {m.sym}(%rip), {r}	9
+X_SHRX_8560	shrxl {n}, {b}, {r}	5
+X_SHRX_8561_m	shrxq {n}, {m.disp}({m.base}), {r}	6
+X_SHRX_8561_x	shrxq {n}, {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_SHRX_8561_p	shrxq {n}, {m.sym}(%rip), {r}	9
+X_SHRX_8562	shrxq {n}, {b}, {r}	5
+X_MULX_8564	mulxl {b}, {n}, {r}	5
+X_MULX_8566_m	mulxl {m.disp}({m.base}), {n}, {r}	6
+X_MULX_8566_x	mulxl {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_MULX_8566_p	mulxl {m.sym}(%rip), {n}, {r}	9
+X_MULX_8567	mulxq {b}, {n}, {r}	5
+X_MULX_8568_m	mulxq {m.disp}({m.base}), {n}, {r}	6
+X_MULX_8568_x	mulxq {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_MULX_8568_p	mulxq {m.sym}(%rip), {n}, {r}	9
+X_RORX_8570	rorxl ${c}, {b}, {r}	6
+X_RORX_8572_m	rorxl ${c}, {m.disp}({m.base}), {r}	7
+X_RORX_8572_x	rorxl ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_RORX_8572_p	rorxl ${c}, {m.sym}(%rip), {r}	10
+X_RORX_8573	rorxq ${c}, {b}, {r}	6
+X_RORX_8574_m	rorxq ${c}, {m.disp}({m.base}), {r}	7
+X_RORX_8574_x	rorxq ${c}, {m.disp}({m.base},{m.index},{m.scale}), {r}	8
+X_RORX_8574_p	rorxq ${c}, {m.sym}(%rip), {r}	10
 X_TZCNT_8575_16_m	tzcntw {m.disp}({m.base}), {r}	6
 X_TZCNT_8575_16_x	tzcntw {m.disp}({m.base},{m.index},{m.scale}), {r}	7
 X_TZCNT_8575_16_p	tzcntw {m.sym}(%rip), {r}	9
@@ -141,6 +3251,22 @@ X_PREFETCHIT0_8582_p	prefetchit0 {m.sym}(%rip)	7
 X_PREFETCHIT1_8583_m	prefetchit1 {m.disp}({m.base})	4
 X_PREFETCHIT1_8583_x	prefetchit1 {m.disp}({m.base},{m.index},{m.scale})	5
 X_PREFETCHIT1_8583_p	prefetchit1 {m.sym}(%rip)	7
+X_VCVTPH2PS_8584_m	vcvtph2ps {m.disp}({m.base}), {r}	6
+X_VCVTPH2PS_8584_x	vcvtph2ps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VCVTPH2PS_8584_p	vcvtph2ps {m.sym}(%rip), {r}	9
+X_VCVTPH2PS_8585	vcvtph2ps {b}, {r}	5
+X_VCVTPH2PS_8586_m	vcvtph2ps {m.disp}({m.base}), {r}	6
+X_VCVTPH2PS_8586_x	vcvtph2ps {m.disp}({m.base},{m.index},{m.scale}), {r}	7
+X_VCVTPH2PS_8586_p	vcvtph2ps {m.sym}(%rip), {r}	9
+X_VCVTPH2PS_8587	vcvtph2ps {b}, {r}	5
+X_VCVTPS2PH_8588_m	vcvtps2ph ${c}, {r}, {m.disp}({m.base})	7
+X_VCVTPS2PH_8588_x	vcvtps2ph ${c}, {r}, {m.disp}({m.base},{m.index},{m.scale})	8
+X_VCVTPS2PH_8588_p	vcvtps2ph ${c}, {r}, {m.sym}(%rip)	10
+X_VCVTPS2PH_8589	vcvtps2ph ${c}, {r}, {b}	6
+X_VCVTPS2PH_8590_m	vcvtps2ph ${c}, {r}, {m.disp}({m.base})	7
+X_VCVTPS2PH_8590_x	vcvtps2ph ${c}, {r}, {m.disp}({m.base},{m.index},{m.scale})	8
+X_VCVTPS2PH_8590_p	vcvtps2ph ${c}, {r}, {m.sym}(%rip)	10
+X_VCVTPS2PH_8591	vcvtps2ph ${c}, {r}, {b}	6
 X_AESDEC128KL_8592_m	aesdec128kl {m.disp}({m.base}), {r}	6
 X_AESDEC128KL_8592_x	aesdec128kl {m.disp}({m.base},{m.index},{m.scale}), {r}	7
 X_AESDEC128KL_8592_p	aesdec128kl {m.sym}(%rip), {r}	9
@@ -273,6 +3399,37 @@ X_SHA256RNDS2_8745	sha256rnds2 %xmm0, {b}, {r}	4
 X_SHA256RNDS2_8746_m	sha256rnds2 %xmm0, {m.disp}({m.base}), {r}	5
 X_SHA256RNDS2_8746_x	sha256rnds2 %xmm0, {m.disp}({m.base},{m.index},{m.scale}), {r}	6
 X_SHA256RNDS2_8746_p	sha256rnds2 %xmm0, {m.sym}(%rip), {r}	8
+X_VSHA512MSG1_8747	vsha512msg1 {b}, {r}	5
+X_VSHA512MSG2_8748	vsha512msg2 {b}, {r}	5
+X_VSHA512RNDS2_8749	vsha512rnds2 {b}, {n}, {r}	5
+X_VSM3MSG1_8750	vsm3msg1 {b}, {n}, {r}	5
+X_VSM3MSG1_8751_m	vsm3msg1 {m.disp}({m.base}), {n}, {r}	6
+X_VSM3MSG1_8751_x	vsm3msg1 {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VSM3MSG1_8751_p	vsm3msg1 {m.sym}(%rip), {n}, {r}	9
+X_VSM3MSG2_8752	vsm3msg2 {b}, {n}, {r}	5
+X_VSM3MSG2_8753_m	vsm3msg2 {m.disp}({m.base}), {n}, {r}	6
+X_VSM3MSG2_8753_x	vsm3msg2 {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VSM3MSG2_8753_p	vsm3msg2 {m.sym}(%rip), {n}, {r}	9
+X_VSM3RNDS2_8754	vsm3rnds2 ${c}, {b}, {n}, {r}	6
+X_VSM3RNDS2_8755_m	vsm3rnds2 ${c}, {m.disp}({m.base}), {n}, {r}	7
+X_VSM3RNDS2_8755_x	vsm3rnds2 ${c}, {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	8
+X_VSM3RNDS2_8755_p	vsm3rnds2 ${c}, {m.sym}(%rip), {n}, {r}	10
+X_VSM4KEY4_8768	vsm4key4 {b}, {n}, {r}	5
+X_VSM4KEY4_8769_m	vsm4key4 {m.disp}({m.base}), {n}, {r}	6
+X_VSM4KEY4_8769_x	vsm4key4 {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VSM4KEY4_8769_p	vsm4key4 {m.sym}(%rip), {n}, {r}	9
+X_VSM4KEY4_8770	vsm4key4 {b}, {n}, {r}	5
+X_VSM4KEY4_8771_m	vsm4key4 {m.disp}({m.base}), {n}, {r}	6
+X_VSM4KEY4_8771_x	vsm4key4 {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VSM4KEY4_8771_p	vsm4key4 {m.sym}(%rip), {n}, {r}	9
+X_VSM4RNDS4_8772	vsm4rnds4 {b}, {n}, {r}	5
+X_VSM4RNDS4_8773_m	vsm4rnds4 {m.disp}({m.base}), {n}, {r}	6
+X_VSM4RNDS4_8773_x	vsm4rnds4 {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VSM4RNDS4_8773_p	vsm4rnds4 {m.sym}(%rip), {n}, {r}	9
+X_VSM4RNDS4_8774	vsm4rnds4 {b}, {n}, {r}	5
+X_VSM4RNDS4_8775_m	vsm4rnds4 {m.disp}({m.base}), {n}, {r}	6
+X_VSM4RNDS4_8775_x	vsm4rnds4 {m.disp}({m.base},{m.index},{m.scale}), {n}, {r}	7
+X_VSM4RNDS4_8775_p	vsm4rnds4 {m.sym}(%rip), {n}, {r}	9
 X_CLAC_8776	clac	3
 X_STAC_8777	stac	3
 X_SEAMCALL_8778	seamcall	4
