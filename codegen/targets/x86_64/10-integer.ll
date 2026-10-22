@@ -756,6 +756,151 @@ declare i32 @llvm.umin.i32(i32, i32)
 
 declare i32 @llvm.umax.i32(i32, i32)
 
+define %flags @TESTB1(i1 "reg"="r32" %n) "enc"="{ acc:0=n 10101000 | 00000001 ; if(n<4) 11110110 | rr(0, n) | 00000001 ; 0100 0 0 0 B:1=n>>3 | 11110110 | rr(0, n) | 00000001 }" "asm"="testb $1, {n:r8}" "sets"="zcso" "nomatch" "nodecode" {
+  %x = zext i1 %n to i64
+  %f0 = insertvalue %flags poison, i64 %x, 0
+  %f = insertvalue %flags %f0, i64 0, 1
+  ret %flags %f
+}
+
+define i64 @select.64(i1 "reg"="r32" %c, i64 "reg"="r64" %a, i64 "reg"="r64" %b) "recipe"="select.64.expand" {
+  %r = select i1 %c, i64 %a, i64 %b
+  ret i64 %r
+}
+
+define i64 @select.64.expand(i1 %c, i64 %a, i64 %b) {
+  %f = call %flags @TESTB1(i1 %c)
+  %ne = call i1 @cc.ne(%flags %f)
+  %r = call i64 @CMOV64(i1 %ne, i64 %a, i64 %b)
+  ret i64 %r
+}
+
+define i32 @select.32(i1 "reg"="r32" %c, i32 "reg"="r32" %a, i32 "reg"="r32" %b) "recipe"="select.32.expand" {
+  %r = select i1 %c, i32 %a, i32 %b
+  ret i32 %r
+}
+
+define i32 @select.32.expand(i1 %c, i32 %a, i32 %b) {
+  %f = call %flags @TESTB1(i1 %c)
+  %ne = call i1 @cc.ne(%flags %f)
+  %r = call i32 @CMOV32(i1 %ne, i32 %a, i32 %b)
+  ret i32 %r
+}
+
+define ptr @select.p(i1 "reg"="r32" %c, ptr "reg"="r64" %a, ptr "reg"="r64" %b) "recipe"="select.p.expand" {
+  %r = select i1 %c, ptr %a, ptr %b
+  ret ptr %r
+}
+
+define ptr @select.p.expand(i1 %c, ptr %a, ptr %b) {
+  %f = call %flags @TESTB1(i1 %c)
+  %ne = call i1 @cc.ne(%flags %f)
+  %r = call ptr @CMOVP(i1 %ne, ptr %a, ptr %b)
+  ret ptr %r
+}
+
+define i8 @ZEXT1toi8(i1 "reg"="r32" %n) "enc"="{ if(n<4) rex(0, d, 0, n) | 00001111 | 10110110 | rr(d, n) ; 0100 0 R:1=d>>3 0 B:1=n>>3 | 00001111 | 10110110 | rr(d, n) }" "asm"="movzbl {n:r8}, {d:r32}" "nomatch" "dclass"="r32" "nodecode" {
+  %r = zext i1 %n to i8
+  ret i8 %r
+}
+
+define i8 @NEGxi8(i8 "reg"="r32" "tied" %n) "enc"="rex(0, 0, 0, d) | 11110111 | rr(3, d)" "asm"="negl {d}" "clobbers"="flags" "nomatch" "dclass"="r32" "nodecode" {
+  %r = sub i8 0, %n
+  ret i8 %r
+}
+
+define i8 @sext.1.i8(i1 "reg"="r32" %n) "recipe"="sext.1.i8.expand" {
+  %r = sext i1 %n to i8
+  ret i8 %r
+}
+
+define i8 @sext.1.i8.expand(i1 %n) {
+  %z = call i8 @ZEXT1toi8(i1 %n)
+  %r = call i8 @NEGxi8(i8 %z)
+  ret i8 %r
+}
+
+define i16 @ZEXT1toi16(i1 "reg"="r32" %n) "enc"="{ if(n<4) rex(0, d, 0, n) | 00001111 | 10110110 | rr(d, n) ; 0100 0 R:1=d>>3 0 B:1=n>>3 | 00001111 | 10110110 | rr(d, n) }" "asm"="movzbl {n:r8}, {d:r32}" "nomatch" "dclass"="r32" "nodecode" {
+  %r = zext i1 %n to i16
+  ret i16 %r
+}
+
+define i16 @NEGxi16(i16 "reg"="r32" "tied" %n) "enc"="rex(0, 0, 0, d) | 11110111 | rr(3, d)" "asm"="negl {d}" "clobbers"="flags" "nomatch" "dclass"="r32" "nodecode" {
+  %r = sub i16 0, %n
+  ret i16 %r
+}
+
+define i16 @sext.1.i16(i1 "reg"="r32" %n) "recipe"="sext.1.i16.expand" {
+  %r = sext i1 %n to i16
+  ret i16 %r
+}
+
+define i16 @sext.1.i16.expand(i1 %n) {
+  %z = call i16 @ZEXT1toi16(i1 %n)
+  %r = call i16 @NEGxi16(i16 %z)
+  ret i16 %r
+}
+
+define i32 @ZEXT1toi32(i1 "reg"="r32" %n) "enc"="{ if(n<4) rex(0, d, 0, n) | 00001111 | 10110110 | rr(d, n) ; 0100 0 R:1=d>>3 0 B:1=n>>3 | 00001111 | 10110110 | rr(d, n) }" "asm"="movzbl {n:r8}, {d:r32}" "nomatch" "nodecode" {
+  %r = zext i1 %n to i32
+  ret i32 %r
+}
+
+define i32 @NEGxi32(i32 "reg"="r32" "tied" %n) "enc"="rex(0, 0, 0, d) | 11110111 | rr(3, d)" "asm"="negl {d}" "clobbers"="flags" "nomatch" "nodecode" {
+  %r = sub i32 0, %n
+  ret i32 %r
+}
+
+define i32 @sext.1.i32(i1 "reg"="r32" %n) "recipe"="sext.1.i32.expand" {
+  %r = sext i1 %n to i32
+  ret i32 %r
+}
+
+define i32 @sext.1.i32.expand(i1 %n) {
+  %z = call i32 @ZEXT1toi32(i1 %n)
+  %r = call i32 @NEGxi32(i32 %z)
+  ret i32 %r
+}
+
+define i64 @ZEXT1toi64(i1 "reg"="r32" %n) "enc"="{ if(n<4) rex(0, d, 0, n) | 00001111 | 10110110 | rr(d, n) ; 0100 0 R:1=d>>3 0 B:1=n>>3 | 00001111 | 10110110 | rr(d, n) }" "asm"="movzbl {n:r8}, {d:r32}" "nomatch" "nodecode" {
+  %r = zext i1 %n to i64
+  ret i64 %r
+}
+
+define i64 @NEGxi64(i64 "reg"="r64" "tied" %n) "enc"="rex(1, 0, 0, d) | 11110111 | rr(3, d)" "asm"="negq {d}" "clobbers"="flags" "nomatch" "nodecode" {
+  %r = sub i64 0, %n
+  ret i64 %r
+}
+
+define i64 @sext.1.i64(i1 "reg"="r32" %n) "recipe"="sext.1.i64.expand" {
+  %r = sext i1 %n to i64
+  ret i64 %r
+}
+
+define i64 @sext.1.i64.expand(i1 %n) {
+  %z = call i64 @ZEXT1toi64(i1 %n)
+  %r = call i64 @NEGxi64(i64 %z)
+  ret i64 %r
+}
+
+define i64 @IMULH64(i64 "reg"="rax" %n, i64 "reg"="r64" %m) "enc"="rex(1, 0, 0, m) | 11110111 | rr(5, m)" "asm"="imulq {m}" "dclass"="rdx" "clobbers"="%rax,flags" "nodecode" {
+  %a = sext i64 %n to i128
+  %b = sext i64 %m to i128
+  %p = mul i128 %a, %b
+  %h = lshr i128 %p, 64
+  %r = trunc i128 %h to i64
+  ret i64 %r
+}
+
+define i64 @MULH64(i64 "reg"="rax" %n, i64 "reg"="r64" %m) "enc"="rex(1, 0, 0, m) | 11110111 | rr(4, m)" "asm"="mulq {m}" "dclass"="rdx" "clobbers"="%rax,flags" "nodecode" {
+  %a = zext i64 %n to i128
+  %b = zext i64 %m to i128
+  %p = mul i128 %a, %b
+  %h = lshr i128 %p, 64
+  %r = trunc i128 %h to i64
+  ret i64 %r
+}
+
 define i64 @MOVZX32(i32 "reg"="r32" %n) "enc"="rex(0, n, 0, d) | 10001001 | rr(n, d)" "asm"="movl {n}, {d:r32}" "zext"="32" "nodecode" {
   %r = zext i32 %n to i64
   ret i64 %r

@@ -287,6 +287,44 @@ def recipes():
                        f'  %c = call i1 @cc.{cc}(%flags %f)\n'
                        f'  %r = call {ty} @CMOV{w}(i1 %c, {ty} %a, {ty} %b)\n  ret {ty} %r\n}}\n')
     out.extend(decl)
+    # A boolean in a register: its low byte tested.
+    entry('%flags', 'TESTB1', ['i1 "reg"="r32" %n'],
+          '{ acc:0=n 10101000 | 00000001 ; if(n<4) 11110110 | rr(0, n) | 00000001 ; '
+          '0100 0 0 0 B:1=n>>3 | 11110110 | rr(0, n) | 00000001 }',
+          'testb $1, {n:r8}', ['%x = zext i1 %n to i64', '%f0 = insertvalue %flags poison, i64 %x, 0',
+                               '%f = insertvalue %flags %f0, i64 0, 1', 'ret %flags %f'], ' "sets"="zcso" "nomatch"')
+    for ty, cls, w in [('i64', 'r64', 64), ('i32', 'r32', 32), ('ptr', 'r64', 'p')]:
+        cm = 'CMOVP' if w == 'p' else f'CMOV{w}'
+        out.append(f'define {ty} @select.{w}(i1 "reg"="r32" %c, {ty} "reg"="{cls}" %a, {ty} "reg"="{cls}" %b) '
+                   f'"recipe"="select.{w}.expand" {{\n  %r = select i1 %c, {ty} %a, {ty} %b\n  ret {ty} %r\n}}\n')
+        out.append(f'define {ty} @select.{w}.expand(i1 %c, {ty} %a, {ty} %b) {{\n'
+                   f'  %f = call %flags @TESTB1(i1 %c)\n  %ne = call i1 @cc.ne(%flags %f)\n'
+                   f'  %r = call {ty} @{cm}(i1 %ne, {ty} %a, {ty} %b)\n  ret {ty} %r\n}}\n')
+    # A boolean sign-extended: 0 or -1, its zero-extension negated.
+    for ty in ('i8', 'i16', 'i32', 'i64'):
+        w = 1 if ty == 'i64' else 0
+        d = '{d}' if ty == 'i64' else '{d}'
+        entry(ty, f'ZEXT1to{ty}', ['i1 "reg"="r32" %n'],
+              '{ if(n<4) rex(0, d, 0, n) | 00001111 | 10110110 | rr(d, n) ; '
+              '0100 0 R:1=d>>3 0 B:1=n>>3 | 00001111 | 10110110 | rr(d, n) }',
+              'movzbl {n:r8}, {d:r32}', [f'%r = zext i1 %n to {ty}', f'ret {ty} %r'], ' "nomatch"' +
+              (' "dclass"="r32"' if ty in ('i8', 'i16') else ''))
+        entry(ty, f'NEGx{ty}', [f'{ty} "reg"="{"r64" if w else "r32"}" "tied" %n'],
+              f'rex({w}, 0, 0, d) | 11110111 | rr(3, d)', f'neg{"q" if w else "l"} {{d}}',
+              [f'%r = sub {ty} 0, %n', f'ret {ty} %r'], ' "clobbers"="flags" "nomatch"' +
+              (' "dclass"="r32"' if ty in ('i8', 'i16') else ''))
+        cls = 'r64' if w else 'r32'
+        out.append(f'define {ty} @sext.1.{ty}(i1 "reg"="r32" %n) "recipe"="sext.1.{ty}.expand" {{\n'
+                   f'  %r = sext i1 %n to {ty}\n  ret {ty} %r\n}}\n')
+        out.append(f'define {ty} @sext.1.{ty}.expand(i1 %n) {{\n  %z = call {ty} @ZEXT1to{ty}(i1 %n)\n'
+                   f'  %r = call {ty} @NEGx{ty}({ty} %z)\n  ret {ty} %r\n}}\n')
+    # The high half of a 64-bit product: rdx, of rax by a register.
+    for mn, r, ext in [('imul', 5, 'sext'), ('mul', 4, 'zext')]:
+        entry('i64', f'{mn.upper()}H64', ['i64 "reg"="rax" %n', 'i64 "reg"="r64" %m'],
+              f'rex(1, 0, 0, m) | 11110111 | rr({r}, m)', f'{mn}q {{m}}',
+              [f'%a = {ext} i64 %n to i128', f'%b = {ext} i64 %m to i128', '%p = mul i128 %a, %b',
+               '%h = lshr i128 %p, 64', '%r = trunc i128 %h to i64', 'ret i64 %r'],
+              ' "dclass"="rdx" "clobbers"="%rax,flags"')
     # A 32-bit value widened with zeros: its move (which clears the top).
     entry('i64', 'MOVZX32', ['i32 "reg"="r32" %n'], 'rex(0, n, 0, d) | 10001001 | rr(n, d)', 'movl {n}, {d:r32}',
           ['%r = zext i32 %n to i64', 'ret i64 %r'], ' "zext"="32"')
