@@ -116352,239 +116352,239 @@ define void @X_FCOMIP_6621(i64 "reg"="st" %o0) "enc"="rex(0, 0, 0, o0) | 1101111
   ret void
 }
 
-define void @X_ADD_LOCK_6622_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="11110000 | rex(0, 0, 4, m.base) | 10000000 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="lock addb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_ADD_LOCK_6622_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="11110000 | rex(0, 0, 4, m.base) | 10000000 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock addb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_ADD_LOCK_6622_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="11110000 | rex(0, 0, m.index, m.base) | 10000000 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="lock addb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_ADD_LOCK_6622_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="11110000 | rex(0, 0, m.index, m.base) | 10000000 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock addb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_ADD_LOCK_6622_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="11110000 | rex(0, 0, 0, 0) | 10000000 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="lock addb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_ADD_LOCK_6622_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="11110000 | rex(0, 0, 0, 0) | 10000000 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock addb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_ADD_6623_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="addb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_ADD_6623_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="addb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_ADD_6623_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="addb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_ADD_6623_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="addb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_ADD_6623_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="addb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_ADD_6623_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="addb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_ADD_6624(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00000100 | i1:s8=c ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 000 rm:3=o0&7 | i1:s8=c }" "asm"="addb ${c}, {o0}" "asmonly" {
+define void @X_ADD_6624(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00000100 | { i1:s8=c ; i1:8=c } ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 000 rm:3=o0&7 | { i1:s8=c ; i1:8=c } }" "asm"="addb ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_OR_LOCK_6625_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="11110000 | rex(0, 0, 4, m.base) | 10000000 | rm(1, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="lock orb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_OR_LOCK_6625_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="11110000 | rex(0, 0, 4, m.base) | 10000000 | rm(1, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock orb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_OR_LOCK_6625_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="11110000 | rex(0, 0, m.index, m.base) | 10000000 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="lock orb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_OR_LOCK_6625_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="11110000 | rex(0, 0, m.index, m.base) | 10000000 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock orb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_OR_LOCK_6625_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="11110000 | rex(0, 0, 0, 0) | 10000000 | rm(1, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="lock orb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_OR_LOCK_6625_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="11110000 | rex(0, 0, 0, 0) | 10000000 | rm(1, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock orb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_OR_6626_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(1, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="orb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_OR_6626_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(1, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="orb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_OR_6626_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="orb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_OR_6626_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="orb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_OR_6626_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(1, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="orb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_OR_6626_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(1, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="orb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_OR_6627(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00001100 | i1:s8=c ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 001 rm:3=o0&7 | i1:s8=c }" "asm"="orb ${c}, {o0}" "asmonly" {
+define void @X_OR_6627(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00001100 | { i1:s8=c ; i1:8=c } ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 001 rm:3=o0&7 | { i1:s8=c ; i1:8=c } }" "asm"="orb ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_ADC_LOCK_6628_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="11110000 | rex(0, 0, 4, m.base) | 10000000 | rm(2, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="lock adcb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_ADC_LOCK_6628_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="11110000 | rex(0, 0, 4, m.base) | 10000000 | rm(2, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock adcb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_ADC_LOCK_6628_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="11110000 | rex(0, 0, m.index, m.base) | 10000000 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="lock adcb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_ADC_LOCK_6628_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="11110000 | rex(0, 0, m.index, m.base) | 10000000 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock adcb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_ADC_LOCK_6628_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="11110000 | rex(0, 0, 0, 0) | 10000000 | rm(2, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="lock adcb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_ADC_LOCK_6628_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="11110000 | rex(0, 0, 0, 0) | 10000000 | rm(2, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock adcb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_ADC_6629_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(2, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="adcb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_ADC_6629_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(2, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="adcb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_ADC_6629_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="adcb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_ADC_6629_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="adcb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_ADC_6629_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(2, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="adcb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_ADC_6629_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(2, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="adcb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_ADC_6630(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00010100 | i1:s8=c ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 010 rm:3=o0&7 | i1:s8=c }" "asm"="adcb ${c}, {o0}" "asmonly" {
+define void @X_ADC_6630(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00010100 | { i1:s8=c ; i1:8=c } ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 010 rm:3=o0&7 | { i1:s8=c ; i1:8=c } }" "asm"="adcb ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_SBB_LOCK_6631_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="11110000 | rex(0, 0, 4, m.base) | 10000000 | rm(3, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="lock sbbb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_SBB_LOCK_6631_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="11110000 | rex(0, 0, 4, m.base) | 10000000 | rm(3, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock sbbb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_SBB_LOCK_6631_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="11110000 | rex(0, 0, m.index, m.base) | 10000000 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="lock sbbb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_SBB_LOCK_6631_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="11110000 | rex(0, 0, m.index, m.base) | 10000000 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock sbbb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_SBB_LOCK_6631_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="11110000 | rex(0, 0, 0, 0) | 10000000 | rm(3, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="lock sbbb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_SBB_LOCK_6631_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="11110000 | rex(0, 0, 0, 0) | 10000000 | rm(3, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock sbbb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_SBB_6632_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(3, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="sbbb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_SBB_6632_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(3, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="sbbb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_SBB_6632_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="sbbb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_SBB_6632_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="sbbb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_SBB_6632_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(3, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="sbbb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_SBB_6632_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(3, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="sbbb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_SBB_6633(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00011100 | i1:s8=c ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 011 rm:3=o0&7 | i1:s8=c }" "asm"="sbbb ${c}, {o0}" "asmonly" {
+define void @X_SBB_6633(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00011100 | { i1:s8=c ; i1:8=c } ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 011 rm:3=o0&7 | { i1:s8=c ; i1:8=c } }" "asm"="sbbb ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_AND_LOCK_6634_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="11110000 | rex(0, 0, 4, m.base) | 10000000 | rm(4, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="lock andb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_AND_LOCK_6634_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="11110000 | rex(0, 0, 4, m.base) | 10000000 | rm(4, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock andb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_AND_LOCK_6634_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="11110000 | rex(0, 0, m.index, m.base) | 10000000 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="lock andb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_AND_LOCK_6634_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="11110000 | rex(0, 0, m.index, m.base) | 10000000 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock andb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_AND_LOCK_6634_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="11110000 | rex(0, 0, 0, 0) | 10000000 | rm(4, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="lock andb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_AND_LOCK_6634_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="11110000 | rex(0, 0, 0, 0) | 10000000 | rm(4, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock andb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_AND_6635_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(4, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="andb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_AND_6635_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(4, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="andb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_AND_6635_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="andb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_AND_6635_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="andb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_AND_6635_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(4, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="andb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_AND_6635_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(4, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="andb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_AND_6636(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00100100 | i1:s8=c ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 100 rm:3=o0&7 | i1:s8=c }" "asm"="andb ${c}, {o0}" "asmonly" {
+define void @X_AND_6636(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00100100 | { i1:s8=c ; i1:8=c } ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 100 rm:3=o0&7 | { i1:s8=c ; i1:8=c } }" "asm"="andb ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_SUB_LOCK_6637_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="11110000 | rex(0, 0, 4, m.base) | 10000000 | rm(5, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="lock subb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_SUB_LOCK_6637_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="11110000 | rex(0, 0, 4, m.base) | 10000000 | rm(5, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock subb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_SUB_LOCK_6637_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="11110000 | rex(0, 0, m.index, m.base) | 10000000 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="lock subb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_SUB_LOCK_6637_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="11110000 | rex(0, 0, m.index, m.base) | 10000000 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock subb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_SUB_LOCK_6637_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="11110000 | rex(0, 0, 0, 0) | 10000000 | rm(5, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="lock subb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_SUB_LOCK_6637_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="11110000 | rex(0, 0, 0, 0) | 10000000 | rm(5, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock subb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_SUB_6638_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(5, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="subb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_SUB_6638_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(5, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="subb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_SUB_6638_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="subb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_SUB_6638_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="subb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_SUB_6638_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(5, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="subb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_SUB_6638_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(5, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="subb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_SUB_6639(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00101100 | i1:s8=c ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 101 rm:3=o0&7 | i1:s8=c }" "asm"="subb ${c}, {o0}" "asmonly" {
+define void @X_SUB_6639(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00101100 | { i1:s8=c ; i1:8=c } ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 101 rm:3=o0&7 | { i1:s8=c ; i1:8=c } }" "asm"="subb ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_XOR_LOCK_6640_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="11110000 | rex(0, 0, 4, m.base) | 10000000 | rm(6, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="lock xorb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_XOR_LOCK_6640_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="11110000 | rex(0, 0, 4, m.base) | 10000000 | rm(6, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock xorb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_XOR_LOCK_6640_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="11110000 | rex(0, 0, m.index, m.base) | 10000000 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="lock xorb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_XOR_LOCK_6640_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="11110000 | rex(0, 0, m.index, m.base) | 10000000 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock xorb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_XOR_LOCK_6640_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="11110000 | rex(0, 0, 0, 0) | 10000000 | rm(6, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="lock xorb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_XOR_LOCK_6640_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="11110000 | rex(0, 0, 0, 0) | 10000000 | rm(6, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="lock xorb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_XOR_6641_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(6, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="xorb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_XOR_6641_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(6, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="xorb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_XOR_6641_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="xorb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_XOR_6641_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="xorb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_XOR_6641_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(6, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="xorb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_XOR_6641_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(6, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="xorb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_XOR_6642(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00110100 | i1:s8=c ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 110 rm:3=o0&7 | i1:s8=c }" "asm"="xorb ${c}, {o0}" "asmonly" {
+define void @X_XOR_6642(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00110100 | { i1:s8=c ; i1:8=c } ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 110 rm:3=o0&7 | { i1:s8=c ; i1:8=c } }" "asm"="xorb ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_CMP_6643_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(7, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="cmpb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_CMP_6643_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 10000000 | rm(7, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="cmpb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_CMP_6643_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(7, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="cmpb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_CMP_6643_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 10000000 | rm(7, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="cmpb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_CMP_6643_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(7, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="cmpb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_CMP_6643_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 10000000 | rm(7, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="cmpb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_CMP_6644(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00111100 | i1:s8=c ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 111 rm:3=o0&7 | i1:s8=c }" "asm"="cmpb ${c}, {o0}" "asmonly" {
+define void @X_CMP_6644(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 00111100 | { i1:s8=c ; i1:8=c } ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10000000 | 11 111 rm:3=o0&7 | { i1:s8=c ; i1:8=c } }" "asm"="cmpb ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_ADD_LOCK_6645_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="lock addw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_ADD_LOCK_6645_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock addw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_ADD_LOCK_6645_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="lock addw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_ADD_LOCK_6645_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock addw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_ADD_LOCK_6645_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="lock addw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_ADD_LOCK_6645_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock addw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_ADD_LOCK_6645_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="lock addl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_ADD_LOCK_6645_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock addl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_ADD_LOCK_6645_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="lock addl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_ADD_LOCK_6645_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock addl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_ADD_LOCK_6645_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="lock addl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_ADD_LOCK_6645_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock addl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -116600,27 +116600,27 @@ define void @X_ADD_LOCK_6645_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110
   ret void
 }
 
-define void @X_ADD_6646_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="addw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_ADD_6646_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="addw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_ADD_6646_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="addw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_ADD_6646_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="addw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_ADD_6646_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="addw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_ADD_6646_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="addw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_ADD_6646_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, 4, m.base) | 10000001 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="addl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_ADD_6646_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 4, m.base) | 10000001 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="addl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_ADD_6646_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, m.index, m.base) | 10000001 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="addl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_ADD_6646_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, m.index, m.base) | 10000001 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="addl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_ADD_6646_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; rex(0, 0, 0, 0) | 10000001 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="addl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_ADD_6646_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 0, 0) | 10000001 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="addl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -116636,11 +116636,11 @@ define void @X_ADD_6646_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(1, 0, 
   ret void
 }
 
-define void @X_ADD_6647_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 000 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00000101 | i1:s16=c ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 000 rm:3=o0&7 | i1:s16=c }" "asm"="addw ${c}, {o0}" "asmonly" {
+define void @X_ADD_6647_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 000 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-65536 } ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00000101 | { i1:s16=c ; i1:16=c } ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 000 rm:3=o0&7 | { i1:s16=c ; i1:16=c } }" "asm"="addw ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_ADD_6647_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 000 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 rex(0, 0, 0, 0) | 00000101 | i1:s32=c ; rex(0, 0, 0, o0) | 10000001 | 11 000 rm:3=o0&7 | i1:s32=c }" "asm"="addl ${c}, {o0}" "asmonly" {
+define void @X_ADD_6647_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 000 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-4294967296 } ; acc:0=o0-0 rex(0, 0, 0, 0) | 00000101 | { i1:s32=c ; i1:32=c } ; rex(0, 0, 0, o0) | 10000001 | 11 000 rm:3=o0&7 | { i1:s32=c ; i1:32=c } }" "asm"="addl ${c}, {o0}" "asmonly" {
   ret void
 }
 
@@ -116648,27 +116648,27 @@ define void @X_ADD_6647_64(i64 "imm" %c, i64 "reg"="r64" %o0) "enc"="{ rex(1, 0,
   ret void
 }
 
-define void @X_OR_LOCK_6648_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(1, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(1, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="lock orw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_OR_LOCK_6648_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(1, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(1, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock orw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_OR_LOCK_6648_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="lock orw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_OR_LOCK_6648_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock orw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_OR_LOCK_6648_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(1, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(1, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="lock orw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_OR_LOCK_6648_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(1, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(1, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock orw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_OR_LOCK_6648_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(1, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(1, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="lock orl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_OR_LOCK_6648_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(1, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(1, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock orl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_OR_LOCK_6648_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="lock orl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_OR_LOCK_6648_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock orl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_OR_LOCK_6648_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(1, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(1, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="lock orl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_OR_LOCK_6648_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(1, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(1, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock orl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -116684,27 +116684,27 @@ define void @X_OR_LOCK_6648_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 111100
   ret void
 }
 
-define void @X_OR_6649_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(1, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(1, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="orw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_OR_6649_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(1, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(1, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="orw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_OR_6649_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="orw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_OR_6649_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="orw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_OR_6649_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(1, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(1, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="orw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_OR_6649_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(1, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(1, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="orw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_OR_6649_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(1, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, 4, m.base) | 10000001 | rm(1, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="orl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_OR_6649_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(1, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 4, m.base) | 10000001 | rm(1, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="orl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_OR_6649_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, m.index, m.base) | 10000001 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="orl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_OR_6649_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, m.index, m.base) | 10000001 | rm(1, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="orl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_OR_6649_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(1, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; rex(0, 0, 0, 0) | 10000001 | rm(1, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="orl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_OR_6649_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(1, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 0, 0) | 10000001 | rm(1, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="orl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -116720,11 +116720,11 @@ define void @X_OR_6649_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(1, 0, 0
   ret void
 }
 
-define void @X_OR_6650_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 001 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00001101 | i1:s16=c ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 001 rm:3=o0&7 | i1:s16=c }" "asm"="orw ${c}, {o0}" "asmonly" {
+define void @X_OR_6650_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 001 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-65536 } ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00001101 | { i1:s16=c ; i1:16=c } ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 001 rm:3=o0&7 | { i1:s16=c ; i1:16=c } }" "asm"="orw ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_OR_6650_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 001 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 rex(0, 0, 0, 0) | 00001101 | i1:s32=c ; rex(0, 0, 0, o0) | 10000001 | 11 001 rm:3=o0&7 | i1:s32=c }" "asm"="orl ${c}, {o0}" "asmonly" {
+define void @X_OR_6650_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 001 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-4294967296 } ; acc:0=o0-0 rex(0, 0, 0, 0) | 00001101 | { i1:s32=c ; i1:32=c } ; rex(0, 0, 0, o0) | 10000001 | 11 001 rm:3=o0&7 | { i1:s32=c ; i1:32=c } }" "asm"="orl ${c}, {o0}" "asmonly" {
   ret void
 }
 
@@ -116732,27 +116732,27 @@ define void @X_OR_6650_64(i64 "imm" %c, i64 "reg"="r64" %o0) "enc"="{ rex(1, 0, 
   ret void
 }
 
-define void @X_ADC_LOCK_6651_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(2, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(2, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="lock adcw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_ADC_LOCK_6651_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(2, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(2, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock adcw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_ADC_LOCK_6651_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="lock adcw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_ADC_LOCK_6651_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock adcw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_ADC_LOCK_6651_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(2, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(2, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="lock adcw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_ADC_LOCK_6651_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(2, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(2, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock adcw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_ADC_LOCK_6651_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(2, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(2, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="lock adcl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_ADC_LOCK_6651_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(2, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(2, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock adcl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_ADC_LOCK_6651_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="lock adcl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_ADC_LOCK_6651_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock adcl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_ADC_LOCK_6651_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(2, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(2, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="lock adcl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_ADC_LOCK_6651_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(2, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(2, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock adcl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -116768,27 +116768,27 @@ define void @X_ADC_LOCK_6651_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110
   ret void
 }
 
-define void @X_ADC_6652_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(2, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(2, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="adcw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_ADC_6652_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(2, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(2, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="adcw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_ADC_6652_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="adcw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_ADC_6652_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="adcw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_ADC_6652_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(2, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(2, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="adcw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_ADC_6652_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(2, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(2, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="adcw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_ADC_6652_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(2, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, 4, m.base) | 10000001 | rm(2, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="adcl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_ADC_6652_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(2, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 4, m.base) | 10000001 | rm(2, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="adcl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_ADC_6652_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, m.index, m.base) | 10000001 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="adcl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_ADC_6652_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, m.index, m.base) | 10000001 | rm(2, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="adcl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_ADC_6652_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(2, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; rex(0, 0, 0, 0) | 10000001 | rm(2, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="adcl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_ADC_6652_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(2, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 0, 0) | 10000001 | rm(2, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="adcl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -116804,11 +116804,11 @@ define void @X_ADC_6652_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(1, 0, 
   ret void
 }
 
-define void @X_ADC_6653_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 010 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00010101 | i1:s16=c ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 010 rm:3=o0&7 | i1:s16=c }" "asm"="adcw ${c}, {o0}" "asmonly" {
+define void @X_ADC_6653_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 010 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-65536 } ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00010101 | { i1:s16=c ; i1:16=c } ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 010 rm:3=o0&7 | { i1:s16=c ; i1:16=c } }" "asm"="adcw ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_ADC_6653_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 010 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 rex(0, 0, 0, 0) | 00010101 | i1:s32=c ; rex(0, 0, 0, o0) | 10000001 | 11 010 rm:3=o0&7 | i1:s32=c }" "asm"="adcl ${c}, {o0}" "asmonly" {
+define void @X_ADC_6653_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 010 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-4294967296 } ; acc:0=o0-0 rex(0, 0, 0, 0) | 00010101 | { i1:s32=c ; i1:32=c } ; rex(0, 0, 0, o0) | 10000001 | 11 010 rm:3=o0&7 | { i1:s32=c ; i1:32=c } }" "asm"="adcl ${c}, {o0}" "asmonly" {
   ret void
 }
 
@@ -116816,27 +116816,27 @@ define void @X_ADC_6653_64(i64 "imm" %c, i64 "reg"="r64" %o0) "enc"="{ rex(1, 0,
   ret void
 }
 
-define void @X_SBB_LOCK_6654_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(3, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(3, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="lock sbbw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_SBB_LOCK_6654_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(3, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(3, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock sbbw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_SBB_LOCK_6654_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="lock sbbw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_SBB_LOCK_6654_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock sbbw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_SBB_LOCK_6654_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(3, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(3, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="lock sbbw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_SBB_LOCK_6654_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(3, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(3, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock sbbw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_SBB_LOCK_6654_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(3, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(3, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="lock sbbl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_SBB_LOCK_6654_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(3, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(3, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock sbbl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_SBB_LOCK_6654_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="lock sbbl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_SBB_LOCK_6654_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock sbbl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_SBB_LOCK_6654_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(3, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(3, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="lock sbbl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_SBB_LOCK_6654_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(3, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(3, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock sbbl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -116852,27 +116852,27 @@ define void @X_SBB_LOCK_6654_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110
   ret void
 }
 
-define void @X_SBB_6655_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(3, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(3, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="sbbw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_SBB_6655_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(3, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(3, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="sbbw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_SBB_6655_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="sbbw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_SBB_6655_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="sbbw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_SBB_6655_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(3, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(3, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="sbbw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_SBB_6655_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(3, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(3, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="sbbw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_SBB_6655_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(3, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, 4, m.base) | 10000001 | rm(3, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="sbbl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_SBB_6655_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(3, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 4, m.base) | 10000001 | rm(3, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="sbbl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_SBB_6655_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, m.index, m.base) | 10000001 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="sbbl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_SBB_6655_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, m.index, m.base) | 10000001 | rm(3, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="sbbl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_SBB_6655_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(3, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; rex(0, 0, 0, 0) | 10000001 | rm(3, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="sbbl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_SBB_6655_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(3, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 0, 0) | 10000001 | rm(3, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="sbbl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -116888,11 +116888,11 @@ define void @X_SBB_6655_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(1, 0, 
   ret void
 }
 
-define void @X_SBB_6656_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 011 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00011101 | i1:s16=c ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 011 rm:3=o0&7 | i1:s16=c }" "asm"="sbbw ${c}, {o0}" "asmonly" {
+define void @X_SBB_6656_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 011 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-65536 } ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00011101 | { i1:s16=c ; i1:16=c } ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 011 rm:3=o0&7 | { i1:s16=c ; i1:16=c } }" "asm"="sbbw ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_SBB_6656_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 011 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 rex(0, 0, 0, 0) | 00011101 | i1:s32=c ; rex(0, 0, 0, o0) | 10000001 | 11 011 rm:3=o0&7 | i1:s32=c }" "asm"="sbbl ${c}, {o0}" "asmonly" {
+define void @X_SBB_6656_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 011 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-4294967296 } ; acc:0=o0-0 rex(0, 0, 0, 0) | 00011101 | { i1:s32=c ; i1:32=c } ; rex(0, 0, 0, o0) | 10000001 | 11 011 rm:3=o0&7 | { i1:s32=c ; i1:32=c } }" "asm"="sbbl ${c}, {o0}" "asmonly" {
   ret void
 }
 
@@ -116900,27 +116900,27 @@ define void @X_SBB_6656_64(i64 "imm" %c, i64 "reg"="r64" %o0) "enc"="{ rex(1, 0,
   ret void
 }
 
-define void @X_AND_LOCK_6657_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(4, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(4, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="lock andw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_AND_LOCK_6657_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(4, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(4, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock andw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_AND_LOCK_6657_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="lock andw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_AND_LOCK_6657_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock andw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_AND_LOCK_6657_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(4, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(4, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="lock andw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_AND_LOCK_6657_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(4, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(4, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock andw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_AND_LOCK_6657_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(4, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(4, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="lock andl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_AND_LOCK_6657_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(4, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(4, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock andl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_AND_LOCK_6657_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="lock andl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_AND_LOCK_6657_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock andl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_AND_LOCK_6657_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(4, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(4, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="lock andl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_AND_LOCK_6657_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(4, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(4, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock andl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -116936,27 +116936,27 @@ define void @X_AND_LOCK_6657_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110
   ret void
 }
 
-define void @X_AND_6658_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(4, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(4, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="andw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_AND_6658_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(4, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(4, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="andw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_AND_6658_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="andw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_AND_6658_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="andw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_AND_6658_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(4, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(4, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="andw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_AND_6658_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(4, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(4, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="andw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_AND_6658_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(4, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, 4, m.base) | 10000001 | rm(4, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="andl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_AND_6658_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(4, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 4, m.base) | 10000001 | rm(4, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="andl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_AND_6658_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, m.index, m.base) | 10000001 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="andl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_AND_6658_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, m.index, m.base) | 10000001 | rm(4, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="andl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_AND_6658_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(4, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; rex(0, 0, 0, 0) | 10000001 | rm(4, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="andl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_AND_6658_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(4, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 0, 0) | 10000001 | rm(4, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="andl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -116972,11 +116972,11 @@ define void @X_AND_6658_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(1, 0, 
   ret void
 }
 
-define void @X_AND_6659_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 100 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00100101 | i1:s16=c ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 100 rm:3=o0&7 | i1:s16=c }" "asm"="andw ${c}, {o0}" "asmonly" {
+define void @X_AND_6659_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 100 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-65536 } ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00100101 | { i1:s16=c ; i1:16=c } ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 100 rm:3=o0&7 | { i1:s16=c ; i1:16=c } }" "asm"="andw ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_AND_6659_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 100 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 rex(0, 0, 0, 0) | 00100101 | i1:s32=c ; rex(0, 0, 0, o0) | 10000001 | 11 100 rm:3=o0&7 | i1:s32=c }" "asm"="andl ${c}, {o0}" "asmonly" {
+define void @X_AND_6659_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 100 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-4294967296 } ; acc:0=o0-0 rex(0, 0, 0, 0) | 00100101 | { i1:s32=c ; i1:32=c } ; rex(0, 0, 0, o0) | 10000001 | 11 100 rm:3=o0&7 | { i1:s32=c ; i1:32=c } }" "asm"="andl ${c}, {o0}" "asmonly" {
   ret void
 }
 
@@ -116984,27 +116984,27 @@ define void @X_AND_6659_64(i64 "imm" %c, i64 "reg"="r64" %o0) "enc"="{ rex(1, 0,
   ret void
 }
 
-define void @X_SUB_LOCK_6660_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(5, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(5, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="lock subw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_SUB_LOCK_6660_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(5, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(5, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock subw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_SUB_LOCK_6660_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="lock subw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_SUB_LOCK_6660_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock subw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_SUB_LOCK_6660_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(5, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(5, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="lock subw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_SUB_LOCK_6660_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(5, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(5, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock subw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_SUB_LOCK_6660_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(5, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(5, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="lock subl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_SUB_LOCK_6660_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(5, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(5, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock subl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_SUB_LOCK_6660_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="lock subl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_SUB_LOCK_6660_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock subl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_SUB_LOCK_6660_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(5, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(5, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="lock subl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_SUB_LOCK_6660_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(5, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(5, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock subl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -117020,27 +117020,27 @@ define void @X_SUB_LOCK_6660_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110
   ret void
 }
 
-define void @X_SUB_6661_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(5, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(5, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="subw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_SUB_6661_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(5, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(5, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="subw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_SUB_6661_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="subw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_SUB_6661_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="subw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_SUB_6661_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(5, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(5, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="subw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_SUB_6661_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(5, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(5, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="subw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_SUB_6661_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(5, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, 4, m.base) | 10000001 | rm(5, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="subl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_SUB_6661_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(5, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 4, m.base) | 10000001 | rm(5, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="subl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_SUB_6661_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, m.index, m.base) | 10000001 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="subl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_SUB_6661_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, m.index, m.base) | 10000001 | rm(5, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="subl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_SUB_6661_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(5, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; rex(0, 0, 0, 0) | 10000001 | rm(5, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="subl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_SUB_6661_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(5, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 0, 0) | 10000001 | rm(5, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="subl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -117056,11 +117056,11 @@ define void @X_SUB_6661_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(1, 0, 
   ret void
 }
 
-define void @X_SUB_6662_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 101 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00101101 | i1:s16=c ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 101 rm:3=o0&7 | i1:s16=c }" "asm"="subw ${c}, {o0}" "asmonly" {
+define void @X_SUB_6662_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 101 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-65536 } ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00101101 | { i1:s16=c ; i1:16=c } ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 101 rm:3=o0&7 | { i1:s16=c ; i1:16=c } }" "asm"="subw ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_SUB_6662_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 101 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 rex(0, 0, 0, 0) | 00101101 | i1:s32=c ; rex(0, 0, 0, o0) | 10000001 | 11 101 rm:3=o0&7 | i1:s32=c }" "asm"="subl ${c}, {o0}" "asmonly" {
+define void @X_SUB_6662_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 101 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-4294967296 } ; acc:0=o0-0 rex(0, 0, 0, 0) | 00101101 | { i1:s32=c ; i1:32=c } ; rex(0, 0, 0, o0) | 10000001 | 11 101 rm:3=o0&7 | { i1:s32=c ; i1:32=c } }" "asm"="subl ${c}, {o0}" "asmonly" {
   ret void
 }
 
@@ -117068,27 +117068,27 @@ define void @X_SUB_6662_64(i64 "imm" %c, i64 "reg"="r64" %o0) "enc"="{ rex(1, 0,
   ret void
 }
 
-define void @X_XOR_LOCK_6663_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(6, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(6, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="lock xorw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_XOR_LOCK_6663_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(6, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(6, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock xorw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_XOR_LOCK_6663_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="lock xorw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_XOR_LOCK_6663_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock xorw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_XOR_LOCK_6663_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(6, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(6, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="lock xorw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_XOR_LOCK_6663_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(6, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(6, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="lock xorw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_XOR_LOCK_6663_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(6, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(6, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="lock xorl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_XOR_LOCK_6663_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 11110000 | rex(0, 0, 4, m.base) | 10000011 | rm(6, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, 4, m.base) | 10000001 | rm(6, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock xorl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_XOR_LOCK_6663_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="lock xorl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_XOR_LOCK_6663_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 11110000 | rex(0, 0, m.index, m.base) | 10000011 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, m.index, m.base) | 10000001 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock xorl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_XOR_LOCK_6663_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(6, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(6, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="lock xorl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_XOR_LOCK_6663_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110000 | rex(0, 0, 0, 0) | 10000011 | rm(6, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; 11110000 | rex(0, 0, 0, 0) | 10000001 | rm(6, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="lock xorl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -117104,27 +117104,27 @@ define void @X_XOR_LOCK_6663_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 11110
   ret void
 }
 
-define void @X_XOR_6664_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(6, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(6, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="xorw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_XOR_6664_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(6, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(6, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="xorw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_XOR_6664_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="xorw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_XOR_6664_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="xorw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_XOR_6664_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(6, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(6, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="xorw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_XOR_6664_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(6, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(6, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="xorw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_XOR_6664_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(6, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, 4, m.base) | 10000001 | rm(6, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="xorl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_XOR_6664_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(6, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 4, m.base) | 10000001 | rm(6, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="xorl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_XOR_6664_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, m.index, m.base) | 10000001 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="xorl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_XOR_6664_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, m.index, m.base) | 10000001 | rm(6, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="xorl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_XOR_6664_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(6, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; rex(0, 0, 0, 0) | 10000001 | rm(6, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="xorl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_XOR_6664_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(6, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 0, 0) | 10000001 | rm(6, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="xorl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -117140,11 +117140,11 @@ define void @X_XOR_6664_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(1, 0, 
   ret void
 }
 
-define void @X_XOR_6665_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 110 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00110101 | i1:s16=c ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 110 rm:3=o0&7 | i1:s16=c }" "asm"="xorw ${c}, {o0}" "asmonly" {
+define void @X_XOR_6665_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 110 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-65536 } ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00110101 | { i1:s16=c ; i1:16=c } ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 110 rm:3=o0&7 | { i1:s16=c ; i1:16=c } }" "asm"="xorw ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_XOR_6665_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 110 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 rex(0, 0, 0, 0) | 00110101 | i1:s32=c ; rex(0, 0, 0, o0) | 10000001 | 11 110 rm:3=o0&7 | i1:s32=c }" "asm"="xorl ${c}, {o0}" "asmonly" {
+define void @X_XOR_6665_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 110 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-4294967296 } ; acc:0=o0-0 rex(0, 0, 0, 0) | 00110101 | { i1:s32=c ; i1:32=c } ; rex(0, 0, 0, o0) | 10000001 | 11 110 rm:3=o0&7 | { i1:s32=c ; i1:32=c } }" "asm"="xorl ${c}, {o0}" "asmonly" {
   ret void
 }
 
@@ -117152,27 +117152,27 @@ define void @X_XOR_6665_64(i64 "imm" %c, i64 "reg"="r64" %o0) "enc"="{ rex(1, 0,
   ret void
 }
 
-define void @X_CMP_6666_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(7, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(7, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="cmpw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_CMP_6666_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ 01100110 | rex(0, 0, 4, m.base) | 10000011 | rm(7, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 4, m.base) | 10000001 | rm(7, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="cmpw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_CMP_6666_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(7, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(7, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="cmpw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_CMP_6666_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ 01100110 | rex(0, 0, m.index, m.base) | 10000011 | rm(7, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, m.index, m.base) | 10000001 | rm(7, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="cmpw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_CMP_6666_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(7, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(7, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="cmpw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_CMP_6666_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 10000011 | rm(7, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 0, 0) | 10000001 | rm(7, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="cmpw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_CMP_6666_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(7, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, 4, m.base) | 10000001 | rm(7, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="cmpl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_CMP_6666_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="{ rex(0, 0, 4, m.base) | 10000011 | rm(7, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 4, m.base) | 10000001 | rm(7, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="cmpl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_CMP_6666_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(7, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; rex(0, 0, m.index, m.base) | 10000001 | rm(7, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="cmpl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_CMP_6666_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="{ rex(0, 0, m.index, m.base) | 10000011 | rm(7, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, m.index, m.base) | 10000001 | rm(7, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="cmpl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_CMP_6666_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(7, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; rex(0, 0, 0, 0) | 10000001 | rm(7, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="cmpl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_CMP_6666_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(0, 0, 0, 0) | 10000011 | rm(7, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, 0, 0, 0) | 10000001 | rm(7, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="cmpl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -117188,11 +117188,11 @@ define void @X_CMP_6666_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="{ rex(1, 0, 
   ret void
 }
 
-define void @X_CMP_6667_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 111 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00111101 | i1:s16=c ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 111 rm:3=o0&7 | i1:s16=c }" "asm"="cmpw ${c}, {o0}" "asmonly" {
+define void @X_CMP_6667_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10000011 | 11 111 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-65536 } ; acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 00111101 | { i1:s16=c ; i1:16=c } ; 01100110 | rex(0, 0, 0, o0) | 10000001 | 11 111 rm:3=o0&7 | { i1:s16=c ; i1:16=c } }" "asm"="cmpw ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_CMP_6667_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 111 rm:3=o0&7 | i1:s8=c ; acc:0=o0-0 rex(0, 0, 0, 0) | 00111101 | i1:s32=c ; rex(0, 0, 0, o0) | 10000001 | 11 111 rm:3=o0&7 | i1:s32=c }" "asm"="cmpl ${c}, {o0}" "asmonly" {
+define void @X_CMP_6667_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10000011 | 11 111 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-4294967296 } ; acc:0=o0-0 rex(0, 0, 0, 0) | 00111101 | { i1:s32=c ; i1:32=c } ; rex(0, 0, 0, o0) | 10000001 | 11 111 rm:3=o0&7 | { i1:s32=c ; i1:32=c } }" "asm"="cmpl ${c}, {o0}" "asmonly" {
   ret void
 }
 
@@ -118576,19 +118576,19 @@ define void @X_SAR_6811_64(i64 "reg"="r64" %o0) "enc"="rex(1, 0, 0, o0) | 110100
   ret void
 }
 
-define void @X_TEST_6812_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 11110110 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="testb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_TEST_6812_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 11110110 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="testb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_TEST_6812_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 11110110 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="testb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_TEST_6812_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 11110110 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="testb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_TEST_6812_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 11110110 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="testb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_TEST_6812_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 11110110 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="testb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_TEST_6813(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 10101000 | i1:s8=c ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 11110110 | 11 000 rm:3=o0&7 | i1:s8=c }" "asm"="testb ${c}, {o0}" "asmonly" {
+define void @X_TEST_6813(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 10101000 | { i1:s8=c ; i1:8=c } ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 11110110 | 11 000 rm:3=o0&7 | { i1:s8=c ; i1:8=c } }" "asm"="testb ${c}, {o0}" "asmonly" {
   ret void
 }
 
@@ -118712,27 +118712,27 @@ define void @X_IDIV_6829(i64 "reg"="r8" %o0) "enc"="{ if(o0<4) rex(0, 0, 0, o0) 
   ret void
 }
 
-define void @X_TEST_6830_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="01100110 | rex(0, 0, 4, m.base) | 11110111 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c" "asm"="testw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_TEST_6830_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="01100110 | rex(0, 0, 4, m.base) | 11110111 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c }" "asm"="testw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_TEST_6830_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="01100110 | rex(0, 0, m.index, m.base) | 11110111 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c" "asm"="testw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_TEST_6830_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="01100110 | rex(0, 0, m.index, m.base) | 11110111 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c }" "asm"="testw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_TEST_6830_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="01100110 | rex(0, 0, 0, 0) | 11110111 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s16=c" "asm"="testw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_TEST_6830_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="01100110 | rex(0, 0, 0, 0) | 11110111 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c }" "asm"="testw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_TEST_6830_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 11110111 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c" "asm"="testl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_TEST_6830_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 11110111 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c }" "asm"="testl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_TEST_6830_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 11110111 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c" "asm"="testl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_TEST_6830_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 11110111 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c }" "asm"="testl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_TEST_6830_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 11110111 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s32=c" "asm"="testl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_TEST_6830_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 11110111 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c }" "asm"="testl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -118748,11 +118748,11 @@ define void @X_TEST_6830_64_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(1, 0, 0
   ret void
 }
 
-define void @X_TEST_6831_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 10101001 | i1:s16=c ; 01100110 | rex(0, 0, 0, o0) | 11110111 | 11 000 rm:3=o0&7 | i1:s16=c }" "asm"="testw ${c}, {o0}" "asmonly" {
+define void @X_TEST_6831_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ acc:0=o0-0 01100110 | rex(0, 0, 0, 0) | 10101001 | { i1:s16=c ; i1:16=c } ; 01100110 | rex(0, 0, 0, o0) | 11110111 | 11 000 rm:3=o0&7 | { i1:s16=c ; i1:16=c } }" "asm"="testw ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_TEST_6831_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 10101001 | i1:s32=c ; rex(0, 0, 0, o0) | 11110111 | 11 000 rm:3=o0&7 | i1:s32=c }" "asm"="testl ${c}, {o0}" "asmonly" {
+define void @X_TEST_6831_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ acc:0=o0-0 rex(0, 0, 0, 0) | 10101001 | { i1:s32=c ; i1:32=c } ; rex(0, 0, 0, o0) | 11110111 | 11 000 rm:3=o0&7 | { i1:s32=c ; i1:32=c } }" "asm"="testl ${c}, {o0}" "asmonly" {
   ret void
 }
 
@@ -119984,27 +119984,27 @@ define void @X_CMPXCHG16B_6907_64_p(ptr "sym" %m.sym) "enc"="rex(1, 0, 0, 0) | 0
   ret void
 }
 
-define void @X_MOV_6908(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10110 o:3=o0&7 | i1:s8=c ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 11000110 | 11 000 rm:3=o0&7 | i1:s8=c }" "asm"="movb ${c}, {o0}" "asmonly" {
+define void @X_MOV_6908(i64 "imm" %c, i64 "reg"="r8" %o0) "enc"="{ { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 10110 o:3=o0&7 | { i1:s8=c ; i1:8=c } ; { if(o0<4) rex(0, 0, 0, o0) ; 0100 W:1=0 R:1=(0)>>3 X:1=(0)>>3 B:1=(o0)>>3 } | 11000110 | 11 000 rm:3=o0&7 | { i1:s8=c ; i1:8=c } }" "asm"="movb ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_MOV_6909_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 11000110 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c" "asm"="movb ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_MOV_6909_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 11000110 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="movb ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_MOV_6909_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 11000110 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c" "asm"="movb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_MOV_6909_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 11000110 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:8=c }" "asm"="movb ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_MOV_6909_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 11000110 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s8=c" "asm"="movb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_MOV_6909_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 11000110 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:8=c }" "asm"="movb ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_MOV_6910_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10111 o:3=o0&7 | i1:16=c ; 01100110 | rex(0, 0, 0, o0) | 11000111 | 11 000 rm:3=o0&7 | i1:s16=c }" "asm"="movw ${c}, {o0}" "asmonly" {
+define void @X_MOV_6910_16(i64 "imm" %c, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, 0, 0, o0) | 10111 o:3=o0&7 | { i1:s16=c ; i1:16=c } ; 01100110 | rex(0, 0, 0, o0) | 11000111 | 11 000 rm:3=o0&7 | { i1:s16=c ; i1:16=c } }" "asm"="movw ${c}, {o0}" "asmonly" {
   ret void
 }
 
-define void @X_MOV_6910_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10111 o:3=o0&7 | i1:32=c ; rex(0, 0, 0, o0) | 11000111 | 11 000 rm:3=o0&7 | i1:s32=c }" "asm"="movl ${c}, {o0}" "asmonly" {
+define void @X_MOV_6910_32(i64 "imm" %c, i64 "reg"="r32" %o0) "enc"="{ rex(0, 0, 0, o0) | 10111 o:3=o0&7 | { i1:s32=c ; i1:32=c } ; rex(0, 0, 0, o0) | 11000111 | 11 000 rm:3=o0&7 | { i1:s32=c ; i1:32=c } }" "asm"="movl ${c}, {o0}" "asmonly" {
   ret void
 }
 
@@ -120012,27 +120012,27 @@ define void @X_MOV_6910_64(i64 "imm" %c, i64 "reg"="r64" %o0) "enc"="rex(1, 0, 0
   ret void
 }
 
-define void @X_MOV_6911_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="01100110 | rex(0, 0, 4, m.base) | 11000111 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c" "asm"="movw ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_MOV_6911_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="01100110 | rex(0, 0, 4, m.base) | 11000111 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c }" "asm"="movw ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_MOV_6911_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="01100110 | rex(0, 0, m.index, m.base) | 11000111 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c" "asm"="movw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_MOV_6911_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="01100110 | rex(0, 0, m.index, m.base) | 11000111 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c }" "asm"="movw ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_MOV_6911_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="01100110 | rex(0, 0, 0, 0) | 11000111 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s16=c" "asm"="movw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_MOV_6911_16_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="01100110 | rex(0, 0, 0, 0) | 11000111 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c }" "asm"="movw ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_MOV_6911_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 11000111 | rm(0, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c" "asm"="movl ${c}, {m.disp}({m.base})" "asmonly" {
+define void @X_MOV_6911_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base) "enc"="rex(0, 0, 4, m.base) | 11000111 | rm(0, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c }" "asm"="movl ${c}, {m.disp}({m.base})" "asmonly" {
   ret void
 }
 
-define void @X_MOV_6911_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 11000111 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c" "asm"="movl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
+define void @X_MOV_6911_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale) "enc"="rex(0, 0, m.index, m.base) | 11000111 | rm(0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c }" "asm"="movl ${c}, {m.disp}({m.base},{m.index},{m.scale})" "asmonly" {
   ret void
 }
 
-define void @X_MOV_6911_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 11000111 | rm(0, 16, 4, 1, 0, m.sym, 1) | i1:s32=c" "asm"="movl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
+define void @X_MOV_6911_32_p(i64 "imm" %c, ptr "sym" %m.sym) "enc"="rex(0, 0, 0, 0) | 11000111 | rm(0, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c }" "asm"="movl ${c}, {m.sym}(%rip)" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -121648,7 +121648,7 @@ define void @X_MOVSXD_7119_64(i64 "reg"="r32" %o0, i64 "reg"="r64" %o1) "enc"="r
   ret void
 }
 
-define void @X_PUSH_7120_16(i64 "imm" %c) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 01101010 | i1:s8=c ; 01100110 | rex(0, 0, 0, 0) | 01101000 | i1:s16=c }" "asm"="pushw ${c}" "asmonly" {
+define void @X_PUSH_7120_16(i64 "imm" %c) "enc"="{ 01100110 | rex(0, 0, 0, 0) | 01101010 | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, 0, 0, 0) | 01101000 | { i1:s16=c ; i1:16=c } }" "asm"="pushw ${c}" "asmonly" {
   ret void
 }
 
@@ -121656,27 +121656,27 @@ define void @X_PUSH_7120_64(i64 "imm" %c) "enc"="{ rex(0, 0, 0, 0) | 01101010 | 
   ret void
 }
 
-define void @X_IMUL_7121_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, o0, 4, m.base) | 01101011 | rm(o0, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, o0, 4, m.base) | 01101001 | rm(o0, m.base, 4, 1, m.disp, 0, 1) | i1:s16=c }" "asm"="imulw ${c}, {m.disp}({m.base}), {o0}" "asmonly" {
+define void @X_IMUL_7121_16_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, o0, 4, m.base) | 01101011 | rm(o0, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, o0, 4, m.base) | 01101001 | rm(o0, m.base, 4, 1, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="imulw ${c}, {m.disp}({m.base}), {o0}" "asmonly" {
   ret void
 }
 
-define void @X_IMUL_7121_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, o0, m.index, m.base) | 01101011 | rm(o0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; 01100110 | rex(0, o0, m.index, m.base) | 01101001 | rm(o0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s16=c }" "asm"="imulw ${c}, {m.disp}({m.base},{m.index},{m.scale}), {o0}" "asmonly" {
+define void @X_IMUL_7121_16_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, o0, m.index, m.base) | 01101011 | rm(o0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, o0, m.index, m.base) | 01101001 | rm(o0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s16=c ; i1:16=c } }" "asm"="imulw ${c}, {m.disp}({m.base},{m.index},{m.scale}), {o0}" "asmonly" {
   ret void
 }
 
-define void @X_IMUL_7121_16_p(i64 "imm" %c, ptr "sym" %m.sym, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, o0, 0, 0) | 01101011 | rm(o0, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; 01100110 | rex(0, o0, 0, 0) | 01101001 | rm(o0, 16, 4, 1, 0, m.sym, 1) | i1:s16=c }" "asm"="imulw ${c}, {m.sym}(%rip), {o0}" "asmonly" "reloc"="pc32x" {
+define void @X_IMUL_7121_16_p(i64 "imm" %c, ptr "sym" %m.sym, i64 "reg"="r16" %o0) "enc"="{ 01100110 | rex(0, o0, 0, 0) | 01101011 | rm(o0, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, o0, 0, 0) | 01101001 | rm(o0, 16, 4, 1, 0, m.sym, 1) | { i1:s16=c ; i1:16=c } }" "asm"="imulw ${c}, {m.sym}(%rip), {o0}" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
-define void @X_IMUL_7121_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r32" %o0) "enc"="{ rex(0, o0, 4, m.base) | 01101011 | rm(o0, m.base, 4, 1, m.disp, 0, 1) | i1:s8=c ; rex(0, o0, 4, m.base) | 01101001 | rm(o0, m.base, 4, 1, m.disp, 0, 1) | i1:s32=c }" "asm"="imull ${c}, {m.disp}({m.base}), {o0}" "asmonly" {
+define void @X_IMUL_7121_32_m(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r32" %o0) "enc"="{ rex(0, o0, 4, m.base) | 01101011 | rm(o0, m.base, 4, 1, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, o0, 4, m.base) | 01101001 | rm(o0, m.base, 4, 1, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="imull ${c}, {m.disp}({m.base}), {o0}" "asmonly" {
   ret void
 }
 
-define void @X_IMUL_7121_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale, i64 "reg"="r32" %o0) "enc"="{ rex(0, o0, m.index, m.base) | 01101011 | rm(o0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s8=c ; rex(0, o0, m.index, m.base) | 01101001 | rm(o0, m.base, m.index, m.scale, m.disp, 0, 1) | i1:s32=c }" "asm"="imull ${c}, {m.disp}({m.base},{m.index},{m.scale}), {o0}" "asmonly" {
+define void @X_IMUL_7121_32_x(i64 "imm" %c, i64 "imm" %m.disp, i64 "reg"="r64" %m.base, i64 "reg"="r64" %m.index, i64 "imm" %m.scale, i64 "reg"="r32" %o0) "enc"="{ rex(0, o0, m.index, m.base) | 01101011 | rm(o0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, o0, m.index, m.base) | 01101001 | rm(o0, m.base, m.index, m.scale, m.disp, 0, 1) | { i1:s32=c ; i1:32=c } }" "asm"="imull ${c}, {m.disp}({m.base},{m.index},{m.scale}), {o0}" "asmonly" {
   ret void
 }
 
-define void @X_IMUL_7121_32_p(i64 "imm" %c, ptr "sym" %m.sym, i64 "reg"="r32" %o0) "enc"="{ rex(0, o0, 0, 0) | 01101011 | rm(o0, 16, 4, 1, 0, m.sym, 1) | i1:s8=c ; rex(0, o0, 0, 0) | 01101001 | rm(o0, 16, 4, 1, 0, m.sym, 1) | i1:s32=c }" "asm"="imull ${c}, {m.sym}(%rip), {o0}" "asmonly" "reloc"="pc32x" {
+define void @X_IMUL_7121_32_p(i64 "imm" %c, ptr "sym" %m.sym, i64 "reg"="r32" %o0) "enc"="{ rex(0, o0, 0, 0) | 01101011 | rm(o0, 16, 4, 1, 0, m.sym, 1) | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, o0, 0, 0) | 01101001 | rm(o0, 16, 4, 1, 0, m.sym, 1) | { i1:s32=c ; i1:32=c } }" "asm"="imull ${c}, {m.sym}(%rip), {o0}" "asmonly" "reloc"="pc32x" {
   ret void
 }
 
@@ -121692,11 +121692,11 @@ define void @X_IMUL_7121_64_p(i64 "imm" %c, ptr "sym" %m.sym, i64 "reg"="r64" %o
   ret void
 }
 
-define void @X_IMUL_7122_16(i64 "imm" %c, i64 "reg"="r16" %o0, i64 "reg"="r16" %o1) "enc"="{ 01100110 | rex(0, o1, 0, o0) | 01101011 | 11 reg:3=o1&7 rm:3=o0&7 | i1:s8=c ; 01100110 | rex(0, o1, 0, o0) | 01101001 | 11 reg:3=o1&7 rm:3=o0&7 | i1:s16=c }" "asm"="imulw ${c}, {o0}, {o1}" "asmonly" {
+define void @X_IMUL_7122_16(i64 "imm" %c, i64 "reg"="r16" %o0, i64 "reg"="r16" %o1) "enc"="{ 01100110 | rex(0, o1, 0, o0) | 01101011 | 11 reg:3=o1&7 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-65536 } ; 01100110 | rex(0, o1, 0, o0) | 01101001 | 11 reg:3=o1&7 rm:3=o0&7 | { i1:s16=c ; i1:16=c } }" "asm"="imulw ${c}, {o0}, {o1}" "asmonly" {
   ret void
 }
 
-define void @X_IMUL_7122_32(i64 "imm" %c, i64 "reg"="r32" %o0, i64 "reg"="r32" %o1) "enc"="{ rex(0, o1, 0, o0) | 01101011 | 11 reg:3=o1&7 rm:3=o0&7 | i1:s8=c ; rex(0, o1, 0, o0) | 01101001 | 11 reg:3=o1&7 rm:3=o0&7 | i1:s32=c }" "asm"="imull ${c}, {o0}, {o1}" "asmonly" {
+define void @X_IMUL_7122_32(i64 "imm" %c, i64 "reg"="r32" %o0, i64 "reg"="r32" %o1) "enc"="{ rex(0, o1, 0, o0) | 01101011 | 11 reg:3=o1&7 rm:3=o0&7 | { i1:s8=c ; i1:s8=c-4294967296 } ; rex(0, o1, 0, o0) | 01101001 | 11 reg:3=o1&7 rm:3=o0&7 | { i1:s32=c ; i1:32=c } }" "asm"="imull ${c}, {o0}, {o1}" "asmonly" {
   ret void
 }
 

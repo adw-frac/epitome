@@ -16,6 +16,7 @@ use std::process::Command;
 
 use epitome_codegen::abi::Syntax;
 use epitome_codegen::assembler::Assembler;
+use epitome_codegen::enc::Env;
 use epitome_codegen::mir::{Operand, Reg, fill_template};
 use epitome_codegen::objdump::{self, Image};
 use epitome_codegen::target::{Instr, Kind, Target};
@@ -24,18 +25,17 @@ const DISPS: &[i64] = &[0, 1, -1, 127, -128, 128, -129, i32::MAX as i64, i32::MI
 
 /// Values at the edges of the widest field holding immediate `name`.
 fn imms(ins: &Instr, name: &str) -> Vec<i64> {
-    let widest = ins
-        .enc
-        .fields()
-        .filter(|f| f.names.as_slice() == [name.to_string()] && f.width > 0)
-        .max_by_key(|f| f.width)
-        .map(|f| (f.signed, f.width));
-    let Some((signed, w)) = widest else { return vec![0, 1] };
-    let (lo, hi) = match (signed, w) {
+    // The widest fields' ranges together (one may be read signed, another
+    // unsigned).
+    let fields: Vec<_> = ins.enc.fields().filter(|f| f.names.as_slice() == [name.to_string()] && f.width > 0).collect();
+    let Some(w) = fields.iter().map(|f| f.width).max() else { return vec![0, 1] };
+    let range = |signed: bool| match (signed, w) {
         (_, 64..) => (i64::MIN, i64::MAX),
         (true, w) => (-(1i64 << (w - 1)), (1i64 << (w - 1)) - 1),
         (false, w) => (0, (1i64 << w) - 1),
     };
+    let widest = fields.iter().filter(|f| f.width == w).map(|f| range(f.signed));
+    let (lo, hi) = widest.fold((i64::MAX, i64::MIN), |(lo, hi), (l, h)| (lo.min(l), hi.max(h)));
     let mut out = Vec::new();
     for v in [0, 1, hi, lo, 127, -128, 128, -129, 255, 32767, -32768, i32::MAX as i64, i32::MIN as i64] {
         if (lo..=hi).contains(&v) && !out.contains(&v) {
@@ -95,7 +95,32 @@ fn samples(t: &Target, all: bool) -> String {
         }
         let mut seen = std::collections::HashSet::new();
         for k in 0..n {
-            let line = fill_template(t, None, i, |j| match &lists[j][(k * (j + 1)) % lists[j].len()] {
+            let pick = |j: usize| &lists[j][(k * (j + 1)) % lists[j].len()];
+            // To be read back as written, an immediate must be the value
+            // its bytes decode as ($255 to a byte operation is $-1).
+            if !all {
+                let env: Env = ins
+                    .operands
+                    .iter()
+                    .enumerate()
+                    .map(|(j, o)| {
+                        let v = match pick(j) {
+                            V::Reg(r) => t.machine.index(*r),
+                            V::Imm(v) => *v,
+                            V::Text(_) => 0,
+                        };
+                        (o.name.clone(), v)
+                    })
+                    .collect();
+                let back = ins.encode(&env).and_then(|b| ins.decode(&b)).map(|(e, _)| e);
+                let same = back.is_some_and(|b| {
+                    ins.operands.iter().all(|o| o.kind != Kind::Imm || b.get(&o.name) == env.get(&o.name))
+                });
+                if !same {
+                    continue;
+                }
+            }
+            let line = fill_template(t, None, i, |j| match pick(j) {
                 V::Reg(r) => Operand::Reg(Reg::P(*r)),
                 V::Imm(v) => Operand::Imm(*v),
                 V::Text(s) => Operand::Text(s.clone()),
@@ -159,7 +184,31 @@ fn x86_instructions_round_trip() {
     let ((ours_code, ours_rel), (their_code, their_rel)) = (text_of(&img), text_of(&theirs));
     if ours_code != their_code {
         let at = ours_code.iter().zip(their_code).position(|(a, b)| a != b).unwrap_or(0);
-        panic!("the code differs from llvm-mc's at byte {at:#x} ({} and {} bytes)", ours_code.len(), their_code.len());
+        // The first instruction of a different length, or else the first
+        // that differs: both walked from the start.
+        let (mut a, mut b, mut k) = (0, 0, 0);
+        let len = |code: &[u8]| epitome_codegen::mir::decode(&t, code).map_or(1, |(_, _, n)| n);
+        let mut first = None;
+        while a < ours_code.len() && b < their_code.len() {
+            let (na, nb) = (len(&ours_code[a..]), len(&their_code[b..]));
+            if na != nb || (first.is_none() && ours_code[a..a + na] != their_code[b..b + nb]) {
+                first = Some((k, a, b));
+                if na != nb {
+                    break;
+                }
+            }
+            a += na;
+            b += nb;
+            k += 1;
+        }
+        let (k, a, b) = first.unwrap_or((0, at, at));
+        let line = asm.lines().filter(|l| l.starts_with('\t')).nth(k + 1).unwrap_or("?");
+        panic!(
+            "the code differs from llvm-mc's at byte {at:#x}; first at `{}`: ours {:02x?}, llvm-mc's {:02x?}",
+            line.trim(),
+            &ours_code[a..(a + 16).min(ours_code.len())],
+            &their_code[b..(b + 16).min(their_code.len())]
+        );
     }
     assert_eq!(ours_rel, their_rel, "the relocations differ from llvm-mc's");
     let _ = std::fs::remove_dir_all(&tmp);

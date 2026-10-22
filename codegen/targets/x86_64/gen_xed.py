@@ -336,7 +336,20 @@ def legacy(rec, form, eosz, rexw, mem):
             f = {'SIMM8()': 's8', 'UIMM8()': '8', 'UIMM8_1()': '8', 'UIMM16()': '16', 'UIMM32()': '32',
                  'SIMMz()': 's16' if eosz == 16 else 's32',
                  'UIMMv()': {16: '16', 32: '32', 64: 's64'}.get(eosz, '32')}[t]
-            pieces.append(f'i{k}:{f}={name}')
+            # An immediate as wide as the operation is read either way, as
+            # llvm-mc reads it ($-1 and $0xffff are one 16-bit value):
+            # signed, or else unsigned, of the same bits.
+            full = (t in ('UIMMv()', 'SIMMz()') and eosz in (16, 32)) or \
+                (t == 'SIMM8()' and 'BYTEOP' in rec.get('ATTRIBUTES', ''))
+            if full:
+                w = f.lstrip('s')
+                pieces.append(f'{{ i{k}:s{w}={name} ; i{k}:{w}={name} }}')
+            elif t == 'SIMM8()' and eosz in (16, 32):
+                # A byte sign-extended: of the value written unsigned too
+                # ($0xffff is -1 to a 16-bit operation).
+                pieces.append(f'{{ i{k}:s8={name} ; i{k}:s8={name}-{1 << eosz} }}')
+            else:
+                pieces.append(f'i{k}:{f}={name}')
         elif t in ('BRDISP8()', 'BRDISP32()', 'BRDISPz()'):
             f = 's8' if t == 'BRDISP8()' else 's32'
             pieces.append(f'rel:{f}=dest-end')
