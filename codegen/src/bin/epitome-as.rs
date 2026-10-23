@@ -20,7 +20,7 @@ const USAGE: &str = "usage: epitome-as [options] <file.s>
                           (default 20)
   --target=<name|path>    the machine description: a .ll file, a directory
                           of them (read in name order), or a name: aarch64
-                          is built in, others are directories of that name
+                          and x86_64 are built in, others are directories of that name
                           in EPITOME_TARGET_PATH (a list separated by
                           colons); aarch64 by default
   --target-add=<path>     read these .ll files too (may be given again)";

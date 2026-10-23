@@ -51,10 +51,22 @@ impl Ctx<'_> {
     /// The width of the vector registers, or 0 if there are none (or their
     /// feature is off): then vectors are done lane by lane.
     pub fn vector_bits(&self) -> u32 {
-        match &self.t.machine.vector_feature {
-            Some(f) if !self.features.contains(f) => 0,
-            _ => self.t.machine.vector_bits,
-        }
+        // The widest whose feature is on (x86: 256 bits with avx2).
+        self.t
+            .machine
+            .vector_widths
+            .iter()
+            .filter(|(_, f)| f.as_ref().is_none_or(|f| self.features.contains(f)))
+            .map(|&(b, _)| b)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The narrowest vector kept whole in a register: narrower ones are
+    /// done lane by lane.
+    pub fn min_vector_bits(&self) -> u32 {
+        let vb = self.vector_bits();
+        self.t.machine.min_vector_bits.map_or(vb / 2, |m| m.min(vb))
     }
 
     /// Are instruction `i`'s features on?
@@ -92,6 +104,16 @@ impl Ctx<'_> {
             }
         }
         self.t.patterns.iter().any(|p| has(&p.tree, &want) && p.emit.iter().all(|e| self.enabled(e.instr)))
+    }
+
+    /// Is there a pattern, of instructions that are on, that is `head`
+    /// alone on values (`mul` of any two registers), not only on what some
+    /// other operation made (AArch64's `smull`, a `mul` of extended halves)?
+    pub fn selects_head_alone(&self, head: &Head) -> bool {
+        self.t.patterns.iter().any(|p| {
+            matches!(&p.tree, Tree::Op(h, kids) if h == head && kids.iter().all(|k| !matches!(k, Tree::Op(..))))
+                && p.emit.iter().all(|e| self.enabled(e.instr))
+        })
     }
 
     /// Is there an instruction for intrinsic `name` (`llvm.ctlz.i64`)?
@@ -155,6 +177,7 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     const_exprs(cx, &mut f);
     addresses_as_ints(&mut f);
     half_as_int(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
+    crate::x87::lower(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     identity_bitcasts(&mut f);
     one_lane_vectors(cx, &mut f);
     odd_lane_vectors(cx, &mut f);
@@ -204,8 +227,11 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     // Lanes of masks legalisation leaves (it handles those of split masks,
     // at their comparisons' widths; before it, this would get in its way).
     mask_lanes(cx, &mut f);
+    // What no instruction does, a lane at a time (after the masks' lanes).
+    crate::lanewise::lanewise(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     // Element-wise intrinsics split into scalars expand as scalars do.
     expand_intrinsics(cx, &mut f);
+    constant_branches(cx, &mut f);
     sink_addresses(&mut f);
     constant_addresses(&mut f);
     lower_geps(cx, &mut f)?;
@@ -485,7 +511,7 @@ fn addresses_as_ints(f: &mut Function) {
 /// `llvm.minimumnum` and `llvm.maximumnum` (Rust's `f32::min`), which
 /// take a number over any NaN, as `llvm.minnum` and `llvm.maxnum` of the
 /// operands each made quiet by its minnum with itself (fminnm gives NaN
-/// for a signalling NaN).
+/// for a signalling NaN), where the machine has minnum.
 fn number_min_max(cx: &mut Ctx, f: &mut Function) {
     for b in f.layout.clone() {
         let mut k = 0;
@@ -499,6 +525,12 @@ fn number_min_max(cx: &mut Ctx, f: &mut Function) {
                         "maximumnum" => "maxnum",
                         _ => return None,
                     };
+                    // (Where minnum is an instruction that orders -0 below
+                    // +0, AArch64's fminnm; elsewhere the C library's
+                    // fminimum_num is.)
+                    if !cx.selects_intrinsic("llvm.minnum.f32") {
+                        return None;
+                    }
                     let args: Vec<Value> = call.args.iter().map(|a| a.value).collect();
                     Some((format!("llvm.{to}.{suffix}"), format!("llvm.minnum.{suffix}"), args))
                 }),
@@ -759,7 +791,9 @@ fn neon_intrinsics(cx: &mut Ctx, f: &mut Function) {
 ///
 /// Where the machine has neither, but has offsets from the thread pointer
 /// (`tprel.*`, as RISC-V's code is a program's): the variable's address
-/// as that sum (`llvm.epitome.tprel`).
+/// as that sum (`llvm.epitome.tprel`). Or, with the offset in the GOT
+/// (`tls.ie`, initial exec: x86's for programs and the libraries they
+/// load), the thread pointer plus that (`llvm.epitome.tls.ie`).
 fn thread_locals(cx: &mut Ctx, f: &mut Function) {
     let darwin = cx.m.triple.as_deref().is_some_and(|t| {
         let t = String::from_utf8_lossy(t);
@@ -767,7 +801,8 @@ fn thread_locals(cx: &mut Ctx, f: &mut Function) {
     });
     let elf = !darwin && cx.t.role("tlsdesc.call").is_some();
     let tprel = !darwin && !elf && cx.t.role("tprel.hi").is_some();
-    if !elf && !tprel && (!darwin || cx.t.role("tlv.hi").is_none()) {
+    let ie = !darwin && !elf && !tprel && cx.t.role("tls.ie").is_some();
+    if !elf && !tprel && !ie && (!darwin || cx.t.role("tlv.hi").is_none()) {
         return;
     }
     let ptr = cx.m.types.ptr(0);
@@ -796,9 +831,10 @@ fn thread_locals(cx: &mut Ctx, f: &mut Function) {
                 k += n;
                 continue;
             }
-            if elf {
+            if elf || ie {
                 let i64t = cx.m.types.int(64);
-                let off = call_intrinsic(cx, &mut s, "llvm.epitome.tlsdesc", vec![var], i64t);
+                let how = if ie { "llvm.epitome.tls.ie" } else { "llvm.epitome.tlsdesc" };
+                let off = call_intrinsic(cx, &mut s, how, vec![var], i64t);
                 let tp = call_intrinsic(cx, &mut s, "llvm.thread.pointer.p0", vec![], ptr);
                 let i8t = cx.m.types.int(8);
                 let addr = s.op(
@@ -2567,6 +2603,27 @@ fn extended_bool_compares(cx: &mut Ctx, f: &mut Function) {
     }
 }
 
+/// A conditional branch on a constant (`llvm.is.constant`'s answer, at
+/// `-O0`) is a branch to the side it picks; the other side's phis lose
+/// this block.
+fn constant_branches(cx: &Ctx, f: &mut Function) {
+    for b in f.layout.clone() {
+        let Some(&t) = f.blocks[b.index()].insts.last() else { continue };
+        let Op::CondBr { cond, then_dest, else_dest } = f.insts[t.index()].op else { continue };
+        let Some(c) = cx.const_int(cond) else { continue };
+        let (to, other) = if c & 1 != 0 { (then_dest, else_dest) } else { (else_dest, then_dest) };
+        f.insts[t.index()].op = Op::Br(to);
+        if other == to {
+            continue;
+        }
+        for &i in &f.blocks[other.index()].insts {
+            if let Op::Phi { incoming, .. } = &mut f.insts[i.index()].op {
+                incoming.retain(|&(_, from)| from != b);
+            }
+        }
+    }
+}
+
 /// A bitcast to its operand's own type is the operand.
 fn identity_bitcasts(f: &mut Function) {
     for i in f.insts_in_order().collect::<Vec<_>>() {
@@ -2610,6 +2667,18 @@ fn half_as_int(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     let has_half = |cx: &mut Ctx, ty: TypeId| as_int(cx, ty).is_some();
     if !f.locals.iter().map(|l| l.ty).collect::<Vec<_>>().into_iter().any(|t| has_half(cx, t)) {
         return Ok(());
+    }
+    // C's sqrtf16 (which clang calls where errno may be set): the C
+    // libraries have none; it is llvm.sqrt.f16, but for errno.
+    for i in f.insts_in_order().collect::<Vec<_>>() {
+        if let Op::Call(c) = &f.insts[i.index()].op
+            && callee_name(cx.m, c).as_deref() == Some("sqrtf16")
+        {
+            let callee = crate::legalize::declare(cx, "llvm.sqrt.f16", half, &[half]);
+            if let Op::Call(c) = &mut f.insts[i.index()].op {
+                c.callee = callee;
+            }
+        }
     }
     // Parameters and results of half, and calls' arguments and results:
     // the i16s of their bits, marked as passed where halves are (`HALF`).
@@ -2790,7 +2859,37 @@ fn half_as_int(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         f.insts[i.index()].op = op;
     }
     half_arith(cx, f);
+    half_helpers(cx, f);
     Ok(())
+}
+
+/// Conversions of half the machine has no instruction for (x86-64 without
+/// F16C): calls of the C library's (libgcc's and compiler-rt's
+/// `__extendhfsf2`, `__truncsfhf2`, `__truncdfhf2`), their halves passed
+/// as halves are.
+fn half_helpers(cx: &mut Ctx, f: &mut Function) {
+    for i in f.insts_in_order().collect::<Vec<_>>() {
+        let Op::Call(c) = &f.insts[i.index()].op else { continue };
+        let Some(name) = callee_name(cx.m, c) else { continue };
+        let (helper, arg_half) = match name.as_str() {
+            "llvm.convert.from.fp16.f32" => ("__extendhfsf2", true),
+            "llvm.convert.to.fp16.f32" => ("__truncsfhf2", false),
+            "llvm.convert.to.fp16.f64" => ("__truncdfhf2", false),
+            _ => continue,
+        };
+        if cx.selects_intrinsic(&name) {
+            continue;
+        }
+        let Type::Function { ret, params, .. } = cx.m.types.get(c.fn_ty).clone() else { continue };
+        let callee = crate::legalize::declare(cx, helper, ret, &params);
+        let Op::Call(c) = &mut f.insts[i.index()].op else { unreachable!() };
+        c.callee = callee;
+        if arg_half {
+            c.args[0].attrs.push(Attr::Word(HALF.into()));
+        } else {
+            c.ret_attrs.push(Attr::Word(HALF.into()));
+        }
+    }
 }
 
 /// What intrinsic `name` of `half` (`llvm.sqrt.f16`) is done as: its
@@ -4528,6 +4627,23 @@ fn libm_base(base: &str) -> Option<&'static str> {
         "fma" => "fma",
         "powi" => "powi",
         "ldexp" => "ldexp",
+        // Rounding, where the machine has no instruction for it (x86-64
+        // before SSE4.1's roundsd).
+        "floor" => "floor",
+        "ceil" => "ceil",
+        "trunc" => "trunc",
+        "rint" => "rint",
+        "nearbyint" => "nearbyint",
+        "round" => "round",
+        "roundeven" => "roundeven",
+        // And the least and greatest: C's fmin and fmax ignore a NaN as
+        // minnum does; fminimum and fmaximum are IEEE 754-2019's.
+        "minnum" => "fmin",
+        "maxnum" => "fmax",
+        "minimum" => "fminimum",
+        "maximum" => "fmaximum",
+        "minimumnum" => "fminimum_num",
+        "maximumnum" => "fmaximum_num",
         _ => return None,
     })
 }
@@ -4535,6 +4651,21 @@ fn libm_base(base: &str) -> Option<&'static str> {
 /// The C library's name for function `c` (`log2`) at floating-point type
 /// `ty` (or its lanes'): `log2` for double, `log2f` for float. `powi` is
 /// the runtime's (`__powidf2`, `__powisf2`); Apple's `exp10` is `__exp10`.
+/// Whether `name`, an intrinsic on vectors (`llvm.floor.v8f32`), has an
+/// instruction for vectors of the same elements at some width
+/// (`llvm.floor.v4f32`).
+fn selects_at_some_width(cx: &Ctx, name: &str) -> bool {
+    let Some((base, ty)) = name.rsplit_once('.') else { return false };
+    let Some(elem) = ty.strip_prefix('v').map(|t| t.trim_start_matches(|c: char| c.is_ascii_digit())) else {
+        return false;
+    };
+    cx.t.intrinsics.iter().any(|n| {
+        n.rsplit_once('.').is_some_and(|(b, t)| {
+            b == base && t.strip_prefix('v').is_some_and(|t| t.trim_start_matches(|c: char| c.is_ascii_digit()) == elem)
+        }) && cx.selects_intrinsic(n)
+    })
+}
+
 fn libm_name(cx: &Ctx, c: &str, ty: TypeId) -> Option<String> {
     let elem = match cx.m.types.get(ty) {
         Type::Vector { elem, .. } => *elem,
@@ -4850,6 +4981,27 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 k += n;
                 continue;
             }
+            // A relative lookup table's entry (as clang makes them for x86):
+            // the table's address plus the 32-bit offset at `offset` in it.
+            if name.starts_with("llvm.load.relative.") {
+                let (i8t, i32t, i64t) = (cx.m.types.int(8), cx.m.types.int(32), cx.m.types.int(64));
+                let gep = |s: &mut Seq, p: Value, k: Value| {
+                    s.op(
+                        Op::Gep { flags: Default::default(), inrange: None, source_ty: i8t, ptr: p, indices: vec![k] },
+                        ty,
+                    )
+                };
+                let at = gep(&mut s, args[0], args[1]);
+                let rel = s.op(Op::Load { volatile: false, atomic: None, ptr: at, align: Some(4) }, i32t);
+                let rel = s.cast(CastOp::SExt, rel, i64t);
+                let v = gep(&mut s, args[0], rel);
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), v);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
             // A pointer with some bits cleared: of its integer.
             if name.starts_with("llvm.ptrmask.") && matches!(cx.m.types.get(ty), Type::Ptr(_)) {
                 let mty = cx.value_ty(s.f, args[1]);
@@ -5106,8 +5258,12 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
             }
             // Mathematical functions without an instruction: the C
             // library's (lane by lane, for vectors), as LLVM calls them.
+            // (A vector the description has at another width, as AArch64's
+            // `<4 x float>` for an `<8 x float>`, is left: legalisation makes
+            // it that width.)
             if let Some(c) = libm_base(&base)
                 && !cx.selects_intrinsic(&name)
+                && !selects_at_some_width(cx, &name)
                 && let Some(lib) = libm_name(cx, c, ty)
             {
                 let v = lanewise_call(cx, &mut s, &lib, args.clone(), ty);
@@ -5722,7 +5878,7 @@ pub(crate) fn bool_vector_casts(cx: &mut Ctx, f: &mut Function) {
 /// Constant lane indices as `i64`, whatever type they were written with
 /// (rustc writes `i32 0`): the description's patterns name them so, and a
 /// lane's number does not depend on its type.
-fn lane_indices(cx: &mut Ctx, f: &mut Function) {
+pub(crate) fn lane_indices(cx: &mut Ctx, f: &mut Function) {
     let i64t = cx.m.types.int(64);
     for b in f.layout.clone() {
         for k in 0..f.blocks[b.index()].insts.len() {
@@ -5946,21 +6102,35 @@ fn legalize_fp(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         replace = Some(s.cast(CastOp::Trunc, w, to_ty));
                     }
                 }
-                Op::FCmp {
-                    pred: pred @ (FCmpPred::One | FCmpPred::Ueq | FCmpPred::True | FCmpPred::False),
-                    lhs,
-                    rhs,
-                    fmf,
-                } => {
+                // (Of scalars: vectors' are legalisation's, and x86's cmppd
+                // has oeq and une.)
+                Op::FCmp { pred, lhs, rhs, fmf }
+                    if !matches!(cx.m.types.get(cx.value_ty(s.f, lhs)), Type::Vector { .. })
+                        && (matches!(pred, FCmpPred::True | FCmpPred::False)
+                            || cx.t.machine.fcmp_split.iter().any(|p| {
+                                matches!(
+                                    (p.as_str(), pred),
+                                    ("one", FCmpPred::One)
+                                        | ("ueq", FCmpPred::Ueq)
+                                        | ("oeq", FCmpPred::Oeq)
+                                        | ("une", FCmpPred::Une)
+                                )
+                            })) =>
+                {
                     replace = Some(match pred {
                         FCmpPred::True => cx.int(i1, 1),
                         FCmpPred::False => cx.int(i1, 0),
                         _ => {
-                            // one: ordered and not equal; ueq: unordered or equal.
-                            let (a, b, op) = if pred == FCmpPred::One {
-                                (FCmpPred::Ord, FCmpPred::Une, BinOp::And)
-                            } else {
-                                (FCmpPred::Uno, FCmpPred::Oeq, BinOp::Or)
+                            // A comparison the machine's conditions do not
+                            // test, of two that they do: one, ordered and not
+                            // equal; ueq, unordered or equal; oeq, ordered and
+                            // (unordered or) equal; une, unordered or ordered
+                            // and not equal.
+                            let (a, b, op) = match pred {
+                                FCmpPred::One => (FCmpPred::Ord, FCmpPred::Une, BinOp::And),
+                                FCmpPred::Ueq => (FCmpPred::Uno, FCmpPred::Oeq, BinOp::Or),
+                                FCmpPred::Oeq => (FCmpPred::Ord, FCmpPred::Ueq, BinOp::And),
+                                _ => (FCmpPred::Uno, FCmpPred::One, BinOp::Or),
                             };
                             let x = s.op(Op::FCmp { pred: a, fmf, lhs, rhs }, i1);
                             let y = s.op(Op::FCmp { pred: b, fmf, lhs, rhs }, i1);

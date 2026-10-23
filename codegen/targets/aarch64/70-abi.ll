@@ -32,7 +32,9 @@
 ;   va-list       "aapcs64": a variadic function's va_list is AAPCS64's
 ;                 record of the saved argument registers and the stack
 ;                 (__stack, __gr_top, __vr_top, __gr_offs, __vr_offs);
-;                 without it, a pointer to the next argument
+;                 "sysv": System V x86-64's (gp_offset, fp_offset,
+;                 overflow_arg_area, reg_save_area); without it, a pointer
+;                 to the next argument
 ;   stack-align   the stack pointer's alignment at calls, in bytes
 ;   hfa           "yes": homogeneous floating-point aggregates (up to four
 ;                 floats, doubles or 64- or 128-bit vectors, as [3 x float]

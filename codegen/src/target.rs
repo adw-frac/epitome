@@ -41,13 +41,47 @@ pub struct Operand {
     pub writeback: bool,
 }
 
+/// An instruction's encoding, from its text: parsed as the description is
+/// read, or (with "lazy-encodings") when first used, so that a description
+/// of tens of thousands of entries loads without parsing them all.
+#[derive(Clone, Debug)]
+pub struct LazyEncoding {
+    name: String,
+    text: String,
+    fragments: std::sync::Arc<enc::Fragments>,
+    cell: std::sync::OnceLock<Result<Encoding, String>>,
+}
+
+impl LazyEncoding {
+    pub fn new(name: &str, text: &str, fragments: std::sync::Arc<enc::Fragments>) -> LazyEncoding {
+        LazyEncoding { name: name.into(), text: text.into(), fragments, cell: Default::default() }
+    }
+
+    /// The encoding, or why its text does not parse.
+    pub fn parsed(&self) -> Result<&Encoding, String> {
+        self.cell
+            .get_or_init(|| enc::parse_with(&self.text, &self.fragments).map_err(|e| format!("@{}: {e}", self.name)))
+            .as_ref()
+            .map_err(Clone::clone)
+    }
+}
+
+impl std::ops::Deref for LazyEncoding {
+    type Target = Encoding;
+    /// (A description read lazily has its encodings checked by
+    /// `--check-target`; one that does not parse is a bug in it.)
+    fn deref(&self) -> &Encoding {
+        self.parsed().unwrap_or_else(|e| panic!("{e}"))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Instr {
     pub name: String,
     /// The result first, called `d`, if there is one; then the parameters.
     pub operands: Vec<Operand>,
     pub has_result: bool,
-    pub enc: Encoding,
+    pub enc: LazyEncoding,
     pub asm: String,
     pub decode: bool,
     /// The result is zero above this many bits (64: nothing known).
@@ -72,6 +106,11 @@ pub struct Instr {
     pub reloc: Option<crate::object::RelocKind>,
     /// Operand 1 (`d2`) is a second register result.
     pub second_result: bool,
+    /// Registers it writes besides its operands (`"clobbers"`: x86's
+    /// division writes rdx), and whether it writes the flags (`flags` in
+    /// that list), where the machine's arithmetic does.
+    pub clobbers: Vec<u8>,
+    pub clobbers_flags: bool,
     /// The features it needs (see `features.rs`).
     pub features: Vec<String>,
     /// Operands `(base, offset)` whose address it uses is `base + offset`,
@@ -95,22 +134,85 @@ impl Instr {
         self.operands.iter().filter(|o| !o.tied).map(|o| o.name.clone()).collect()
     }
 
-    /// Decodes `word` as this instruction, tied operands included.
-    /// A symbol no field holds (a relocation marking the instruction, as
-    /// TLSDESC's call is marked) is 0.
-    pub fn decode(&self, word: u32) -> Option<Env> {
-        let (held, marks): (Vec<&Operand>, Vec<&Operand>) =
-            self.operands.iter().filter(|o| !o.tied).partition(|o| o.kind != Kind::Sym || self.enc.mentions(&o.name));
-        let names: Vec<String> = held.iter().map(|o| o.name.clone()).collect();
-        let mut env = self.enc.decode(word, &names)?;
-        for o in marks {
-            env.insert(o.name.clone(), 0);
+    /// The symbol operands no field holds by itself (a relocation marking
+    /// the instruction, as TLSDESC's call is marked, or a symbol added to a
+    /// displacement): taken as 0 when decoding.
+    pub fn free(&self) -> Vec<String> {
+        if !self.operands.iter().any(|o| o.kind == Kind::Sym) {
+            return Vec::new();
         }
+        self.operands
+            .iter()
+            .filter(|o| {
+                o.kind == Kind::Sym && !self.enc.fields().any(|f| f.names.as_slice() == std::slice::from_ref(&o.name))
+            })
+            .map(|o| o.name.clone())
+            .collect()
+    }
+
+    /// The bytes for these operand values, and which alternative of the
+    /// encoding they are, or `None` if they cannot be encoded.
+    pub fn encode_alt(&self, env: &Env) -> Option<(Vec<u8>, usize)> {
+        if let [only] = &self.enc.alts[..] {
+            return only.encode(env).map(|b| (b, 0));
+        }
+        self.enc.encode_alt(env, &self.free())
+    }
+
+    /// As `encode_alt`, by an alternative `len` bytes long.
+    pub fn encode_alt_of_len(&self, env: &Env, len: u32) -> Option<(Vec<u8>, usize)> {
+        self.enc.encode_alt_of(env, &self.free(), Some(len))
+    }
+
+    /// The bytes for these operand values, or `None` if they cannot be
+    /// encoded.
+    pub fn encode(&self, env: &Env) -> Option<Vec<u8>> {
+        self.encode_alt(env).map(|(b, _)| b)
+    }
+
+    /// Where in alternative `alt` the field holding operand `name` is (its
+    /// piece's offset), and its value with these operands, `name` at 0: a
+    /// relocation's place and addend.
+    pub fn field_of(&self, alt: usize, name: &str, env: &Env) -> (usize, i64) {
+        let a = &self.enc.alts[alt];
+        match a.fields.iter().find(|x| x.names.iter().any(|n| n == name)) {
+            Some(x) => {
+                let mut env = env.clone();
+                env.insert(name.to_string(), 0);
+                (a.pieces[x.piece].offset as usize, enc::eval(&x.expr, &env).unwrap_or(0))
+            }
+            None => (0, 0),
+        }
+    }
+
+    /// Decodes the start of `bytes` as this instruction, tied operands
+    /// included, and gives its length.
+    pub fn decode(&self, bytes: &[u8]) -> Option<(Env, usize)> {
+        self.decode_with(bytes, None)
+    }
+
+    /// Decodes `bytes` as alternative `alt` of the encoding: what it
+    /// encodes, where another alternative may read the same bytes
+    /// otherwise (a commutative operation's sources swapped).
+    pub fn decode_alt(&self, bytes: &[u8], alt: usize) -> Option<(Env, usize)> {
+        self.decode_with(bytes, Some(alt))
+    }
+
+    fn decode_with(&self, bytes: &[u8], alt: Option<usize>) -> Option<(Env, usize)> {
+        let free = self.free();
+        let names: Vec<String> = self.operands.iter().filter(|o| !o.tied).map(|o| o.name.clone()).collect();
+        let (mut env, len) = match alt {
+            Some(k) => {
+                let a = &self.enc.alts[k];
+                (a.decode(bytes, &names, &free)?, a.len as usize)
+            }
+            None => self.enc.decode(bytes, &names, &free)?,
+        };
         let d = env.get("d").copied();
         for o in self.operands.iter().filter(|o| o.tied) {
             env.insert(o.name.clone(), d?);
         }
-        Some(env)
+        Some((env, len))
     }
 
     /// Whether these operand values can be encoded: each immediate must
@@ -121,8 +223,8 @@ impl Instr {
         for (o, v) in self.operands.iter().zip(values) {
             env.insert(o.name.clone(), v.unwrap_or(0));
         }
-        let Some(word) = self.enc.encode(&env) else { return false };
-        let Some(back) = self.decode(word) else { return false };
+        let Some(bytes) = self.encode(&env) else { return false };
+        let Some((back, _)) = self.decode(&bytes) else { return false };
         self.operands.iter().zip(values).all(|(o, v)| match (o.kind, v) {
             (Kind::Imm, Some(v)) => {
                 let m = if o.bits >= 64 { u64::MAX } else { (1u64 << o.bits) - 1 };
@@ -341,6 +443,29 @@ pub struct Target {
     fits_cache: std::sync::Mutex<HashMap<FitsKey, bool>>,
     /// Shuffle masks the description's patterns use.
     pub masks: std::sync::Mutex<Vec<Vec<i32>>>,
+    decode_index: std::sync::OnceLock<Vec<DecodeBucket>>,
+}
+
+/// The disassembler's candidates for code starting with one byte: by the
+/// byte at an offset (the first after it with all bits literal), and those
+/// with no such byte.
+#[derive(Default)]
+struct DecodeBucket {
+    keyed: HashMap<(u8, u8), Vec<Candidate>>,
+    offsets: Vec<u8>,
+    rest: Vec<Candidate>,
+}
+
+/// An alternative to try: its place in the order tried, the entry, which
+/// alternative, and its literal bits.
+type Candidate = (usize, usize, usize, LitHead);
+
+/// An alternative's literal bits over its first bytes (up to 8).
+#[derive(Clone, Copy, Default)]
+struct LitHead {
+    mask: u64,
+    value: u64,
+    len: u8,
 }
 
 fn attr<'a>(attrs: &'a [Attr], key: &str) -> Option<Option<&'a str>> {
@@ -401,6 +526,16 @@ pub const AARCH64_FILES: &[(&str, &str)] = &[
     ("80-asm.ll", include_str!("../targets/aarch64/80-asm.ll")),
     ("85-sysregs.ll", include_str!("../targets/aarch64/85-sysregs.ll")),
     ("86-system.ll", include_str!("../targets/aarch64/86-system.ll")),
+];
+
+/// The x86-64 description (see docs/design/x86.md): for assembly and
+/// disassembly so far, its instructions generated from Intel XED's tables.
+pub const X86_64_FILES: &[(&str, &str)] = &[
+    ("00-base.ll", include_str!("../targets/x86_64/00-base.ll")),
+    ("02-xed.ll", include_str!("../targets/x86_64/02-xed.ll")),
+    ("05-cond.ll", include_str!("../targets/x86_64/05-cond.ll")),
+    ("10-integer.ll", include_str!("../targets/x86_64/10-integer.ll")),
+    ("70-abi.ll", include_str!("../targets/x86_64/70-abi.ll")),
 ];
 
 pub fn type_bits(m: &Module, ty: TypeId) -> u32 {
@@ -512,6 +647,10 @@ impl Target {
         Target::load_files(AARCH64_FILES).expect("the built-in AArch64 description is valid")
     }
 
+    pub fn x86_64() -> Target {
+        Target::load_files(X86_64_FILES).expect("the built-in x86-64 description is valid")
+    }
+
     /// A description in several files, read in order as one module; a
     /// parse error is reported by the file and line it is in.
     pub fn load_files(files: &[(&str, &str)]) -> Result<Target, String> {
@@ -544,10 +683,14 @@ impl Target {
         let built_in = |files: &mut Vec<(String, String)>| {
             files.extend(AARCH64_FILES.iter().map(|(n, t)| (n.to_string(), t.to_string())));
         };
+        let x86 = |files: &mut Vec<(String, String)>| {
+            files.extend(X86_64_FILES.iter().map(|(n, t)| (n.to_string(), t.to_string())));
+        };
         let arch = triple.split('-').next().unwrap_or("");
         match spec {
             Some(p) if std::path::Path::new(p).exists() => files.extend(read_path(p)?),
             Some("aarch64" | "arm64") => built_in(&mut files),
+            Some("x86_64" | "x86-64") => x86(&mut files),
             Some(name) => {
                 let dir = search_path(name).ok_or_else(|| {
                     format!("no target {name}: not a path, not built in, and not in EPITOME_TARGET_PATH")
@@ -555,6 +698,7 @@ impl Target {
                 files.extend(read_path(&dir)?);
             }
             None if matches!(arch, "" | "aarch64" | "arm64" | "arm64e") => built_in(&mut files),
+            None if arch == "x86_64" => x86(&mut files),
             None => match search_path(arch) {
                 Some(dir) => files.extend(read_path(&dir)?),
                 None => {
@@ -574,9 +718,10 @@ impl Target {
     /// The target whose ELF machine number is `machine`: the built-in one,
     /// or one in `EPITOME_TARGET_PATH`.
     pub fn for_elf_machine(machine: u16) -> Option<Target> {
-        let t = Target::aarch64();
-        if t.machine.elf_machine == machine {
-            return Some(t);
+        for t in [Target::aarch64(), Target::x86_64()] {
+            if t.machine.elf_machine == machine {
+                return Some(t);
+            }
         }
         for dir in target_dirs() {
             let Ok(entries) = std::fs::read_dir(&dir) else { continue };
@@ -620,6 +765,7 @@ impl Target {
             abis: Vec::new(),
             fits_cache: Default::default(),
             masks: Default::default(),
+            decode_index: Default::default(),
         };
         t.read()?;
         t.abis = crate::abi::read(&t.module, "abi.", &t.machine)?;
@@ -634,6 +780,90 @@ impl Target {
 
     /// `Instr::fits`, remembered: the same few immediates come up again
     /// and again.
+    /// The entries the disassembler tries for `bytes`, and which of their
+    /// alternatives, most literal bits first: those with an alternative whose first byte's literal bits are
+    /// those of `bytes`, and whose first byte after that with all its bits
+    /// literal (the opcode, after VEX's or EVEX's prefix), if it has one, is
+    /// there too.
+    pub fn decode_candidates(&self, bytes: &[u8]) -> Vec<(usize, usize)> {
+        let index = self.decode_index.get_or_init(|| {
+            // Every encoding is needed: those not yet parsed are, on every
+            // core.
+            let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+            let chunk = self.instrs.len().div_ceil(threads).max(1);
+            std::thread::scope(|scope| {
+                for part in self.instrs.chunks(chunk) {
+                    scope.spawn(move || part.iter().for_each(|i| drop(i.enc.parsed())));
+                }
+            });
+            // (Entries not to be read as themselves are here too, for reading
+            // an instruction a relocation fills in: `decode` is the caller's.)
+            let mut rank: Vec<usize> = (0..self.instrs.len()).filter(|&i| !self.instrs[i].enc.is_empty()).collect();
+            rank.sort_by_key(|&i| std::cmp::Reverse(self.instrs[i].enc.fixed_bits()));
+            let mut index: Vec<DecodeBucket> = (0..256).map(|_| DecodeBucket::default()).collect();
+            for (order, &i) in rank.iter().enumerate() {
+                for (alt, a) in self.instrs[i].enc.alts.iter().enumerate() {
+                    // Each byte's literal bits, over the first 8.
+                    let mut lit = [(0u8, 0u8); 8];
+                    for p in &a.pieces {
+                        for k in 0..p.bytes.min(8) {
+                            let at = (p.offset + k) as usize;
+                            if at < 8 {
+                                lit[at] = (((p.mask >> (8 * k)) & 0xff) as u8, ((p.value >> (8 * k)) & 0xff) as u8);
+                            }
+                        }
+                    }
+                    let key = (1..a.len.min(8) as usize).find(|&k| lit[k].0 == 0xff);
+                    // Its literal bits over the first 8 bytes, to check at once.
+                    let n = (a.len as usize).min(8);
+                    let head = lit[..n].iter().enumerate().fold(LitHead::default(), |h, (k, &(m, v))| LitHead {
+                        mask: h.mask | (m as u64) << (8 * k),
+                        value: h.value | (v as u64) << (8 * k),
+                        len: n as u8,
+                    });
+                    for (b0, bucket) in index.iter_mut().enumerate() {
+                        if (b0 as u8) & lit[0].0 != lit[0].1 {
+                            continue;
+                        }
+                        let list = match key {
+                            Some(k) => bucket.keyed.entry((k as u8, lit[k].1)).or_default(),
+                            None => &mut bucket.rest,
+                        };
+                        list.push((order, i, alt, head));
+                    }
+                }
+            }
+            for b in &mut index {
+                b.offsets = b.keyed.keys().map(|&(k, _)| k).collect();
+                b.offsets.sort();
+                b.offsets.dedup();
+            }
+            index
+        });
+        let Some(&b0) = bytes.first() else { return Vec::new() };
+        let bucket = &index[b0 as usize];
+        let word = enc::word(&bytes[..bytes.len().min(8)]);
+        let fits = |h: &LitHead| bytes.len() >= h.len as usize && word & h.mask == h.value;
+        let mut out: Vec<(usize, usize, usize)> =
+            bucket.rest.iter().filter(|(_, _, _, h)| fits(h)).map(|&(o, i, a, _)| (o, i, a)).collect();
+        for &k in &bucket.offsets {
+            if let Some(&b) = bytes.get(k as usize)
+                && let Some(list) = bucket.keyed.get(&(k, b))
+            {
+                out.extend(list.iter().filter(|(_, _, _, h)| fits(h)).map(|&(o, i, a, _)| (o, i, a)));
+            }
+        }
+        out.sort();
+        out.dedup();
+        out.into_iter().map(|(_, i, a)| (i, a)).collect()
+    }
+
+    /// The shortest instruction's length in bytes: 4 for a target whose
+    /// instructions are all one word.
+    pub fn unit(&self) -> usize {
+        self.machine.unit as usize
+    }
+
     pub fn fits_cached(&self, i: usize, vals: Vec<Option<i64>>) -> bool {
         let key = (i, vals);
         if let Some(&ok) = self.fits_cache.lock().unwrap().get(&key) {
@@ -753,6 +983,14 @@ impl Target {
         }
         let mut instrs = Vec::new();
         let mut conds = Vec::new();
+        // Named pieces of encodings, `!{!"name", !"params", !"encoding"}`.
+        let mut fragments = enc::Fragments::new();
+        for t in crate::machine::tuples(m, "target.encodings") {
+            let [name, params, body] = &t[..] else { return Err(format!("bad encoding fragment {t:?}")) };
+            let params = params.split([',', ' ']).filter(|p| !p.is_empty()).map(String::from).collect();
+            fragments.insert(name.clone(), (params, body.clone()));
+        }
+        let fragments = std::sync::Arc::new(fragments);
         for (g, f) in m.functions() {
             let name = m.global(g).name.clone().unwrap_or_default();
             if let Some(Some(v)) = attr(&f.fn_attrs, "cond") {
@@ -774,7 +1012,10 @@ impl Target {
                 continue;
             }
             let Some(Some(enc_text)) = attr(&f.fn_attrs, "enc") else { continue };
-            let enc = enc::parse(enc_text).map_err(|e| format!("@{name}: {e}"))?;
+            let enc = LazyEncoding::new(&name, enc_text, fragments.clone());
+            if !self.machine.lazy_encodings {
+                enc.parsed()?;
+            }
             let fn_ty = m.types.get(f.ty).clone();
             let Type::Function { ret, .. } = fn_ty else { unreachable!() };
             // A struct result is the flags, for a comparison ("sets"), or
@@ -948,6 +1189,16 @@ impl Target {
                     }),
                     _ => false,
                 }),
+                clobbers: {
+                    let list: Vec<String> = attr(&f.fn_attrs, "clobbers")
+                        .flatten()
+                        .map_or(vec![], |c| c.split(',').map(|x| x.trim().to_string()).collect());
+                    let regs: Vec<String> = list.iter().filter(|x| *x != "flags").cloned().collect();
+                    self.machine.regs(&regs).map_err(|e| format!("@{name}: clobbers: {e}"))?
+                },
+                clobbers_flags: attr(&f.fn_attrs, "clobbers")
+                    .flatten()
+                    .is_some_and(|c| c.split(',').any(|x| x.trim() == "flags")),
                 func: g,
             });
         }
@@ -1231,7 +1482,9 @@ impl Target {
 
     fn build_patterns(&mut self) -> Result<(), String> {
         let mut out: Vec<Pattern> = Vec::new();
-        let producers: Vec<usize> = (0..self.instrs.len()).filter(|&i| self.instrs[i].sets.is_some()).collect();
+        // (Those not to be matched are only for recipes: x86's fucompi.)
+        let producers: Vec<usize> =
+            (0..self.instrs.len()).filter(|&i| self.instrs[i].sets.is_some() && self.instrs[i].matchable).collect();
         for idx in 0..self.instrs.len() {
             let ins = &self.instrs[idx];
             if !ins.matchable || ins.copy.is_some() || ins.sets.is_some() {
@@ -1627,13 +1880,16 @@ impl Target {
                         e.locals.iter().any(|l| matches!(m.types.get(l.ty), Type::Vector { .. }))
                     },
                 );
-            // Nor those that touch memory (atomic read-modify-writes):
-            // there is no memory to evaluate them on.
-            let touches_memory = f.blocks.iter().flat_map(|b| &b.insts).any(|i| {
-                matches!(
-                    f.insts[i.index()].op,
-                    Op::AtomicRmw { .. } | Op::CmpXchg { .. } | Op::Load { .. } | Op::Store { .. }
-                )
+            // Nor those that touch memory (atomic read-modify-writes, and
+            // intrinsics given pointers: x86's x87 comparisons): there is
+            // no memory to evaluate them on.
+            let touches_memory = f.blocks.iter().flat_map(|b| &b.insts).any(|i| match &f.insts[i.index()].op {
+                Op::AtomicRmw { .. } | Op::CmpXchg { .. } | Op::Load { .. } | Op::Store { .. } => true,
+                Op::Call(c) => c.args.iter().any(|a| match a.value {
+                    Value::Local(x) => matches!(m.types.get(f.locals[x.index()].ty), Type::Ptr(_)),
+                    _ => false,
+                }),
+                _ => false,
             });
             if through_vectors || touches_memory {
                 continue;

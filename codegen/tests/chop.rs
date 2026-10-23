@@ -9,6 +9,8 @@
 //!    they run out of stack.)
 //! 2. So do limits part-way through every function.
 //! 3. Counts, and the code under a limit, are the same on 1 thread and 8.
+//!
+//! On an AArch64 Mac, or on x86-64 Linux for x86-64.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -25,9 +27,12 @@ fn run(cmd: &mut Command) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// The libraries programs link with (Linux's atomics are libatomic's).
+const LIBS: &[&str] = if cfg!(target_os = "linux") { &["-lm", "-latomic"] } else { &["-lm"] };
+
 fn have_tools() -> bool {
-    cfg!(target_arch = "aarch64")
-        && cfg!(target_os = "macos")
+    (cfg!(target_arch = "aarch64") && cfg!(target_os = "macos")
+        || cfg!(target_arch = "x86_64") && cfg!(target_os = "linux"))
         && Command::new("clang").arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
@@ -39,20 +44,20 @@ fn output(t: &Target, ll: &str, main: &Path, tmp: &Path, tag: &str, limit: Optio
     let obj = tmp.join(format!("{tag}.o"));
     std::fs::write(&obj, c.object_file(t)?).unwrap();
     let exe = tmp.join(tag);
-    run(Command::new("clang").args(["-w", "-O1"]).arg(main).arg(&obj).arg("-lm").arg("-o").arg(&exe))?;
+    run(Command::new("clang").args(["-w", "-O1"]).arg(main).arg(&obj).args(LIBS).arg("-o").arg(&exe))?;
     run(&mut Command::new(&exe))
 }
 
 #[test]
 fn programs_run_without_elective_choices() {
     if !have_tools() {
-        eprintln!("needs clang on an AArch64 Mac; skipping");
+        eprintln!("needs clang on an AArch64 Mac or x86-64 Linux; skipping");
         return;
     }
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/programs");
     let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("chop");
     std::fs::create_dir_all(&tmp).unwrap();
-    let t = Target::aarch64();
+    let t = if cfg!(target_arch = "x86_64") { Target::x86_64() } else { Target::aarch64() };
     let mut names: Vec<String> = std::fs::read_dir(&dir)
         .unwrap()
         .filter_map(|e| {
@@ -73,7 +78,7 @@ fn programs_run_without_elective_choices() {
         }
         // What clang's build prints.
         let reference = tmp.join(format!("{name}.ref"));
-        if run(Command::new("clang").args(["-w", "-O1"]).arg(&src).arg(&main).arg("-lm").arg("-o").arg(&reference))
+        if run(Command::new("clang").args(["-w", "-O1"]).arg(&src).arg(&main).args(LIBS).arg("-o").arg(&reference))
             .is_err()
         {
             continue;

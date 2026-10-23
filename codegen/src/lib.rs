@@ -18,6 +18,7 @@ pub mod frame;
 pub mod huge;
 pub mod intrinsics;
 pub mod isel;
+pub mod lanewise;
 pub mod layout;
 pub mod legalize;
 pub mod machine;
@@ -34,6 +35,7 @@ pub mod target;
 pub mod unwind;
 pub mod wide;
 pub mod wide_vectors;
+pub mod x87;
 
 use epitome_ir::Module;
 use epitome_ir::layout::DataLayout;
@@ -216,6 +218,7 @@ fn compile_function(t: &Target, abi: &abi::Abi, cx: &mut Ctx, job: &Job, opts: &
             let now = Instant::now();
             layout::place(t, &mut mf);
             layout::relax(t, &mut mf);
+            mir::set_sizes(t, &mut mf);
             timing::add(&timing::LAYOUT, now);
         }
     }

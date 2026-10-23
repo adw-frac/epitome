@@ -65,13 +65,24 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     off = (off + 7) / 8 * 8;
     let save_at: Vec<(u8, i64)> = saved.iter().enumerate().map(|(k, &r)| (r, off + 8 * k as i64)).collect();
     off += 8 * saved.len() as i64;
-    let calls =
-        f.blocks.iter().any(|b| b.insts.iter().any(|i| !i.imp_defs.is_empty() && !matches!(i.op, Opcode::Asm { .. })));
-    let record = if calls { 16 } else { 0 };
+    let calls = f.blocks.iter().any(|b| b.insts.iter().any(|i| i.is_call(t)));
+    // With the return address on the stack (x86), the call pushed it: no
+    // record, and the frame keeps sp aligned below its 8 bytes.
+    let ra = f.abi.ra_on_stack;
+    let record = if calls && !ra { 16 } else { 0 };
     let align = f.abi.stack_align;
-    let size = (off + record + align - 1) / align * align;
+    let size = if !ra {
+        (off + record + align - 1) / align * align
+    } else if off == 0 && !calls {
+        0
+    } else {
+        (off + 8 + align - 1) / align * align - 8
+    };
     let fp_at = size - 16;
     f.frame_size = size;
+    // Where the CFA (sp on entry, before the call pushed the return
+    // address) is from sp after the frame is made.
+    let cfa = size + if ra { 8 } else { 0 };
 
     // Frame offsets become immediates. Where one is more than the
     // instruction's immediate holds (RISC-V's reach 2047 bytes), the
@@ -90,7 +101,7 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
                         at = Some(k);
                     }
                     MOp::Incoming(o) => {
-                        *op = MOp::Imm(size + *o);
+                        *op = MOp::Imm(cfa + *o);
                         at = Some(k);
                     }
                     MOp::OutArea => *op = MOp::Imm(f.out_size),
@@ -140,7 +151,7 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     // Registers saved and restored two at a time where they can be: two of
     // the same file at neighbouring slots, at an offset a pair reaches.
     let mut slots: Vec<(u8, i64)> = Vec::new();
-    if calls {
+    if calls && !ra {
         slots.push((fp_reg, fp_at));
         slots.push((lr_reg, fp_at + 8));
     }
@@ -176,24 +187,25 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     // was saved, from the CFA.
     let cfi = |c: Cfi| MInst { op: Opcode::Cfi(c), ..MInst::new(0, vec![]) };
     let mut prologue = Vec::new();
+    let extra = cfa - size;
     if size - low > 0 {
         adjust(t, &mut prologue, sp, sp, -(size - low), &f.abi.scratch)?;
-        prologue.push(cfi(Cfi::DefCfaOffset(size - low)));
+        prologue.push(cfi(Cfi::DefCfaOffset(size - low + extra)));
     }
     prologue.extend(saves);
-    prologue.extend(slots.iter().map(|&(reg, at)| cfi(Cfi::Offset(reg, at - size))));
-    if calls {
+    prologue.extend(slots.iter().map(|&(reg, at)| cfi(Cfi::Offset(reg, at - cfa))));
+    if calls && !ra {
         adjust(t, &mut prologue, fp_reg, sp, fp_at - low, &f.abi.scratch)?;
     }
     if low > 0 {
         adjust(t, &mut prologue, sp, sp, -low, &f.abi.scratch)?;
-        prologue.push(cfi(Cfi::DefCfaOffset(size)));
+        prologue.push(cfi(Cfi::DefCfaOffset(cfa)));
     }
     let mut epilogue = Vec::new();
     if let Some(b) = base {
         let addi = t.by_role("addi");
         prologue.push(MInst::new(addi, vec![MOp::Reg(Reg::P(b)), MOp::Reg(Reg::P(sp)), MOp::Imm(0)]));
-        prologue.push(cfi(Cfi::DefCfa(b, size)));
+        prologue.push(cfi(Cfi::DefCfa(b, cfa)));
         epilogue.push(MInst::new(addi, vec![MOp::Reg(Reg::P(sp)), MOp::Reg(Reg::P(b)), MOp::Imm(0)]));
     }
     if low > 0 {

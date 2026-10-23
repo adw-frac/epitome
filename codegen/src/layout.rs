@@ -334,7 +334,7 @@ fn reaches(t: &Target, inst: &MInst, pc: i64, target: i64) -> bool {
         };
         env.insert(o.name.clone(), v);
     }
-    ins.enc.encode(&env).is_some()
+    ins.encode(&env).is_some()
 }
 
 /// Branch relaxation: a conditional branch whose target is out of its
