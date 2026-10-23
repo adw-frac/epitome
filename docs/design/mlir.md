@@ -691,6 +691,46 @@ operands, and dynamic shapes. JAX writes each element-wise operation as its
 own; fusing them (upstream's `linalg-fuse-elementwise-ops`) would save
 memory traffic for both front ends.
 
+### 5.11 x86-64 with AVX-512 BF16
+
+On x86-64 (`examples/llm.rs` on an x86-64 Linux machine) the code
+generator targets AVX2 and FMA, `linalg-vectorize=8`, and `--avx512`
+takes matrix products to `mlir/targets/x86-avx512.mlir` (written by
+`gen_x86_avx512.py`): BF16 kernels for 4 rows and for 1, which take B
+packed as section 5.9's BF16 kernel does. A block of rows of A is rounded
+to BF16 into `at` (`vcvtneps2bf16`); for each 64-column panel, the block's
+rows x 64 of C stay in registers (16 of the 32 for four rows) while each
+row of pairs of the panel is multiplied in: four vectors of B, a pair of A
+broadcast for each row (`vpbroadcastd`), and `vdpbf16ps`, which adds both
+products of a pair into each lane. The kernels' functions alone have AVX-512
+(`"target-features"`, in `llvm.passthrough`); the description's 512-bit
+class, `zv`, is used only by functions with `avx512f`.
+
+On TinyStories-1M, on one core of an AMD EPYC 9B45 (Zen 5), with the
+same tokens at each step for f32 and for BF16 respectively:
+
+| Step | ms a window |
+| --- | --- |
+| AVX2 loops, f32 | 906 |
+| the BF16 kernel for the layers' products | 820 |
+| the LM head too: a kernel of packed weights does the whole panels, `linalg.generic` the 17 columns past them | 113 |
+| the causal mask (2048 x 2048, compared with zero) worked out only where it is sliced | 95 |
+| FMA turned on (it was off, so `math.fma` of vectors was a call of `fmaf` a lane) | 48 |
+| IEEE `maximum` and `minimum` of vectors as compares and selects, not `fmaximumf` a lane | 32 |
+| a contraction vectorized along a parallel loop when the innermost is not contiguous (attention's) | 21 |
+| `tanh` as arithmetic (GELU's), not a call of `tanhf` | 17 |
+
+`linalg-fold-constants` now also works out an element-wise
+`linalg.generic` whose result is only sliced (`tensor.extract_slice`, a
+slice of a slice) on slices of its inputs. `linalg-vectorize` falls back
+to vectors of half its width, and so down to 4, for a dimension that is
+not a multiple of the width, and swaps a parallel loop into the innermost
+place when that makes every operand it indexes contiguous: a matrix
+product's columns rather than its sum, each lane summing its own element
+in the order the scalar loops do. `math-polynomial-approximation` expands
+`math.tanh`: below 1/4 the odd Taylor series to x^9, above it 1 - 2 /
+(e^2|x| + 1), then x's sign.
+
 ## 6. Dialect descriptions
 
 A description is written in the dialect it lowers to. `torch` lowers to

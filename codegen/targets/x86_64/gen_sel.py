@@ -1321,6 +1321,76 @@ def avx2():
                    f'  ret {ty} %r\n}}\n')
 
 
+def avx512():
+    """AVX-512's 512-bit vectors, in zv (zmm0-31), for functions with
+    avx512f: what matrix kernels need (memory, copies, zero, broadcasts,
+    adds and fused multiply-adds), and AVX512-BF16's conversion and dot
+    product (as intrinsics of the code generator's own: pairs of BF16 are
+    i32 lanes). EVEX encodings from 02-xed.ll."""
+    feat = ' "feature"="avx512f"'
+    bf = ' "feature"="avx512f,avx512bf16"'
+    Z = 'z'
+    for ty in ('<16 x float>', '<16 x i32>'):
+        T = ty.strip('<>').replace(' x ', 'x').replace('float', 'f32')
+        role = ty == '<16 x i32>'
+        enc, _ = xed('vmovups {m.disp}({m.base}), {o0}', (Z,))
+        entry(ty, f'VLDZ.{T}', ['ptr "reg"="r64" %n', 'i64 "imm" %off'], renamed(enc, {'o0': 'd', 'm.disp': 'off', 'm.base': 'n'}),
+              'vmovups {off}({n}), {d}', ['%a = getelementptr i8, ptr %n, i64 %off', f'%r = load {ty}, ptr %a', f'ret {ty} %r'],
+              ' "dclass"="zv"' + (' "role"="load.zv"' if role else '') + feat)
+        enc, _ = xed('vmovups {o0}, {m.disp}({m.base})', (Z,))
+        entry('void', f'VSTZ.{T}', [f'{ty} "reg"="zv" %t', 'ptr "reg"="r64" %n', 'i64 "imm" %off'],
+              renamed(enc, {'o0': 't', 'm.disp': 'off', 'm.base': 'n'}), 'vmovups {t}, {off}({n})',
+              ['%a = getelementptr i8, ptr %n, i64 %off', f'store {ty} %t, ptr %a', 'ret void'],
+              (' "role"="store.zv"' if role else '') + feat)
+    enc, _ = xed('vmovaps {o0}, {o1}', (Z, Z))
+    entry('<16 x i32>', 'VMOVAPSzv', ['<16 x i32> "reg"="zv" %n'], renamed(enc, {'o0': 'n', 'o1': 'd'}), 'vmovaps {n}, {d}',
+          ['ret <16 x i32> %n'], ' "copy"="zv" "dclass"="zv"' + feat)
+    enc, _ = xed('vpxord {o0}, {o1}, {o2}', (Z, Z, Z))
+    for ty in ('<16 x float>', '<16 x i32>'):
+        T = ty.strip('<>').replace(' x ', 'x').replace('float', 'f32')
+        entry(ty, f'VPXORDzero.{T}', [], renamed(enc, {'o0': 'd', 'o1': 'd', 'o2': 'd'}), 'vpxord {d}, {d}, {d}',
+              [f'ret {ty} zeroinitializer'], ' "dclass"="zv"' + (' "role"="movi.zero.zv"' if ty == '<16 x i32>' else '') + feat)
+    # Broadcasts of an element in memory.
+    for ty, et, mn in [('<16 x i32>', 'i32', 'vpbroadcastd'), ('<16 x float>', 'float', 'vbroadcastss')]:
+        T = ty.strip('<>').replace(' x ', 'x').replace('float', 'f32')
+        enc, _ = xed(f'{mn} {{m.disp}}({{m.base}}), {{o0}}', (Z,))
+        entry(ty, f'{mn.upper()}m.{T}', ['ptr "reg"="r64" %n', 'i64 "imm" %off'],
+              renamed(enc, {'o0': 'd', 'm.disp': 'off', 'm.base': 'n'}), f'{mn} {{off}}({{n}}), {{d}}',
+              ['%a = getelementptr i8, ptr %n, i64 %off', f'%x = load {et}, ptr %a',
+               f'%i = insertelement {ty} poison, {et} %x, i64 0',
+               f'%r = shufflevector {ty} %i, {ty} poison, <16 x i32> zeroinitializer', f'ret {ty} %r'],
+              ' "dclass"="zv"' + feat)
+    # Arithmetic on floats: AT&T's src2, src1, dst.
+    for ir, mn in [('fadd', 'vaddps'), ('fsub', 'vsubps'), ('fmul', 'vmulps')]:
+        enc, _ = xed(f'{mn} {{o0}}, {{o1}}, {{o2}}', (Z, Z, Z))
+        entry('<16 x float>', f'{mn.upper()}.16xf32', ['<16 x float> "reg"="zv" %n', '<16 x float> "reg"="zv" %m'],
+              renamed(enc, {'o0': 'm', 'o1': 'n', 'o2': 'd'}), f'{mn} {{m}}, {{n}}, {{d}}',
+              [f'%r = {ir} <16 x float> %n, %m', 'ret <16 x float> %r'], ' "dclass"="zv"' + feat)
+    enc, _ = xed('vfmadd231ps {o0}, {o1}, {o2}', (Z, Z, Z))
+    for intr in ('fma', 'fmuladd'):
+        entry('<16 x float>', f'VFMADD231PS.{intr}.16xf32',
+              ['<16 x float> "reg"="zv" %n', '<16 x float> "reg"="zv" %m', '<16 x float> "reg"="zv" "tied" %acc'],
+              renamed(enc, {'o0': 'm', 'o1': 'n', 'o2': 'd'}), 'vfmadd231ps {m}, {n}, {d}',
+              [f'%r = call <16 x float> @llvm.{intr}.v16f32(<16 x float> %n, <16 x float> %m, <16 x float> %acc)',
+               'ret <16 x float> %r'], ' "dclass"="zv"' + feat)
+        out.append(f'declare <16 x float> @llvm.{intr}.v16f32(<16 x float>, <16 x float>, <16 x float>)\n')
+    # BF16: sixteen floats rounded (to nearest, even) to sixteen BF16, a
+    # ymm's worth; and acc + the products of pairs of BF16, each lane's two
+    # added in.
+    enc, _ = xed('vcvtneps2bf16 {o0}, {o1}', (Z, 'ye'))
+    entry('<8 x i32>', 'VCVTNEPS2BF16.16xf32', ['<16 x float> "reg"="zv" %n'], renamed(enc, {'o0': 'n', 'o1': 'd'}),
+          'vcvtneps2bf16 {n}, {d}', ['%r = call <8 x i32> @llvm.epitome.x86.cvtneps2bf16.512(<16 x float> %n)', 'ret <8 x i32> %r'],
+          ' "dclass"="yv"' + bf)
+    out.append('declare <8 x i32> @llvm.epitome.x86.cvtneps2bf16.512(<16 x float>)\n')
+    enc, _ = xed('vdpbf16ps {o0}, {o1}, {o2}', (Z, Z, Z))
+    entry('<16 x float>', 'VDPBF16PS.16xf32',
+          ['<16 x float> "reg"="zv" "tied" %acc', '<16 x i32> "reg"="zv" %n', '<16 x i32> "reg"="zv" %m'],
+          renamed(enc, {'o0': 'm', 'o1': 'n', 'o2': 'd'}), 'vdpbf16ps {m}, {n}, {d}',
+          ['%r = call <16 x float> @llvm.epitome.x86.dpbf16ps.512(<16 x float> %acc, <16 x i32> %n, <16 x i32> %m)',
+           'ret <16 x float> %r'], ' "dclass"="zv"' + bf)
+    out.append('declare <16 x float> @llvm.epitome.x86.dpbf16ps.512(<16 x float>, <16 x i32>, <16 x i32>)\n')
+
+
 def reductions():
     """Sums across lanes: halves added until one lane is left (pshufd's
     high lanes brought down), as SSE2 and AVX2 have no across-lanes add."""
@@ -1426,6 +1496,48 @@ def more_compares():
                        f'  %y = call {ty} @{xor}({ty} %x, {ty} %s)\n  %r = call {ty} @{sub}({ty} %y, {ty} %s)\n  ret {ty} %r\n}}\n')
 
 
+def float_minmax():
+    """IEEE 754's maximum and minimum (llvm.maximum, llvm.minimum) of
+    vectors: x86's maxps and minps return the second operand when either
+    is a NaN and when the two are equal (so of +0 and -0), so these are
+    compares and selects instead: the greater (or lesser), or when equal
+    the two's bits and-ed (or or-ed), which makes +0 the greater of the
+    zeros, and a NaN (their sum) when either is one."""
+    for ty, it, cls, feat in [('<4 x float>', 'v4f32', 'xv', ''), ('<2 x double>', 'v2f64', 'xv', ''),
+                              ('<8 x float>', 'v8f32', 'yv', ' "feature"="avx2"'), ('<4 x double>', 'v4f64', 'yv', ' "feature"="avx2"')]:
+        n = ty[1:].split()[0]
+        M = f'<{n} x i1>'
+        T = f'{n}x{"f32" if "float" in ty else "f64"}'
+        S = 'PS' if 'float' in ty else 'PD'
+        if cls == 'xv':
+            I, cmp, add, AND, OR = '<2 x i64>', f'CMP{{p}}{S}.{T}', f'FADD{S}.{T}', 'PAND.2xi64', 'POR.2xi64'
+            def select(r, c, a, b):
+                return (f'  %{r}c = bitcast {M} %{c} to {I}\n  %{r}a = bitcast {ty} %{a} to {I}\n  %{r}b = bitcast {ty} %{b} to {I}\n'
+                        f'  %{r}x = call {I} @PAND.2xi64({I} %{r}c, {I} %{r}a)\n  %{r}y = call {I} @PANDN.xv({I} %{r}c, {I} %{r}b)\n'
+                        f'  %{r}i = call {I} @POR.2xi64({I} %{r}x, {I} %{r}y)\n  %{r} = bitcast {I} %{r}i to {ty}\n')
+        else:
+            I, cmp, add, AND, OR = '<4 x i64>', f'VCMP{{p}}{S}.{T}', f'VADD{S}.{T}', 'VPAND.4xi64', 'VPOR.4xi64'
+            def select(r, c, a, b):
+                return f'  %{r} = call {ty} @VBLENDV{S}.{T}({M} %{c}, {ty} %{a}, {ty} %{b})\n'
+        # (SSE's greater-than is its less-than, the operands swapped: its
+        # entry's are.)
+        for op, (pred, x, y), bits in [('maximum', ('OGT', 'a', 'b') if cls == 'yv' else ('OLT', 'b', 'a'), AND),
+                                       ('minimum', ('OLT', 'a', 'b'), OR)]:
+            out.append(f'define {ty} @{op}.{T}({ty} "reg"="{cls}" %a, {ty} "reg"="{cls}" %b) "recipe"="{op}.{T}.expand"{feat} {{\n'
+                       f'  %r = call {ty} @llvm.{op}.{it}({ty} %a, {ty} %b)\n  ret {ty} %r\n}}\n')
+            out.append(f'define {ty} @{op}.{T}.expand({ty} %a, {ty} %b) {{\n'
+                       f'  %w = call {M} @{cmp.format(p=pred)}({ty} %{x}, {ty} %{y})\n'
+                       + select('x', 'w', 'a', 'b') +
+                       f'  %e = call {M} @{cmp.format(p="OEQ")}({ty} %a, {ty} %b)\n'
+                       f'  %ai = bitcast {ty} %a to {I}\n  %bi = bitcast {ty} %b to {I}\n'
+                       f'  %ci = call {I} @{bits}({I} %ai, {I} %bi)\n  %c = bitcast {I} %ci to {ty}\n'
+                       + select('y', 'e', 'c', 'x') +
+                       f'  %u = call {M} @{cmp.format(p="UNO")}({ty} %a, {ty} %b)\n'
+                       f'  %nan = call {ty} @{add}({ty} %a, {ty} %b)\n'
+                       + select('r', 'u', 'nan', 'y') +
+                       f'  ret {ty} %r\n}}\n')
+            out.append(f'declare {ty} @llvm.{op}.{it}({ty}, {ty})\n')
+
 def vector_copies():
     """Copies of the vector and mask registers (the register allocator's)."""
     entry('<2 x i64>', 'MOVAPSrr', ['<2 x i64> "reg"="x" %n'], 'rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)',
@@ -1466,9 +1578,11 @@ def main():
     sse_vectors()
     sse_recipes()
     avx2()
+    avx512()
     reductions()
     mul64()
     more_compares()
+    float_minmax()
     vector_copies()
     sys.stdout.write('\n'.join(out))
 

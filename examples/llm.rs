@@ -1,5 +1,6 @@
-//! A language model from Hugging Face, compiled by Epitome into a Mach-O
-//! executable that writes text.
+//! A language model from Hugging Face, compiled by Epitome into an
+//! executable that writes text: for AArch64 macOS (Mach-O) or x86-64 Linux
+//! (ELF), whichever this runs on.
 //!
 //! The model (TinyStories-1M, SmolLM2-135M, ...) is exported from PyTorch as
 //! MLIR by `examples/llm/export.py` (`linalg` on tensors, as torch-mlir
@@ -10,7 +11,7 @@
 //!    `to-llvm`: MLIR from `linalg` to the `llvm` dialect;
 //! 2. translation to LLVM IR;
 //! 3. `epitome-opt`'s pipeline;
-//! 4. code generation for AArch64, to a Mach-O object, `model.o`;
+//! 4. code generation for AArch64 or x86-64, to an object, `model.o`;
 //!
 //! then links it with the Rust program in `examples/llm/driver.rs`, which
 //! tokenizes a prompt and runs the model to choose each next token.
@@ -19,9 +20,15 @@
 //! `mlir/targets/aarch64-sme.mlir` (`linalg-to-kernels`, after `bufferize`),
 //! and the code generator targets `apple-m4`; without it, they are loops.
 //! Element-wise work and reductions are vectorized for NEON
-//! (`linalg-vectorize=4`), and `exp` is arithmetic rather than a call
-//! (`math-polynomial-approximation`), either way.
-//! `--weights=bf16` (with `--sme`) stores constant weights in that format,
+//! (`linalg-vectorize=4`), and `exp` and `tanh` are arithmetic rather than
+//! calls (`math-polynomial-approximation`), either way.
+//!
+//! On x86-64 the code generator targets AVX2 and FMA, vectors of eight
+//! (`linalg-vectorize=8`); `--avx512` is `--sme`'s counterpart, matrix
+//! products by the kernels of `mlir/targets/x86-avx512.mlir`, which need
+//! AVX-512 and AVX512-BF16 and so `--weights=bf16`; only they use them.
+//!
+//! `--weights=bf16` (with `--sme` or `--avx512`) stores constant weights in that format,
 //! rounding them, for the kernels of that format; the program is then
 //! `llm-bf16`, and so on, so that the formats can be compared.
 //! `--dump` writes each stage's MLIR and the LLVM IR next to the model.
@@ -33,7 +40,8 @@
 //! target/smollm2/llm --bench 5   # time forward passes
 //! ```
 //!
-//! On an AArch64 Mac, with `rustc` to build the driver.
+//! On an AArch64 Mac or an x86-64 Linux machine, with `rustc` to build the
+//! driver.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -45,7 +53,7 @@ use epitome_codegen::{Options, compile};
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dump = args.iter().any(|a| a == "--dump");
-    let sme = args.iter().any(|a| a == "--sme");
+    let sme = args.iter().any(|a| a == "--sme" || a == "--avx512");
     let weights = args.iter().find_map(|a| a.strip_prefix("--weights=")).map(str::to_string);
     let dir = args
         .iter()
@@ -76,9 +84,11 @@ fn build(dir: &Path, dump: bool, sme: bool, weights: Option<&str>) -> Result<Pat
     step("read MLIR (linalg on tensors)", start);
 
     // MLIR, stage by stage, to the llvm dialect.
+    let x86 = cfg!(target_arch = "x86_64");
+    let set = if x86 { "x86-avx512" } else { "aarch64-sme" };
     let kernels = match weights {
-        Some(w) => format!("linalg-to-kernels=aarch64-sme:{w}"),
-        None => "linalg-to-kernels=aarch64-sme".to_string(),
+        Some(w) => format!("linalg-to-kernels={set}:{w}"),
+        None => format!("linalg-to-kernels={set}"),
     };
     let suffix = weights.map(|w| format!("-{w}")).unwrap_or_default();
     let mut passes: Vec<&str> = epitome_mlir::LINALG_TO_LLVM.to_vec();
@@ -92,7 +102,7 @@ fn build(dir: &Path, dump: bool, sme: bool, weights: Option<&str>) -> Result<Pat
     passes.insert(at, "outline-linalg");
     // Element-wise work and reductions on NEON's four lanes, and exp as
     // arithmetic, so that it is vectorized too.
-    passes.insert(at + 1, "linalg-vectorize=4");
+    passes.insert(at + 1, if x86 { "linalg-vectorize=8" } else { "linalg-vectorize=4" });
     let at = passes.iter().position(|&p| p == "to-llvm").unwrap();
     passes.insert(at, "math-polynomial-approximation");
     for (k, pass) in passes.iter().enumerate() {
@@ -109,7 +119,7 @@ fn build(dir: &Path, dump: bool, sme: bool, weights: Option<&str>) -> Result<Pat
     let start = Instant::now();
     let mut ir = epitome_mlir::translate::translate(&m).map_err(|e| format!("translate: {e}"))?;
     drop(m);
-    ir.triple = Some(b"arm64-apple-macosx14.0.0".to_vec());
+    ir.triple = Some(if x86 { b"x86_64-unknown-linux-gnu".to_vec() } else { b"arm64-apple-macosx14.0.0".to_vec() });
     step("translate to LLVM IR", start);
     if dump {
         let out = dir.join("model.ll");
@@ -121,12 +131,15 @@ fn build(dir: &Path, dump: bool, sme: bool, weights: Option<&str>) -> Result<Pat
 
     // Machine code.
     let start = Instant::now();
-    let t = Target::aarch64();
-    let opts = Options { mcpu: sme.then(|| "apple-m4".to_string()), ..Options::default() };
+    let (t, opts) = if x86 {
+        (Target::x86_64(), Options { mattr: vec!["+avx2,+fma".to_string()], ..Options::default() })
+    } else {
+        (Target::aarch64(), Options { mcpu: sme.then(|| "apple-m4".to_string()), ..Options::default() })
+    };
     let compiled = compile(&t, &mut ir, &opts)?;
     let object = dir.join(format!("model{suffix}.o"));
     std::fs::write(&object, compiled.object_file(&t)?).map_err(|e| format!("{}: {e}", object.display()))?;
-    step("compile to model.o (Mach-O)", start);
+    step(if x86 { "compile to model.o (ELF)" } else { "compile to model.o (Mach-O)" }, start);
 
     // The driver, linked with the model.
     let start = Instant::now();

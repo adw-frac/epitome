@@ -9,8 +9,12 @@
 //! An operation is vectorized when its innermost loop runs over the last,
 //! contiguous dimension of every operand that it indexes (the others are
 //! the same for each lane and broadcast), its size is a multiple of
-//! `width`, the elements it loads in vectors are `f32`, and its body is
-//! arithmetic that has a vector form. When the innermost loop is a
+//! `width` (or of half of it, and so on down to 4, then vectors of that
+//! many lanes), the elements it loads in vectors are `f32`, and its body is
+//! arithmetic that has a vector form. Failing that, another parallel loop
+//! that is so may be made the innermost instead (the two swapped): a
+//! matrix product's columns rather than its sum, each lane then summing
+//! its own element as the scalar loops do. When the innermost loop is a
 //! reduction, each output's value must be its old one combined (`addf`,
 //! `mulf`, `maximumf`, `minimumf`, `maxnumf` or `minnumf`) with what the
 //! rest of the body works out: the loop carries a vector of partial
@@ -52,7 +56,8 @@ fn copy(
         && let Some(block) = block
         && let Some(plan) = plan(src, op, width)
     {
-        return Vectorize { src, out, map, width }.lower(op, &plan, block);
+        let width = plan.width;
+        return Vectorize { src, out, map, width, swap: plan.swap }.lower(op, &plan, block);
     }
     let o = &src.ops[op.index()];
     if o.regions.is_empty() {
@@ -116,6 +121,11 @@ struct Plan {
     /// For a reduction: each output's combining operation in the body,
     /// whose other operand is what the rest of the body works out.
     combine: Option<Vec<OpId>>,
+    /// Lanes in a vector.
+    width: u64,
+    /// The loop made the innermost, swapped with the last (in `maps`,
+    /// already).
+    swap: usize,
 }
 
 /// How many vectors of partial results a reduction keeps, at most.
@@ -135,6 +145,7 @@ const ELEMENTWISE: &[&str] = &[
     "arith.cmpf",
     "arith.select",
     "math.exp",
+    "math.tanh",
     "math.sqrt",
     "math.rsqrt",
     "math.absf",
@@ -169,6 +180,61 @@ fn plan(src: &Module, op: OpId, width: u64) -> Option<Plan> {
             .collect::<Vec<_>>(),
         _ => return None,
     };
+    // The innermost loop, else a parallel one in its place; the widest
+    // vectors that fit.
+    let widths: Vec<u64> = std::iter::successors(Some(width), |&w| (w > 4 && w % 2 == 0).then_some(w / 2)).collect();
+    for swap in std::iter::once(d).chain((0..d).rev().filter(|&k| !reduction[k])) {
+        let swapped = |k: usize| if k == swap { d } else if k == d { swap } else { k };
+        let maps: Vec<Map> = maps
+            .iter()
+            .map(|m| Map { dims: m.dims, syms: 0, results: m.results.iter().map(|e| rename(e, &swapped)).collect() })
+            .collect();
+        let mut reduction = reduction.clone();
+        reduction.swap(swap, d);
+        for &w in &widths {
+            if let Some(p) = plan_at(src, op, w, maps.clone(), &reduction, swap) {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+/// `e` with its dimensions renamed.
+fn rename(e: &Expr, to: &dyn Fn(usize) -> usize) -> Expr {
+    let two = |a: &Expr, b: &Expr| (Box::new(rename(a, to)), Box::new(rename(b, to)));
+    match e {
+        Expr::Dim(k) => Expr::Dim(to(*k)),
+        Expr::Sym(_) | Expr::Const(_) => e.clone(),
+        Expr::Add(a, b) => {
+            let (a, b) = two(a, b);
+            Expr::Add(a, b)
+        }
+        Expr::Mul(a, b) => {
+            let (a, b) = two(a, b);
+            Expr::Mul(a, b)
+        }
+        Expr::FloorDiv(a, b) => {
+            let (a, b) = two(a, b);
+            Expr::FloorDiv(a, b)
+        }
+        Expr::CeilDiv(a, b) => {
+            let (a, b) = two(a, b);
+            Expr::CeilDiv(a, b)
+        }
+        Expr::Mod(a, b) => {
+            let (a, b) = two(a, b);
+            Expr::Mod(a, b)
+        }
+    }
+}
+
+/// The plan for `op` with `maps` (its own, `swap` swapped with the last
+/// loop) and vectors of `width`, if it can be vectorized so.
+fn plan_at(src: &Module, op: OpId, width: u64, maps: Vec<Map>, reduction: &[bool], swap: usize) -> Option<Plan> {
+    let o = &src.ops[op.index()];
+    let n = maps[0].dims;
+    let d = n - 1;
     let n_ins = crate::bufferize::inputs_of(src, op);
 
     // The loops' sizes; each operand indexed by the innermost loop only in
@@ -218,7 +284,7 @@ fn plan(src: &Module, op: OpId, width: u64) -> Option<Plan> {
         }
         if name == "linalg.index" {
             match src.op_attr(inner, "dim").and_then(|a| src.int_of(a)) {
-                Some(k) if (k as usize) < d => continue,
+                Some(k) if k as usize != swap && (k as usize) <= d => continue,
                 _ => return None,
             }
         }
@@ -243,7 +309,7 @@ fn plan(src: &Module, op: OpId, width: u64) -> Option<Plan> {
         if !vector[n_ins..].iter().all(|&v| v) {
             return None;
         }
-        return Some(Plan { maps, sizes, vector, combine: None });
+        return Some(Plan { maps, sizes, vector, combine: None, width, swap });
     }
     // A reduction along the innermost loop only, each output its old value
     // combined with something else, and read nowhere else.
@@ -266,7 +332,7 @@ fn plan(src: &Module, op: OpId, width: u64) -> Option<Plan> {
         }
         combine.push(c);
     }
-    Some(Plan { maps, sizes, vector, combine: Some(combine) })
+    Some(Plan { maps, sizes, vector, combine: Some(combine), width, swap })
 }
 
 /// A constant integer exponent from 0 to 16.
@@ -293,6 +359,8 @@ struct Vectorize<'a> {
     out: &'a mut Module,
     map: &'a mut HashMap<ValueId, ValueId>,
     width: u64,
+    /// The plan's loop made the innermost.
+    swap: usize,
 }
 
 impl Vectorize<'_> {
@@ -407,7 +475,10 @@ impl Vectorize<'_> {
         let name = src.op_name(inner);
         if name == "linalg.index" {
             let d = src.op_attr(inner, "dim").and_then(|a| src.int_of(a)).ok_or("linalg.index without dim")?;
-            self.map.insert(i.results[0], ivs[d as usize]);
+            // (Its loop's place, after the swap.)
+            let (d, last) = (d as usize, ivs.len() - 1);
+            let d = if d == self.swap { last } else if d == last { self.swap } else { d };
+            self.map.insert(i.results[0], ivs[d]);
             return Ok(());
         }
         let args: Vec<ValueId> = i

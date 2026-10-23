@@ -27,7 +27,10 @@ use crate::affine::Map;
 use crate::build::{OpSpec, row_major_strides, strided_attr, strided_layout};
 use crate::ir::*;
 
-const BUILT_IN: &[(&str, &str)] = &[("aarch64-sme", include_str!("../targets/aarch64-sme.mlir"))];
+const BUILT_IN: &[(&str, &str)] = &[
+    ("aarch64-sme", include_str!("../targets/aarch64-sme.mlir")),
+    ("x86-avx512", include_str!("../targets/x86-avx512.mlir")),
+];
 
 /// Lowers what `kernels` (a name in `mlir/targets`, or a path) has kernels
 /// for. `name:bf16` (or another format) also allows the kernels whose
@@ -477,7 +480,7 @@ fn tiles(
         }
         if let (Some(w), Some(p)) = (&k.weights, k.pack_b) {
             let k_multiple = if w == "i8" { 64 } else { 32 };
-            if !k.whole_rows || n % p != 0 || kk % k_multiple != 0 {
+            if !k.whole_rows || n < p || kk % k_multiple != 0 {
                 continue;
             }
             match pack(out, b, p, w, module_block, block, cx)? {
@@ -607,7 +610,13 @@ fn tiles(
         _ => (c64(out, lb.0[0] as i64), c64(out, lb.1 as i64), None),
     };
     let (kv, offc) = (c64(out, kk as i64), c64(out, lc.1 as i64));
-    let nv = c64(out, n as i64);
+    // A kernel of packed weights does the whole panels; the columns past
+    // them are left to a linalg.generic.
+    let nk = match (&k.weights, k.pack_b) {
+        (Some(_), Some(p)) => n / p * p,
+        _ => n,
+    };
+    let nv = c64(out, nk as i64);
 
     // for i in 0..full by tile rows, for j in 0..n by tile columns.
     let zero = cidx(out, 0);
@@ -667,6 +676,9 @@ fn tiles(
         args.extend(scale_ptr);
         OpSpec::new("func.call").operands(&args).prop("callee", callee).build(out, Some(ob));
         OpSpec::new("scf.yield").build(out, Some(ob));
+        if nk < n {
+            edge_columns(src, op, [a, b, c], props, out, block, map, full, nk)?;
+        }
         return rest_rows(src, op, [a, b, c], props, out, block, module_block, cx, &ks[ki + 1..], map, full, at)
             .map(|()| true);
     }
@@ -700,6 +712,56 @@ fn tiles(
 
     rest_rows(src, op, [a, b, c], props, out, block, module_block, cx, &ks[ki + 1..], map, full, at)?;
     Ok(true)
+}
+
+/// Columns of C from `from` on, of its first `rows` rows: the original
+/// operation on views of A, B and C.
+#[allow(clippy::too_many_arguments)]
+fn edge_columns(
+    src: &Module,
+    op: OpId,
+    [a, b, c]: [ValueId; 3],
+    props: &[(String, AttrId)],
+    out: &mut Module,
+    block: BlockId,
+    map: &mut HashMap<ValueId, ValueId>,
+    rows: u64,
+    from: u64,
+) -> Result<(), String> {
+    let (sa, elem) = out.shaped(out.value_type(a)).ok_or("an operand of unknown shape")?;
+    let (sb, _) = out.shaped(out.value_type(b)).ok_or("an operand of unknown shape")?;
+    let (kk, n) = (sa[1], sb[1]);
+    // A view of `v`: `nrows` rows from `row`, `ncols` columns from `col`.
+    let view = |out: &mut Module, v: ValueId, row: u64, nrows: u64, col: u64, ncols: u64| -> Result<ValueId, String> {
+        let (strides, offset) = layout(out, out.value_type(v)).ok_or("an operand of unknown layout")?;
+        let layout = strided_attr(out, &strides, offset + row * strides[0] + col * strides[1]);
+        let ty = out.memref_type(&[nrows, ncols], elem, Some(layout));
+        let segments = out.dense_array_attr("i32", &[1, 0, 0, 0]);
+        let offsets = out.dense_array_attr("i64", &[row as i64, col as i64]);
+        let sizes = out.dense_array_attr("i64", &[nrows as i64, ncols as i64]);
+        let ones = out.dense_array_attr("i64", &[1, 1]);
+        let s = OpSpec::new("memref.subview")
+            .operands(&[v])
+            .results(&[ty])
+            .prop("operandSegmentSizes", segments)
+            .prop("static_offsets", offsets)
+            .prop("static_sizes", sizes)
+            .prop("static_strides", ones)
+            .build(out, Some(block));
+        Ok(out.result(s))
+    };
+    let va = view(out, a, 0, rows, 0, kk)?;
+    let vb = view(out, b, 0, kk, from, n - from)?;
+    let vc = view(out, c, 0, rows, from, n - from)?;
+    let o = &src.ops[op.index()];
+    let mut spec = OpSpec::new("linalg.generic").operands(&[va, vb, vc]).regions(1).loc(o.loc);
+    for (key, v) in props {
+        spec = spec.prop(key, *v);
+    }
+    let g = spec.build(out, Some(block));
+    let region = out.region_of(g, 0);
+    out.clone_region_into(src, o.regions[0], region, map)?;
+    Ok(())
 }
 
 /// Rows of C past `full`, the last whole tile's end: by the kernels left,
