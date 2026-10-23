@@ -877,6 +877,118 @@ def sse_vectors():
                        f'  %r = call {wid} @UNPCKLz.{T}({nar} %v, <2 x i64> %sw)\n  ret {wid} %r\n}}\n')
 
 
+def sse_recipes():
+    """What SSE2 does in a few instructions: the other comparisons, the
+    least and greatest, multiplying 32-bit lanes, and a sign's bits."""
+    P66 = '01100110 | '
+    def leg(pre, op, r, m):
+        return f'{pre}rex(0, {r}, 0, {m}) | 00001111 | {op} | rr({r}, {m})'
+    tag = lambda ty: ty.strip('<>').replace(' x ', 'x').replace('float', 'f32').replace('double', 'f64')
+    # All ones (any register compared with itself).
+    entry('<2 x i64>', 'ALLONES', [], leg(P66, '01110110', 'd', 'd'), 'pcmpeqd {d}, {d}',
+          ['ret <2 x i64> splat (i64 -1)'], ' "dclass"="xv" "nomatch"')
+    def recipe(name, ret, params, body, expand):
+        ps = ', '.join(f'{t} "reg"="{c}" %{n}' for t, c, n in params)
+        plain = ', '.join(f'{t} %{n}' for t, c, n in params)
+        out.append(f'define {ret} @{name}({ps}) "recipe"="{name}.expand" {{\n' + ''.join(f'  {l}\n' for l in body) + '}\n')
+        out.append(f'define {ret} @{name}.expand({plain}) {{\n' + ''.join(f'  {l}\n' for l in expand) + '}\n')
+    INT = [('<16 x i8>', 'b', 8, 16, 'xv'), ('<8 x i16>', 'w', 16, 8, 'xv'), ('<4 x i32>', 'd', 32, 4, 'xv'),
+           ('<8 x i8>', 'b', 8, 8, 'xh'), ('<4 x i16>', 'w', 16, 4, 'xh'), ('<2 x i32>', 'd', 32, 2, 'xh')]
+    for ty, sfx, eb, n, cls in INT:
+        T = tag(ty)
+        M = f'<{n} x i1>'
+        S = sfx.upper()
+        eq, gt = f'PCMPEQ{S}.{T}', f'PCMPGT{S}.{T}'
+        wide = '<2 x i64>'
+        notm = lambda x: [f'%xi = sext {M} {x} to {ty}', f'%xw = bitcast {ty} %xi to {wide}',
+                          '%on = call <2 x i64> @ALLONES()', f'%nw = call {wide} @PXOR.2xi64({wide} %xw, {wide} %on)',
+                          f'%ni = bitcast {wide} %nw to {ty}', f'%r = trunc {ty} %ni to {M}', f'ret {M} %r']
+        # slt: sgt the other way round.
+        recipe(f'slt.{T}', M, [(ty, cls, 'a'), (ty, cls, 'b')], [f'%r = icmp slt {ty} %a, %b', f'ret {M} %r'],
+               [f'%r = call {M} @{gt}({ty} %b, {ty} %a)', f'ret {M} %r'])
+        # ne, sge, sle: the opposite comparison, inverted.
+        for pred, inner, a, b in [('ne', eq, '%a', '%b'), ('sge', gt, '%b', '%a'), ('sle', gt, '%a', '%b')]:
+            recipe(f'{pred}.{T}', M, [(ty, cls, 'a'), (ty, cls, 'b')], [f'%r = icmp {pred} {ty} %a, %b', f'ret {M} %r'],
+                   [f'%c = call {M} @{inner}({ty} {a}, {ty} {b})'] + notm('%c'))
+        # Unsigned: bytes by their greatest (a >= b when max(a, b) == a),
+        # words by saturating subtraction (a <= b when a - b is 0), and
+        # 32-bit lanes with their sign bits flipped, compared signed.
+        if eb == 8:
+            mx = f'PMAXUB.{T}'
+            entry(ty, mx, [f'{ty} "reg"="{cls}" "tied" %n', f'{ty} "reg"="{cls}" %m'], leg(P66, '11011110', 'd', 'm'),
+                  'pmaxub {m}, {d}', [f'%r = call {ty} @llvm.umax.v{n}i8({ty} %n, {ty} %m)', f'ret {ty} %r'], f' "dclass"="{cls}"')
+            entry(ty, f'PMINUB.{T}', [f'{ty} "reg"="{cls}" "tied" %n', f'{ty} "reg"="{cls}" %m'], leg(P66, '11011010', 'd', 'm'),
+                  'pminub {m}, {d}', [f'%r = call {ty} @llvm.umin.v{n}i8({ty} %n, {ty} %m)', f'ret {ty} %r'], f' "dclass"="{cls}"')
+            out.append(f'declare {ty} @llvm.umax.v{n}i8({ty}, {ty})\ndeclare {ty} @llvm.umin.v{n}i8({ty}, {ty})\n')
+            for pred, x, y, inv in [('uge', '%a', '%b', False), ('ule', '%b', '%a', False), ('ult', '%a', '%b', True),
+                                    ('ugt', '%b', '%a', True)]:
+                body = [f'%m = call {ty} @{mx}({ty} {x}, {ty} {y})', f'%c = call {M} @{eq}({ty} %m, {ty} {x})']
+                recipe(f'{pred}.{T}', M, [(ty, cls, 'a'), (ty, cls, 'b')], [f'%r = icmp {pred} {ty} %a, %b', f'ret {M} %r'],
+                       body + (notm('%c') if inv else [f'ret {M} %c']))
+        elif eb == 16:
+            sub = f'PSUBUSW.{T}'
+            entry(ty, sub, [f'{ty} "reg"="{cls}" "tied" %n', f'{ty} "reg"="{cls}" %m'], leg(P66, '11011001', 'd', 'm'),
+                  'psubusw {m}, {d}', [f'%r = call {ty} @llvm.usub.sat.v{n}i16({ty} %n, {ty} %m)', f'ret {ty} %r'],
+                  f' "dclass"="{cls}"')
+            out.append(f'declare {ty} @llvm.usub.sat.v{n}i16({ty}, {ty})\n')
+            for name, mn, op, ir in [('PMAXSW', 'pmaxsw', '11101110', 'smax'), ('PMINSW', 'pminsw', '11101010', 'smin')]:
+                entry(ty, f'{name}.{T}', [f'{ty} "reg"="{cls}" "tied" %n', f'{ty} "reg"="{cls}" %m'], leg(P66, op, 'd', 'm'),
+                      f'{mn} {{m}}, {{d}}', [f'%r = call {ty} @llvm.{ir}.v{n}i16({ty} %n, {ty} %m)', f'ret {ty} %r'],
+                      f' "dclass"="{cls}"')
+                out.append(f'declare {ty} @llvm.{ir}.v{n}i16({ty}, {ty})\n')
+            for pred, x, y, inv in [('ule', '%a', '%b', False), ('uge', '%b', '%a', False), ('ugt', '%a', '%b', True),
+                                    ('ult', '%b', '%a', True)]:
+                body = ['%z = call <2 x i64> @PXORzero()', f'%zt = bitcast <2 x i64> %z to {ty}',
+                        f'%d = call {ty} @{sub}({ty} {x}, {ty} {y})', f'%c = call {M} @{eq}({ty} %d, {ty} %zt)']
+                recipe(f'{pred}.{T}', M, [(ty, cls, 'a'), (ty, cls, 'b')], [f'%r = icmp {pred} {ty} %a, %b', f'ret {M} %r'],
+                       body + (notm('%c') if inv else [f'ret {M} %c']))
+        else:
+            sh = f'PSLLDi.{T}'
+            for pred, sp, x, y, inv in [('ugt', 'sgt', '%fa', '%fb', False), ('ult', 'sgt', '%fb', '%fa', False),
+                                        ('ule', 'sgt', '%fa', '%fb', True), ('uge', 'sgt', '%fb', '%fa', True)]:
+                body = ['%o = call <2 x i64> @ALLONES()', f'%ot = bitcast <2 x i64> %o to {ty}',
+                        f'%sg = call {ty} @{sh}({ty} %ot, i32 31)', f'%fa = call {ty} @PXOR.{T}({ty} %a, {ty} %sg)',
+                        f'%fb = call {ty} @PXOR.{T}({ty} %b, {ty} %sg)', f'%c = call {M} @{gt}({ty} {x}, {ty} {y})']
+                recipe(f'{pred}.{T}', M, [(ty, cls, 'a'), (ty, cls, 'b')], [f'%r = icmp {pred} {ty} %a, %b', f'ret {M} %r'],
+                       body + (notm('%c') if inv else [f'ret {M} %c']))
+    # 32-bit lanes multiplied: the even lanes' and the odd lanes' 64-bit
+    # products (pmuludq), their low halves gathered.
+    entry('<2 x i64>', 'PMULUDQ', ['<2 x i64> "reg"="xv" "tied" %n', '<2 x i64> "reg"="xv" %m'], leg(P66, '11110100', 'd', 'm'),
+          'pmuludq {m}, {d}', ['ret <2 x i64> %n'], ' "dclass"="xv" "nomatch"')
+    entry('<4 x i32>', 'PUNPCKLDQ', ['<4 x i32> "reg"="xv" "tied" %n', '<4 x i32> "reg"="xv" %m'], leg(P66, '01100010', 'd', 'm'),
+          'punpckldq {m}, {d}', ['ret <4 x i32> %n'], ' "dclass"="xv" "nomatch"')
+    for ty, cls in [('<4 x i32>', 'xv'), ('<2 x i32>', 'xh')]:
+        T = tag(ty)
+        recipe(f'mul.{T}', ty, [(ty, cls, 'a'), (ty, cls, 'b')], [f'%r = mul {ty} %a, %b', f'ret {ty} %r'],
+               [f'%aw = bitcast {ty} %a to <2 x i64>', f'%bw = bitcast {ty} %b to <2 x i64>',
+                '%p0 = call <2 x i64> @PMULUDQ(<2 x i64> %aw, <2 x i64> %bw)',
+                '%a1 = call <2 x i64> @PSRLQi.2xi64(<2 x i64> %aw, i64 32)', '%b1 = call <2 x i64> @PSRLQi.2xi64(<2 x i64> %bw, i64 32)',
+                '%p1 = call <2 x i64> @PMULUDQ(<2 x i64> %a1, <2 x i64> %b1)',
+                '%q0 = bitcast <2 x i64> %p0 to <4 x i32>', '%q1 = bitcast <2 x i64> %p1 to <4 x i32>',
+                '%s0 = call <4 x i32> @PSHUFD(<4 x i32> %q0, i64 8)', '%s1 = call <4 x i32> @PSHUFD(<4 x i32> %q1, i64 8)',
+                '%u = call <4 x i32> @PUNPCKLDQ(<4 x i32> %s0, <4 x i32> %s1)', f'%r = bitcast <4 x i32> %u to {ty}',
+                f'ret {ty} %r'])
+    # A float's sign: flipped (xor) or cleared (and), with masks made of all
+    # ones shifted.
+    for ty, cls, et, w in [('<4 x float>', 'xv', 'f32', 32), ('<2 x double>', 'xv', 'f64', 64), ('<2 x float>', 'xh', 'f32', 32)]:
+        T = tag(ty)
+        n = int(ty[1:].split()[0])
+        lane = 'q' if w == 64 else 'd'
+        shl, shr = (f'PSLLQi.2xi64', f'PSRLQi.2xi64') if w == 64 else (f'PSLLDi.4xi32', f'PSRLDi.4xi32')
+        it = '<2 x i64>' if w == 64 else '<4 x i32>'
+        recipe(f'fneg.{T}', ty, [(ty, cls, 'a')], [f'%r = fneg {ty} %a', f'ret {ty} %r'],
+               ['%o = call <2 x i64> @ALLONES()', f'%oi = bitcast <2 x i64> %o to {it}',
+                f'%s = call {it} @{shl}({it} %oi, i32 {w - 1})', '%sw = bitcast ' + it + ' %s to <2 x i64>',
+                f'%aw = bitcast {ty} %a to <2 x i64>', '%x = call <2 x i64> @PXOR.2xi64(<2 x i64> %aw, <2 x i64> %sw)',
+                f'%r = bitcast <2 x i64> %x to {ty}', f'ret {ty} %r'])
+        recipe(f'fabs.{T}', ty, [(ty, cls, 'a')], [f'%r = call {ty} @llvm.fabs.v{n}{et}({ty} %a)', f'ret {ty} %r'],
+               ['%o = call <2 x i64> @ALLONES()', f'%oi = bitcast <2 x i64> %o to {it}',
+                f'%s = call {it} @{shr}({it} %oi, i32 1)', '%sw = bitcast ' + it + ' %s to <2 x i64>',
+                f'%aw = bitcast {ty} %a to <2 x i64>', '%x = call <2 x i64> @PAND.2xi64(<2 x i64> %aw, <2 x i64> %sw)',
+                f'%r = bitcast <2 x i64> %x to {ty}', f'ret {ty} %r'])
+        out.append(f'declare {ty} @llvm.fabs.v{n}{et}({ty})\n')
+
+
 def vector_copies():
     """Copies of the vector and mask registers (the register allocator's)."""
     entry('<2 x i64>', 'MOVAPSrr', ['<2 x i64> "reg"="x" %n'], 'rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)',
@@ -912,6 +1024,7 @@ def main():
     atomics()
     x87()
     sse_vectors()
+    sse_recipes()
     vector_copies()
     sys.stdout.write('\n'.join(out))
 
