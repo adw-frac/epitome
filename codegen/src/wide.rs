@@ -481,11 +481,13 @@ fn rewrite(
                 Op::Gep { flags: GepFlags::default(), inrange: None, source_ty: i8t, ptr, indices: vec![eight] },
                 cx.m.types.ptr(0),
             );
-            let hb = bits - 64;
-            let hi = if hb > 32 || hb == 64 {
+            // The high half is as many bytes as it takes, and no more (an
+            // `i104`'s five: an `i40`, which `promote_odd` loads in pieces).
+            let hb = (bits - 64).div_ceil(8) * 8;
+            let hi = if hb == 64 {
                 s.op(Op::Load { volatile, atomic: None, ptr: p8, align: align.map(|a| a.min(8)) }, i64t)
             } else {
-                let narrow = cx.m.types.int(hb.next_power_of_two().max(8));
+                let narrow = cx.m.types.int(hb);
                 let v = s.op(Op::Load { volatile, atomic: None, ptr: p8, align: Some(1) }, narrow);
                 s.cast(CastOp::ZExt, v, i64t)
             };
@@ -505,11 +507,20 @@ fn rewrite(
             );
             let st = s.f.add_inst(Op::Store { volatile, atomic: None, value: lo, ptr, align }, None);
             s.new.push(st);
-            let hb = b - 64;
-            let hi = if hb > 32 {
+            // As many bytes as the value takes, and no more (see the load);
+            // bits past the value's in its last byte written as zeros, as
+            // LLVM writes them.
+            let hb = (b - 64).div_ceil(8) * 8;
+            let hi = if b % 8 != 0 {
+                let mask = int(cx, i64t, ((1u64 << (b - 64)) - 1) as i64);
+                s.bin(BinOp::And, hi, mask, i64t)
+            } else {
+                hi
+            };
+            let hi = if hb == 64 {
                 hi
             } else {
-                let narrow = cx.m.types.int(hb.next_power_of_two().max(8));
+                let narrow = cx.m.types.int(hb);
                 s.cast(CastOp::Trunc, hi, narrow)
             };
             let st = s.f.add_inst(Op::Store { volatile, atomic: None, value: hi, ptr: p8, align: Some(1) }, None);
