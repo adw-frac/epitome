@@ -11,6 +11,9 @@
 //! and every caller-saved register at each call. Values live across a call
 //! therefore end up in callee-saved registers. Copies give hints, so that a
 //! copy's two sides often share a register and the copy disappears.
+//! Before that, the two sides of a copy whose live ranges never meet are
+//! made one value (coalescing); where the allocation then spills, the one
+//! without coalescing is made too, and the smaller kept.
 //!
 //! When no register is free, a value may take one from values that are
 //! cheaper to spill: those whose uses are sparser over their ranges (their
@@ -88,21 +91,35 @@ pub fn allocate_keeping_scratch(t: &Target, f: &mut MFunc) -> Result<(), String>
 }
 
 fn allocate_as(t: &Target, f: &mut MFunc, try_scratch: bool) -> Result<(), String> {
+    let before = f.clone();
     if try_scratch && !(f.abi.scratch.is_empty() && f.abi.fp_scratch.is_empty()) {
         let kept = f.abi.clone();
         f.abi.scratch.clear();
         f.abi.fp_scratch.clear();
-        if allocate_with(t, f, true)? {
+        if allocate_with(t, f, true, true)? {
             return Ok(());
         }
         f.abi = kept;
     }
-    allocate_with(t, f, false).map(|_| ())
+    let slots = f.slots.len();
+    allocate_with(t, f, false, true)?;
+    // Coalesced values live longer, so where registers ran out, the
+    // allocation without coalescing may do better: the one of fewer
+    // instructions is kept.
+    if f.slots.len() > slots {
+        let mut other = before;
+        allocate_with(t, &mut other, false, false)?;
+        let size = |f: &MFunc| f.blocks.iter().map(|b| b.insts.len()).sum::<usize>();
+        if size(&other) < size(f) {
+            *f = other;
+        }
+    }
+    Ok(())
 }
 
-/// Allocates registers; with `bail` set, gives up (`false`, nothing
-/// changed) instead of spilling.
-fn allocate_with(t: &Target, f: &mut MFunc, bail: bool) -> Result<bool, String> {
+/// Allocates registers, coalescing copies first if `coalescing`; with
+/// `bail` set, gives up (`false`) instead of spilling.
+fn allocate_with(t: &Target, f: &mut MFunc, bail: bool, coalescing: bool) -> Result<bool, String> {
     record_copy_classes(f);
     let m = &t.machine;
     let abi = f.abi.clone();
@@ -117,12 +134,13 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool) -> Result<bool, String> 
             || fp_callee_saved.contains(&r)
     };
     let nv = f.vclass.len();
-    let file_of_v = |v: VReg| m.def(f.vclass[v as usize]).file;
+    let classes = f.vclass.clone();
+    let file_of_v = |v: VReg| m.def(classes[v as usize]).file;
     // A value wider than the registers a function preserves (a vector, of
     // which only the low 64 bits of AArch64's v8-v15 survive a call) cannot
     // be kept in one across a call.
     let too_wide = |v: VReg| {
-        let c = m.def(f.vclass[v as usize]);
+        let c = m.def(classes[v as usize]);
         m.save_class(c.file).is_none_or(|s| c.bits > m.def(s).bits)
     };
     // Positions.
@@ -262,6 +280,10 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool) -> Result<bool, String> 
         for (v, s) in local {
             segs[v as usize].push(s);
         }
+    }
+
+    if coalescing {
+        coalesce(f, &mut segs, &mut hints, &mut occ);
     }
 
     // Linear scan.
@@ -629,6 +651,84 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool) -> Result<bool, String> 
     }
     redundant_copies(t, f);
     lower_copies(t, f).map(|_| true)
+}
+
+/// Coalescing: the two sides of a copy between virtual registers of one
+/// class whose live ranges never meet (the source's last read the copy,
+/// the destination first written there) become one register, so the copy
+/// copies a register to itself and goes, and allocation places one value
+/// where it would have placed two, perhaps apart. Each merge is an
+/// elective change (autochop).
+fn coalesce(f: &mut MFunc, segs: &mut [Vec<Interval>], hints: &mut [Vec<Reg>], occ: &mut [u32]) {
+    let n = segs.len();
+    let mut parent: Vec<VReg> = (0..n as VReg).collect();
+    fn root(parent: &mut [VReg], mut v: VReg) -> VReg {
+        while parent[v as usize] != v {
+            parent[v as usize] = parent[parent[v as usize] as usize];
+            v = parent[v as usize];
+        }
+        v
+    }
+    // Whether two sorted lists of closed intervals meet.
+    let meet = |a: &[Interval], b: &[Interval]| {
+        let (mut i, mut j) = (0, 0);
+        while i < a.len() && j < b.len() {
+            if a[i].1 < b[j].0 {
+                i += 1;
+            } else if b[j].1 < a[i].0 {
+                j += 1;
+            } else {
+                return true;
+            }
+        }
+        false
+    };
+    let name = f.name.clone();
+    let mut merged = false;
+    for b in &f.blocks {
+        for inst in &b.insts {
+            let (Opcode::Copy, [MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(s))]) = (inst.op, &inst.ops[..]) else { continue };
+            let (d, s) = (root(&mut parent, *d), root(&mut parent, *s));
+            if d == s
+                || f.vclass[d as usize] != f.vclass[s as usize]
+                || segs[d as usize].is_empty()
+                || segs[s as usize].is_empty()
+                || meet(&segs[d as usize], &segs[s as usize])
+                || !epitome_ir::chop::allow(|| format!("{name}: coalesce the copy v{d} = v{s}"))
+            {
+                continue;
+            }
+            let mut all = std::mem::take(&mut segs[s as usize]);
+            all.extend(segs[d as usize].iter().copied());
+            all.sort();
+            segs[d as usize] = all;
+            let hs = std::mem::take(&mut hints[s as usize]);
+            hints[d as usize].extend(hs);
+            occ[d as usize] += occ[s as usize];
+            parent[s as usize] = d;
+            merged = true;
+        }
+    }
+    if !merged {
+        return;
+    }
+    let roots: Vec<VReg> = (0..n as VReg).map(|v| root(&mut parent, v)).collect();
+    for b in &mut f.blocks {
+        for inst in &mut b.insts {
+            for op in &mut inst.ops {
+                if let MOp::Reg(Reg::V(v)) = op {
+                    *v = roots[*v as usize];
+                }
+            }
+        }
+    }
+    for h in hints.iter_mut() {
+        for r in h.iter_mut() {
+            if let Reg::V(v) = r {
+                *v = roots[*v as usize];
+            }
+        }
+    }
 }
 
 /// Reloads of a spill slot into a register that already holds it, from an

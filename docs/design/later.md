@@ -152,9 +152,9 @@ these are for after.
   callee's), and its sign is changed through a stack slot and two `eor`s
   (one with `xzr`) where `eor v.16b` with a constant would do.
 - **Register allocation's moves and spills** (`regalloc.rs`): across a
-  sample of crates we make 1.17 times llc's instructions (80,800 against
-  68,885), the most of the excess register moves (16,076 against 11,769)
-  and spill code (loads 7,234 against 4,871, stores 4,622 against 2,674).
+  sample of crates we make 1.16 times llc's instructions (79,899 against
+  68,885), the most of the excess register moves (15,210 against 11,769)
+  and spill code (loads 7,356 against 4,871, stores 4,675 against 2,674).
   The moves left are mostly arguments copied into registers and out again
   when a register an argument arrived in is needed for another, and loop
   phis whose incoming values were allocated elsewhere: linear scan
@@ -166,8 +166,9 @@ these are for after.
   length) for heavier ones; it does not split ranges, so a value of a
   long, sparsely used range is reloaded at every use (rand_chacha's
   four-block refill). Better: coalescing of copies before allocation (or a
-  graph colouring that does it), and range splitting, as LLVM's greedy
-  allocator does.
+  graph colouring that does it; copies whose sides never meet are now
+  coalesced, but none that would need a range split), and range
+  splitting, as LLVM's greedy allocator does.
 - **Frames** (`frame.rs`): every alloca has its own slot for the whole
   function (a serde_json deserializer: 1,088 bytes of slots to llc's 336
   for its whole frame), where slots of allocas whose lifetimes
