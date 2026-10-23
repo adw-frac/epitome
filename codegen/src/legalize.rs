@@ -728,7 +728,9 @@ fn scalar_selects(cx: &mut Ctx, f: &mut Function) {
             }
             let mt = vec_ty(cx, len, i1);
             let poison = Value::Const(cx.m.consts.intern(Constant { ty: mt, kind: ConstKind::Poison }));
-            let zero = cx.int(i32t, 0);
+            // (Lane 0 as an i64, as splats' patterns have it.)
+            let i64t = cx.m.types.int(64);
+            let zero = cx.int(i64t, 0);
             let mut bld = Builder { f, new: Vec::new() };
             let one = bld.op(Op::InsertElement { vector: poison, element: cond, index: zero }, Some(mt));
             let lanes = vec_ty(cx, len, i32t);
@@ -2245,8 +2247,7 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         let (phis, rest): (Vec<InstId>, Vec<InstId>) = insts.into_iter().partition(|&i| f.insts[i.index()].op.is_phi());
         f.blocks[b.index()].insts = phis.into_iter().chain(rest).collect();
     }
-    expand_lanewise(cx, f)?;
-    crate::lanewise::lanewise(cx, f)
+    expand_lanewise(cx, f)
 }
 
 fn call_value(b: &mut Builder, cx: &mut Ctx, callee: Value, args: Vec<Value>, ret: TypeId, _pt: TypeId) -> Value {

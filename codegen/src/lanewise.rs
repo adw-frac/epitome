@@ -1,5 +1,6 @@
 //! Operations on legal vectors that no instruction of the description does,
-//! done a lane at a time, after legalisation (`legalize::legalize_vectors`).
+//! done a lane at a time, after legalisation (`legalize::legalize_vectors`)
+//! and the lanes of masks it leaves (`prepare::mask_lanes`).
 //! It matters where the vector instructions are few (x86's SSE2: no
 //! multiplication of 32-bit lanes, no shifts by vectors, no byte lanes'
 //! inserts); on AArch64 nearly everything has an instruction.
@@ -124,8 +125,11 @@ fn shuffle_selectable(cx: &Ctx, f: &Function, a: Value, mask: ConstId, rty: Type
     use crate::target::Tree;
     let Some(id) = crate::target::mask_lanes(cx.m, mask).and_then(|l| cx.t.find_mask(&l)) else { return false };
     let head = Head::Shuffle(id, head_bits(cx.m, rty));
+    // (A splat's: an insert into poison at lane 0.)
     let from_insert = matches!(a, Value::Local(x)
-        if matches!(f.locals[x.index()].def, LocalDef::Inst(d) if matches!(f.insts[d.index()].op, Op::InsertElement { .. })));
+        if matches!(f.locals[x.index()].def, LocalDef::Inst(d)
+            if matches!(f.insts[d.index()].op, Op::InsertElement { vector: Value::Const(c), index, .. }
+                if matches!(cx.m.constant(c).kind, ConstKind::Poison | ConstKind::Undef) && cx.const_int(index) == Some(0))));
     cx.t.patterns.iter().any(|p| match &p.tree {
         Tree::Op(h, kids) if *h == head => match kids.first() {
             Some(Tree::Leaf(_)) => true,
@@ -265,6 +269,8 @@ pub fn lanewise(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     if cx.vector_bits() == 0 || !cx.selects_intrinsic("llvm.epitome.mask.bits.v4i32") {
         return Ok(());
     }
+    // (Lane numbers legalisation made as i32s, as i64s.)
+    crate::prepare::lane_indices(cx, f);
     let mut lanes = Lanes { slots: Vec::new() };
     let blocks: Vec<BlockId> = f.layout.clone();
     // Operations first, then the inserts and extracts left.

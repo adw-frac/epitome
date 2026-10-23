@@ -1,7 +1,9 @@
 //! Hand-written IR for what crates' code showed us we did wrong or not at
 //! all: each `tests/ir/NAME.ll`, built by us and by clang, linked with
 //! `NAME.main.c` (built by clang) and run on this machine; the two must
-//! print the same. On an AArch64 Mac with clang only.
+//! print the same. On an AArch64 Mac with clang, or on x86-64 Linux (with
+//! its triple and data layout, leaving out what calls AArch64's
+//! intrinsics).
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -10,7 +12,8 @@ use epitome_codegen::target::Target;
 use epitome_codegen::{Options, compile};
 
 fn output(obj: &std::path::Path, main: &std::path::Path, exe: &std::path::Path) -> Result<String, String> {
-    let st = Command::new("clang").arg(obj).arg(main).arg("-o").arg(exe).status().map_err(|e| e.to_string())?;
+    let st =
+        Command::new("clang").arg(obj).arg(main).arg("-lm").arg("-o").arg(exe).status().map_err(|e| e.to_string())?;
     if !st.success() {
         return Err(format!("linking {} failed", exe.display()));
     }
@@ -23,17 +26,17 @@ fn output(obj: &std::path::Path, main: &std::path::Path, exe: &std::path::Path) 
 
 #[test]
 fn ir_behaves_as_clangs_build() {
-    let ok = cfg!(target_arch = "aarch64")
-        && cfg!(target_os = "macos")
+    let x86 = cfg!(target_arch = "x86_64") && cfg!(target_os = "linux");
+    let ok = (cfg!(target_arch = "aarch64") && cfg!(target_os = "macos") || x86)
         && Command::new("clang").arg("--version").output().is_ok_and(|o| o.status.success());
     if !ok {
-        eprintln!("needs clang on an AArch64 Mac; skipping");
+        eprintln!("needs clang on an AArch64 Mac or x86-64 Linux; skipping");
         return;
     }
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ir");
     let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("ir");
     std::fs::create_dir_all(&tmp).unwrap();
-    let t = Target::aarch64();
+    let t = if x86 { Target::x86_64() } else { Target::aarch64() };
     let mut names: Vec<String> = std::fs::read_dir(&dir)
         .unwrap()
         .filter_map(|e| e.ok()?.file_name().to_str()?.strip_suffix(".ll").map(str::to_string))
@@ -43,6 +46,28 @@ fn ir_behaves_as_clangs_build() {
     for name in &names {
         let ll = dir.join(format!("{name}.ll"));
         let main = dir.join(format!("{name}.main.c"));
+        let mut ll = ll;
+        if x86 {
+            // This machine's triple and layout; not AArch64's intrinsics.
+            let text = std::fs::read_to_string(&ll).unwrap();
+            // (Nor number_minmax: of two NaNs, clang's x86 build returns a
+            // signalling one as it is, where LLVM's reference says a quiet
+            // one, as ours does.)
+            if text.contains("@llvm.aarch64.") || name == "number_minmax" {
+                continue;
+            }
+            let text: String = text
+                .lines()
+                .map(|l| match l {
+                    l if l.starts_with("target triple") => "target triple = \"x86_64-unknown-linux-gnu\"".to_string(),
+                    l if l.starts_with("target datalayout") => String::new(),
+                    l => l.to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            ll = tmp.join(format!("{name}.x86.ll"));
+            std::fs::write(&ll, text).unwrap();
+        }
         let run = || -> Result<(), String> {
             let src = std::fs::read_to_string(&ll).map_err(|e| e.to_string())?;
             let mut m = epitome_ir::parse_module(&src).map_err(|e| format!("{e:?}"))?;

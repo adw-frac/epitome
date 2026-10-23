@@ -191,6 +191,8 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     // Lanes of masks legalisation leaves (it handles those of split masks,
     // at their comparisons' widths; before it, this would get in its way).
     mask_lanes(cx, &mut f);
+    // What no instruction does, a lane at a time (after the masks' lanes).
+    crate::lanewise::lanewise(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     // Element-wise intrinsics split into scalars expand as scalars do.
     expand_intrinsics(cx, &mut f);
     constant_branches(cx, &mut f);
@@ -468,7 +470,7 @@ fn addresses_as_ints(f: &mut Function) {
 /// `llvm.minimumnum` and `llvm.maximumnum` (Rust's `f32::min`), which
 /// take a number over any NaN, as `llvm.minnum` and `llvm.maxnum` of the
 /// operands each made quiet by its minnum with itself (fminnm gives NaN
-/// for a signalling NaN).
+/// for a signalling NaN), where the machine has minnum.
 fn number_min_max(cx: &mut Ctx, f: &mut Function) {
     for b in f.layout.clone() {
         let mut k = 0;
@@ -482,6 +484,12 @@ fn number_min_max(cx: &mut Ctx, f: &mut Function) {
                         "maximumnum" => "maxnum",
                         _ => return None,
                     };
+                    // (Where minnum is an instruction that orders -0 below
+                    // +0, AArch64's fminnm; elsewhere the C library's
+                    // fminimum_num is.)
+                    if !cx.selects_intrinsic("llvm.minnum.f32") {
+                        return None;
+                    }
                     let args: Vec<Value> = call.args.iter().map(|a| a.value).collect();
                     Some((format!("llvm.{to}.{suffix}"), format!("llvm.minnum.{suffix}"), args))
                 }),
@@ -5295,7 +5303,7 @@ pub(crate) fn bool_vector_casts(cx: &mut Ctx, f: &mut Function) {
 /// Constant lane indices as `i64`, whatever type they were written with
 /// (rustc writes `i32 0`): the description's patterns name them so, and a
 /// lane's number does not depend on its type.
-fn lane_indices(cx: &mut Ctx, f: &mut Function) {
+pub(crate) fn lane_indices(cx: &mut Ctx, f: &mut Function) {
     let i64t = cx.m.types.int(64);
     for b in f.layout.clone() {
         for k in 0..f.blocks[b.index()].insts.len() {
@@ -5519,17 +5527,20 @@ fn legalize_fp(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         replace = Some(s.cast(CastOp::Trunc, w, to_ty));
                     }
                 }
+                // (Of scalars: vectors' are legalisation's, and x86's cmppd
+                // has oeq and une.)
                 Op::FCmp { pred, lhs, rhs, fmf }
-                    if matches!(pred, FCmpPred::True | FCmpPred::False)
-                        || cx.t.machine.fcmp_split.iter().any(|p| {
-                            matches!(
-                                (p.as_str(), pred),
-                                ("one", FCmpPred::One)
-                                    | ("ueq", FCmpPred::Ueq)
-                                    | ("oeq", FCmpPred::Oeq)
-                                    | ("une", FCmpPred::Une)
-                            )
-                        }) =>
+                    if !matches!(cx.m.types.get(cx.value_ty(s.f, lhs)), Type::Vector { .. })
+                        && (matches!(pred, FCmpPred::True | FCmpPred::False)
+                            || cx.t.machine.fcmp_split.iter().any(|p| {
+                                matches!(
+                                    (p.as_str(), pred),
+                                    ("one", FCmpPred::One)
+                                        | ("ueq", FCmpPred::Ueq)
+                                        | ("oeq", FCmpPred::Oeq)
+                                        | ("une", FCmpPred::Une)
+                                )
+                            })) =>
                 {
                     replace = Some(match pred {
                         FCmpPred::True => cx.int(i1, 1),
