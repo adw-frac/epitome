@@ -52,6 +52,16 @@ const FUNCS: &str = r#""builtin.module"() ({
     }) : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
     return %r : tensor<8x16xf32>
   }) : () -> ()
+  "func.func"() <{function_type = (tensor<8x16xf32>) -> tensor<8x16xf32>, sym_name = "tanhs"}> ({
+  ^bb0(%x: tensor<8x16xf32>):
+    %e = "tensor.empty"() : () -> tensor<8x16xf32>
+    %r = "linalg.generic"(%x, %e) <{indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0, d1)>], iterator_types = [#linalg.iterator_type<parallel>, #linalg.iterator_type<parallel>], operandSegmentSizes = array<i32: 1, 1>}> ({
+    ^bb0(%a: f32, %b: f32):
+      %s = "math.tanh"(%a) <{fastmath = #arith.fastmath<none>}> : (f32) -> f32
+      linalg.yield %s : f32
+    }) : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
+    return %r : tensor<8x16xf32>
+  }) : () -> ()
   "func.func"() <{function_type = (tensor<8x16xf32>, tensor<8x1xf32>) -> tensor<8x16xf32>, sym_name = "scaled"}> ({
   ^bb0(%x: tensor<8x16xf32>, %y: tensor<8x1xf32>):
     %e = "tensor.empty"() : () -> tensor<8x16xf32>
@@ -70,6 +80,7 @@ unsafe extern "C" {
     fn sums(x: *const f32, r: *mut f32);
     fn maxes(x: *const f32, r: *mut f32);
     fn exps(x: *const f32, r: *mut f32);
+    fn tanhs(x: *const f32, r: *mut f32);
     fn scaled(x: *const f32, y: *const f32, r: *mut f32);
 }
 fn check(what: &str, got: &[f32], want: &[f32], tolerance: f32) {
@@ -93,6 +104,13 @@ fn main() {
     unsafe { exps(x.as_ptr(), r.as_mut_ptr()) };
     let want: Vec<f32> = x.iter().map(|v| v.exp()).collect();
     check("exps", &r, &want, 3e-7);
+    // tanh, and of values 16 times smaller, which its series does.
+    for scale in [1.0f32, 1.0 / 16.0] {
+        let xs: Vec<f32> = x.iter().map(|v| v * scale).collect();
+        unsafe { tanhs(xs.as_ptr(), r.as_mut_ptr()) };
+        let want: Vec<f32> = xs.iter().map(|v| v.tanh()).collect();
+        check("tanhs", &r, &want, 5e-7);
+    }
     unsafe { scaled(x.as_ptr(), y.as_ptr(), r.as_mut_ptr()) };
     let want: Vec<f32> = (0..128).map(|i| x[i] * y[i / 16]).collect();
     check("scaled", &r, &want, 0.0);
@@ -121,28 +139,31 @@ fn vectorized_elementwise_and_reductions() {
             assert!(text.contains("kind = #vector.kind<maximumf>"), "{text}");
         }
         if pass == "math-polynomial-approximation" {
-            assert!(!text.contains("math.exp"), "{text}");
+            assert!(!text.contains("math.exp") && !text.contains("math.tanh"), "{text}");
         }
     }
     let mut ir = epitome_mlir::translate::translate(&m).unwrap();
     ir.triple = Some(b"arm64-apple-macosx14.0.0".to_vec());
     epitome_opt::pipeline::run(&mut ir, &epitome_opt::pipeline::Options::default());
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("vectorize");
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::write(tmp.join("funcs.ll"), ir.to_string()).unwrap();
     let t = Target::aarch64();
     let compiled = compile(&t, &mut ir, &Options::default()).unwrap();
     for word in ["fadd v", "fmax v", "fmul v"] {
         assert!(compiled.asm.contains(word), "no {word} in:\n{}", compiled.asm);
     }
-    assert!(!compiled.asm.contains("expf"), "a call to expf:\n{}", compiled.asm);
+    assert!(!compiled.asm.contains("expf") && !compiled.asm.contains("tanhf"), "a call to libm:\n{}", compiled.asm);
 
     let rustc = Command::new("rustc").arg("--version").output().is_ok_and(|o| o.status.success());
     if !(cfg!(target_arch = "aarch64") && cfg!(target_os = "macos")) || !rustc {
         eprintln!("needs an AArch64 Mac, and rustc, to run; skipping that");
         return;
     }
-    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("vectorize");
-    std::fs::create_dir_all(&tmp).unwrap();
     let obj = tmp.join("funcs.o");
     std::fs::write(&obj, compiled.object_file(&t).unwrap()).unwrap();
+    // (And the assembly, to read when it fails.)
+    std::fs::write(tmp.join("funcs.s"), &compiled.asm).unwrap();
     std::fs::write(tmp.join("main.rs"), DRIVER).unwrap();
     let exe = tmp.join("funcs");
     let built = Command::new("rustc")

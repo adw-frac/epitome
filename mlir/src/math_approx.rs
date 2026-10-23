@@ -10,6 +10,13 @@
 //! leaves k in the low bits of the sum. x is clamped first, to where 2^k
 //! is a normal float: e^x underflows to about 1.2e-38 rather than 0 below
 //! -87.3, and stops at about 1.7e38 above 88.
+//!
+//! `math.tanh` of `f32` likewise: for |x| below 1/4, the odd Taylor series
+//! to x^9 (the next term is under a hundredth of an ulp there); above, 1 -
+//! 2 / (e^2|x| + 1), with e^2|x| as above, which loses no more than a few
+//! ulps to the subtraction at 1/4 and none further out; |x| stops at 9,
+//! where tanh is 1 to within half an ulp. The sign is x's, so tanh(-0) is
+//! -0, and a NaN stays one.
 
 use std::collections::HashMap;
 
@@ -40,6 +47,15 @@ fn copy(
     {
         let x = *map.get(&o.operands[0]).ok_or("an operand from outside")?;
         let r = Expand { out, block, ty: src.value_type(o.results[0]) }.exp(x);
+        map.insert(o.results[0], r);
+        return Ok(());
+    }
+    if src.op_name(op) == "math.tanh"
+        && let Some(block) = block
+        && f32_lanes(src, src.value_type(o.results[0])).is_some()
+    {
+        let x = *map.get(&o.operands[0]).ok_or("an operand from outside")?;
+        let r = Expand { out, block, ty: src.value_type(o.results[0]) }.tanh(x);
         map.insert(o.results[0], r);
         return Ok(());
     }
@@ -170,6 +186,71 @@ impl Expand<'_> {
 
     fn f(&mut self, name: &str, a: ValueId, b: ValueId) -> ValueId {
         self.op(name, &[a, b], self.ty)
+    }
+
+    /// The boolean type of the same shape: `i1` or `vector<N x i1>`.
+    fn bool_ty(&mut self) -> TypeId {
+        let i1 = self.out.int_type(1);
+        match self.out.ty(self.ty).clone() {
+            Type::Vector { dims, .. } => self.out.intern_type(Type::Vector { dims, elem: i1 }),
+            _ => i1,
+        }
+    }
+
+    /// `a < b`, ordered (false if either is a NaN).
+    fn less(&mut self, a: ValueId, b: ValueId) -> ValueId {
+        let bty = self.bool_ty();
+        let fm = self.out.dialect_attr("arith.fastmath", Some("<none>"));
+        let i64t = self.out.int_type(64);
+        let olt = self.out.int_attr(4, i64t);
+        let o = OpSpec::new("arith.cmpf")
+            .operands(&[a, b])
+            .results(&[bty])
+            .prop("fastmath", fm)
+            .prop("predicate", olt)
+            .build(self.out, Some(self.block));
+        self.out.result(o)
+    }
+
+    fn select(&mut self, c: ValueId, a: ValueId, b: ValueId) -> ValueId {
+        self.op("arith.select", &[c, a, b], self.ty)
+    }
+
+    fn tanh(&mut self, x: ValueId) -> ValueId {
+        let ity = self.int_ty();
+        let a = self.op("math.absf", &[x], self.ty);
+        // |x| at most 9; a NaN is not more than 9, and stays.
+        let nine = self.float(9.0);
+        let over = self.less(nine, a);
+        let a = self.select(over, nine, a);
+        // 1 - 2 / (e^2a + 1).
+        let a2 = self.f("arith.addf", a, a);
+        let e = self.exp(a2);
+        let one = self.float(1.0);
+        let e1 = self.f("arith.addf", e, one);
+        let two = self.float(2.0);
+        let q = self.f("arith.divf", two, e1);
+        let far = self.f("arith.subf", one, q);
+        // a - a^3/3 + 2a^5/15 - 17a^7/315 + 62a^9/2835.
+        let s = self.f("arith.mulf", a, a);
+        let coeffs = [62.0 / 2835.0, -17.0 / 315.0, 2.0 / 15.0, -1.0 / 3.0];
+        let mut p = self.float(coeffs[0]);
+        for &c in &coeffs[1..] {
+            let c = self.float(c);
+            p = self.fma(p, s, c);
+        }
+        let p = self.f("arith.mulf", p, s);
+        let near = self.fma(a, p, a);
+        let quarter = self.float(0.25);
+        let small = self.less(a, quarter);
+        let t = self.select(small, near, far);
+        // x's sign.
+        let tb = self.op("arith.bitcast", &[t], ity);
+        let xb = self.op("arith.bitcast", &[x], ity);
+        let sign = self.constant(ity, (i32::MIN).to_string());
+        let xs = self.op("arith.andi", &[xb, sign], ity);
+        let r = self.op("arith.ori", &[tb, xs], ity);
+        self.op("arith.bitcast", &[r], self.ty)
     }
 
     fn exp(&mut self, x: ValueId) -> ValueId {

@@ -6068,6 +6068,101 @@ define <4 x double> @vsplat.4xf64.expand(double %x) {
   ret <4 x double> %r
 }
 
+define <16 x float> @VLDZ.16xf32(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="evexm(d, n, 4, 1, 0, 0, 2, 0, 0, 0, 0) | 00010000 | rm(d, n, 4, 1, off, 0, 64)" "asm"="vmovups {off}({n}), {d}" "dclass"="zv" "feature"="avx512f" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <16 x float>, ptr %a
+  ret <16 x float> %r
+}
+
+define void @VSTZ.16xf32(<16 x float> "reg"="zv" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="evexm(t, n, 4, 1, 0, 0, 2, 0, 0, 0, 0) | 00010001 | rm(t, n, 4, 1, off, 0, 64)" "asm"="vmovups {t}, {off}({n})" "feature"="avx512f" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <16 x float> %t, ptr %a
+  ret void
+}
+
+define <16 x i32> @VLDZ.16xi32(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="evexm(d, n, 4, 1, 0, 0, 2, 0, 0, 0, 0) | 00010000 | rm(d, n, 4, 1, off, 0, 64)" "asm"="vmovups {off}({n}), {d}" "dclass"="zv" "role"="load.zv" "feature"="avx512f" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <16 x i32>, ptr %a
+  ret <16 x i32> %r
+}
+
+define void @VSTZ.16xi32(<16 x i32> "reg"="zv" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="evexm(t, n, 4, 1, 0, 0, 2, 0, 0, 0, 0) | 00010001 | rm(t, n, 4, 1, off, 0, 64)" "asm"="vmovups {t}, {off}({n})" "role"="store.zv" "feature"="avx512f" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <16 x i32> %t, ptr %a
+  ret void
+}
+
+define <16 x i32> @VMOVAPSzv(<16 x i32> "reg"="zv" %n) "enc"="{ evexr(d, n, 1, 0, 0, 2, 0, 0, 0, 0) | 00101000 | 11 reg:3=d&7 rm:3=n&7 ; evexr(n, d, 1, 0, 0, 2, 0, 0, 0, 0) | 00101001 | 11 reg:3=n&7 rm:3=d&7 }" "asm"="vmovaps {n}, {d}" "copy"="zv" "dclass"="zv" "feature"="avx512f" "nodecode" {
+  ret <16 x i32> %n
+}
+
+define <16 x float> @VPXORDzero.16xf32() "enc"="evexr(d, d, 1, 0, d, 2, 1, 0, 0, 0) | 11101111 | 11 reg:3=d&7 rm:3=d&7" "asm"="vpxord {d}, {d}, {d}" "dclass"="zv" "feature"="avx512f" "nodecode" {
+  ret <16 x float> zeroinitializer
+}
+
+define <16 x i32> @VPXORDzero.16xi32() "enc"="evexr(d, d, 1, 0, d, 2, 1, 0, 0, 0) | 11101111 | 11 reg:3=d&7 rm:3=d&7" "asm"="vpxord {d}, {d}, {d}" "dclass"="zv" "role"="movi.zero.zv" "feature"="avx512f" "nodecode" {
+  ret <16 x i32> zeroinitializer
+}
+
+define <16 x i32> @VPBROADCASTDm.16xi32(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="evexm(d, n, 4, 2, 0, 0, 2, 1, 0, 0, 0) | 01011000 | rm(d, n, 4, 1, off, 0, 4)" "asm"="vpbroadcastd {off}({n}), {d}" "dclass"="zv" "feature"="avx512f" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %x = load i32, ptr %a
+  %i = insertelement <16 x i32> poison, i32 %x, i64 0
+  %r = shufflevector <16 x i32> %i, <16 x i32> poison, <16 x i32> zeroinitializer
+  ret <16 x i32> %r
+}
+
+define <16 x float> @VBROADCASTSSm.16xf32(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="evexm(d, n, 4, 2, 0, 0, 2, 1, 0, 0, 0) | 00011000 | rm(d, n, 4, 1, off, 0, 4)" "asm"="vbroadcastss {off}({n}), {d}" "dclass"="zv" "feature"="avx512f" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %x = load float, ptr %a
+  %i = insertelement <16 x float> poison, float %x, i64 0
+  %r = shufflevector <16 x float> %i, <16 x float> poison, <16 x i32> zeroinitializer
+  ret <16 x float> %r
+}
+
+define <16 x float> @VADDPS.16xf32(<16 x float> "reg"="zv" %n, <16 x float> "reg"="zv" %m) "enc"="evexr(d, m, 1, 0, n, 2, 0, 0, 0, 0) | 01011000 | 11 reg:3=d&7 rm:3=m&7" "asm"="vaddps {m}, {n}, {d}" "dclass"="zv" "feature"="avx512f" "nodecode" {
+  %r = fadd <16 x float> %n, %m
+  ret <16 x float> %r
+}
+
+define <16 x float> @VSUBPS.16xf32(<16 x float> "reg"="zv" %n, <16 x float> "reg"="zv" %m) "enc"="evexr(d, m, 1, 0, n, 2, 0, 0, 0, 0) | 01011100 | 11 reg:3=d&7 rm:3=m&7" "asm"="vsubps {m}, {n}, {d}" "dclass"="zv" "feature"="avx512f" "nodecode" {
+  %r = fsub <16 x float> %n, %m
+  ret <16 x float> %r
+}
+
+define <16 x float> @VMULPS.16xf32(<16 x float> "reg"="zv" %n, <16 x float> "reg"="zv" %m) "enc"="evexr(d, m, 1, 0, n, 2, 0, 0, 0, 0) | 01011001 | 11 reg:3=d&7 rm:3=m&7" "asm"="vmulps {m}, {n}, {d}" "dclass"="zv" "feature"="avx512f" "nodecode" {
+  %r = fmul <16 x float> %n, %m
+  ret <16 x float> %r
+}
+
+define <16 x float> @VFMADD231PS.fma.16xf32(<16 x float> "reg"="zv" %n, <16 x float> "reg"="zv" %m, <16 x float> "reg"="zv" "tied" %acc) "enc"="evexr(d, m, 2, 0, n, 2, 1, 0, 0, 0) | 10111000 | 11 reg:3=d&7 rm:3=m&7" "asm"="vfmadd231ps {m}, {n}, {d}" "dclass"="zv" "feature"="avx512f" "nodecode" {
+  %r = call <16 x float> @llvm.fma.v16f32(<16 x float> %n, <16 x float> %m, <16 x float> %acc)
+  ret <16 x float> %r
+}
+
+declare <16 x float> @llvm.fma.v16f32(<16 x float>, <16 x float>, <16 x float>)
+
+define <16 x float> @VFMADD231PS.fmuladd.16xf32(<16 x float> "reg"="zv" %n, <16 x float> "reg"="zv" %m, <16 x float> "reg"="zv" "tied" %acc) "enc"="evexr(d, m, 2, 0, n, 2, 1, 0, 0, 0) | 10111000 | 11 reg:3=d&7 rm:3=m&7" "asm"="vfmadd231ps {m}, {n}, {d}" "dclass"="zv" "feature"="avx512f" "nodecode" {
+  %r = call <16 x float> @llvm.fmuladd.v16f32(<16 x float> %n, <16 x float> %m, <16 x float> %acc)
+  ret <16 x float> %r
+}
+
+declare <16 x float> @llvm.fmuladd.v16f32(<16 x float>, <16 x float>, <16 x float>)
+
+define <8 x i32> @VCVTNEPS2BF16.16xf32(<16 x float> "reg"="zv" %n) "enc"="evexr(d, n, 2, 0, 0, 2, 2, 0, 0, 0) | 01110010 | 11 reg:3=d&7 rm:3=n&7" "asm"="vcvtneps2bf16 {n}, {d}" "dclass"="yv" "feature"="avx512f,avx512bf16" "nodecode" {
+  %r = call <8 x i32> @llvm.epitome.x86.cvtneps2bf16.512(<16 x float> %n)
+  ret <8 x i32> %r
+}
+
+declare <8 x i32> @llvm.epitome.x86.cvtneps2bf16.512(<16 x float>)
+
+define <16 x float> @VDPBF16PS.16xf32(<16 x float> "reg"="zv" "tied" %acc, <16 x i32> "reg"="zv" %n, <16 x i32> "reg"="zv" %m) "enc"="evexr(d, m, 2, 0, n, 2, 2, 0, 0, 0) | 01010010 | 11 reg:3=d&7 rm:3=m&7" "asm"="vdpbf16ps {m}, {n}, {d}" "dclass"="zv" "feature"="avx512f,avx512bf16" "nodecode" {
+  %r = call <16 x float> @llvm.epitome.x86.dpbf16ps.512(<16 x float> %acc, <16 x i32> %n, <16 x i32> %m)
+  ret <16 x float> %r
+}
+
+declare <16 x float> @llvm.epitome.x86.dpbf16ps.512(<16 x float>, <16 x i32>, <16 x i32>)
+
 declare i32 @llvm.vector.reduce.add.v4i32(<4 x i32>)
 
 define i32 @reduce.add.4xi32(<4 x i32> "reg"="xv" %v) "recipe"="reduce.add.4xi32.expand" {
@@ -6737,6 +6832,254 @@ define <2 x i32> @abs.true.2xi32.expand(<2 x i32> %x) {
   %r = call <2 x i32> @PSUBD.2xi32(<2 x i32> %y, <2 x i32> %s)
   ret <2 x i32> %r
 }
+
+define <4 x float> @maximum.4xf32(<4 x float> "reg"="xv" %a, <4 x float> "reg"="xv" %b) "recipe"="maximum.4xf32.expand" {
+  %r = call <4 x float> @llvm.maximum.v4f32(<4 x float> %a, <4 x float> %b)
+  ret <4 x float> %r
+}
+
+define <4 x float> @maximum.4xf32.expand(<4 x float> %a, <4 x float> %b) {
+  %w = call <4 x i1> @CMPOLTPS.4xf32(<4 x float> %b, <4 x float> %a)
+  %xc = bitcast <4 x i1> %w to <2 x i64>
+  %xa = bitcast <4 x float> %a to <2 x i64>
+  %xb = bitcast <4 x float> %b to <2 x i64>
+  %xx = call <2 x i64> @PAND.2xi64(<2 x i64> %xc, <2 x i64> %xa)
+  %xy = call <2 x i64> @PANDN.xv(<2 x i64> %xc, <2 x i64> %xb)
+  %xi = call <2 x i64> @POR.2xi64(<2 x i64> %xx, <2 x i64> %xy)
+  %x = bitcast <2 x i64> %xi to <4 x float>
+  %e = call <4 x i1> @CMPOEQPS.4xf32(<4 x float> %a, <4 x float> %b)
+  %ai = bitcast <4 x float> %a to <2 x i64>
+  %bi = bitcast <4 x float> %b to <2 x i64>
+  %ci = call <2 x i64> @PAND.2xi64(<2 x i64> %ai, <2 x i64> %bi)
+  %c = bitcast <2 x i64> %ci to <4 x float>
+  %yc = bitcast <4 x i1> %e to <2 x i64>
+  %ya = bitcast <4 x float> %c to <2 x i64>
+  %yb = bitcast <4 x float> %x to <2 x i64>
+  %yx = call <2 x i64> @PAND.2xi64(<2 x i64> %yc, <2 x i64> %ya)
+  %yy = call <2 x i64> @PANDN.xv(<2 x i64> %yc, <2 x i64> %yb)
+  %yi = call <2 x i64> @POR.2xi64(<2 x i64> %yx, <2 x i64> %yy)
+  %y = bitcast <2 x i64> %yi to <4 x float>
+  %u = call <4 x i1> @CMPUNOPS.4xf32(<4 x float> %a, <4 x float> %b)
+  %nan = call <4 x float> @FADDPS.4xf32(<4 x float> %a, <4 x float> %b)
+  %rc = bitcast <4 x i1> %u to <2 x i64>
+  %ra = bitcast <4 x float> %nan to <2 x i64>
+  %rb = bitcast <4 x float> %y to <2 x i64>
+  %rx = call <2 x i64> @PAND.2xi64(<2 x i64> %rc, <2 x i64> %ra)
+  %ry = call <2 x i64> @PANDN.xv(<2 x i64> %rc, <2 x i64> %rb)
+  %ri = call <2 x i64> @POR.2xi64(<2 x i64> %rx, <2 x i64> %ry)
+  %r = bitcast <2 x i64> %ri to <4 x float>
+  ret <4 x float> %r
+}
+
+declare <4 x float> @llvm.maximum.v4f32(<4 x float>, <4 x float>)
+
+define <4 x float> @minimum.4xf32(<4 x float> "reg"="xv" %a, <4 x float> "reg"="xv" %b) "recipe"="minimum.4xf32.expand" {
+  %r = call <4 x float> @llvm.minimum.v4f32(<4 x float> %a, <4 x float> %b)
+  ret <4 x float> %r
+}
+
+define <4 x float> @minimum.4xf32.expand(<4 x float> %a, <4 x float> %b) {
+  %w = call <4 x i1> @CMPOLTPS.4xf32(<4 x float> %a, <4 x float> %b)
+  %xc = bitcast <4 x i1> %w to <2 x i64>
+  %xa = bitcast <4 x float> %a to <2 x i64>
+  %xb = bitcast <4 x float> %b to <2 x i64>
+  %xx = call <2 x i64> @PAND.2xi64(<2 x i64> %xc, <2 x i64> %xa)
+  %xy = call <2 x i64> @PANDN.xv(<2 x i64> %xc, <2 x i64> %xb)
+  %xi = call <2 x i64> @POR.2xi64(<2 x i64> %xx, <2 x i64> %xy)
+  %x = bitcast <2 x i64> %xi to <4 x float>
+  %e = call <4 x i1> @CMPOEQPS.4xf32(<4 x float> %a, <4 x float> %b)
+  %ai = bitcast <4 x float> %a to <2 x i64>
+  %bi = bitcast <4 x float> %b to <2 x i64>
+  %ci = call <2 x i64> @POR.2xi64(<2 x i64> %ai, <2 x i64> %bi)
+  %c = bitcast <2 x i64> %ci to <4 x float>
+  %yc = bitcast <4 x i1> %e to <2 x i64>
+  %ya = bitcast <4 x float> %c to <2 x i64>
+  %yb = bitcast <4 x float> %x to <2 x i64>
+  %yx = call <2 x i64> @PAND.2xi64(<2 x i64> %yc, <2 x i64> %ya)
+  %yy = call <2 x i64> @PANDN.xv(<2 x i64> %yc, <2 x i64> %yb)
+  %yi = call <2 x i64> @POR.2xi64(<2 x i64> %yx, <2 x i64> %yy)
+  %y = bitcast <2 x i64> %yi to <4 x float>
+  %u = call <4 x i1> @CMPUNOPS.4xf32(<4 x float> %a, <4 x float> %b)
+  %nan = call <4 x float> @FADDPS.4xf32(<4 x float> %a, <4 x float> %b)
+  %rc = bitcast <4 x i1> %u to <2 x i64>
+  %ra = bitcast <4 x float> %nan to <2 x i64>
+  %rb = bitcast <4 x float> %y to <2 x i64>
+  %rx = call <2 x i64> @PAND.2xi64(<2 x i64> %rc, <2 x i64> %ra)
+  %ry = call <2 x i64> @PANDN.xv(<2 x i64> %rc, <2 x i64> %rb)
+  %ri = call <2 x i64> @POR.2xi64(<2 x i64> %rx, <2 x i64> %ry)
+  %r = bitcast <2 x i64> %ri to <4 x float>
+  ret <4 x float> %r
+}
+
+declare <4 x float> @llvm.minimum.v4f32(<4 x float>, <4 x float>)
+
+define <2 x double> @maximum.2xf64(<2 x double> "reg"="xv" %a, <2 x double> "reg"="xv" %b) "recipe"="maximum.2xf64.expand" {
+  %r = call <2 x double> @llvm.maximum.v2f64(<2 x double> %a, <2 x double> %b)
+  ret <2 x double> %r
+}
+
+define <2 x double> @maximum.2xf64.expand(<2 x double> %a, <2 x double> %b) {
+  %w = call <2 x i1> @CMPOLTPD.2xf64(<2 x double> %b, <2 x double> %a)
+  %xc = bitcast <2 x i1> %w to <2 x i64>
+  %xa = bitcast <2 x double> %a to <2 x i64>
+  %xb = bitcast <2 x double> %b to <2 x i64>
+  %xx = call <2 x i64> @PAND.2xi64(<2 x i64> %xc, <2 x i64> %xa)
+  %xy = call <2 x i64> @PANDN.xv(<2 x i64> %xc, <2 x i64> %xb)
+  %xi = call <2 x i64> @POR.2xi64(<2 x i64> %xx, <2 x i64> %xy)
+  %x = bitcast <2 x i64> %xi to <2 x double>
+  %e = call <2 x i1> @CMPOEQPD.2xf64(<2 x double> %a, <2 x double> %b)
+  %ai = bitcast <2 x double> %a to <2 x i64>
+  %bi = bitcast <2 x double> %b to <2 x i64>
+  %ci = call <2 x i64> @PAND.2xi64(<2 x i64> %ai, <2 x i64> %bi)
+  %c = bitcast <2 x i64> %ci to <2 x double>
+  %yc = bitcast <2 x i1> %e to <2 x i64>
+  %ya = bitcast <2 x double> %c to <2 x i64>
+  %yb = bitcast <2 x double> %x to <2 x i64>
+  %yx = call <2 x i64> @PAND.2xi64(<2 x i64> %yc, <2 x i64> %ya)
+  %yy = call <2 x i64> @PANDN.xv(<2 x i64> %yc, <2 x i64> %yb)
+  %yi = call <2 x i64> @POR.2xi64(<2 x i64> %yx, <2 x i64> %yy)
+  %y = bitcast <2 x i64> %yi to <2 x double>
+  %u = call <2 x i1> @CMPUNOPD.2xf64(<2 x double> %a, <2 x double> %b)
+  %nan = call <2 x double> @FADDPD.2xf64(<2 x double> %a, <2 x double> %b)
+  %rc = bitcast <2 x i1> %u to <2 x i64>
+  %ra = bitcast <2 x double> %nan to <2 x i64>
+  %rb = bitcast <2 x double> %y to <2 x i64>
+  %rx = call <2 x i64> @PAND.2xi64(<2 x i64> %rc, <2 x i64> %ra)
+  %ry = call <2 x i64> @PANDN.xv(<2 x i64> %rc, <2 x i64> %rb)
+  %ri = call <2 x i64> @POR.2xi64(<2 x i64> %rx, <2 x i64> %ry)
+  %r = bitcast <2 x i64> %ri to <2 x double>
+  ret <2 x double> %r
+}
+
+declare <2 x double> @llvm.maximum.v2f64(<2 x double>, <2 x double>)
+
+define <2 x double> @minimum.2xf64(<2 x double> "reg"="xv" %a, <2 x double> "reg"="xv" %b) "recipe"="minimum.2xf64.expand" {
+  %r = call <2 x double> @llvm.minimum.v2f64(<2 x double> %a, <2 x double> %b)
+  ret <2 x double> %r
+}
+
+define <2 x double> @minimum.2xf64.expand(<2 x double> %a, <2 x double> %b) {
+  %w = call <2 x i1> @CMPOLTPD.2xf64(<2 x double> %a, <2 x double> %b)
+  %xc = bitcast <2 x i1> %w to <2 x i64>
+  %xa = bitcast <2 x double> %a to <2 x i64>
+  %xb = bitcast <2 x double> %b to <2 x i64>
+  %xx = call <2 x i64> @PAND.2xi64(<2 x i64> %xc, <2 x i64> %xa)
+  %xy = call <2 x i64> @PANDN.xv(<2 x i64> %xc, <2 x i64> %xb)
+  %xi = call <2 x i64> @POR.2xi64(<2 x i64> %xx, <2 x i64> %xy)
+  %x = bitcast <2 x i64> %xi to <2 x double>
+  %e = call <2 x i1> @CMPOEQPD.2xf64(<2 x double> %a, <2 x double> %b)
+  %ai = bitcast <2 x double> %a to <2 x i64>
+  %bi = bitcast <2 x double> %b to <2 x i64>
+  %ci = call <2 x i64> @POR.2xi64(<2 x i64> %ai, <2 x i64> %bi)
+  %c = bitcast <2 x i64> %ci to <2 x double>
+  %yc = bitcast <2 x i1> %e to <2 x i64>
+  %ya = bitcast <2 x double> %c to <2 x i64>
+  %yb = bitcast <2 x double> %x to <2 x i64>
+  %yx = call <2 x i64> @PAND.2xi64(<2 x i64> %yc, <2 x i64> %ya)
+  %yy = call <2 x i64> @PANDN.xv(<2 x i64> %yc, <2 x i64> %yb)
+  %yi = call <2 x i64> @POR.2xi64(<2 x i64> %yx, <2 x i64> %yy)
+  %y = bitcast <2 x i64> %yi to <2 x double>
+  %u = call <2 x i1> @CMPUNOPD.2xf64(<2 x double> %a, <2 x double> %b)
+  %nan = call <2 x double> @FADDPD.2xf64(<2 x double> %a, <2 x double> %b)
+  %rc = bitcast <2 x i1> %u to <2 x i64>
+  %ra = bitcast <2 x double> %nan to <2 x i64>
+  %rb = bitcast <2 x double> %y to <2 x i64>
+  %rx = call <2 x i64> @PAND.2xi64(<2 x i64> %rc, <2 x i64> %ra)
+  %ry = call <2 x i64> @PANDN.xv(<2 x i64> %rc, <2 x i64> %rb)
+  %ri = call <2 x i64> @POR.2xi64(<2 x i64> %rx, <2 x i64> %ry)
+  %r = bitcast <2 x i64> %ri to <2 x double>
+  ret <2 x double> %r
+}
+
+declare <2 x double> @llvm.minimum.v2f64(<2 x double>, <2 x double>)
+
+define <8 x float> @maximum.8xf32(<8 x float> "reg"="yv" %a, <8 x float> "reg"="yv" %b) "recipe"="maximum.8xf32.expand" "feature"="avx2" {
+  %r = call <8 x float> @llvm.maximum.v8f32(<8 x float> %a, <8 x float> %b)
+  ret <8 x float> %r
+}
+
+define <8 x float> @maximum.8xf32.expand(<8 x float> %a, <8 x float> %b) {
+  %w = call <8 x i1> @VCMPOGTPS.8xf32(<8 x float> %a, <8 x float> %b)
+  %x = call <8 x float> @VBLENDVPS.8xf32(<8 x i1> %w, <8 x float> %a, <8 x float> %b)
+  %e = call <8 x i1> @VCMPOEQPS.8xf32(<8 x float> %a, <8 x float> %b)
+  %ai = bitcast <8 x float> %a to <4 x i64>
+  %bi = bitcast <8 x float> %b to <4 x i64>
+  %ci = call <4 x i64> @VPAND.4xi64(<4 x i64> %ai, <4 x i64> %bi)
+  %c = bitcast <4 x i64> %ci to <8 x float>
+  %y = call <8 x float> @VBLENDVPS.8xf32(<8 x i1> %e, <8 x float> %c, <8 x float> %x)
+  %u = call <8 x i1> @VCMPUNOPS.8xf32(<8 x float> %a, <8 x float> %b)
+  %nan = call <8 x float> @VADDPS.8xf32(<8 x float> %a, <8 x float> %b)
+  %r = call <8 x float> @VBLENDVPS.8xf32(<8 x i1> %u, <8 x float> %nan, <8 x float> %y)
+  ret <8 x float> %r
+}
+
+declare <8 x float> @llvm.maximum.v8f32(<8 x float>, <8 x float>)
+
+define <8 x float> @minimum.8xf32(<8 x float> "reg"="yv" %a, <8 x float> "reg"="yv" %b) "recipe"="minimum.8xf32.expand" "feature"="avx2" {
+  %r = call <8 x float> @llvm.minimum.v8f32(<8 x float> %a, <8 x float> %b)
+  ret <8 x float> %r
+}
+
+define <8 x float> @minimum.8xf32.expand(<8 x float> %a, <8 x float> %b) {
+  %w = call <8 x i1> @VCMPOLTPS.8xf32(<8 x float> %a, <8 x float> %b)
+  %x = call <8 x float> @VBLENDVPS.8xf32(<8 x i1> %w, <8 x float> %a, <8 x float> %b)
+  %e = call <8 x i1> @VCMPOEQPS.8xf32(<8 x float> %a, <8 x float> %b)
+  %ai = bitcast <8 x float> %a to <4 x i64>
+  %bi = bitcast <8 x float> %b to <4 x i64>
+  %ci = call <4 x i64> @VPOR.4xi64(<4 x i64> %ai, <4 x i64> %bi)
+  %c = bitcast <4 x i64> %ci to <8 x float>
+  %y = call <8 x float> @VBLENDVPS.8xf32(<8 x i1> %e, <8 x float> %c, <8 x float> %x)
+  %u = call <8 x i1> @VCMPUNOPS.8xf32(<8 x float> %a, <8 x float> %b)
+  %nan = call <8 x float> @VADDPS.8xf32(<8 x float> %a, <8 x float> %b)
+  %r = call <8 x float> @VBLENDVPS.8xf32(<8 x i1> %u, <8 x float> %nan, <8 x float> %y)
+  ret <8 x float> %r
+}
+
+declare <8 x float> @llvm.minimum.v8f32(<8 x float>, <8 x float>)
+
+define <4 x double> @maximum.4xf64(<4 x double> "reg"="yv" %a, <4 x double> "reg"="yv" %b) "recipe"="maximum.4xf64.expand" "feature"="avx2" {
+  %r = call <4 x double> @llvm.maximum.v4f64(<4 x double> %a, <4 x double> %b)
+  ret <4 x double> %r
+}
+
+define <4 x double> @maximum.4xf64.expand(<4 x double> %a, <4 x double> %b) {
+  %w = call <4 x i1> @VCMPOGTPD.4xf64(<4 x double> %a, <4 x double> %b)
+  %x = call <4 x double> @VBLENDVPD.4xf64(<4 x i1> %w, <4 x double> %a, <4 x double> %b)
+  %e = call <4 x i1> @VCMPOEQPD.4xf64(<4 x double> %a, <4 x double> %b)
+  %ai = bitcast <4 x double> %a to <4 x i64>
+  %bi = bitcast <4 x double> %b to <4 x i64>
+  %ci = call <4 x i64> @VPAND.4xi64(<4 x i64> %ai, <4 x i64> %bi)
+  %c = bitcast <4 x i64> %ci to <4 x double>
+  %y = call <4 x double> @VBLENDVPD.4xf64(<4 x i1> %e, <4 x double> %c, <4 x double> %x)
+  %u = call <4 x i1> @VCMPUNOPD.4xf64(<4 x double> %a, <4 x double> %b)
+  %nan = call <4 x double> @VADDPD.4xf64(<4 x double> %a, <4 x double> %b)
+  %r = call <4 x double> @VBLENDVPD.4xf64(<4 x i1> %u, <4 x double> %nan, <4 x double> %y)
+  ret <4 x double> %r
+}
+
+declare <4 x double> @llvm.maximum.v4f64(<4 x double>, <4 x double>)
+
+define <4 x double> @minimum.4xf64(<4 x double> "reg"="yv" %a, <4 x double> "reg"="yv" %b) "recipe"="minimum.4xf64.expand" "feature"="avx2" {
+  %r = call <4 x double> @llvm.minimum.v4f64(<4 x double> %a, <4 x double> %b)
+  ret <4 x double> %r
+}
+
+define <4 x double> @minimum.4xf64.expand(<4 x double> %a, <4 x double> %b) {
+  %w = call <4 x i1> @VCMPOLTPD.4xf64(<4 x double> %a, <4 x double> %b)
+  %x = call <4 x double> @VBLENDVPD.4xf64(<4 x i1> %w, <4 x double> %a, <4 x double> %b)
+  %e = call <4 x i1> @VCMPOEQPD.4xf64(<4 x double> %a, <4 x double> %b)
+  %ai = bitcast <4 x double> %a to <4 x i64>
+  %bi = bitcast <4 x double> %b to <4 x i64>
+  %ci = call <4 x i64> @VPOR.4xi64(<4 x i64> %ai, <4 x i64> %bi)
+  %c = bitcast <4 x i64> %ci to <4 x double>
+  %y = call <4 x double> @VBLENDVPD.4xf64(<4 x i1> %e, <4 x double> %c, <4 x double> %x)
+  %u = call <4 x i1> @VCMPUNOPD.4xf64(<4 x double> %a, <4 x double> %b)
+  %nan = call <4 x double> @VADDPD.4xf64(<4 x double> %a, <4 x double> %b)
+  %r = call <4 x double> @VBLENDVPD.4xf64(<4 x i1> %u, <4 x double> %nan, <4 x double> %y)
+  ret <4 x double> %r
+}
+
+declare <4 x double> @llvm.minimum.v4f64(<4 x double>, <4 x double>)
 
 define <2 x i64> @MOVAPSrr(<2 x i64> "reg"="x" %n) "enc"="rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)" "asm"="movaps {n}, {d}" "copy"="x" "dclass"="x" "nodecode" {
   ret <2 x i64> %n

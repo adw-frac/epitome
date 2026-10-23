@@ -198,5 +198,21 @@ these are for after.
   shapes. The allocator could weigh each register by the bytes its uses
   and definitions would take in it, from the encodings, preferring the
   cheaper for the values used most.
+- **xmm16-31 as call clobbers** (`targets/x86_64/70-abi.ll`): the
+  System V convention saves none of the vector registers, but
+  `fp-clobbers` names only xmm0-15 (naming the rest gave the allocator
+  registers it then printed as `r32?`). Only the AVX-512 kernels use
+  zmm16-31 so far, and they call nothing; a function that keeps a value
+  there across a call would lose it.
+- **The LLM on x86-64** (`examples/llm.rs`, TinyStories-1M with
+  `--avx512 --weights=bf16`: 17 ms a forward pass on a Zen 5 core, M4's
+  SME 3.5 ms). Left: the 64 x 50257 logits are zeroed (`linalg.fill`)
+  and then read and written by the kernel, where its accumulators could
+  start at zero; they are then copied to the output, where `bufferize`
+  could write them in place; the kernel streams a panel of B for each 4
+  rows, where one call for all the rows could keep it in L1; f32 matrix
+  products (attention's, of non-constant operands) are vectorized loops,
+  with no AVX-512 kernel; `maximumf` is eight instructions on x86 (no
+  IEEE maximum there), where a clamp by a constant needs one `maxps`.
 - **Acquire loads** use `ldar`; with RCpc (the M1 has it) `ldapr` is
   enough for C++'s and Rust's acquire, as LLVM's back end uses.

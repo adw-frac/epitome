@@ -13,6 +13,11 @@
 //! canonicalization does: torch-mlir's `max` along a dimension works out
 //! where each maximum is as well, which softmax never reads.
 //!
+//! An element-wise `linalg.generic` whose result is only sliced
+//! (`tensor.extract_slice`, perhaps of a slice) works out only the slice,
+//! on slices of its inputs: GPT-2's and GPT-Neo's causal masks are 2048 x
+//! 2048 buffers, compared with zero and then cut to the sequence's length.
+//!
 //! An operation is folded when it has one input, a constant
 //! (`arith.constant` of `dense_resource`), an output from `tensor.empty`, a
 //! body that yields the input's element, an identity map for the output and
@@ -35,7 +40,14 @@ pub fn run(src: &Module) -> Result<Module, String> {
     let mut map = HashMap::new();
     let mut blobs = Vec::new();
     let used: HashSet<ValueId> = src.ops.iter().flat_map(|o| o.operands.iter().copied()).collect();
-    let mut cx = Cx { resources: &resources, used: &used, made: &mut made, blobs: &mut blobs };
+    let mut users: HashMap<ValueId, Vec<OpId>> = HashMap::new();
+    for (k, o) in src.ops.iter().enumerate() {
+        for &v in &o.operands {
+            users.entry(v).or_default().push(OpId(k as u32));
+        }
+    }
+    let mut cx =
+        Cx { resources: &resources, used: &used, users: &users, skip: HashSet::new(), made: &mut made, blobs: &mut blobs };
     for top in src.top_ops().collect::<Vec<_>>() {
         copy(src, top, &mut out, None, &mut map, &mut cx)?;
     }
@@ -53,6 +65,10 @@ struct Cx<'a> {
     resources: &'a Resources<'a>,
     /// Every value some operation uses.
     used: &'a HashSet<ValueId>,
+    /// The operations that use each value.
+    users: &'a HashMap<ValueId, Vec<OpId>>,
+    /// Slices already worked out by the operations they slice.
+    skip: HashSet<OpId>,
     /// Blobs made so far, for their names.
     made: &'a mut usize,
     blobs: &'a mut Vec<Item>,
@@ -66,9 +82,18 @@ fn copy(
     map: &mut HashMap<ValueId, ValueId>,
     cx: &mut Cx<'_>,
 ) -> Result<(), String> {
+    if cx.skip.contains(&op) {
+        return Ok(());
+    }
     if src.op_name(op) == "linalg.generic"
         && let Some(block) = block
         && drop_dead_results(src, op, out, block, map, cx.used)?
+    {
+        return Ok(());
+    }
+    if src.op_name(op) == "linalg.generic"
+        && let Some(block) = block
+        && sliced(src, op, out, block, map, cx)?
     {
         return Ok(());
     }
@@ -246,6 +271,119 @@ fn drop_dead_results(
     Ok(true)
 }
 
+/// A `tensor.extract_slice` of `v` without rank reduction, static and of
+/// unit strides: its offsets and sizes.
+fn static_slice(m: &Module, op: OpId, rank: usize) -> Option<(Vec<i64>, Vec<i64>)> {
+    if m.op_name(op) != "tensor.extract_slice" || m.ops[op.index()].operands.len() != 1 {
+        return None;
+    }
+    let list = |k: &str| m.op_attr(op, k).and_then(|a| m.int_list(a));
+    let (offsets, sizes, strides) = (list("static_offsets")?, list("static_sizes")?, list("static_strides")?);
+    let rank_kept = m.shaped(m.value_type(m.ops[op.index()].results[0])).is_some_and(|(s, _)| s.len() == rank);
+    (offsets.len() == rank && sizes.len() == rank && strides.iter().all(|&s| s == 1) && rank_kept)
+        .then_some((offsets, sizes))
+}
+
+/// `op`, element-wise, as itself on slices of its inputs, if its result
+/// is only sliced (perhaps a slice of a slice, and so on): the last slice
+/// becomes its result. Whether it was written so.
+fn sliced(
+    src: &Module,
+    op: OpId,
+    out: &mut Module,
+    block: BlockId,
+    map: &mut HashMap<ValueId, ValueId>,
+    cx: &mut Cx<'_>,
+) -> Result<bool, String> {
+    let o = &src.ops[op.index()];
+    let n_ins = crate::bufferize::inputs_of(src, op);
+    if o.results.len() != 1 || o.operands.len() != n_ins + 1 {
+        return Ok(false);
+    }
+    if def(src, o.operands[n_ins]).is_none_or(|e| src.op_name(e) != "tensor.empty") {
+        return Ok(false);
+    }
+    let Some((shape, elem)) = src.shaped(src.value_type(o.results[0])) else { return Ok(false) };
+    let rank = shape.len();
+    // Every map the identity, every loop parallel, and no indices read.
+    let Some(Attr::Array(ms)) = src.op_attr(op, "indexing_maps").map(|a| src.attr(src.resolve_attr(a))) else {
+        return Ok(false);
+    };
+    let identity = Map::identity(rank);
+    let all_identity = ms.iter().all(|&m| match src.attr(src.resolve_attr(m)) {
+        Attr::Builtin { keyword: "affine_map", body, .. } => Map::parse(&body[1..body.len() - 1]).ok() == Some(identity.clone()),
+        _ => false,
+    });
+    let parallel = match src.op_attr(op, "iterator_types").map(|a| src.attr(src.resolve_attr(a))) {
+        Some(Attr::Array(es)) => es.iter().all(|&e| matches!(src.attr(e), Attr::Dialect { body: Some(b), .. } if b.contains("parallel"))),
+        _ => false,
+    };
+    let body = src.regions[o.regions[0].index()].blocks[0];
+    if !all_identity || !parallel || src.blocks[body.index()].ops.iter().any(|&b| src.op_name(b) == "linalg.index") {
+        return Ok(false);
+    }
+    // The chain of slices, each the only user of the last.
+    let only_user = |v: ValueId| match cx.users.get(&v).map(Vec::as_slice) {
+        Some(&[u]) => Some(u),
+        _ => None,
+    };
+    let mut chain = Vec::new();
+    let (mut offsets, mut sizes) = (vec![0i64; rank], shape.iter().map(|&s| s as i64).collect::<Vec<_>>());
+    let mut at = o.results[0];
+    while let Some(u) = only_user(at)
+        && let Some((offs, szs)) = static_slice(src, u, rank)
+    {
+        for (o, d) in offsets.iter_mut().zip(&offs) {
+            *o += d;
+        }
+        sizes = szs;
+        chain.push(u);
+        at = src.ops[u.index()].results[0];
+    }
+    if chain.is_empty() {
+        return Ok(false);
+    }
+    let shape: Vec<u64> = sizes.iter().map(|&s| s as u64).collect();
+    let slice = |out: &mut Module, v: ValueId| -> Result<ValueId, String> {
+        let (_, e) = out.shaped(out.value_type(v)).ok_or("an input of unknown shape")?;
+        let ty = out.tensor_type(&shape, e);
+        let segments = out.dense_array_attr("i32", &[1, 0, 0, 0]);
+        let offs = out.dense_array_attr("i64", &offsets);
+        let szs = out.dense_array_attr("i64", &sizes);
+        let ones = out.dense_array_attr("i64", &vec![1; rank]);
+        let s = OpSpec::new("tensor.extract_slice")
+            .operands(&[v])
+            .results(&[ty])
+            .prop("operandSegmentSizes", segments)
+            .prop("static_offsets", offs)
+            .prop("static_sizes", szs)
+            .prop("static_strides", ones)
+            .build(out, Some(block));
+        Ok(out.result(s))
+    };
+    let mut operands = Vec::new();
+    for v in &o.operands[..n_ins] {
+        let v = map.get(v).copied().ok_or("an operand from outside")?;
+        operands.push(slice(out, v)?);
+    }
+    let ty = out.tensor_type(&shape, elem);
+    let empty = OpSpec::new("tensor.empty").results(&[ty]).build(out, Some(block));
+    operands.push(out.result(empty));
+    let mut spec = OpSpec::new("linalg.generic").operands(&operands).results(&[ty]).regions(1).loc(o.loc);
+    for (k, v) in dict(src, o.properties) {
+        spec = spec.prop(&k, v);
+    }
+    for (k, v) in dict(src, o.attrs) {
+        spec = spec.attr(&k, v);
+    }
+    let new = spec.build(out, Some(block));
+    let region = out.region_of(new, 0);
+    out.clone_region_into(src, o.regions[0], region, map)?;
+    map.insert(at, out.result(new));
+    cx.skip.extend(chain);
+    Ok(true)
+}
+
 /// The op that defines `v`, if an op does.
 fn def(m: &Module, v: ValueId) -> Option<OpId> {
     match m.values[v.index()].def {
@@ -400,6 +538,33 @@ mod tests {
             assert!(!text.contains(gone), "{gone} is still there:\n{text}");
         }
         assert!(text.contains("operandSegmentSizes = array<i32: 1, 1>"), "{text}");
+        crate::parse_module(&text).unwrap();
+    }
+
+    #[test]
+    fn a_map_only_sliced() {
+        // x != 0 of all of x, then a slice of a slice of it: only the slice
+        // is worked out.
+        let src = r#""builtin.module"() ({
+  "func.func"() <{function_type = (tensor<8x8xi8>) -> tensor<2x3xi1>, sym_name = "m"}> ({
+  ^bb0(%x: tensor<8x8xi8>):
+    %z = "arith.constant"() <{value = 0 : i8}> : () -> i8
+    %e = "tensor.empty"() : () -> tensor<8x8xi1>
+    %r = "linalg.generic"(%x, %e) <{indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0, d1)>], iterator_types = [#linalg.iterator_type<parallel>, #linalg.iterator_type<parallel>], operandSegmentSizes = array<i32: 1, 1>}> ({
+    ^bb0(%a: i8, %b: i1):
+      %c = "arith.cmpi"(%a, %z) <{predicate = 1 : i64}> : (i8, i8) -> i1
+      "linalg.yield"(%c) : (i1) -> ()
+    }) : (tensor<8x8xi8>, tensor<8x8xi1>) -> tensor<8x8xi1>
+    %s = "tensor.extract_slice"(%r) <{operandSegmentSizes = array<i32: 1, 0, 0, 0>, static_offsets = array<i64: 1, 0>, static_sizes = array<i64: 4, 8>, static_strides = array<i64: 1, 1>}> : (tensor<8x8xi1>) -> tensor<4x8xi1>
+    %t = "tensor.extract_slice"(%s) <{operandSegmentSizes = array<i32: 1, 0, 0, 0>, static_offsets = array<i64: 2, 5>, static_sizes = array<i64: 2, 3>, static_strides = array<i64: 1, 1>}> : (tensor<4x8xi1>) -> tensor<2x3xi1>
+    "func.return"(%t) : (tensor<2x3xi1>) -> ()
+  }) : () -> ()
+}) : () -> ()
+"#;
+        let text = super::run(&crate::parse_module(src).unwrap()).unwrap().to_string();
+        assert!(text.contains("static_offsets = array<i64: 3, 5>"), "{text}");
+        assert!(text.contains("(tensor<2x3xi8>, tensor<2x3xi1>) -> tensor<2x3xi1>"), "{text}");
+        assert!(!text.contains("tensor<4x8xi1>") && !text.contains("(tensor<8x8xi8>, tensor<8x8xi1>)"), "{text}");
         crate::parse_module(&text).unwrap();
     }
 

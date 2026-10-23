@@ -629,7 +629,9 @@ impl<'a> Lower<'a> {
             }
             "arith.cmpf" | "arith.cmpi" => {
                 let pred = src.op_attr(op, "predicate").ok_or("no predicate")?;
+                // i1, or a vector of them for vectors.
                 let i1 = self.out.int_type(1);
+                let i1 = result_ty(self).unwrap_or(i1);
                 let mut props = vec![("predicate", pred)];
                 let llvm = if name == "arith.cmpf" {
                     props.insert(0, ("fastmathFlags", self.fastmath()));
