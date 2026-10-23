@@ -433,6 +433,38 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool) -> Result<bool, String> 
         let old = std::mem::take(&mut b.insts);
         let mut new = Vec::with_capacity(old.len());
         for mut inst in old {
+            // A copy from a spilled value to a register is the load into
+            // it, and one from a register to a spilled value the store
+            // (of one file), not the copy and a scratch register's load or
+            // store besides.
+            if inst.op == Opcode::Copy
+                && let [MOp::Reg(d), MOp::Reg(src)] = inst.ops[..]
+            {
+                let reg = |r: Reg| match r {
+                    Reg::P(p) => Some(p),
+                    Reg::V(v) if !slot_of.contains_key(&v) => assigned[v as usize],
+                    Reg::V(_) => None,
+                };
+                let spilled_of = |r: Reg| match r {
+                    Reg::V(v) => slot_of.get(&v).map(|&slot| (v, slot)),
+                    Reg::P(_) => None,
+                };
+                let sp = Reg::P(t.machine.sp);
+                if let (Some((v, slot)), Some(p)) = (spilled_of(src), reg(d))
+                    && m.file_of(p) == m.def(vclass[v as usize]).file
+                    && let Some((ld, _)) = spill_of(vclass[v as usize])
+                {
+                    new.push(MInst::new(ld, vec![MOp::Reg(Reg::P(p)), MOp::Reg(sp), MOp::Frame(slot, 0)]));
+                    continue;
+                }
+                if let (Some((v, slot)), Some(p)) = (spilled_of(d), reg(src))
+                    && m.file_of(p) == m.def(vclass[v as usize]).file
+                    && let Some((_, st)) = spill_of(vclass[v as usize])
+                {
+                    new.push(MInst::new(st, vec![MOp::Reg(Reg::P(p)), MOp::Reg(sp), MOp::Frame(slot, 0)]));
+                    continue;
+                }
+            }
             let (defs, uses) = regs_of(t, &inst);
             let mut scratch: HashMap<VReg, u8> = HashMap::new();
             let mut next: HashMap<usize, usize> = HashMap::new();
