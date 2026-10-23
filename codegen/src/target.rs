@@ -121,6 +121,9 @@ pub struct Instr {
     /// Its value is that address itself (`add` or `getelementptr` of base
     /// and offset, returned): an address computation, not an access.
     pub address_of: bool,
+    /// It reads or writes memory, or calls: its body loads, stores, calls,
+    /// fences or makes an atomic access.
+    pub memory: bool,
     pub func: GlobalId,
 }
 
@@ -154,6 +157,11 @@ impl Instr {
             return only.encode(env).map(|b| (b, 0));
         }
         self.enc.encode_alt(env, &self.free())
+    }
+
+    /// As `encode_alt`, by an alternative `len` bytes long.
+    pub fn encode_alt_of_len(&self, env: &Env, len: u32) -> Option<(Vec<u8>, usize)> {
+        self.enc.encode_alt_of(env, &self.free(), Some(len))
     }
 
     /// The bytes for these operand values, or `None` if they cannot be
@@ -513,9 +521,11 @@ pub const AARCH64_FILES: &[(&str, &str)] = &[
     ("45-crypto.ll", include_str!("../targets/aarch64/45-crypto.ll")),
     ("50-vectors.ll", include_str!("../targets/aarch64/50-vectors.ll")),
     ("60-recipes.ll", include_str!("../targets/aarch64/60-recipes.ll")),
+    ("65-runtime.ll", include_str!("../targets/aarch64/65-runtime.ll")),
     ("70-abi.ll", include_str!("../targets/aarch64/70-abi.ll")),
     ("80-asm.ll", include_str!("../targets/aarch64/80-asm.ll")),
     ("85-sysregs.ll", include_str!("../targets/aarch64/85-sysregs.ll")),
+    ("86-system.ll", include_str!("../targets/aarch64/86-system.ll")),
 ];
 
 /// The x86-64 description (see docs/design/x86.md): for assembly and
@@ -525,6 +535,8 @@ pub const X86_64_FILES: &[(&str, &str)] = &[
     ("02-xed.ll", include_str!("../targets/x86_64/02-xed.ll")),
     ("05-cond.ll", include_str!("../targets/x86_64/05-cond.ll")),
     ("10-integer.ll", include_str!("../targets/x86_64/10-integer.ll")),
+    ("15-frame.ll", include_str!("../targets/x86_64/15-frame.ll")),
+    ("16-short.ll", include_str!("../targets/x86_64/16-short.ll")),
     ("70-abi.ll", include_str!("../targets/x86_64/70-abi.ll")),
 ];
 
@@ -1159,6 +1171,26 @@ impl Target {
                     .unwrap_or_default(),
                 base_offset: base_offset_of(m, f, has_result),
                 address_of: has_result && base_offset_of(m, f, has_result).is_some() && returns_first(f),
+                memory: f.blocks.iter().flat_map(|b| &b.insts).any(|i| match &f.insts[i.index()].op {
+                    Op::Load { .. }
+                    | Op::Store { .. }
+                    | Op::Fence { .. }
+                    | Op::AtomicRmw { .. }
+                    | Op::CmpXchg { .. } => true,
+                    // A call of a function, or of an intrinsic that may
+                    // touch memory or order it (exclusive loads, barriers,
+                    // hints, traps), not one that only computes.
+                    Op::Call(c) => crate::prepare::callee_name(m, c).is_none_or(|n| {
+                        !n.starts_with("llvm.")
+                            || [
+                                "ld", "st", "dmb", "dsb", "isb", "clrex", "hint", "prefetch", "barrier", "break",
+                                "hlt", "trap",
+                            ]
+                            .iter()
+                            .any(|k| n.contains(k))
+                    }),
+                    _ => false,
+                }),
                 clobbers: {
                     let list: Vec<String> = attr(&f.fn_attrs, "clobbers")
                         .flatten()

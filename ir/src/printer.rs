@@ -181,8 +181,17 @@ impl<'m> Printer<'m> {
         }
         if !m.module_asm.is_empty() {
             self.out.push('\n');
-            for s in &m.module_asm {
-                writeln!(self.out, "module asm {}", quote(s)).unwrap();
+            if m.module_asm_options.is_empty() {
+                for s in &m.module_asm {
+                    writeln!(self.out, "module asm {}", quote(s)).unwrap();
+                }
+            } else {
+                let opts: Vec<String> =
+                    m.module_asm_options.iter().map(|(k, v)| format!("{k}: {}", quote(v))).collect();
+                writeln!(self.out, "module asm({})", opts.join(", ")).unwrap();
+                for s in &m.module_asm {
+                    writeln!(self.out, "    {}", quote(s)).unwrap();
+                }
             }
         }
 

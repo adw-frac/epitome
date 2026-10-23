@@ -327,6 +327,52 @@ The calling convention adds a few registers, and the stack's alignment:
   The address is made with the target's `far-add` instruction where it
   has one, an add that may take the stack pointer, else `add`.
 
+## Runtime calls
+
+What a machine has no instructions for, it may do by calling its runtime:
+the description says which runtime functions do what, and how a value no
+register holds is held. AArch64's (`65-runtime.ll`) does quad precision
+(`fp128`) so; a description without such entries cannot compile it, and
+says so.
+
+- **`"libcall"="f"`**: a function whose body is one instruction of its
+  parameters (and constants), as an instruction's is, done by calling
+  runtime function `f` (declared in the description) on the parameters in
+  order:
+
+  ```llvm
+  declare fp128 @__addtf3(fp128, fp128)
+
+  define fp128 @fadd.f128(fp128 %a, fp128 %b) "libcall"="__addtf3" {
+    %r = fadd fp128 %a, %b
+    ret fp128 %r
+  }
+  ```
+
+- **`"lower"="g"`**: the same, but the instruction becomes the body of
+  description function `g` (of the same parameters, one block), which may
+  call the runtime and do other IR: a comparison as a call and a test of
+  its result (`fcmp olt` is `__lttf2(a, b) < 0`), a negation as an
+  exclusive or of the sign bit. A body may use arithmetic, comparisons,
+  casts, selects and calls.
+
+- **`!target.held`**: pairs of types: the type no register holds, and the
+  type it is held as once only moves of it are left (loads, stores,
+  selects, phis, bit-casts, calls' arguments and results, constants). On
+  AArch64 `fp128` is `<2 x i64>`, in a q register, where AAPCS64 passes
+  it; a convention passing it in two integer registers (RISC-V's) would
+  hold it as `i128`. A constant is held as its bits, from the low end.
+
+An entry is used only where its `"feature"`s are on and its `"format"`
+(`macho`, `elf`), if it has one, is the convention's: Apple's C library
+has no quad-precision `sqrtl`, so `llvm.sqrt.f128` calls it only on ELF.
+Whatever of a held type is left that is not a move is an error naming it
+(`llvm.sqrt.f128 of fp128: no instruction does it, and the description
+names no runtime function for it here`), as it would otherwise be taken
+for an operation on the holding type. The runtime is the platform's
+(libgcc's or compiler-rt's names; Rust's `compiler_builtins` has them on
+Apple's systems, whose own library lacks most).
+
 ## What is still built in
 
 The Rust names no instruction, register, class, relocation or CPU. What it

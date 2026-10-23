@@ -650,7 +650,15 @@ pub fn encode_function(t: &Target, f: &MFunc) -> Result<Code, String> {
             let ins = &t.instrs[i];
             let env = inst_env(t, f, inst, pc, &starts)?;
             let cannot = || format!("{}: cannot encode `{}`", f.name, format_inst(t, f, inst));
-            let (mut bytes, alt) = ins.encode_alt(&env).ok_or_else(cannot)?;
+            // As long as `sizes` settled on: padding before it may have
+            // shrunk since, so that a branch made long would now fit short,
+            // but its length is part of where everything after it is.
+            let (mut bytes, alt) = if ins.enc.alts.len() > 1 {
+                ins.encode_alt_of_len(&env, size[bi][k] as u32)
+            } else {
+                ins.encode_alt(&env)
+            }
+            .ok_or_else(cannot)?;
             if bytes.len() != size[bi][k] {
                 return Err(format!("{}: `{}` changed size", f.name, format_inst(t, f, inst)));
             }

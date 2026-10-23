@@ -52,7 +52,10 @@ pub struct Module {
     pub source_filename: Option<Vec<u8>>,
     pub data_layout: Option<Vec<u8>>,
     pub triple: Option<Vec<u8>>,
+    /// Module-level assembly, a line each.
     pub module_asm: Vec<Vec<u8>>,
+    /// Its options (`module asm(target_cpu: "apple-m1")`), in order.
+    pub module_asm_options: Vec<(String, Vec<u8>)>,
     pub types: Types,
     pub consts: Constants,
     pub metadata: Vec<MdNode>,

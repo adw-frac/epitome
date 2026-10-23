@@ -106,6 +106,9 @@ pub struct Sel<'a, 'b> {
     pos: Vec<usize>,
     /// The bits above which a register is known to be zero.
     zbits: HashMap<VReg, u32>,
+    /// Booleans whose registers hold exactly 0 or 1 wherever they are made
+    /// (`clean_bools`).
+    clean: HashSet<LocalId>,
     /// Instructions whose values are wanted in registers.
     needed: HashSet<InstId>,
     covered: HashSet<InstId>,
@@ -226,6 +229,68 @@ fn statements(template: &str, comment: &str) -> u32 {
         .count() as u32
 }
 
+/// The booleans whose registers hold exactly 0 or 1 however they are
+/// reached: comparisons (made by `cset`), and phis, selects, `and`s, `or`s
+/// and `xor`s of those and of constants. (Not truncations, loads, or
+/// arguments and results marked `zeroext`, which are extended only to 32
+/// bits.) Found optimistically, then those with an operand that is not one
+/// taken out until none are.
+fn clean_bools(cx: &Ctx, f: &Function) -> HashSet<LocalId> {
+    let i1 = |ty: TypeId| matches!(cx.m.types.get(ty), Type::Int(1));
+    // Comparisons are, where every instruction that makes a register of a
+    // condition alone zeroes the rest of it (AArch64's cset; not x86's
+    // setcc, which writes a byte).
+    // (Operand 0 is the result.)
+    let makers: Vec<u32> =
+        cx.t.instrs
+            .iter()
+            .filter(|i| i.has_result && i.operands.len() == 2 && i.operands[1].kind == Kind::Cond)
+            .map(|i| i.zext)
+            .collect();
+    let cmp_clean = !makers.is_empty() && makers.iter().all(|&z| z <= 1);
+    let mut set: HashSet<LocalId> = HashSet::new();
+    for i in f.insts_in_order() {
+        let Some(r) = f.insts[i.index()].result else { continue };
+        if i1(f.locals[r.index()].ty)
+            && match f.insts[i.index()].op {
+                Op::ICmp { .. } | Op::FCmp { .. } => cmp_clean,
+                _ => matches!(
+                    f.insts[i.index()].op,
+                    Op::Phi { .. } | Op::Select { .. } | Op::Binary { op: BinOp::And | BinOp::Or | BinOp::Xor, .. }
+                ),
+            }
+        {
+            set.insert(r);
+        }
+    }
+    loop {
+        let ok = |set: &HashSet<LocalId>, v: Value| match v {
+            Value::Local(l) => set.contains(&l),
+            Value::Const(_) => cx.const_int(v).is_some(),
+            _ => false,
+        };
+        let out: Vec<LocalId> = set
+            .iter()
+            .copied()
+            .filter(|&l| {
+                let LocalDef::Inst(d) = f.locals[l.index()].def else { return true };
+                match &f.insts[d.index()].op {
+                    Op::Phi { incoming, .. } => !incoming.iter().all(|&(v, _)| ok(&set, v)),
+                    Op::Select { then_value, else_value, .. } => !(ok(&set, *then_value) && ok(&set, *else_value)),
+                    Op::Binary { lhs, rhs, .. } => !(ok(&set, *lhs) && ok(&set, *rhs)),
+                    _ => false,
+                }
+            })
+            .collect();
+        if out.is_empty() {
+            return set;
+        }
+        for l in out {
+            set.remove(&l);
+        }
+    }
+}
+
 fn side_effects(op: &Op) -> bool {
     matches!(
         op,
@@ -288,6 +353,7 @@ impl<'a, 'b> Sel<'a, 'b> {
                 mf.abi.reserved.push(b);
             }
         }
+        let clean = clean_bools(cx, f);
         let mut bmap = HashMap::new();
         for (k, &b) in f.layout.iter().enumerate() {
             bmap.insert(b, k);
@@ -305,6 +371,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             inst_block,
             pos,
             zbits: HashMap::new(),
+            clean,
             needed: HashSet::new(),
             covered: HashSet::new(),
             chosen: HashMap::new(),
@@ -1285,8 +1352,9 @@ impl<'a, 'b> Sel<'a, 'b> {
     }
 
     /// A vector constant: zero with `movi`; a splat by duplicating the lane
-    /// from an integer register; otherwise zero, then each nonzero lane
-    /// inserted.
+    /// from an integer register; otherwise its bits made in integer
+    /// registers and moved in, or zero and each nonzero lane inserted,
+    /// whichever takes fewer instructions.
     fn vector_const(&mut self, c: ConstId, class: Class) -> Result<Reg, String> {
         let k = self.cx.m.constant(c).clone();
         let Type::Vector { len, elem, .. } = self.cx.m.types.get(k.ty).clone() else {
@@ -1359,6 +1427,40 @@ impl<'a, 'b> Sel<'a, 'b> {
             self.push(MInst::new(dup, vec![MOp::Reg(Reg::V(d)), MOp::Reg(g)]));
             return Ok(Reg::V(d));
         }
+        // Lanes that would take more inserting than their bits take
+        // making: the bits made in integer registers, 64 at a time, and
+        // moved in.
+        let total = len * ebits;
+        let nonzero = lanes.iter().filter(|&&l| l != 0).count();
+        if total == 64 || total == 128 {
+            let mut halves = [0u64; 2];
+            for (k, &l) in lanes.iter().enumerate() {
+                let at = k as u32 * ebits;
+                let m = if ebits == 64 { u64::MAX } else { (1u64 << ebits) - 1 };
+                halves[(at / 64) as usize] |= (l as u64 & m) << (at % 64);
+            }
+            let halves = &halves[..(total / 64) as usize];
+            let chunks = |u: u64| {
+                let z = (0..4).filter(|i| (u >> (16 * i)) & 0xffff != 0).count();
+                let n = (0..4).filter(|i| (!u >> (16 * i)) & 0xffff != 0).count();
+                z.min(n).max(1)
+            };
+            let cost: usize = halves.iter().map(|&h| chunks(h) + 1).sum();
+            if cost < 2 * nonzero + 1 {
+                let fmov = self.t.by_role("move.d.x");
+                let lo = self.int_reg(halves[0] as i64, true, true)?;
+                self.push(MInst::new(fmov, vec![MOp::Reg(Reg::V(d)), MOp::Reg(lo)]));
+                if let Some(&hi) = halves.get(1) {
+                    let insd = self.t.by_role("ins.d");
+                    let g = self.int_reg(hi as i64, true, true)?;
+                    self.push(MInst::new(
+                        insd,
+                        vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(d)), MOp::Reg(g), MOp::Imm(1)],
+                    ));
+                }
+                return Ok(Reg::V(d));
+            }
+        }
         // (The class's own, if it has one: x86's pxor leaves a ymm
         // register's high half.)
         let own = format!("movi.zero.{}", self.t.machine.def(class).name);
@@ -1412,6 +1514,10 @@ impl<'a, 'b> Sel<'a, 'b> {
         let r = self.make_int(v, wide)?;
         if let Reg::V(x) = r {
             self.block_ints.insert((self.cur, v, wide), x);
+            // A positive one is zero above its highest set bit.
+            if v >= 0 {
+                self.zbits.insert(x, 64 - (v as u64).leading_zeros());
+            }
         }
         Ok(r)
     }
@@ -1532,6 +1638,25 @@ impl<'a, 'b> Sel<'a, 'b> {
         Ok(Reg::V(d))
     }
 
+    /// The largest value instruction `i`'s `!range` allows, if it is one
+    /// range of non-negative numbers.
+    fn range_top(&self, i: InstId) -> Option<u64> {
+        let a = self.f.insts[i.index()].attachments.iter().find(|a| a.kind == "range")?;
+        let Metadata::Tuple { ops, .. } = &self.cx.m.metadata[a.node.index()].data else { return None };
+        let [Some(lo), Some(hi)] = ops[..] else { return None };
+        let int = |m: MdId| match &self.cx.m.metadata[m.index()].data {
+            Metadata::Value(v) => self.cx.const_int(*v),
+            _ => None,
+        };
+        let (lo, hi) = (int(lo)?, int(hi)?);
+        (lo >= 0 && hi > lo).then(|| (hi - 1) as u64)
+    }
+
+    /// What is known of the zero bits of a value already given a register.
+    fn vregs_zbits(&self, l: LocalId) -> Option<&u32> {
+        self.vreg.get(&l).and_then(|v| self.zbits.get(v))
+    }
+
     fn set_zbits(&mut self, r: Reg, z: u32) {
         if let Reg::V(v) = r {
             self.zbits.insert(v, z);
@@ -1547,7 +1672,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         {
             let from = self.bits(self.f.locals[x.index()].ty);
             let src = self.vreg_of(x);
-            if self.zbits.get(&src).is_some_and(|&z| z <= from) {
+            if self.zbits.get(&src).is_some_and(|&z| z <= from) || (from == 1 && self.clean.contains(&x)) {
                 let r = self.f.insts[root.index()].result.unwrap();
                 if self.alias(r, Value::Local(x)) {
                     return Ok(());
@@ -1638,6 +1763,60 @@ impl<'a, 'b> Sel<'a, 'b> {
                 self.set_zbits(r, z);
             }
             self.push_fixed(e.instr, ops);
+        }
+        // An `and` alone with a constant whose top bit (in its type) is
+        // clear: the bits above the constant's are zero, however the
+        // constant was made.
+        if p.nodes == 1
+            && let Op::Binary { op: BinOp::And, lhs, rhs, .. } = self.f.insts[root.index()].op
+            && let Some(Reg::V(r)) = result.map(Reg::V)
+        {
+            let ty = self.f.locals[self.f.insts[root.index()].result.unwrap().index()].ty;
+            let bits = self.bits(ty);
+            let c = self.cx.const_int(rhs).or_else(|| self.cx.const_int(lhs));
+            if let Some(c) = c
+                && !self.is_vector(ty)
+                && c >= 0
+                && (bits >= 64 || c < 1 << (bits - 1))
+            {
+                let z = 64 - (c as u64).leading_zeros();
+                let e = self.zbits.entry(r).or_insert(z);
+                *e = (*e).min(z);
+            }
+        }
+        // A load whose value is known to be in a range of non-negative
+        // numbers (`!range !{i8 0, i8 2}`, a bool): zero above the largest.
+        if let Op::Load { .. } = self.f.insts[root.index()].op
+            && let Some(Reg::V(r)) = result.map(Reg::V)
+            && let Some(hi) = self.range_top(root)
+        {
+            let z = 64 - hi.leading_zeros();
+            let e = self.zbits.entry(r).or_insert(z);
+            *e = (*e).min(z);
+        }
+        // An `or` or `xor` alone of a value zero above some bit with such a
+        // constant: zero above the higher of the two.
+        if p.nodes == 1
+            && let Op::Binary { op: BinOp::Or | BinOp::Xor, lhs, rhs, .. } = self.f.insts[root.index()].op
+            && let Some(Reg::V(r)) = result.map(Reg::V)
+        {
+            let ty = self.f.locals[self.f.insts[root.index()].result.unwrap().index()].ty;
+            let (x, c) = match (self.cx.const_int(lhs), self.cx.const_int(rhs)) {
+                (None, Some(c)) => (lhs, c),
+                (Some(c), None) => (rhs, c),
+                _ => (lhs, -1),
+            };
+            let bits = self.bits(ty);
+            if let Value::Local(xl) = x
+                && c >= 0
+                && !self.is_vector(ty)
+                && (bits >= 64 || c < 1 << (bits - 1))
+                && let Some(&zx) = self.vregs_zbits(xl)
+            {
+                let z = zx.max(64 - (c as u64).leading_zeros());
+                let e = self.zbits.entry(r).or_insert(z);
+                *e = (*e).min(z);
+            }
         }
         if let Some(n) = m.next
             && Some(n) != layout_next
@@ -2659,6 +2838,17 @@ impl<'a, 'b> Sel<'a, 'b> {
             (_, true, 16) => "sext.16",
             _ => return Ok(r),
         };
+        // Already so: zero, or a value zero above its bits (or, for a sign
+        // extension, above all but its top bit, which is zero).
+        let known = match r {
+            Reg::P(p) => self.t.machine.zero == Some(p),
+            Reg::V(v) => {
+                self.zbits.get(&v).is_some_and(|&z| if role.starts_with("zext") { z <= bits } else { z < bits })
+            }
+        };
+        if known {
+            return Ok(r);
+        }
         let d = self.ivreg(false);
         let Some(ext) = self.t.role(role) else {
             // Without one: shifted up to the top of the register and back,
@@ -2978,8 +3168,8 @@ impl<'a, 'b> Sel<'a, 'b> {
         Ok(())
     }
 
-    /// Phis become copies at the end of each predecessor, through
-    /// temporaries so that values swapped between phis stay right.
+    /// Phis become copies at the end of each predecessor, ordered so that
+    /// values swapped between phis stay right.
     fn emit_phi_copies(&mut self) -> Result<(), String> {
         let f = self.f;
         for &s in &f.layout {
@@ -3006,7 +3196,8 @@ impl<'a, 'b> Sel<'a, 'b> {
                 let saved = std::mem::take(&mut self.mf.blocks[pb].insts);
                 let at = self.mf.blocks[pb].term_start.min(saved.len());
                 self.cur = pb;
-                let mut finals = Vec::new();
+                // (phi's register, incoming value's register, class)
+                let mut pending: Vec<(Reg, Reg, Class)> = Vec::new();
                 for &phi in &phis {
                     let Op::Phi { incoming, .. } = &f.insts[phi.index()].op else { unreachable!() };
                     let r = f.insts[phi.index()].result.unwrap();
@@ -3017,13 +3208,36 @@ impl<'a, 'b> Sel<'a, 'b> {
                     let ty = f.locals[r.index()].ty;
                     let class = self.class_of_ty(ty);
                     let src = self.reg_for(v, class)?;
-                    let tmp = self.mf.new_vreg(class);
-                    self.push(MInst::copy(Reg::V(tmp), src));
-                    let d = self.vreg_of(r);
-                    finals.push(MInst::copy(Reg::V(d), Reg::V(tmp)));
+                    let d = Reg::V(self.vreg_of(r));
+                    if src != d {
+                        pending.push((d, src, class));
+                    }
                 }
-                let mut copies = std::mem::take(&mut self.mf.blocks[pb].insts);
-                copies.extend(finals);
+                // The copies together, in an order where none overwrites
+                // what another is still to read: each as soon as nothing
+                // left reads its phi's register; where all that are left
+                // do (a cycle, values swapped), one of those registers is
+                // copied aside first and read from there.
+                while !pending.is_empty() {
+                    let ready = pending.iter().position(|&(d, _, _)| !pending.iter().any(|&(_, s, _)| s == d));
+                    match ready {
+                        Some(k) => {
+                            let (d, s, _) = pending.remove(k);
+                            self.push(MInst::copy(d, s));
+                        }
+                        None => {
+                            let (d, _, class) = pending[0];
+                            let tmp = Reg::V(self.mf.new_vreg(class));
+                            self.push(MInst::copy(tmp, d));
+                            for c in &mut pending {
+                                if c.1 == d {
+                                    c.1 = tmp;
+                                }
+                            }
+                        }
+                    }
+                }
+                let copies = std::mem::take(&mut self.mf.blocks[pb].insts);
                 let mut insts = saved;
                 let n = copies.len();
                 insts.splice(at..at, copies);

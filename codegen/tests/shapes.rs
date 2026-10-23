@@ -211,3 +211,21 @@ fn far_branches_relaxed_one_after_another() {
         assert!(lines[k + 1].starts_with("b ") && lines[k + 2] == format!("{target}:"), "{:?}", &lines[k - 1..k + 4]);
     }
 }
+
+/// Quad precision as the runtime does it, where the description has it:
+/// on ELF, libm's `sqrtl`; on Apple's systems, which have no such
+/// function, an error naming the operation (not a square root of the
+/// <2 x i64> it is held as).
+#[test]
+fn quad_precision_by_the_runtime() {
+    let body = "declare fp128 @llvm.sqrt.f128(fp128)\ndefine void @f(ptr %p) {\n  %x = load fp128, ptr %p\n  %y = fadd fp128 %x, %x\n  %r = call fp128 @llvm.sqrt.f128(fp128 %y)\n  store fp128 %r, ptr %p\n  ret void\n}";
+    let t = Target::aarch64();
+    let elf = format!("target triple = \"aarch64-unknown-linux-gnu\"\n{body}");
+    let mut m = epitome_ir::parse_module(&elf).unwrap();
+    let a = compile(&t, &mut m, &Options::default()).unwrap().asm;
+    assert!(a.contains("bl __addtf3") && a.contains("bl sqrtl"), "{a}");
+    let apple = format!("target triple = \"arm64-apple-macosx14.0.0\"\n{body}");
+    let mut m = epitome_ir::parse_module(&apple).unwrap();
+    let e = compile(&t, &mut m, &Options::default()).err().unwrap();
+    assert!(e.contains("llvm.sqrt.f128 of fp128"), "{e}");
+}

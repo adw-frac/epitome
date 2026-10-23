@@ -15,6 +15,9 @@
 ;   05-cond.ll      the flags, and the conditions that read them
 ;   10-integer.ll   integer instructions for selection, with bodies;
 ;                   written by gen_sel.py
+;   15-frame.ll     what frames are made with: pushes, pops, rsp's
+;                   adjustments
+;   16-short.ll     short forms peepholes use in place of longer ones
 ;   70-abi.ll       the System V calling convention
 ;
 ; Assembly is AT&T's, as clang, llvm-mc and objdump write it on Linux.

@@ -1067,10 +1067,20 @@ impl Encoding {
     /// the one chosen must also decode back to the same operands (other
     /// than `free` ones).
     pub fn encode_alt(&self, env: &Env, free: &[String]) -> Option<(Vec<u8>, usize)> {
+        self.encode_alt_of(env, free, None)
+    }
+
+    /// As `encode_alt`, but only by an alternative `len` bytes long, if
+    /// given: an instruction whose length was settled before its operands
+    /// were final (a branch made long that could now be short).
+    pub fn encode_alt_of(&self, env: &Env, free: &[String], len: Option<u32>) -> Option<(Vec<u8>, usize)> {
         if let [only] = &self.alts[..] {
             return only.encode(env).map(|b| (b, 0));
         }
         for (k, a) in self.alts.iter().enumerate() {
+            if len.is_some_and(|n| a.len != n) {
+                continue;
+            }
             let Some(bytes) = a.encode(env) else { continue };
             let names: Vec<String> = a.names.iter().filter(|n| env.contains_key(*n)).cloned().collect();
             let Some(back) = a.decode(&bytes, &names, free) else { continue };

@@ -17,6 +17,7 @@
 ;   40-float.ll     floating point
 ;   50-vectors.ll   vectors (Advanced SIMD), written by gen_vectors.py
 ;   60-recipes.ll   recipes: IR with no single instruction
+;   65-runtime.ll   what is done by calling the runtime (quad precision)
 ;   70-abi.ll       calling conventions and platforms
 ;   80-asm.ll       for assembly and disassembly only: the rest of the A64
 ;                   base, floating-point and Advanced SIMD instructions,
@@ -48,6 +49,10 @@
 ;   "cond"="11"           a condition form, with its encoding
 ;   "reads"="nv"          the flags a condition form reads
 ;   "recipe"="f"          IR with no single instruction; f emits it
+;   "libcall"="f"         IR done by calling runtime function f (not an
+;                         instruction: see docs/design/targets.md,
+;                         "Runtime calls")
+;   "lower"="f"           IR that becomes f's body, before selection
 ;   "nodecode"            not offered by the disassembler
 ;   "zext"="8"            the result is zero above this many bits
 ;   "copy"                a register-to-register move of this class

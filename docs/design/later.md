@@ -121,3 +121,82 @@ these are for after.
 - **Address differences in data** between two globals (`sub (ptrtoint
   @a, ptrtoint @b)`): unsupported (those within one global are folded);
   they need a pair of relocations (Mach-O's `SUBTRACTOR`).
+- **Intrinsics lowered for correctness only** (`intrinsics.rs`,
+  `neon.rs`): carry-less products (`llvm.clmul`, NEON's `pmul`, `pmull`,
+  `pmull64`) bit by bit, where PMULL does bytes and 64-bit halves at
+  once; `pdep`/`pext` bit by bit; masked loads and stores and
+  compressions lane by lane through stack slots; structured stores
+  (`st3`) element by element; vectors of halves converted to single
+  precision lane by lane (where `fcvtl`/`fcvtn` do four at once); the
+  padding of `<3 x float>` reductions rebuilt lane by lane;
+  `llvm.prefetch` dropped (no `prfm`).
+- **Half-precision NEON operations** (`fabd`, `fmulx`, the pairwise ones,
+  `fmlal`...) on `<4 x half>`/`<8 x half>`: not done, as vectors of halves
+  are integers here (`prepare::half_as_int`).
+- **Reporting to the user** (`epitome-rustc`): a crate Epitome cannot
+  compile keeps rustc's object and says why only in
+  `epitome-rustc.log`. Better: errors and warnings on stderr in rustc's
+  form (its JSON when Cargo asks for `--error-format=json`), at the Rust
+  source line from the IR's debug information (`!dbg`) where the crate has
+  it. rustc's own mechanism (LLVM's diagnostic handler, inline
+  assembly's `!srcloc` cookies) belongs to a codegen backend running
+  inside rustc, which a wrapper is not.
+- **Hardware limits as diagnostics**: a description should be able to
+  say what the machine cannot do (no writable memory, so no stack slots,
+  spills or calls that save a return address; no runtime to call; only
+  some operations), and a compilation should report, at the source line,
+  each thing the program asks for that the machine lacks, all of them
+  rather than the first, so that the program can be changed to fit.
+- **Quad precision's code** (`runtime.rs`, `65-runtime.ll`): every fp128
+  value is spilled around each runtime call (q registers are all the
+  callee's), and its sign is changed through a stack slot and two `eor`s
+  (one with `xzr`) where `eor v.16b` with a constant would do.
+- **Register allocation's moves and spills** (`regalloc.rs`): across a
+  sample of crates we make 1.16 times llc's instructions (79,899 against
+  68,885), the most of the excess register moves (15,210 against 11,769)
+  and spill code (loads 7,356 against 4,871, stores 4,675 against 2,674).
+  The moves left are mostly arguments copied into registers and out again
+  when a register an argument arrived in is needed for another, and loop
+  phis whose incoming values were allocated elsewhere: linear scan
+  assigns each value as it comes, from hints. After allocation, copies in
+  a block that propagate, repeat or are overwritten go, and a spilled
+  value's copy is its load or store; but spilling is still of whole values
+  (a load before each use, a store after each definition, reused only
+  within a block), now evicting lighter values (fewer uses over their
+  length) for heavier ones; it does not split ranges, so a value of a
+  long, sparsely used range is reloaded at every use (rand_chacha's
+  four-block refill). Better: coalescing of copies before allocation (or a
+  graph colouring that does it; copies whose sides never meet are now
+  coalesced, but none that would need a range split), and range
+  splitting, as LLVM's greedy allocator does.
+- **Frames** (`frame.rs`): every alloca has its own slot for the whole
+  function (a serde_json deserializer: 1,088 bytes of slots to llc's 336
+  for its whole frame), where slots of allocas whose lifetimes
+  (`llvm.lifetime.start` and `.end`) do not meet could share, as LLVM's
+  stack colouring does; and spill slots are never shared.
+- **Conditions combined** (`isel.rs`, `00-base.ll`): an `and` or `or` of
+  two comparisons that a branch or select reads is each compare made into
+  a boolean (`cset`), the two combined and tested again (`cmp`, `cset`,
+  `cmp`, `cset`, `and`, `tbnz`), where AArch64's conditional compare does
+  it in the flags (`cmp`, `ccmp`, `b.cc`; llc uses 126 in regex-syntax
+  alone). Needs a condition form that reads one condition and sets the
+  flags from a compare only when it holds, else to a constant chosen so
+  the result's condition fails (for `and`) or holds (for `or`).
+- **x86's code size** (`regalloc.rs`, `isel.rs`, `targets/x86_64/`): over
+  a sample of crates' scalar modules, 1.31 times llc's bytes. Most of the
+  rest is moves (`movq`, 30,013 against 17,880): spill code, as on
+  AArch64 but with 14 registers and five callee-saved; reloads not folded
+  into instructions' memory operands, as x86 allows (`movq 32(%rsp),
+  %r11; cmpq %rax, %r11` where `cmpq 32(%rsp), %rax` does; a reg-form
+  instruction's memory form could be found from their bodies); stores of
+  immediates made in a register first (`movq $imm, mem` has no pattern);
+  switches tested case by case where llc jumps through a table.
+- **Registers chosen for encodings' size**: x86's r8-r15 need a REX
+  prefix, and some instructions have shorter forms for rax (the
+  descriptions' `acc:0=d` alternatives, already there); RISC-V's
+  compressed forms (not yet described) need x8-x15 and two-address
+  shapes. The allocator could weigh each register by the bytes its uses
+  and definitions would take in it, from the encodings, preferring the
+  cheaper for the values used most.
+- **Acquire loads** use `ldar`; with RCpc (the M1 has it) `ldapr` is
+  enough for C++'s and Rust's acquire, as LLVM's back end uses.

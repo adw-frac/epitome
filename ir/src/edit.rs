@@ -306,6 +306,28 @@ impl Function {
         }
     }
 
+    /// Replaces each use of the locals in `map` by what they map to (and
+    /// what that maps to, and on), in one pass over the function: for
+    /// passes that replace many values, where a pass for each would take
+    /// time in the square of the function's size.
+    pub fn replace_many(&mut self, map: &std::collections::HashMap<LocalId, Value>) {
+        if map.is_empty() {
+            return;
+        }
+        let resolve = |mut v: Value| {
+            while let Value::Local(l) = v
+                && let Some(&w) = map.get(&l)
+            {
+                v = w;
+            }
+            v
+        };
+        let order: Vec<InstId> = self.insts_in_order().collect();
+        for i in order {
+            self.insts[i.index()].op.for_each_value_mut(|v| *v = resolve(*v));
+        }
+    }
+
     /// In the phis of block `b`, renames incoming block `from` to `to`.
     pub fn retarget_phis(&mut self, b: BlockId, from: BlockId, to: BlockId) {
         for k in 0..self.blocks[b.index()].insts.len() {

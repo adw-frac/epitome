@@ -718,6 +718,305 @@ define {T} @TBL1v{arr}(<16 x i8> "reg"="q" %n, {T} "reg"="{c}" %m) "enc"="0 {Q} 
 ''')
 out.append("\n".join(o))
 
+# --- appended: floating-point reductions across lanes, in NEON's order
+# (pairs, then pairs of those), which decides which NaN comes out:
+# fmaxnmv and the rest for four floats, the pairwise scalar forms for two
+o = []
+for intr, name, o1, opc in [('fmax', 'FMAXNM', 0, '1100'), ('fmin', 'FMINNM', 1, '1100'),
+                            ('fmaximum', 'FMAX', 0, '1111'), ('fminimum', 'FMIN', 1, '1111')]:
+    f = f'llvm.vector.reduce.{intr}.v4f32'
+    o.append(f'''declare float @{f}(<4 x float>)
+
+define float @{name}Vs(<4 x float> "reg"="q" %n) "enc"="0 1 1 01110 {o1} 0 11000 0 {opc} 10 n:5 d:5" "asm"="{name.lower()}v {{d}}, {{n:4s}}" {{
+  %r = call float @{f}(<4 x float> %n)
+  ret float %r
+}}
+''')
+    for T, E, sz, arr in [('<2 x float>', 'float', 0, '2s'), ('<2 x double>', 'double', 1, '2d')]:
+        f = f'llvm.vector.reduce.{intr}.v2{"f32" if sz == 0 else "f64"}'
+        c = 'v' if sz == 0 else 'q'
+        o.append(f'''declare {E} @{f}({T})
+
+define {E} @{name}P{arr}({T} "reg"="{c}" %n) "enc"="01 1 11110 {o1} {sz} 11000 0 {opc} 10 n:5 d:5" "asm"="{name.lower()}p {{d}}, {{n:{arr}}}" {{
+  %r = call {E} @{f}({T} %n)
+  ret {E} %r
+}}
+''')
+out.append("\n".join(o))
+
+# --- appended: NEON's own intrinsics (Rust's std::arch, C's arm_neon.h)
+# that no generic IR is for: halving and rounding arithmetic, absolute
+# differences, saturating and rounding shifts by vectors and by constants,
+# saturating absolute values and negations and accumulations, leading
+# sign bits, pairwise long sums, narrowing high halves, floating point's
+# pairwise operations, estimates and steps, rounding to 32 and 64 bits,
+# complex sums and products, and dot products. The 32- and 64-bit scalar
+# forms (an integer in an s or d register) are recipes: the integer moved
+# there, the instruction, the result moved back.
+o = []
+declared = set()
+def declare(f, ret, params):
+    if f in declared or f'@{f}(' in "".join(out):
+        return ''
+    declared.add(f)
+    return f'declare {ret} @{f}({", ".join(params)})\n\n'
+NINT = [x for x in INT]
+def scalar_recipe(name, intr, ty, args, enc, asm, tied=False):
+    """A scalar form: `ty` (i32 or i64) in w or x registers, done in s or d."""
+    e = 32 if ty == 'i32' else 64
+    fty = 'float' if e == 32 else 'double'
+    r = 's' if e == 32 else 'd'
+    to_f = 'FMOVSW' if e == 32 else 'FMOVDX'
+    to_i = 'FMOVWS' if e == 32 else 'FMOVXD'
+    g = 'w' if e == 32 else 'x'
+    params = ', '.join(f'{ty} "reg"="{g}" %{a}' for a in args)
+    fparams = ', '.join((f'{fty} "reg"="{r}" "tied" %{a}' if (tied and k == 0) else f'{fty} "reg"="{r}" %{a}') for k, a in enumerate(args))
+    moves = ''.join(f'  %f{a} = call {fty} @{to_f}({ty} %{a})\n' for a in args)
+    fargs = ', '.join(f'{fty} %f{a}' for a in args)
+    iargs = ', '.join(f'{ty} %{a}' for a in args)
+    return (declare(intr, ty, [ty] * len(args)) + f'''define {ty} @{name}.{g}({params}) "recipe"="{name}.expand" {{
+  %r = call {ty} @{intr}({iargs})
+  ret {ty} %r
+}}
+
+define {ty} @{name}.expand({", ".join(f"{ty} %{a}" for a in args)}) {{
+{moves}  %v = call {fty} @{name}({fargs})
+  %r = call {ty} @{to_i}({fty} %v)
+  ret {ty} %r
+}}
+
+define {fty} @{name}({fparams}) "enc"="{enc}" "asm"="{asm}" "nomatch" {{
+  ret {fty} %{args[0]}
+}}
+''')
+# Three registers of one arrangement.
+three_same = [('shadd', 'SHADD', 0, '00000'), ('uhadd', 'UHADD', 1, '00000'), ('srhadd', 'SRHADD', 0, '00010'),
+              ('urhadd', 'URHADD', 1, '00010'), ('shsub', 'SHSUB', 0, '00100'), ('uhsub', 'UHSUB', 1, '00100'),
+              ('sqshl', 'SQSHL', 0, '01001'), ('uqshl', 'UQSHL', 1, '01001'), ('srshl', 'SRSHL', 0, '01010'),
+              ('urshl', 'URSHL', 1, '01010'), ('sqrshl', 'SQRSHL', 0, '01011'), ('uqrshl', 'UQRSHL', 1, '01011'),
+              ('sabd', 'SABD', 0, '01110'), ('uabd', 'UABD', 1, '01110')]
+for intr, name, U, opc in three_same:
+    for arr, n, e, Q, size in INT:
+        if e == 64 and intr not in ('sqshl', 'uqshl', 'srshl', 'urshl', 'sqrshl', 'uqrshl'):
+            continue
+        T = vt(n, it(e)); f = f'llvm.aarch64.neon.{intr}.v{n}i{e}'
+        o.append(declare(f, T, [T, T]) + f'''define {T} @{name}v{arr}({T} "reg"="{cls(Q)}" %n, {T} "reg"="{cls(Q)}" %m) "enc"="0 {Q} {U} 01110 {size} 1 m:5 {opc} 1 n:5 d:5" "asm"="{intr} {{d:{arr}}}, {{n:{arr}}}, {{m:{arr}}}" {{
+  %r = call {T} @{f}({T} %n, {T} %m)
+  ret {T} %r
+}}
+''')
+# Their scalar forms: the shifts (sshl and the rest) of 64 bits, the
+# saturating ones of 32 too.
+for intr, name, U, opc in three_same + [('sshl', 'SSHL', 0, '01000'), ('ushl', 'USHL', 1, '01000')]:
+    for ty, size in [('i32', '10'), ('i64', '11')]:
+        if intr in ('srshl', 'urshl', 'sshl', 'ushl') and ty == 'i32':
+            continue
+        if intr not in ('sqshl', 'uqshl', 'srshl', 'urshl', 'sqrshl', 'uqrshl', 'sshl', 'ushl'):
+            continue
+        r = 's' if ty == 'i32' else 'd'
+        o.append(scalar_recipe(f'{name}{r}', f'llvm.aarch64.neon.{intr}.{ty}', ty, ['n', 'm'],
+                               f'01 {U} 11110 {size} 1 m:5 {opc} 1 n:5 d:5', f'{intr} {{d}}, {{n}}, {{m}}'))
+# Two registers: leading sign bits, saturating absolute values and
+# negations, absolute values (neon.abs), and accumulations of the other
+# sign (suqadd, usqadd, tied).
+two_misc = [('cls', 'CLS', 0, '00100', False), ('sqabs', 'SQABS', 0, '00111', False), ('sqneg', 'SQNEG', 1, '00111', False),
+            ('abs', 'ABSn', 0, '01011', False), ('suqadd', 'SUQADD', 0, '00011', True), ('usqadd', 'USQADD', 1, '00011', True)]
+for intr, name, U, opc, tied in two_misc:
+    for arr, n, e, Q, size in INT:
+        if intr == 'cls' and e == 64:
+            continue
+        T = vt(n, it(e)); f = f'llvm.aarch64.neon.{intr}.v{n}i{e}'
+        if tied:
+            o.append(declare(f, T, [T, T]) + f'''define {T} @{name}v{arr}({T} "reg"="{cls(Q)}" "tied" %old, {T} "reg"="{cls(Q)}" %n) "enc"="0 {Q} {U} 01110 {size} 10000 {opc} 10 n:5 d:5" "asm"="{intr} {{d:{arr}}}, {{n:{arr}}}" {{
+  %r = call {T} @{f}({T} %old, {T} %n)
+  ret {T} %r
+}}
+''')
+        else:
+            o.append(declare(f, T, [T]) + f'''define {T} @{name}v{arr}({T} "reg"="{cls(Q)}" %n) "enc"="0 {Q} {U} 01110 {size} 10000 {opc} 10 n:5 d:5" "asm"="{"abs" if intr == "abs" else intr} {{d:{arr}}}, {{n:{arr}}}" {{
+  %r = call {T} @{f}({T} %n)
+  ret {T} %r
+}}
+''')
+    for ty, size in [('i32', '10'), ('i64', '11')]:
+        if intr == 'cls' or (intr == 'abs' and ty == 'i32'):
+            continue
+        r = 's' if ty == 'i32' else 'd'
+        args = ['old', 'n'] if tied else ['n']
+        o.append(scalar_recipe(f'{name}{r}', f'llvm.aarch64.neon.{intr}.{ty}', ty, args,
+                               f'01 {U} 11110 {size} 10000 {opc} 10 n:5 d:5', f'{intr} {{d}}, {{n}}', tied))
+# Pairwise long sums: lanes of twice the width, half as many.
+for intr, name, U in [('saddlp', 'SADDLP', 0), ('uaddlp', 'UADDLP', 1)]:
+    for arr, n, e, Q, size in INT:
+        if e == 64:
+            continue
+        T = vt(n, it(e)); W = vt(n // 2, it(2 * e)); warr = f'{n // 2}{suffix(2 * e)}'
+        f = f'llvm.aarch64.neon.{intr}.v{n // 2}i{2 * e}.v{n}i{e}'
+        o.append(declare(f, W, [T]) + f'''define {W} @{name}v{arr}({T} "reg"="{cls(Q)}" %n) "enc"="0 {Q} {U} 01110 {size} 10000 00010 10 n:5 d:5" "asm"="{intr} {{d:{warr}}}, {{n:{arr}}}" {{
+  %r = call {W} @{f}({T} %n)
+  ret {W} %r
+}}
+''')
+# The high halves of sums and differences, narrowed (the low half of a
+# register).
+for intr, name, U, opc in [('addhn', 'ADDHN', 0, '0100'), ('raddhn', 'RADDHN', 1, '0100'),
+                           ('subhn', 'SUBHN', 0, '0110'), ('rsubhn', 'RSUBHN', 1, '0110')]:
+    for (n, e, size) in [(8, 8, '00'), (4, 16, '01'), (2, 32, '10')]:
+        N = vt(n, it(e)); W = vt(n, it(2 * e)); narr = f'{n}{suffix(e)}'; warr = f'{n}{suffix(2 * e)}'
+        f = f'llvm.aarch64.neon.{intr}.v{n}i{e}'
+        o.append(declare(f, N, [W, W]) + f'''define {N} @{name}v{narr}({W} "reg"="q" %n, {W} "reg"="q" %m) "enc"="0 0 {U} 01110 {size} 1 m:5 {opc} 00 n:5 d:5" "asm"="{intr} {{d:{narr}}}, {{n:{warr}}}, {{m:{warr}}}" {{
+  %r = call {N} @{f}({W} %n, {W} %m)
+  ret {N} %r
+}}
+''')
+# Shifts by constants: saturating left, unsigned of signed (sqshlu, by a
+# splat), and inserting (sli, sri: the other bits the old value's).
+for arr, n, e, Q, size in INT:
+    T = vt(n, it(e)); L = e.bit_length() - 1; size_bits = '0' * (6 - L) + '1'
+    f = f'llvm.aarch64.neon.sqshlu.v{n}i{e}'
+    o.append(declare(f, T, [T, T]) + f'''define {T} @SQSHLUv{arr}({T} "reg"="{cls(Q)}" %n, {T} "imm" %sh) "enc"="0 {Q} 1 011110 {size_bits} sh:{L} 01100 1 n:5 d:5" "asm"="sqshlu {{d:{arr}}}, {{n:{arr}}}, #{{sh}}" {{
+  %r = call {T} @{f}({T} %n, {T} %sh)
+  ret {T} %r
+}}
+''')
+    for intr, name, opc, enc_sh in [('vsli', 'SLI', '01010', f'sh:{L}'), ('vsri', 'SRI', '01000', f'amt:{L}={e}-sh')]:
+        f = f'llvm.aarch64.neon.{intr}.v{n}i{e}'
+        o.append(declare(f, T, [T, T, 'i32']) + f'''define {T} @{name}v{arr}({T} "reg"="{cls(Q)}" "tied" %old, {T} "reg"="{cls(Q)}" %n, i32 "imm" %sh) "enc"="0 {Q} 1 011110 {size_bits} {enc_sh} {opc} 1 n:5 d:5" "asm"="{name.lower()} {{d:{arr}}}, {{n:{arr}}}, #{{sh}}" {{
+  %r = call {T} @{f}({T} %old, {T} %n, i32 %sh)
+  ret {T} %r
+}}
+''')
+# Floating point: three registers (U, a, opcode); the comparisons of
+# magnitudes give integers.
+fthree = [('fabd', 'FABD', 1, 1, '11010', None), ('fmulx', 'FMULX', 0, 0, '11011', None), ('frecps', 'FRECPS', 0, 0, '11111', None),
+          ('frsqrts', 'FRSQRTS', 0, 1, '11111', None), ('facge', 'FACGE', 1, 0, '11101', 'int'), ('facgt', 'FACGT', 1, 1, '11101', 'int'),
+          ('fmaxp', 'FMAXP', 1, 0, '11110', None), ('fminp', 'FMINP', 1, 1, '11110', None), ('fmaxnmp', 'FMAXNMP', 1, 0, '11000', None),
+          ('fminnmp', 'FMINNMP', 1, 1, '11000', None), ('faddp', 'FADDP', 1, 0, '11010', None)]
+for intr, name, U, a, opc, res in fthree:
+    for arr, n, ty, Q, sz in FLT:
+        T = vt(n, ty); fm = 'f32' if ty == 'float' else 'f64'
+        R = vt(n, 'i32' if ty == 'float' else 'i64') if res else T
+        f = f'llvm.aarch64.neon.{intr}.v{n}{"i32" if ty == "float" else "i64"}.v{n}{fm}' if res else f'llvm.aarch64.neon.{intr}.v{n}{fm}'
+        o.append(declare(f, R, [T, T]) + f'''define {R} @{name}v{arr}({T} "reg"="{cls(Q)}" %n, {T} "reg"="{cls(Q)}" %m) "enc"="0 {Q} {U} 01110 {a} {sz} 1 m:5 {opc} 1 n:5 d:5" "asm"="{intr} {{d:{arr}}}, {{n:{arr}}}, {{m:{arr}}}" {{
+  %r = call {R} @{f}({T} %n, {T} %m)
+  ret {R} %r
+}}
+''')
+# Their scalar forms (fabd's is sisd.fabd).
+for intr, name, U, a, opc, res in fthree[:6]:
+    for ty, sz, r in [('float', '0', 's'), ('double', '1', 'd')]:
+        fm = 'f32' if ty == 'float' else 'f64'
+        iname = 'llvm.aarch64.sisd.fabd' if intr == 'fabd' else f'llvm.aarch64.neon.{intr}'
+        if res:
+            ity = 'i32' if ty == 'float' else 'i64'
+            f = f'{iname}.{ity}.{fm}'
+            to_i = 'FMOVWS' if ty == 'float' else 'FMOVXD'
+            g = 'w' if ty == 'float' else 'x'
+            o.append(declare(f, ity, [ty, ty]) + f'''define {ity} @{name}{r}.w({ty} "reg"="{r}" %n, {ty} "reg"="{r}" %m) "recipe"="{name}{r}.expand" {{
+  %r = call {ity} @{f}({ty} %n, {ty} %m)
+  ret {ity} %r
+}}
+
+define {ity} @{name}{r}.expand({ty} %n, {ty} %m) {{
+  %v = call {ty} @{name}{r}({ty} %n, {ty} %m)
+  %r = call {ity} @{to_i}({ty} %v)
+  ret {ity} %r
+}}
+
+define {ty} @{name}{r}({ty} "reg"="{r}" %n, {ty} "reg"="{r}" %m) "enc"="01 {U} 11110 {a} {sz} 1 m:5 {opc} 1 n:5 d:5" "asm"="{intr} {{d}}, {{n}}, {{m}}" "nomatch" {{
+  ret {ty} %n
+}}
+''')
+        else:
+            f = f'{iname}.{fm}'
+            o.append(declare(f, ty, [ty, ty]) + f'''define {ty} @{name}{r}({ty} "reg"="{r}" %n, {ty} "reg"="{r}" %m) "enc"="01 {U} 11110 {a} {sz} 1 m:5 {opc} 1 n:5 d:5" "asm"="{intr} {{d}}, {{n}}, {{m}}" {{
+  %r = call {ty} @{f}({ty} %n, {ty} %m)
+  ret {ty} %r
+}}
+''')
+# Floating point, two registers: estimates, rounding to 32 or 64 bits.
+ftwo = [('frecpe', 'FRECPE', 0, 1, '11101'), ('frsqrte', 'FRSQRTE', 1, 1, '11101'),
+        ('frint32z', 'FRINT32Z', 0, 0, '11110'), ('frint32x', 'FRINT32X', 1, 0, '11110'),
+        ('frint64z', 'FRINT64Z', 0, 0, '11111'), ('frint64x', 'FRINT64X', 1, 0, '11111')]
+for intr, name, U, a, opc in ftwo:
+    for arr, n, ty, Q, sz in FLT:
+        T = vt(n, ty); fm = 'f32' if ty == 'float' else 'f64'
+        f = f'llvm.aarch64.neon.{intr}.v{n}{fm}'
+        o.append(declare(f, T, [T]) + f'''define {T} @{name}v{arr}({T} "reg"="{cls(Q)}" %n) "enc"="0 {Q} {U} 01110 {a} {sz} 10000 {opc} 10 n:5 d:5" "asm"="{intr} {{d:{arr}}}, {{n:{arr}}}" {{
+  %r = call {T} @{f}({T} %n)
+  ret {T} %r
+}}
+''')
+for intr, name, U, a, opc in ftwo[:2] + [('frecpx', 'FRECPX', 0, 1, '11111')]:
+    for ty, sz, r in [('float', '0', 's'), ('double', '1', 'd')]:
+        fm = 'f32' if ty == 'float' else 'f64'
+        f = f'llvm.aarch64.neon.{intr}.{fm}'
+        o.append(declare(f, ty, [ty]) + f'''define {ty} @{name}{r}({ty} "reg"="{r}" %n) "enc"="01 {U} 11110 {a} {sz} 10000 {opc} 10 n:5 d:5" "asm"="{intr} {{d}}, {{n}}" {{
+  %r = call {ty} @{f}({ty} %n)
+  ret {ty} %r
+}}
+''')
+for intr, name, op in [('frint32z', 'FRINT32Z', '00'), ('frint32x', 'FRINT32X', '01'), ('frint64z', 'FRINT64Z', '10'), ('frint64x', 'FRINT64X', '11')]:
+    for ty, sz, r in [('float', '0', 's'), ('double', '1', 'd')]:
+        fm = 'f32' if ty == 'float' else 'f64'
+        f = f'llvm.aarch64.{intr}.{fm}'
+        o.append(declare(f, ty, [ty]) + f'''define {ty} @{name}{r}({ty} "reg"="{r}" %n) "enc"="0 0 0 11110 0 {sz} 1 0100 {op} 10000 n:5 d:5" "asm"="{intr} {{d}}, {{n}}" {{
+  %r = call {ty} @{f}({ty} %n)
+  ret {ty} %r
+}}
+''')
+for intr, name, U in [('urecpe', 'URECPE', 0), ('ursqrte', 'URSQRTE', 1)]:
+    for arr, n, Q in [('4s', 4, 1), ('2s', 2, 0)]:
+        T = vt(n, 'i32'); f = f'llvm.aarch64.neon.{intr}.v{n}i32'
+        o.append(declare(f, T, [T]) + f'''define {T} @{name}v{arr}({T} "reg"="{cls(Q)}" %n) "enc"="0 {Q} {U} 01110 1 0 10000 11100 10 n:5 d:5" "asm"="{intr} {{d:{arr}}}, {{n:{arr}}}" {{
+  %r = call {T} @{f}({T} %n)
+  ret {T} %r
+}}
+''')
+# Complex numbers (FCMA): sums with the second rotated by 90 or 270
+# degrees, and multiply-accumulates by 0, 90, 180 or 270 (tied).
+for arr, n, ty, Q, sz in FLT:
+    if ty == 'double' and not Q:
+        continue
+    T = vt(n, ty); fm = 'f32' if ty == 'float' else 'f64'; size = '10' if ty == 'float' else '11'
+    for rot, bit in [('90', '0'), ('270', '1')]:
+        f = f'llvm.aarch64.neon.vcadd.rot{rot}.v{n}{fm}'
+        o.append(declare(f, T, [T, T]) + f'''define {T} @FCADD{rot}v{arr}({T} "reg"="{cls(Q)}" %n, {T} "reg"="{cls(Q)}" %m) "enc"="0 {Q} 1 01110 {size} 0 m:5 111 {bit} 0 1 n:5 d:5" "asm"="fcadd {{d:{arr}}}, {{n:{arr}}}, {{m:{arr}}}, #{rot}" {{
+  %r = call {T} @{f}({T} %n, {T} %m)
+  ret {T} %r
+}}
+''')
+    for rot, bits in [('0', '00'), ('90', '01'), ('180', '10'), ('270', '11')]:
+        f = f'llvm.aarch64.neon.vcmla.rot{rot}.v{n}{fm}'
+        o.append(declare(f, T, [T, T, T]) + f'''define {T} @FCMLA{rot}v{arr}({T} "reg"="{cls(Q)}" "tied" %old, {T} "reg"="{cls(Q)}" %n, {T} "reg"="{cls(Q)}" %m) "enc"="0 {Q} 1 01110 {size} 0 m:5 110 {bits} 1 n:5 d:5" "asm"="fcmla {{d:{arr}}}, {{n:{arr}}}, {{m:{arr}}}, #{rot}" {{
+  %r = call {T} @{f}({T} %old, {T} %n, {T} %m)
+  ret {T} %r
+}}
+''')
+# Dot products of bytes into words (tied); rounding doubling
+# multiply-accumulates (RDM, tied).
+for intr, name, U in [('sdot', 'SDOT', 0), ('udot', 'UDOT', 1)]:
+    for n, Q, b in [(4, 1, 16), (2, 0, 8)]:
+        T = vt(n, 'i32'); B = vt(b, 'i8'); f = f'llvm.aarch64.neon.{intr}.v{n}i32.v{b}i8'
+        o.append(declare(f, T, [T, B, B]) + f'''define {T} @{name}v{n}s({T} "reg"="{cls(Q)}" "tied" %old, {B} "reg"="{cls(Q)}" %n, {B} "reg"="{cls(Q)}" %m) "enc"="0 {Q} {U} 01110 10 0 m:5 1001 0 1 n:5 d:5" "asm"="{intr} {{d:{n}s}}, {{n:{b}b}}, {{m:{b}b}}" {{
+  %r = call {T} @{f}({T} %old, {B} %n, {B} %m)
+  ret {T} %r
+}}
+''')
+for intr, name, S in [('sqrdmlah', 'SQRDMLAH', 0), ('sqrdmlsh', 'SQRDMLSH', 1)]:
+    for arr, n, e, Q, size in INT:
+        if e not in (16, 32):
+            continue
+        T = vt(n, it(e)); f = f'llvm.aarch64.neon.{intr}.v{n}i{e}'
+        o.append(declare(f, T, [T, T, T]) + f'''define {T} @{name}v{arr}({T} "reg"="{cls(Q)}" "tied" %old, {T} "reg"="{cls(Q)}" %n, {T} "reg"="{cls(Q)}" %m) "enc"="0 {Q} 1 01110 {size} 0 m:5 1000 {S} 1 n:5 d:5" "asm"="{intr} {{d:{arr}}}, {{n:{arr}}}, {{m:{arr}}}" {{
+  %r = call {T} @{f}({T} %old, {T} %n, {T} %m)
+  ret {T} %r
+}}
+''')
+    o.append(scalar_recipe(f'{name}s', f'llvm.aarch64.neon.{intr}.i32', 'i32', ['old', 'n', 'm'],
+                           f'01 1 11110 10 0 m:5 1000 {S} 1 n:5 d:5', f'{intr} {{d}}, {{n}}, {{m}}', True))
+out.append("\n".join(o))
+
 
 def write():
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "50-vectors.ll")

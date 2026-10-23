@@ -51,7 +51,8 @@ def alu():
             entry(ty, f'{N}rr', [f'{ty} "reg"="{cls}" "tied" %n', f'{ty} "reg"="{cls}" %m'],
                   f'rex({rw}, m, 0, d) | {bits(n * 8 + 1)} | rr(m, d)', f'{mn}{sfx} {{m}}, {{d}}',
                   [f'%r = {ir} {ty} %n, %m', f'ret {ty} %r'],
-                  FLAGS + zext + (' "role"="sub"' if (mn, w) == ('sub', 64) else ''))
+                  FLAGS + zext + (' "role"="sub"' if (mn, w) == ('sub', 64) else '')
+                  + (' "role"="add2.r64"' if (mn, w) == ('add', 64) else ''))
             # op $imm, d: a byte if it fits (83 /n), else 32 bits (81 /n).
             # (The accumulator's own form, 05 + 8n, where the byte does not
             # hold the immediate: as llvm-mc writes it.)
@@ -59,7 +60,11 @@ def alu():
                   f'{{ rex({rw}, 0, 0, d) | 10000011 | rr({n}, d) | ib:s8=imm ; '
                   f'acc:0=d rex({rw}, 0, 0, 0) | {bits(n * 8 + 5)} | iv:s32=imm ; '
                   f'rex({rw}, 0, 0, d) | 10000001 | rr({n}, d) | iv:s32=imm }}',
-                  f'{mn}{sfx} ${{imm}}, {{d}}', [f'%r = {ir} {ty} %n, %imm', f'ret {ty} %r'], FLAGS + zext)
+                  f'{mn}{sfx} ${{imm}}, {{d}}', [f'%r = {ir} {ty} %n, %imm', f'ret {ty} %r'],
+                  FLAGS + zext + (' "role"="add2i.r64"' if (mn, w) == ('add', 64) else ''))
+        # (Roles add2 and add2i, the two-address adds: where one follows a
+        # copy of its source, and the flags it sets are dead, peephole.rs
+        # makes the two one lea, which is three-address.)
         # imul m, d (0F AF /r: ModRM.reg the destination).
         entry(ty, f'IMUL{w}rr', [f'{ty} "reg"="{cls}" "tied" %n', f'{ty} "reg"="{cls}" %m'],
               f'rex({rw}, d, 0, m) | 00001111 | 10101111 | rr(d, m)', f'imul{sfx} {{m}}, {{d}}',
@@ -215,13 +220,16 @@ def compares():
               f'acc:0=n rex({rw}, 0, 0, 0) | 00111101 | iv:s32=imm ; '
               f'rex({rw}, 0, 0, n) | 10000001 | rr(7, n) | iv:s32=imm }}', f'cmp{sfx} ${{imm}}, {{n}}',
               ext2 + [f'%f0 = insertvalue %flags poison, i64 {a}, 0', f'%f = insertvalue %flags %f0, i64 {b2}, 1',
-                      'ret %flags %f'], ' "sets"="zcso"')
+                      'ret %flags %f'], f' "sets"="zcso" "role"="cmpi.{cls}"')
+        # (A compare with 0 is a test of the register with itself, a byte
+        # shorter, with the same flags: roles cmpi and test, for
+        # peephole.rs's short forms.)
         # test m, n: the flags of n & m compared with 0.
         x = [f'%r = and {ty} %n, %m'] + ([] if w == 64 else ['%x = sext i32 %r to i64'])
         entry('%flags', f'TEST{w}rr', [f'{ty} "reg"="{cls}" %n', f'{ty} "reg"="{cls}" %m'],
               f'rex({rw}, m, 0, n) | 10000101 | rr(m, n)', f'test{sfx} {{m}}, {{n}}',
               x + [f'%f0 = insertvalue %flags poison, i64 {"%r" if w == 64 else "%x"}, 0',
-                   '%f = insertvalue %flags %f0, i64 0, 1', 'ret %flags %f'], ' "sets"="zcso"')
+                   '%f = insertvalue %flags %f0, i64 0, 1', 'ret %flags %f'], f' "sets"="zcso" "role"="test.{cls}"')
 
 
 def control():
