@@ -434,55 +434,128 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool, coalescing: bool) -> Res
         return Ok(false);
     }
 
-    // A spilled value that appears more than once in a block, and for which
-    // a register is free there from its first appearance to its last, is
-    // held in that register in the block: loaded once (if read before it is
-    // written), and stored after each definition as everywhere.
-    let spilled_set: HashSet<VReg> = spilled.iter().copied().collect();
-    let mut local: HashMap<(VReg, usize), u8> = HashMap::new();
+    // A spilled value is held in a register through stretches of a block
+    // where one is free: its appearances in the block, in order, grouped
+    // as far as a register stays free from a group's first to its last
+    // (caller-saved ones between calls, callee-saved ones across them).
+    // In a group of two or more, it is loaded once (if read before it is
+    // written) and read from the register; it is stored after each
+    // definition, as everywhere, so memory always has it.
+    // A spilled value made by one instruction from nothing but immediates
+    // and symbols (a constant, an address), which reads no register,
+    // memory or flags and changes nothing else, is made again before each use
+    // instead: no slot, no store, no loads. (Rematerialisation; each is an
+    // elective change, autochop.)
+    let remat: HashMap<VReg, MInst> = {
+        let mut defs_of: HashMap<VReg, Vec<MInst>> = HashMap::new();
+        let want: HashSet<VReg> = spilled.iter().copied().collect();
+        for b in &f.blocks {
+            for inst in &b.insts {
+                let (defs, _) = regs_of(t, inst);
+                for r in defs {
+                    if let Reg::V(v) = r
+                        && want.contains(&v)
+                    {
+                        defs_of.entry(v).or_default().push(inst.clone());
+                    }
+                }
+            }
+        }
+        defs_of
+            .into_iter()
+            .filter_map(|(v, ds)| {
+                let [d] = &ds[..] else { return None };
+                let Opcode::Instr(k) = d.op else { return None };
+                let ins = &t.instrs[k];
+                // (Nor one that reads the flags: x86's setcc, whose only
+                // operand is its condition.)
+                let pure = !ins.memory
+                    && !ins.operands.iter().any(|o| o.kind == crate::target::Kind::Cond)
+                    && ins.sets.is_none()
+                    && !ins.clobbers_flags
+                    && ins.clobbers.is_empty()
+                    && !ins.second_result
+                    && d.imp_defs.is_empty()
+                    && d.imp_uses.is_empty()
+                    && !d.barrier
+                    && d.ops.first() == Some(&MOp::Reg(Reg::V(v)))
+                    && d.ops[1..].iter().all(|o| matches!(o, MOp::Imm(_) | MOp::Sym(_)));
+                (pure && epitome_ir::chop::allow(|| format!("{}: make v{v} again where it is used", f.name)))
+                    .then(|| (v, d.clone()))
+            })
+            .collect()
+    };
+    let spilled_set: HashSet<VReg> = spilled.iter().copied().filter(|v| !remat.contains_key(v)).collect();
+    let mut local: HashMap<(VReg, usize), Vec<(u32, u32, u8)>> = HashMap::new();
     {
         let mut idx = 0u32;
         for (bi, b) in f.blocks.iter().enumerate() {
-            // Each spilled value's (first, last, appearances) in the block.
-            let mut seen: HashMap<VReg, (u32, u32, u32)> = HashMap::new();
+            // Each spilled value's positions in the block, in order.
+            let mut seen: HashMap<VReg, Vec<u32>> = HashMap::new();
             for inst in &b.insts {
                 let (defs, uses) = regs_of(t, inst);
                 for (r, p) in uses.iter().map(|r| (r, 2 * idx)).chain(defs.iter().map(|r| (r, 2 * idx + 1))) {
                     if let Reg::V(v) = r
                         && spilled_set.contains(v)
                     {
-                        let e = seen.entry(*v).or_insert((p, p, 0));
-                        e.1 = e.1.max(p);
-                        e.2 += 1;
+                        let ps = seen.entry(*v).or_default();
+                        if ps.last() != Some(&p) {
+                            ps.push(p);
+                        }
                     }
                 }
                 idx += 1;
             }
-            let mut vs: Vec<_> = seen.into_iter().filter(|(_, e)| e.2 > 1).collect();
-            vs.sort_by_key(|(v, e)| (e.0, *v));
-            for (v, (a, z, _)) in vs {
+            let mut vs: Vec<(VReg, Vec<u32>)> = seen.into_iter().filter(|(_, ps)| ps.len() > 1).collect();
+            vs.sort_by_key(|(v, ps)| (ps[0], *v));
+            for (v, ps) in vs {
                 let file = file_of_v(v);
                 let wide = too_wide(v);
-                let cands = caller_saved
+                let cands: Vec<u8> = caller_saved
                     .iter()
                     .chain(&fp_caller_saved)
                     .chain(callee_saved.iter().chain(&fp_callee_saved).filter(|_| !wide))
                     .copied()
-                    .filter(|&p| m.file_of(p) == file);
-                let free = cands.into_iter().find(|p| taken.get(p).is_none_or(|busy| !busy.meets((a, z))));
-                if let Some(p) = free
-                    && epitome_ir::chop::allow(|| format!("{}: hold a spilled value in a register in a block", f.name))
-                {
-                    taken.entry(p).or_default().add((a, z));
-                    local.insert((v, bi), p);
+                    .filter(|&p| m.file_of(p) == file)
+                    .collect();
+                let free = |taken: &HashMap<u8, Busy>, p: u8, iv: Interval| taken.get(&p).is_none_or(|b| !b.meets(iv));
+                let mut a = 0;
+                while a + 1 < ps.len() {
+                    // The furthest appearance a register stays free to.
+                    let mut best: Option<(usize, u8)> = None;
+                    for z in a + 1..ps.len() {
+                        let iv = (ps[a], ps[z]);
+                        match best
+                            .map(|b| b.1)
+                            .filter(|&p| free(&taken, p, iv))
+                            .or_else(|| cands.iter().copied().find(|&p| free(&taken, p, iv)))
+                        {
+                            Some(p) => best = Some((z, p)),
+                            None => break,
+                        }
+                    }
+                    let Some((z, p)) = best else {
+                        a += 1;
+                        continue;
+                    };
+                    if epitome_ir::chop::allow(|| format!("{}: hold a spilled value in a register in a block", f.name))
+                    {
+                        taken.entry(p).or_default().add((ps[a], ps[z]));
+                        local.entry((v, bi)).or_default().push((ps[a], ps[z], p));
+                    }
+                    a = z + 1;
                 }
             }
         }
     }
+    // The group of a spilled value's appearance at a position, if any.
+    let group_at = |v: VReg, bi: usize, pos: u32| -> Option<(u32, u8)> {
+        local.get(&(v, bi))?.iter().find(|g| g.0 <= pos && pos <= g.1).map(|g| (g.0, g.2))
+    };
 
     // Spill slots, and loads and stores around each use and definition.
     let mut slot_of: HashMap<VReg, usize> = HashMap::new();
-    for &v in &spilled {
+    for &v in spilled.iter().filter(|v| !remat.contains_key(v)) {
         let size = (m.def(f.vclass[v as usize]).bits as u64 / 8).max(8);
         f.slots.push(Slot { size, align: size, offset: 0 });
         slot_of.insert(v, f.slots.len() - 1);
@@ -506,13 +579,24 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool, coalescing: bool) -> Res
     let pool_of = |file: usize| -> Vec<u8> {
         abi.scratch.iter().chain(&abi.fp_scratch).copied().filter(|&r| m.file_of(r) == file).collect()
     };
+    // Each instruction's number, as the positions above count them.
+    let mut pos = 0u32;
     for (bi, b) in f.blocks.iter_mut().enumerate() {
         let old = std::mem::take(&mut b.insts);
         let mut new = Vec::with_capacity(old.len());
-        // Values held in their block's register that it now holds.
-        let mut loaded: HashSet<VReg> = HashSet::new();
-        let held = |r: Reg| matches!(r, Reg::V(v) if local.contains_key(&(v, bi)));
+        // Values held in a register, and the group whose register holds
+        // them now.
+        let mut loaded: HashMap<VReg, u32> = HashMap::new();
         for mut inst in old {
+            let here = pos;
+            pos += 1;
+            let held = |r: Reg| matches!(r, Reg::V(v) if group_at(v, bi, 2 * here).or(group_at(v, bi, 2 * here + 1)).is_some());
+            // The definition of a value made again where it is used goes.
+            if let Some(MOp::Reg(Reg::V(v))) = inst.ops.first()
+                && remat.get(v).is_some_and(|d| d.op == inst.op && d.ops == inst.ops)
+            {
+                continue;
+            }
             // A copy between a spilled value and one in a register is the
             // spill code alone: the register loaded or stored directly.
             if inst.op == Opcode::Copy
@@ -558,11 +642,13 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool, coalescing: bool) -> Res
             let both: Vec<Reg> = uses.iter().filter(|r| defs.contains(r)).copied().collect();
             for r in uses.iter().chain(defs.iter()) {
                 if let Reg::V(v) = r
-                    && let Some(&slot) = slot_of.get(v)
+                    && (slot_of.contains_key(v) || remat.contains_key(v))
                     && !scratch.contains_key(v)
                 {
+                    let slot = slot_of.get(v).copied().unwrap_or(0);
                     let class = vclass[*v as usize];
-                    if let Some(&p) = local.get(&(*v, bi)) {
+                    let at = if uses.contains(r) { 2 * here } else { 2 * here + 1 };
+                    if let Some((g, p)) = group_at(*v, bi, at) {
                         let (ld, st) = spill_of(class).ok_or_else(|| {
                             format!(
                                 "{fname}: no instructions load and store a {} register to spill it",
@@ -570,7 +656,7 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool, coalescing: bool) -> Res
                             )
                         })?;
                         scratch.insert(*v, p);
-                        if uses.contains(r) && !loaded.contains(v) {
+                        if uses.contains(r) && loaded.get(v) != Some(&g) {
                             new.push(MInst::new(
                                 ld,
                                 vec![MOp::Reg(Reg::P(p)), MOp::Reg(Reg::P(t.machine.sp)), MOp::Frame(slot, 0)],
@@ -582,7 +668,7 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool, coalescing: bool) -> Res
                                 vec![MOp::Reg(Reg::P(p)), MOp::Reg(Reg::P(t.machine.sp)), MOp::Frame(slot, 0)],
                             ));
                         }
-                        loaded.insert(*v);
+                        loaded.insert(*v, g);
                         continue;
                     }
                     let pool = pool_of(m.def(class).file);
@@ -599,6 +685,14 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool, coalescing: bool) -> Res
                         None => return Err(format!("{fname}: more spilled operands than scratch registers")),
                     };
                     scratch.insert(*v, s);
+                    if let Some(d) = remat.get(v) {
+                        if uses.contains(r) {
+                            let mut again = d.clone();
+                            again.ops[0] = MOp::Reg(Reg::P(s));
+                            new.push(again);
+                        }
+                        continue;
+                    }
                     let (ld, st) = spill_of(class).ok_or_else(|| {
                         format!("{fname}: no instructions load and store a {} register to spill it", m.def(class).name)
                     })?;

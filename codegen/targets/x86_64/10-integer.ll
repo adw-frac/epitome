@@ -2,12 +2,12 @@
 ; not edit. The conventions are those of codegen/targets/aarch64/00-base.ll,
 ; and docs/design/x86.md has the plan.
 
-define i64 @ADD64rr(i64 "reg"="r64" "tied" %n, i64 "reg"="r64" %m) "enc"="rex(1, m, 0, d) | 00000001 | rr(m, d)" "asm"="addq {m}, {d}" "clobbers"="flags" "nodecode" {
+define i64 @ADD64rr(i64 "reg"="r64" "tied" %n, i64 "reg"="r64" %m) "enc"="rex(1, m, 0, d) | 00000001 | rr(m, d)" "asm"="addq {m}, {d}" "clobbers"="flags" "role"="add2.r64" "nodecode" {
   %r = add i64 %n, %m
   ret i64 %r
 }
 
-define i64 @ADD64ri(i64 "reg"="r64" "tied" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, d) | 10000011 | rr(0, d) | ib:s8=imm ; acc:0=d rex(1, 0, 0, 0) | 00000101 | iv:s32=imm ; rex(1, 0, 0, d) | 10000001 | rr(0, d) | iv:s32=imm }" "asm"="addq ${imm}, {d}" "clobbers"="flags" "nodecode" {
+define i64 @ADD64ri(i64 "reg"="r64" "tied" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, d) | 10000011 | rr(0, d) | ib:s8=imm ; acc:0=d rex(1, 0, 0, 0) | 00000101 | iv:s32=imm ; rex(1, 0, 0, d) | 10000001 | rr(0, d) | iv:s32=imm }" "asm"="addq ${imm}, {d}" "clobbers"="flags" "role"="add2i.r64" "nodecode" {
   %r = add i64 %n, %imm
   ret i64 %r
 }
@@ -883,13 +883,13 @@ define %flags @CMP64rr(i64 "reg"="r64" %n, i64 "reg"="r64" %m) "enc"="rex(1, m, 
   ret %flags %f
 }
 
-define %flags @CMP64ri(i64 "reg"="r64" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, n) | 10000011 | rr(7, n) | ib:s8=imm ; acc:0=n rex(1, 0, 0, 0) | 00111101 | iv:s32=imm ; rex(1, 0, 0, n) | 10000001 | rr(7, n) | iv:s32=imm }" "asm"="cmpq ${imm}, {n}" "sets"="zcso" "nodecode" {
+define %flags @CMP64ri(i64 "reg"="r64" %n, i64 "imm" %imm) "enc"="{ rex(1, 0, 0, n) | 10000011 | rr(7, n) | ib:s8=imm ; acc:0=n rex(1, 0, 0, 0) | 00111101 | iv:s32=imm ; rex(1, 0, 0, n) | 10000001 | rr(7, n) | iv:s32=imm }" "asm"="cmpq ${imm}, {n}" "sets"="zcso" "role"="cmpi.r64" "nodecode" {
   %f0 = insertvalue %flags poison, i64 %n, 0
   %f = insertvalue %flags %f0, i64 %imm, 1
   ret %flags %f
 }
 
-define %flags @TEST64rr(i64 "reg"="r64" %n, i64 "reg"="r64" %m) "enc"="rex(1, m, 0, n) | 10000101 | rr(m, n)" "asm"="testq {m}, {n}" "sets"="zcso" "nodecode" {
+define %flags @TEST64rr(i64 "reg"="r64" %n, i64 "reg"="r64" %m) "enc"="rex(1, m, 0, n) | 10000101 | rr(m, n)" "asm"="testq {m}, {n}" "sets"="zcso" "role"="test.r64" "nodecode" {
   %r = and i64 %n, %m
   %f0 = insertvalue %flags poison, i64 %r, 0
   %f = insertvalue %flags %f0, i64 0, 1
@@ -904,7 +904,7 @@ define %flags @CMP32rr(i32 "reg"="r32" %n, i32 "reg"="r32" %m) "enc"="rex(0, m, 
   ret %flags %f
 }
 
-define %flags @CMP32ri(i32 "reg"="r32" %n, i32 "imm" %imm) "enc"="{ rex(0, 0, 0, n) | 10000011 | rr(7, n) | ib:s8=imm ; acc:0=n rex(0, 0, 0, 0) | 00111101 | iv:s32=imm ; rex(0, 0, 0, n) | 10000001 | rr(7, n) | iv:s32=imm }" "asm"="cmpl ${imm}, {n}" "sets"="zcso" "nodecode" {
+define %flags @CMP32ri(i32 "reg"="r32" %n, i32 "imm" %imm) "enc"="{ rex(0, 0, 0, n) | 10000011 | rr(7, n) | ib:s8=imm ; acc:0=n rex(0, 0, 0, 0) | 00111101 | iv:s32=imm ; rex(0, 0, 0, n) | 10000001 | rr(7, n) | iv:s32=imm }" "asm"="cmpl ${imm}, {n}" "sets"="zcso" "role"="cmpi.r32" "nodecode" {
   %a = sext i32 %n to i64
   %b = sext i32 %imm to i64
   %f0 = insertvalue %flags poison, i64 %a, 0
@@ -912,7 +912,7 @@ define %flags @CMP32ri(i32 "reg"="r32" %n, i32 "imm" %imm) "enc"="{ rex(0, 0, 0,
   ret %flags %f
 }
 
-define %flags @TEST32rr(i32 "reg"="r32" %n, i32 "reg"="r32" %m) "enc"="rex(0, m, 0, n) | 10000101 | rr(m, n)" "asm"="testl {m}, {n}" "sets"="zcso" "nodecode" {
+define %flags @TEST32rr(i32 "reg"="r32" %n, i32 "reg"="r32" %m) "enc"="rex(0, m, 0, n) | 10000101 | rr(m, n)" "asm"="testl {m}, {n}" "sets"="zcso" "role"="test.r32" "nodecode" {
   %r = and i32 %n, %m
   %x = sext i32 %r to i64
   %f0 = insertvalue %flags poison, i64 %x, 0

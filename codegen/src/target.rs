@@ -535,6 +535,8 @@ pub const X86_64_FILES: &[(&str, &str)] = &[
     ("02-xed.ll", include_str!("../targets/x86_64/02-xed.ll")),
     ("05-cond.ll", include_str!("../targets/x86_64/05-cond.ll")),
     ("10-integer.ll", include_str!("../targets/x86_64/10-integer.ll")),
+    ("15-frame.ll", include_str!("../targets/x86_64/15-frame.ll")),
+    ("16-short.ll", include_str!("../targets/x86_64/16-short.ll")),
     ("70-abi.ll", include_str!("../targets/x86_64/70-abi.ll")),
 ];
 

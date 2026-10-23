@@ -12,7 +12,7 @@
 //! Each removal is an elective change (autochop).
 
 use crate::mir::*;
-use crate::target::Target;
+use crate::target::{Kind, Target};
 
 /// Removes redundant compares; returns how many.
 pub fn redundant_compares(t: &Target, mf: &mut MFunc) -> usize {
@@ -247,6 +247,134 @@ pub fn pair_memory(t: &Target, mf: &mut MFunc) -> usize {
             }
         }
         b.insts = new;
+    }
+    made
+}
+
+/// **Short forms.** After allocation, where the description has them (x86):
+/// a move of 0 into a register becomes its zero idiom (role
+/// `zero.<class>`, x86's `xor` of the register with itself, two bytes for
+/// five) where the flags, which that clobbers, are dead after it: written
+/// again before anything reads them, or never read in the block (nothing
+/// keeps them from one block to the next). And a compare of a register
+/// with 0 (role `cmpi.<class>`) becomes a test of it with itself (role
+/// `test.<class>`, a byte shorter), which sets the flags as the compare
+/// does. Each change is an elective one (autochop). Returns how many.
+pub fn short_forms(t: &Target, mf: &mut MFunc) -> usize {
+    let m = &t.machine;
+    let class_name = |k: usize| match t.instrs[k].operands.first().map(|o| o.kind) {
+        Some(Kind::Reg(c)) => Some(m.def(c).name.clone()),
+        _ => None,
+    };
+    let name = mf.name.clone();
+    let mut made = 0;
+    for b in &mut mf.blocks {
+        for k in 0..b.insts.len() {
+            let Opcode::Instr(op) = b.insts[k].op else { continue };
+            // A compare with 0: a test.
+            if let [MOp::Reg(r), MOp::Imm(0)] = b.insts[k].ops[..]
+                && let Some(c) = class_name(op)
+                && t.has_role(op, &format!("cmpi.{c}"))
+                && let Some(test) = t.role(&format!("test.{c}"))
+                && epitome_ir::chop::allow(|| format!("{name}: test a register against itself for a compare with 0"))
+            {
+                b.insts[k] = MInst::new(test, vec![MOp::Reg(r), MOp::Reg(r)]);
+                made += 1;
+                continue;
+            }
+            // A move of 0: the zero idiom, where the flags are dead.
+            if t.constants.contains(&op)
+                && let [MOp::Reg(d), MOp::Imm(0)] = b.insts[k].ops[..]
+                && let Some(c) = class_name(op)
+                && let Some(zero) = t.role(&format!("zero.{c}"))
+            {
+                let dead = flags_dead(t, &b.insts[k + 1..]);
+                if dead && epitome_ir::chop::allow(|| format!("{name}: zero a register by its zero idiom")) {
+                    b.insts[k] = MInst::new(zero, vec![MOp::Reg(d)]);
+                    made += 1;
+                }
+            }
+        }
+    }
+    made
+}
+
+/// Whether the flags are dead after `rest` begins: written again before
+/// anything reads them, or not read in the rest of the block.
+fn flags_dead(t: &Target, rest: &[MInst]) -> bool {
+    let reads = |i: &MInst| match i.op {
+        Opcode::Instr(k) => t.instrs[k].operands.iter().any(|o| o.kind == Kind::Cond),
+        Opcode::Asm { .. } => true,
+        _ => false,
+    };
+    let writes = |i: &MInst| match i.op {
+        Opcode::Instr(k) => t.instrs[k].sets.is_some() || t.instrs[k].clobbers_flags || i.is_call(t),
+        Opcode::Asm { .. } => true,
+        _ => false,
+    };
+    rest.iter().find(|i| reads(i) || writes(i)).is_none_or(|i| !reads(i))
+}
+
+/// **Three-address adds.** After allocation, where the description has
+/// them (x86): a copy of `s` into `d` followed by a two-address add to `d`
+/// (roles `add2i.<class>`, of an immediate, and `add2.<class>`, of a
+/// register), whose flags are dead, becomes one three-address add that
+/// leaves the flags alone (roles `addi` and `add`, x86's `lea`): `movq
+/// %r15, %rax; addq $1, %rax` is `leaq 1(%r15), %rax`. Each change is an
+/// elective one (autochop). Returns how many.
+pub fn three_address(t: &Target, mf: &mut MFunc) -> usize {
+    let m = &t.machine;
+    let (Some(addi), Some(add)) = (t.role("addi"), t.role("add")) else { return 0 };
+    let copies: Vec<usize> = t.copies.values().copied().collect();
+    let sp = m.sp;
+    let name = mf.name.clone();
+    let mut made = 0;
+    for b in &mut mf.blocks {
+        let mut k = 0;
+        while k + 1 < b.insts.len() {
+            let (c, j) = (&b.insts[k], &b.insts[k + 1]);
+            let (Opcode::Instr(ci), Opcode::Instr(ji)) = (c.op, j.op) else {
+                k += 1;
+                continue;
+            };
+            let [MOp::Reg(Reg::P(d)), MOp::Reg(Reg::P(s))] = c.ops[..] else {
+                k += 1;
+                continue;
+            };
+            let class = match t.instrs[ji].operands.first().map(|o| o.kind) {
+                Some(Kind::Reg(cl)) => m.def(cl).name.clone(),
+                _ => String::new(),
+            };
+            let new = match j.ops[..] {
+                [MOp::Reg(Reg::P(x)), MOp::Reg(Reg::P(y)), MOp::Imm(v)]
+                    if x == d && y == d && t.has_role(ji, &format!("add2i.{class}")) =>
+                {
+                    Some(MInst::new(addi, vec![MOp::Reg(Reg::P(d)), MOp::Reg(Reg::P(s)), MOp::Imm(v)]))
+                }
+                [MOp::Reg(Reg::P(x)), MOp::Reg(Reg::P(y)), MOp::Reg(Reg::P(r))]
+                    if x == d && y == d && t.has_role(ji, &format!("add2.{class}")) =>
+                {
+                    // (d + d is s + s; an index cannot be sp.)
+                    let r = if r == d { s } else { r };
+                    let (base, index) = if r == sp { (r, s) } else { (s, r) };
+                    (index != sp).then(|| {
+                        MInst::new(add, vec![MOp::Reg(Reg::P(d)), MOp::Reg(Reg::P(base)), MOp::Reg(Reg::P(index))])
+                    })
+                }
+                _ => None,
+            };
+            if let Some(new) = new
+                && copies.contains(&ci)
+                && d != s
+                && flags_dead(t, &b.insts[k + 2..])
+                && epitome_ir::chop::allow(|| format!("{name}: a copy and a two-address add as one three-address add"))
+            {
+                b.insts[k] = new;
+                b.insts.remove(k + 1);
+                made += 1;
+            }
+            k += 1;
+        }
     }
     made
 }

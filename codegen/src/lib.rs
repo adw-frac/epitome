@@ -214,6 +214,8 @@ fn compile_function(t: &Target, abi: &abi::Abi, cx: &mut Ctx, job: &Job, opts: &
                 r => r?,
             }
             peephole::pair_memory(t, &mut mf);
+            peephole::three_address(t, &mut mf);
+            peephole::short_forms(t, &mut mf);
             timing::add(&timing::FRAME, now);
             let now = Instant::now();
             layout::place(t, &mut mf);

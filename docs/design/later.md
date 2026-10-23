@@ -182,5 +182,21 @@ these are for after.
   alone). Needs a condition form that reads one condition and sets the
   flags from a compare only when it holds, else to a constant chosen so
   the result's condition fails (for `and`) or holds (for `or`).
+- **x86's code size** (`regalloc.rs`, `isel.rs`, `targets/x86_64/`): over
+  a sample of crates' scalar modules, 1.31 times llc's bytes. Most of the
+  rest is moves (`movq`, 30,013 against 17,880): spill code, as on
+  AArch64 but with 14 registers and five callee-saved; reloads not folded
+  into instructions' memory operands, as x86 allows (`movq 32(%rsp),
+  %r11; cmpq %rax, %r11` where `cmpq 32(%rsp), %rax` does; a reg-form
+  instruction's memory form could be found from their bodies); stores of
+  immediates made in a register first (`movq $imm, mem` has no pattern);
+  switches tested case by case where llc jumps through a table.
+- **Registers chosen for encodings' size**: x86's r8-r15 need a REX
+  prefix, and some instructions have shorter forms for rax (the
+  descriptions' `acc:0=d` alternatives, already there); RISC-V's
+  compressed forms (not yet described) need x8-x15 and two-address
+  shapes. The allocator could weigh each register by the bytes its uses
+  and definitions would take in it, from the encodings, preferring the
+  cheaper for the values used most.
 - **Acquire loads** use `ldar`; with RCpc (the M1 has it) `ldapr` is
   enough for C++'s and Rust's acquire, as LLVM's back end uses.

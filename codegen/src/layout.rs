@@ -262,6 +262,17 @@ pub fn place(t: &Target, f: &mut MFunc) {
             .or_else(|| (0..n).find(|&b| !placed[b] && reached[b] && !leaves(b)))
             .or_else(|| (0..n).find(|&b| !placed[b] && reached[b]));
         let Some(next) = next else { break };
+        // A block earlier in the order that only goes on to `next` (the
+        // other arm of a diamond whose first arm the chain went through)
+        // goes just before it, falling through into it, rather than after
+        // everything else with a branch there and one back: cold code
+        // then touches fewer cache lines.
+        if let Some(arm) = (0..next)
+            .find(|&p| p != cur && !placed[p] && reached[p] && matches!(parts[p].1, Exit::Goto(x) if x == next))
+        {
+            placed[arm] = true;
+            order.push(arm);
+        }
         placed[next] = true;
         order.push(next);
     }

@@ -237,18 +237,28 @@ fn statements(template: &str, comment: &str) -> u32 {
 /// taken out until none are.
 fn clean_bools(cx: &Ctx, f: &Function) -> HashSet<LocalId> {
     let i1 = |ty: TypeId| matches!(cx.m.types.get(ty), Type::Int(1));
+    // Comparisons are, where every instruction that makes a register of a
+    // condition alone zeroes the rest of it (AArch64's cset; not x86's
+    // setcc, which writes a byte).
+    // (Operand 0 is the result.)
+    let makers: Vec<u32> =
+        cx.t.instrs
+            .iter()
+            .filter(|i| i.has_result && i.operands.len() == 2 && i.operands[1].kind == Kind::Cond)
+            .map(|i| i.zext)
+            .collect();
+    let cmp_clean = !makers.is_empty() && makers.iter().all(|&z| z <= 1);
     let mut set: HashSet<LocalId> = HashSet::new();
     for i in f.insts_in_order() {
         let Some(r) = f.insts[i.index()].result else { continue };
         if i1(f.locals[r.index()].ty)
-            && matches!(
-                f.insts[i.index()].op,
-                Op::ICmp { .. }
-                    | Op::FCmp { .. }
-                    | Op::Phi { .. }
-                    | Op::Select { .. }
-                    | Op::Binary { op: BinOp::And | BinOp::Or | BinOp::Xor, .. }
-            )
+            && match f.insts[i.index()].op {
+                Op::ICmp { .. } | Op::FCmp { .. } => cmp_clean,
+                _ => matches!(
+                    f.insts[i.index()].op,
+                    Op::Phi { .. } | Op::Select { .. } | Op::Binary { op: BinOp::And | BinOp::Or | BinOp::Xor, .. }
+                ),
+            }
         {
             set.insert(r);
         }
