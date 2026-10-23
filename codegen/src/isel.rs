@@ -437,7 +437,25 @@ impl<'a, 'b> Sel<'a, 'b> {
         true
     }
 
-    fn push(&mut self, inst: MInst) {
+    fn push(&mut self, mut inst: MInst) {
+        // A tied operand shares the result's register (x86's two-address
+        // arithmetic): copied there first, if it is another, as patterns'
+        // are, for instructions made by role (`zext.1`).
+        if let Opcode::Instr(k) = inst.op
+            && self.t.instrs[k].has_result
+            && let Some(MOp::Reg(res)) = inst.ops.first().cloned()
+        {
+            for (j, o) in self.t.instrs[k].operands.iter().enumerate() {
+                if o.tied
+                    && !o.writeback
+                    && let Some(MOp::Reg(src)) = inst.ops.get(j).cloned()
+                    && src != res
+                {
+                    self.mf.blocks[self.cur].insts.push(MInst::copy(res, src));
+                    inst.ops[j] = MOp::Reg(res);
+                }
+            }
+        }
         self.mf.blocks[self.cur].insts.push(inst);
     }
 
@@ -1272,6 +1290,28 @@ impl<'a, 'b> Sel<'a, 'b> {
         };
         let d = self.mf.new_vreg(class);
         let arr = arrangement(len, ebits);
+        // From 64-bit words, where the description says how
+        // (`vec.from.x`: a word into the low half, the rest zero;
+        // `vec.join.d`: a second word into the high half; x86's).
+        if let (Some(from), false) = (self.t.role("vec.from.x"), lanes.iter().all(|&l| l == 0)) {
+            let mask = if ebits >= 64 { u64::MAX } else { (1u64 << ebits) - 1 };
+            let mut words = [0u64; 2];
+            for (k, &l) in lanes.iter().enumerate() {
+                let at = k as u32 * ebits;
+                words[(at / 64) as usize] |= (l as u64 & mask) << (at % 64);
+            }
+            let wide = len * ebits > 64;
+            let lo = self.int_reg(words[0] as i64, true, false)?;
+            self.push(MInst::new(from, vec![MOp::Reg(Reg::V(d)), MOp::Reg(lo)]));
+            if wide && words[1] != 0 {
+                let join = self.t.by_role("vec.join.d");
+                let t = self.mf.new_vreg(class);
+                let hi = self.int_reg(words[1] as i64, true, false)?;
+                self.push(MInst::new(from, vec![MOp::Reg(Reg::V(t)), MOp::Reg(hi)]));
+                self.push(MInst::new(join, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(t))]));
+            }
+            return Ok(Reg::V(d));
+        }
         if lanes.iter().all(|&l| l == lanes[0]) && lanes[0] != 0 {
             let g = self.int_reg(lanes[0], ebits > 32, true)?;
             let dup = self.t.by_role(&format!("dup.{arr}"));
@@ -1280,6 +1320,9 @@ impl<'a, 'b> Sel<'a, 'b> {
         }
         let zero = self.t.by_role("movi.zero");
         self.push(MInst::new(zero, vec![MOp::Reg(Reg::V(d))]));
+        if lanes.iter().all(|&l| l == 0) {
+            return Ok(Reg::V(d));
+        }
         let ins = self.t.by_role(&format!("ins.{}", lane_suffix(ebits)));
         for (k, &l) in lanes.iter().enumerate() {
             if l != 0 {
@@ -1658,12 +1701,22 @@ impl<'a, 'b> Sel<'a, 'b> {
             let regs = self.mf.abi.fp_results(n);
             return (regs.len() == n).then_some(regs);
         }
+        // (Where aggregates are not homogeneous ones, a vector of up to a
+        // register is a floating-point field: System V's `{ <2 x float>,
+        // float }`, three floats, in xmm0 and xmm1.)
+        let vector = |t: &TypeId| {
+            !self.mf.abi.hfa
+                && self.is_vector(*t)
+                && self.cx.vector_bits() > 0
+                && self.bits(*t) <= self.cx.vector_bits()
+        };
         if let Some(fields) = self.fields(ty)
             && fields.iter().all(|t| {
                 matches!(self.cx.m.types.get(*t), Type::Int(1..=64) | Type::Ptr(0) | Type::Float | Type::Double)
+                    || vector(t)
             })
         {
-            let fp = |t: &TypeId| matches!(self.cx.m.types.get(*t), Type::Float | Type::Double);
+            let fp = |t: &TypeId| matches!(self.cx.m.types.get(*t), Type::Float | Type::Double) || vector(t);
             let (nf, ni) = (fields.iter().filter(|t| fp(t)).count(), fields.iter().filter(|t| !fp(t)).count());
             let ints = self.mf.abi.results(usize::MAX);
             let fps = self.mf.abi.fp_results(usize::MAX);
@@ -1717,7 +1770,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         };
         let regs: Vec<u32> = (0..n)
             .map(|k| match fields.get(k) {
-                Some(&t) if self.is_fp(t) => {
+                Some(&t) if self.is_fp(t) || self.is_vector(t) => {
                     let c = self.class_of_ty(t);
                     self.mf.new_vreg(c)
                 }

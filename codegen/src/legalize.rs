@@ -1047,11 +1047,13 @@ fn expand_lanewise(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         && let Some((len, elem, eb)) = vec_info(cx, cx.value_ty(bld.f, arg))
                     {
                         let opname = rest.split('.').next().unwrap_or("");
+                        // (And the description must have it: x86's SSE2 has no
+                        // across-lanes instructions.)
                         let native = match opname {
                             "add" => true,
                             "smax" | "smin" | "umax" | "umin" => eb < 64 && len * eb == cx.vector_bits() || eb < 32,
                             _ => false,
-                        };
+                        } && cx.selects_intrinsic(&name);
                         if !native
                             && matches!(
                                 opname,
@@ -2243,7 +2245,8 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         let (phis, rest): (Vec<InstId>, Vec<InstId>) = insts.into_iter().partition(|&i| f.insts[i.index()].op.is_phi());
         f.blocks[b.index()].insts = phis.into_iter().chain(rest).collect();
     }
-    expand_lanewise(cx, f)
+    expand_lanewise(cx, f)?;
+    crate::lanewise::lanewise(cx, f)
 }
 
 fn call_value(b: &mut Builder, cx: &mut Ctx, callee: Value, args: Vec<Value>, ret: TypeId, _pt: TypeId) -> Value {

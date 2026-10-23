@@ -15,6 +15,7 @@ pub mod enc;
 pub mod features;
 pub mod frame;
 pub mod isel;
+pub mod lanewise;
 pub mod layout;
 pub mod legalize;
 pub mod machine;

@@ -266,12 +266,12 @@ define i64 @MOVSWQ64(i16 "reg"="r32" %n) "enc"="rex(1, d, 0, n) | 00001111 | 101
   ret i64 %r
 }
 
-define i32 @MOVZBL1(i1 "reg"="r32" %n) "enc"="{ if(n<4) rex(0, d, 0, n) ; 0100 W:1=0 R:1=(d)>>3 X:1=0 B:1=(n)>>3 } | 00001111 | 10110110 | rr(d, n)" "asm"="movzbl {n:r8}, {d}" "zext"="1" "role"="zext.1" "nodecode" {
+define i32 @ZEXT1(i1 "reg"="r32" "tied" %n) "enc"="rex(0, 0, 0, d) | 10000011 | rr(4, d) | 00000001" "asm"="andl $1, {d}" "zext"="1" "role"="zext.1" "clobbers"="flags" "nodecode" {
   %r = zext i1 %n to i32
   ret i32 %r
 }
 
-define i64 @MOVZBQ1(i1 "reg"="r32" %n) "enc"="{ if(n<4) rex(0, d, 0, n) ; 0100 W:1=0 R:1=(d)>>3 X:1=0 B:1=(n)>>3 } | 00001111 | 10110110 | rr(d, n)" "asm"="movzbl {n:r8}, {d:r32}" "zext"="1" "nodecode" {
+define i64 @ZEXT1q(i1 "reg"="r32" "tied" %n) "enc"="rex(0, 0, 0, d) | 10000011 | rr(4, d) | 00000001" "asm"="andl $1, {d:r32}" "zext"="1" "dclass"="r64" "clobbers"="flags" "nodecode" {
   %r = zext i1 %n to i64
   ret i64 %r
 }
@@ -1982,7 +1982,1556 @@ define i1 @x87.cmp.ord.expand(ptr %a, ptr %b) {
   ret i1 %r
 }
 
-define <2 x i64> @MOVAPSrr(<2 x i64> "reg"="x" %n) "enc"="rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)" "asm"="movaps {n}, {d}" "copy"="x" "nodecode" {
+define <16 x i8> @LDV.16xi8(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, d, 4, n) | 00001111 | 00010000 | rm(d, n, 4, 1, off, 0, 1)" "asm"="movups {off}({n}), {d}" "dclass"="xv" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <16 x i8>, ptr %a
+  ret <16 x i8> %r
+}
+
+define void @STV.16xi8(<16 x i8> "reg"="xv" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, t, 4, n) | 00001111 | 00010001 | rm(t, n, 4, 1, off, 0, 1)" "asm"="movups {t}, {off}({n})" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <16 x i8> %t, ptr %a
+  ret void
+}
+
+define <8 x i16> @LDV.8xi16(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, d, 4, n) | 00001111 | 00010000 | rm(d, n, 4, 1, off, 0, 1)" "asm"="movups {off}({n}), {d}" "dclass"="xv" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <8 x i16>, ptr %a
+  ret <8 x i16> %r
+}
+
+define void @STV.8xi16(<8 x i16> "reg"="xv" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, t, 4, n) | 00001111 | 00010001 | rm(t, n, 4, 1, off, 0, 1)" "asm"="movups {t}, {off}({n})" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <8 x i16> %t, ptr %a
+  ret void
+}
+
+define <4 x i32> @LDV.4xi32(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, d, 4, n) | 00001111 | 00010000 | rm(d, n, 4, 1, off, 0, 1)" "asm"="movups {off}({n}), {d}" "dclass"="xv" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <4 x i32>, ptr %a
+  ret <4 x i32> %r
+}
+
+define void @STV.4xi32(<4 x i32> "reg"="xv" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, t, 4, n) | 00001111 | 00010001 | rm(t, n, 4, 1, off, 0, 1)" "asm"="movups {t}, {off}({n})" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <4 x i32> %t, ptr %a
+  ret void
+}
+
+define <2 x i64> @LDV.2xi64(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, d, 4, n) | 00001111 | 00010000 | rm(d, n, 4, 1, off, 0, 1)" "asm"="movups {off}({n}), {d}" "dclass"="xv" "role"="load.xv,load.q" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <2 x i64>, ptr %a
+  ret <2 x i64> %r
+}
+
+define void @STV.2xi64(<2 x i64> "reg"="xv" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, t, 4, n) | 00001111 | 00010001 | rm(t, n, 4, 1, off, 0, 1)" "asm"="movups {t}, {off}({n})" "role"="store.xv,store.q" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <2 x i64> %t, ptr %a
+  ret void
+}
+
+define <8 x i8> @LDV.8xi8(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110011 | rex(0, d, 4, n) | 00001111 | 01111110 | rm(d, n, 4, 1, off, 0, 1)" "asm"="movq {off}({n}), {d}" "dclass"="xh" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <8 x i8>, ptr %a
+  ret <8 x i8> %r
+}
+
+define void @STV.8xi8(<8 x i8> "reg"="xh" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="01100110 | rex(0, t, 4, n) | 00001111 | 11010110 | rm(t, n, 4, 1, off, 0, 1)" "asm"="movq {t}, {off}({n})" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <8 x i8> %t, ptr %a
+  ret void
+}
+
+define <4 x i16> @LDV.4xi16(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110011 | rex(0, d, 4, n) | 00001111 | 01111110 | rm(d, n, 4, 1, off, 0, 1)" "asm"="movq {off}({n}), {d}" "dclass"="xh" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <4 x i16>, ptr %a
+  ret <4 x i16> %r
+}
+
+define void @STV.4xi16(<4 x i16> "reg"="xh" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="01100110 | rex(0, t, 4, n) | 00001111 | 11010110 | rm(t, n, 4, 1, off, 0, 1)" "asm"="movq {t}, {off}({n})" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <4 x i16> %t, ptr %a
+  ret void
+}
+
+define <2 x i32> @LDV.2xi32(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110011 | rex(0, d, 4, n) | 00001111 | 01111110 | rm(d, n, 4, 1, off, 0, 1)" "asm"="movq {off}({n}), {d}" "dclass"="xh" "role"="load.xh" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <2 x i32>, ptr %a
+  ret <2 x i32> %r
+}
+
+define void @STV.2xi32(<2 x i32> "reg"="xh" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="01100110 | rex(0, t, 4, n) | 00001111 | 11010110 | rm(t, n, 4, 1, off, 0, 1)" "asm"="movq {t}, {off}({n})" "role"="store.xh" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <2 x i32> %t, ptr %a
+  ret void
+}
+
+define <4 x float> @LDV.4xf32(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, d, 4, n) | 00001111 | 00010000 | rm(d, n, 4, 1, off, 0, 1)" "asm"="movups {off}({n}), {d}" "dclass"="xv" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <4 x float>, ptr %a
+  ret <4 x float> %r
+}
+
+define void @STV.4xf32(<4 x float> "reg"="xv" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, t, 4, n) | 00001111 | 00010001 | rm(t, n, 4, 1, off, 0, 1)" "asm"="movups {t}, {off}({n})" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <4 x float> %t, ptr %a
+  ret void
+}
+
+define <2 x double> @LDV.2xf64(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, d, 4, n) | 00001111 | 00010000 | rm(d, n, 4, 1, off, 0, 1)" "asm"="movups {off}({n}), {d}" "dclass"="xv" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <2 x double>, ptr %a
+  ret <2 x double> %r
+}
+
+define void @STV.2xf64(<2 x double> "reg"="xv" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, t, 4, n) | 00001111 | 00010001 | rm(t, n, 4, 1, off, 0, 1)" "asm"="movups {t}, {off}({n})" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <2 x double> %t, ptr %a
+  ret void
+}
+
+define <2 x float> @LDV.2xf32(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110011 | rex(0, d, 4, n) | 00001111 | 01111110 | rm(d, n, 4, 1, off, 0, 1)" "asm"="movq {off}({n}), {d}" "dclass"="xh" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <2 x float>, ptr %a
+  ret <2 x float> %r
+}
+
+define void @STV.2xf32(<2 x float> "reg"="xh" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="01100110 | rex(0, t, 4, n) | 00001111 | 11010110 | rm(t, n, 4, 1, off, 0, 1)" "asm"="movq {t}, {off}({n})" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <2 x float> %t, ptr %a
+  ret void
+}
+
+define <2 x i64> @MOVAPSxv(<2 x i64> "reg"="xv" %n) "enc"="rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)" "asm"="movaps {n}, {d}" "copy"="xv" "dclass"="xv" "nodecode" {
+  ret <2 x i64> %n
+}
+
+define <2 x i32> @MOVAPSxh(<2 x i32> "reg"="xh" %n) "enc"="rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)" "asm"="movaps {n}, {d}" "copy"="xh" "dclass"="xh" "nodecode" {
+  ret <2 x i32> %n
+}
+
+define <2 x i64> @PXORzero() "enc"="01100110 | rex(0, d, 0, d) | 00001111 | 11101111 | rr(d, d)" "asm"="pxor {d}, {d}" "dclass"="xv" "role"="movi.zero" "nomatch" "nodecode" {
+  ret <2 x i64> zeroinitializer
+}
+
+define <16 x i8> @PADDB.16xi8(<16 x i8> "reg"="xv" "tied" %n, <16 x i8> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11111100 | rr(d, m)" "asm"="paddb {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = add <16 x i8> %n, %m
+  ret <16 x i8> %r
+}
+
+define <16 x i8> @PSUBB.16xi8(<16 x i8> "reg"="xv" "tied" %n, <16 x i8> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11111000 | rr(d, m)" "asm"="psubb {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = sub <16 x i8> %n, %m
+  ret <16 x i8> %r
+}
+
+define <16 x i8> @PAND.16xi8(<16 x i8> "reg"="xv" "tied" %n, <16 x i8> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11011011 | rr(d, m)" "asm"="pand {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = and <16 x i8> %n, %m
+  ret <16 x i8> %r
+}
+
+define <16 x i8> @POR.16xi8(<16 x i8> "reg"="xv" "tied" %n, <16 x i8> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101011 | rr(d, m)" "asm"="por {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = or <16 x i8> %n, %m
+  ret <16 x i8> %r
+}
+
+define <16 x i8> @PXOR.16xi8(<16 x i8> "reg"="xv" "tied" %n, <16 x i8> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101111 | rr(d, m)" "asm"="pxor {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = xor <16 x i8> %n, %m
+  ret <16 x i8> %r
+}
+
+define <16 x i1> @PCMPEQB.16xi8(<16 x i8> "reg"="xv" "tied" %n, <16 x i8> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01110100 | rr(d, m)" "asm"="pcmpeqb {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = icmp eq <16 x i8> %n, %m
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @PCMPGTB.16xi8(<16 x i8> "reg"="xv" "tied" %n, <16 x i8> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01100100 | rr(d, m)" "asm"="pcmpgtb {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = icmp sgt <16 x i8> %n, %m
+  ret <16 x i1> %r
+}
+
+define <8 x i16> @PADDW.8xi16(<8 x i16> "reg"="xv" "tied" %n, <8 x i16> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11111101 | rr(d, m)" "asm"="paddw {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = add <8 x i16> %n, %m
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @PSUBW.8xi16(<8 x i16> "reg"="xv" "tied" %n, <8 x i16> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11111001 | rr(d, m)" "asm"="psubw {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = sub <8 x i16> %n, %m
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @PMULLW.8xi16(<8 x i16> "reg"="xv" "tied" %n, <8 x i16> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11010101 | rr(d, m)" "asm"="pmullw {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = mul <8 x i16> %n, %m
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @PAND.8xi16(<8 x i16> "reg"="xv" "tied" %n, <8 x i16> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11011011 | rr(d, m)" "asm"="pand {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = and <8 x i16> %n, %m
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @POR.8xi16(<8 x i16> "reg"="xv" "tied" %n, <8 x i16> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101011 | rr(d, m)" "asm"="por {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = or <8 x i16> %n, %m
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @PXOR.8xi16(<8 x i16> "reg"="xv" "tied" %n, <8 x i16> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101111 | rr(d, m)" "asm"="pxor {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = xor <8 x i16> %n, %m
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @PSLLWi.8xi16(<8 x i16> "reg"="xv" "tied" %n, <8 x i16> "imm" %sh) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110001 | rr(6, d) | ib:8=sh" "asm"="psllw ${sh}, {d}" "dclass"="xv" "nodecode" {
+  %r = shl <8 x i16> %n, %sh
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @PSRLWi.8xi16(<8 x i16> "reg"="xv" "tied" %n, <8 x i16> "imm" %sh) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110001 | rr(2, d) | ib:8=sh" "asm"="psrlw ${sh}, {d}" "dclass"="xv" "nodecode" {
+  %r = lshr <8 x i16> %n, %sh
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @PSRAWi.8xi16(<8 x i16> "reg"="xv" "tied" %n, <8 x i16> "imm" %sh) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110001 | rr(4, d) | ib:8=sh" "asm"="psraw ${sh}, {d}" "dclass"="xv" "nodecode" {
+  %r = ashr <8 x i16> %n, %sh
+  ret <8 x i16> %r
+}
+
+define <8 x i1> @PCMPEQW.8xi16(<8 x i16> "reg"="xv" "tied" %n, <8 x i16> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01110101 | rr(d, m)" "asm"="pcmpeqw {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = icmp eq <8 x i16> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @PCMPGTW.8xi16(<8 x i16> "reg"="xv" "tied" %n, <8 x i16> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01100101 | rr(d, m)" "asm"="pcmpgtw {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = icmp sgt <8 x i16> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i16> @MASK.8xi16(<8 x i1> "reg"="xv" "tied" %n) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110001 | rr(2, d) | ib:8=15" "asm"="psrlw $15, {d}" "dclass"="xv" "nodecode" {
+  %r = zext <8 x i1> %n to <8 x i16>
+  ret <8 x i16> %r
+}
+
+define <4 x i32> @PADDD.4xi32(<4 x i32> "reg"="xv" "tied" %n, <4 x i32> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11111110 | rr(d, m)" "asm"="paddd {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = add <4 x i32> %n, %m
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @PSUBD.4xi32(<4 x i32> "reg"="xv" "tied" %n, <4 x i32> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11111010 | rr(d, m)" "asm"="psubd {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = sub <4 x i32> %n, %m
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @PAND.4xi32(<4 x i32> "reg"="xv" "tied" %n, <4 x i32> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11011011 | rr(d, m)" "asm"="pand {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = and <4 x i32> %n, %m
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @POR.4xi32(<4 x i32> "reg"="xv" "tied" %n, <4 x i32> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101011 | rr(d, m)" "asm"="por {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = or <4 x i32> %n, %m
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @PXOR.4xi32(<4 x i32> "reg"="xv" "tied" %n, <4 x i32> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101111 | rr(d, m)" "asm"="pxor {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = xor <4 x i32> %n, %m
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @PSLLDi.4xi32(<4 x i32> "reg"="xv" "tied" %n, <4 x i32> "imm" %sh) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110010 | rr(6, d) | ib:8=sh" "asm"="pslld ${sh}, {d}" "dclass"="xv" "nodecode" {
+  %r = shl <4 x i32> %n, %sh
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @PSRLDi.4xi32(<4 x i32> "reg"="xv" "tied" %n, <4 x i32> "imm" %sh) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110010 | rr(2, d) | ib:8=sh" "asm"="psrld ${sh}, {d}" "dclass"="xv" "nodecode" {
+  %r = lshr <4 x i32> %n, %sh
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @PSRADi.4xi32(<4 x i32> "reg"="xv" "tied" %n, <4 x i32> "imm" %sh) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110010 | rr(4, d) | ib:8=sh" "asm"="psrad ${sh}, {d}" "dclass"="xv" "nodecode" {
+  %r = ashr <4 x i32> %n, %sh
+  ret <4 x i32> %r
+}
+
+define <4 x i1> @PCMPEQD.4xi32(<4 x i32> "reg"="xv" "tied" %n, <4 x i32> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01110110 | rr(d, m)" "asm"="pcmpeqd {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = icmp eq <4 x i32> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @PCMPGTD.4xi32(<4 x i32> "reg"="xv" "tied" %n, <4 x i32> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01100110 | rr(d, m)" "asm"="pcmpgtd {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = icmp sgt <4 x i32> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i32> @MASK.4xi32(<4 x i1> "reg"="xv" "tied" %n) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110010 | rr(2, d) | ib:8=31" "asm"="psrld $31, {d}" "dclass"="xv" "nodecode" {
+  %r = zext <4 x i1> %n to <4 x i32>
+  ret <4 x i32> %r
+}
+
+define <2 x i64> @PADDQ.2xi64(<2 x i64> "reg"="xv" "tied" %n, <2 x i64> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11010100 | rr(d, m)" "asm"="paddq {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = add <2 x i64> %n, %m
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @PSUBQ.2xi64(<2 x i64> "reg"="xv" "tied" %n, <2 x i64> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11111011 | rr(d, m)" "asm"="psubq {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = sub <2 x i64> %n, %m
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @PAND.2xi64(<2 x i64> "reg"="xv" "tied" %n, <2 x i64> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11011011 | rr(d, m)" "asm"="pand {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = and <2 x i64> %n, %m
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @POR.2xi64(<2 x i64> "reg"="xv" "tied" %n, <2 x i64> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101011 | rr(d, m)" "asm"="por {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = or <2 x i64> %n, %m
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @PXOR.2xi64(<2 x i64> "reg"="xv" "tied" %n, <2 x i64> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101111 | rr(d, m)" "asm"="pxor {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = xor <2 x i64> %n, %m
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @PSLLQi.2xi64(<2 x i64> "reg"="xv" "tied" %n, <2 x i64> "imm" %sh) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110011 | rr(6, d) | ib:8=sh" "asm"="psllq ${sh}, {d}" "dclass"="xv" "nodecode" {
+  %r = shl <2 x i64> %n, %sh
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @PSRLQi.2xi64(<2 x i64> "reg"="xv" "tied" %n, <2 x i64> "imm" %sh) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110011 | rr(2, d) | ib:8=sh" "asm"="psrlq ${sh}, {d}" "dclass"="xv" "nodecode" {
+  %r = lshr <2 x i64> %n, %sh
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @MASK.2xi64(<2 x i1> "reg"="xv" "tied" %n) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110011 | rr(2, d) | ib:8=63" "asm"="psrlq $63, {d}" "dclass"="xv" "nodecode" {
+  %r = zext <2 x i1> %n to <2 x i64>
+  ret <2 x i64> %r
+}
+
+define <8 x i8> @PADDB.8xi8(<8 x i8> "reg"="xh" "tied" %n, <8 x i8> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11111100 | rr(d, m)" "asm"="paddb {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = add <8 x i8> %n, %m
+  ret <8 x i8> %r
+}
+
+define <8 x i8> @PSUBB.8xi8(<8 x i8> "reg"="xh" "tied" %n, <8 x i8> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11111000 | rr(d, m)" "asm"="psubb {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = sub <8 x i8> %n, %m
+  ret <8 x i8> %r
+}
+
+define <8 x i8> @PAND.8xi8(<8 x i8> "reg"="xh" "tied" %n, <8 x i8> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11011011 | rr(d, m)" "asm"="pand {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = and <8 x i8> %n, %m
+  ret <8 x i8> %r
+}
+
+define <8 x i8> @POR.8xi8(<8 x i8> "reg"="xh" "tied" %n, <8 x i8> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101011 | rr(d, m)" "asm"="por {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = or <8 x i8> %n, %m
+  ret <8 x i8> %r
+}
+
+define <8 x i8> @PXOR.8xi8(<8 x i8> "reg"="xh" "tied" %n, <8 x i8> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101111 | rr(d, m)" "asm"="pxor {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = xor <8 x i8> %n, %m
+  ret <8 x i8> %r
+}
+
+define <8 x i1> @PCMPEQB.8xi8(<8 x i8> "reg"="xh" "tied" %n, <8 x i8> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01110100 | rr(d, m)" "asm"="pcmpeqb {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = icmp eq <8 x i8> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @PCMPGTB.8xi8(<8 x i8> "reg"="xh" "tied" %n, <8 x i8> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01100100 | rr(d, m)" "asm"="pcmpgtb {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = icmp sgt <8 x i8> %n, %m
+  ret <8 x i1> %r
+}
+
+define <4 x i16> @PADDW.4xi16(<4 x i16> "reg"="xh" "tied" %n, <4 x i16> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11111101 | rr(d, m)" "asm"="paddw {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = add <4 x i16> %n, %m
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @PSUBW.4xi16(<4 x i16> "reg"="xh" "tied" %n, <4 x i16> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11111001 | rr(d, m)" "asm"="psubw {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = sub <4 x i16> %n, %m
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @PMULLW.4xi16(<4 x i16> "reg"="xh" "tied" %n, <4 x i16> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11010101 | rr(d, m)" "asm"="pmullw {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = mul <4 x i16> %n, %m
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @PAND.4xi16(<4 x i16> "reg"="xh" "tied" %n, <4 x i16> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11011011 | rr(d, m)" "asm"="pand {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = and <4 x i16> %n, %m
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @POR.4xi16(<4 x i16> "reg"="xh" "tied" %n, <4 x i16> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101011 | rr(d, m)" "asm"="por {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = or <4 x i16> %n, %m
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @PXOR.4xi16(<4 x i16> "reg"="xh" "tied" %n, <4 x i16> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101111 | rr(d, m)" "asm"="pxor {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = xor <4 x i16> %n, %m
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @PSLLWi.4xi16(<4 x i16> "reg"="xh" "tied" %n, <4 x i16> "imm" %sh) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110001 | rr(6, d) | ib:8=sh" "asm"="psllw ${sh}, {d}" "dclass"="xh" "nodecode" {
+  %r = shl <4 x i16> %n, %sh
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @PSRLWi.4xi16(<4 x i16> "reg"="xh" "tied" %n, <4 x i16> "imm" %sh) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110001 | rr(2, d) | ib:8=sh" "asm"="psrlw ${sh}, {d}" "dclass"="xh" "nodecode" {
+  %r = lshr <4 x i16> %n, %sh
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @PSRAWi.4xi16(<4 x i16> "reg"="xh" "tied" %n, <4 x i16> "imm" %sh) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110001 | rr(4, d) | ib:8=sh" "asm"="psraw ${sh}, {d}" "dclass"="xh" "nodecode" {
+  %r = ashr <4 x i16> %n, %sh
+  ret <4 x i16> %r
+}
+
+define <4 x i1> @PCMPEQW.4xi16(<4 x i16> "reg"="xh" "tied" %n, <4 x i16> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01110101 | rr(d, m)" "asm"="pcmpeqw {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = icmp eq <4 x i16> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @PCMPGTW.4xi16(<4 x i16> "reg"="xh" "tied" %n, <4 x i16> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01100101 | rr(d, m)" "asm"="pcmpgtw {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = icmp sgt <4 x i16> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i16> @MASK.4xi16(<4 x i1> "reg"="xv" "tied" %n) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110001 | rr(2, d) | ib:8=15" "asm"="psrlw $15, {d}" "dclass"="xh" "nodecode" {
+  %r = zext <4 x i1> %n to <4 x i16>
+  ret <4 x i16> %r
+}
+
+define <2 x i32> @PADDD.2xi32(<2 x i32> "reg"="xh" "tied" %n, <2 x i32> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11111110 | rr(d, m)" "asm"="paddd {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = add <2 x i32> %n, %m
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @PSUBD.2xi32(<2 x i32> "reg"="xh" "tied" %n, <2 x i32> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11111010 | rr(d, m)" "asm"="psubd {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = sub <2 x i32> %n, %m
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @PAND.2xi32(<2 x i32> "reg"="xh" "tied" %n, <2 x i32> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11011011 | rr(d, m)" "asm"="pand {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = and <2 x i32> %n, %m
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @POR.2xi32(<2 x i32> "reg"="xh" "tied" %n, <2 x i32> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101011 | rr(d, m)" "asm"="por {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = or <2 x i32> %n, %m
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @PXOR.2xi32(<2 x i32> "reg"="xh" "tied" %n, <2 x i32> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101111 | rr(d, m)" "asm"="pxor {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = xor <2 x i32> %n, %m
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @PSLLDi.2xi32(<2 x i32> "reg"="xh" "tied" %n, <2 x i32> "imm" %sh) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110010 | rr(6, d) | ib:8=sh" "asm"="pslld ${sh}, {d}" "dclass"="xh" "nodecode" {
+  %r = shl <2 x i32> %n, %sh
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @PSRLDi.2xi32(<2 x i32> "reg"="xh" "tied" %n, <2 x i32> "imm" %sh) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110010 | rr(2, d) | ib:8=sh" "asm"="psrld ${sh}, {d}" "dclass"="xh" "nodecode" {
+  %r = lshr <2 x i32> %n, %sh
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @PSRADi.2xi32(<2 x i32> "reg"="xh" "tied" %n, <2 x i32> "imm" %sh) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110010 | rr(4, d) | ib:8=sh" "asm"="psrad ${sh}, {d}" "dclass"="xh" "nodecode" {
+  %r = ashr <2 x i32> %n, %sh
+  ret <2 x i32> %r
+}
+
+define <2 x i1> @PCMPEQD.2xi32(<2 x i32> "reg"="xh" "tied" %n, <2 x i32> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01110110 | rr(d, m)" "asm"="pcmpeqd {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = icmp eq <2 x i32> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @PCMPGTD.2xi32(<2 x i32> "reg"="xh" "tied" %n, <2 x i32> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01100110 | rr(d, m)" "asm"="pcmpgtd {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = icmp sgt <2 x i32> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i32> @MASK.2xi32(<2 x i1> "reg"="xv" "tied" %n) "enc"="01100110 | rex(0, 0, 0, d) | 00001111 | 01110010 | rr(2, d) | ib:8=31" "asm"="psrld $31, {d}" "dclass"="xh" "nodecode" {
+  %r = zext <2 x i1> %n to <2 x i32>
+  ret <2 x i32> %r
+}
+
+define <16 x i1> @PAND.m16(<16 x i1> "reg"="xv" "tied" %n, <16 x i1> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11011011 | rr(d, m)" "asm"="pand {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = and <16 x i1> %n, %m
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @POR.m16(<16 x i1> "reg"="xv" "tied" %n, <16 x i1> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101011 | rr(d, m)" "asm"="por {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = or <16 x i1> %n, %m
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @PXOR.m16(<16 x i1> "reg"="xv" "tied" %n, <16 x i1> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101111 | rr(d, m)" "asm"="pxor {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = xor <16 x i1> %n, %m
+  ret <16 x i1> %r
+}
+
+define <8 x i1> @PAND.m8(<8 x i1> "reg"="xv" "tied" %n, <8 x i1> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11011011 | rr(d, m)" "asm"="pand {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = and <8 x i1> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @POR.m8(<8 x i1> "reg"="xv" "tied" %n, <8 x i1> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101011 | rr(d, m)" "asm"="por {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = or <8 x i1> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @PXOR.m8(<8 x i1> "reg"="xv" "tied" %n, <8 x i1> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101111 | rr(d, m)" "asm"="pxor {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = xor <8 x i1> %n, %m
+  ret <8 x i1> %r
+}
+
+define <4 x i1> @PAND.m4(<4 x i1> "reg"="xv" "tied" %n, <4 x i1> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11011011 | rr(d, m)" "asm"="pand {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = and <4 x i1> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @POR.m4(<4 x i1> "reg"="xv" "tied" %n, <4 x i1> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101011 | rr(d, m)" "asm"="por {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = or <4 x i1> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @PXOR.m4(<4 x i1> "reg"="xv" "tied" %n, <4 x i1> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101111 | rr(d, m)" "asm"="pxor {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = xor <4 x i1> %n, %m
+  ret <4 x i1> %r
+}
+
+define <2 x i1> @PAND.m2(<2 x i1> "reg"="xv" "tied" %n, <2 x i1> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11011011 | rr(d, m)" "asm"="pand {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = and <2 x i1> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @POR.m2(<2 x i1> "reg"="xv" "tied" %n, <2 x i1> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101011 | rr(d, m)" "asm"="por {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = or <2 x i1> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @PXOR.m2(<2 x i1> "reg"="xv" "tied" %n, <2 x i1> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11101111 | rr(d, m)" "asm"="pxor {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = xor <2 x i1> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i64> @PANDN.xv(<2 x i64> "reg"="xv" "tied" %n, <2 x i64> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11011111 | rr(d, m)" "asm"="pandn {m}, {d}" "dclass"="xv" "nodecode" {
+  %x = xor <2 x i64> %n, splat (i64 -1)
+  %r = and <2 x i64> %x, %m
+  ret <2 x i64> %r
+}
+
+define <2 x i32> @PANDN.xh(<2 x i32> "reg"="xh" "tied" %n, <2 x i32> "reg"="xh" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11011111 | rr(d, m)" "asm"="pandn {m}, {d}" "dclass"="xh" "nodecode" {
+  %x = xor <2 x i32> %n, splat (i32 -1)
+  %r = and <2 x i32> %x, %m
+  ret <2 x i32> %r
+}
+
+define <4 x float> @FADDPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 01011000 | rr(d, m)" "asm"="addps {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fadd <4 x float> %n, %m
+  ret <4 x float> %r
+}
+
+define <4 x float> @FSUBPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 01011100 | rr(d, m)" "asm"="subps {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fsub <4 x float> %n, %m
+  ret <4 x float> %r
+}
+
+define <4 x float> @FMULPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 01011001 | rr(d, m)" "asm"="mulps {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fmul <4 x float> %n, %m
+  ret <4 x float> %r
+}
+
+define <4 x float> @FDIVPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 01011110 | rr(d, m)" "asm"="divps {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fdiv <4 x float> %n, %m
+  ret <4 x float> %r
+}
+
+define <4 x float> @SQRTPS.4xf32(<4 x float> "reg"="xv" %n) "enc"="rex(0, d, 0, n) | 00001111 | 01010001 | rr(d, n)" "asm"="sqrtps {n}, {d}" "dclass"="xv" "nodecode" {
+  %r = call <4 x float> @llvm.sqrt.v4f32(<4 x float> %n)
+  ret <4 x float> %r
+}
+
+declare <4 x float> @llvm.sqrt.v4f32(<4 x float>)
+
+define <4 x i1> @CMPOEQPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000000" "asm"="cmpps $0, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp oeq <4 x float> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @CMPOLTPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000001" "asm"="cmpps $1, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp olt <4 x float> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @CMPOLEPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000010" "asm"="cmpps $2, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ole <4 x float> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @CMPUNOPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000011" "asm"="cmpps $3, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp uno <4 x float> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @CMPUNEPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000100" "asm"="cmpps $4, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp une <4 x float> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @CMPUGEPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000101" "asm"="cmpps $5, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp uge <4 x float> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @CMPUGTPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000110" "asm"="cmpps $6, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ugt <4 x float> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @CMPORDPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000111" "asm"="cmpps $7, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ord <4 x float> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @CMPOGTPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000001" "asm"="cmpps $1, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ogt <4 x float> %m, %n
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @CMPOGEPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000010" "asm"="cmpps $2, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp oge <4 x float> %m, %n
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @CMPULTPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000110" "asm"="cmpps $6, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ult <4 x float> %m, %n
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @CMPULEPS.4xf32(<4 x float> "reg"="xv" "tied" %n, <4 x float> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000101" "asm"="cmpps $5, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ule <4 x float> %m, %n
+  ret <4 x i1> %r
+}
+
+define <2 x double> @FADDPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01011000 | rr(d, m)" "asm"="addpd {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fadd <2 x double> %n, %m
+  ret <2 x double> %r
+}
+
+define <2 x double> @FSUBPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01011100 | rr(d, m)" "asm"="subpd {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fsub <2 x double> %n, %m
+  ret <2 x double> %r
+}
+
+define <2 x double> @FMULPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01011001 | rr(d, m)" "asm"="mulpd {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fmul <2 x double> %n, %m
+  ret <2 x double> %r
+}
+
+define <2 x double> @FDIVPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01011110 | rr(d, m)" "asm"="divpd {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fdiv <2 x double> %n, %m
+  ret <2 x double> %r
+}
+
+define <2 x double> @SQRTPD.2xf64(<2 x double> "reg"="xv" %n) "enc"="01100110 | rex(0, d, 0, n) | 00001111 | 01010001 | rr(d, n)" "asm"="sqrtpd {n}, {d}" "dclass"="xv" "nodecode" {
+  %r = call <2 x double> @llvm.sqrt.v2f64(<2 x double> %n)
+  ret <2 x double> %r
+}
+
+declare <2 x double> @llvm.sqrt.v2f64(<2 x double>)
+
+define <2 x i1> @CMPOEQPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000000" "asm"="cmppd $0, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp oeq <2 x double> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPOLTPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000001" "asm"="cmppd $1, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp olt <2 x double> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPOLEPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000010" "asm"="cmppd $2, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ole <2 x double> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPUNOPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000011" "asm"="cmppd $3, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp uno <2 x double> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPUNEPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000100" "asm"="cmppd $4, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp une <2 x double> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPUGEPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000101" "asm"="cmppd $5, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp uge <2 x double> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPUGTPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000110" "asm"="cmppd $6, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ugt <2 x double> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPORDPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000111" "asm"="cmppd $7, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ord <2 x double> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPOGTPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000001" "asm"="cmppd $1, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ogt <2 x double> %m, %n
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPOGEPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000010" "asm"="cmppd $2, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp oge <2 x double> %m, %n
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPULTPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000110" "asm"="cmppd $6, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ult <2 x double> %m, %n
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPULEPD.2xf64(<2 x double> "reg"="xv" "tied" %n, <2 x double> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000101" "asm"="cmppd $5, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ule <2 x double> %m, %n
+  ret <2 x i1> %r
+}
+
+define <2 x float> @FADDPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 01011000 | rr(d, m)" "asm"="addps {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = fadd <2 x float> %n, %m
+  ret <2 x float> %r
+}
+
+define <2 x float> @FSUBPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 01011100 | rr(d, m)" "asm"="subps {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = fsub <2 x float> %n, %m
+  ret <2 x float> %r
+}
+
+define <2 x float> @FMULPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 01011001 | rr(d, m)" "asm"="mulps {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = fmul <2 x float> %n, %m
+  ret <2 x float> %r
+}
+
+define <2 x float> @FDIVPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 01011110 | rr(d, m)" "asm"="divps {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = fdiv <2 x float> %n, %m
+  ret <2 x float> %r
+}
+
+define <2 x float> @SQRTPS.2xf32(<2 x float> "reg"="xh" %n) "enc"="rex(0, d, 0, n) | 00001111 | 01010001 | rr(d, n)" "asm"="sqrtps {n}, {d}" "dclass"="xh" "nodecode" {
+  %r = call <2 x float> @llvm.sqrt.v2f32(<2 x float> %n)
+  ret <2 x float> %r
+}
+
+declare <2 x float> @llvm.sqrt.v2f32(<2 x float>)
+
+define <2 x i1> @CMPOEQPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000000" "asm"="cmpps $0, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp oeq <2 x float> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPOLTPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000001" "asm"="cmpps $1, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp olt <2 x float> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPOLEPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000010" "asm"="cmpps $2, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ole <2 x float> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPUNOPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000011" "asm"="cmpps $3, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp uno <2 x float> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPUNEPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000100" "asm"="cmpps $4, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp une <2 x float> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPUGEPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000101" "asm"="cmpps $5, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp uge <2 x float> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPUGTPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000110" "asm"="cmpps $6, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ugt <2 x float> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPORDPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000111" "asm"="cmpps $7, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ord <2 x float> %n, %m
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPOGTPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000001" "asm"="cmpps $1, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ogt <2 x float> %m, %n
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPOGEPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000010" "asm"="cmpps $2, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp oge <2 x float> %m, %n
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPULTPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000110" "asm"="cmpps $6, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ult <2 x float> %m, %n
+  ret <2 x i1> %r
+}
+
+define <2 x i1> @CMPULEPS.2xf32(<2 x float> "reg"="xh" "tied" %n, <2 x float> "reg"="xh" %m) "enc"="rex(0, d, 0, m) | 00001111 | 11000010 | rr(d, m) | 00000101" "asm"="cmpps $5, {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = fcmp ule <2 x float> %m, %n
+  ret <2 x i1> %r
+}
+
+define <4 x float> @CVTDQ2PS.4xf32(<4 x i32> "reg"="xv" %n) "enc"="rex(0, d, 0, n) | 00001111 | 01011011 | rr(d, n)" "asm"="cvtdq2ps {n}, {d}" "dclass"="xv" "nodecode" {
+  %r = sitofp <4 x i32> %n to <4 x float>
+  ret <4 x float> %r
+}
+
+define <4 x i32> @CVTTPS2DQ.4xi32(<4 x float> "reg"="xv" %n) "enc"="11110011 | rex(0, d, 0, n) | 00001111 | 01011011 | rr(d, n)" "asm"="cvttps2dq {n}, {d}" "dclass"="xv" "nodecode" {
+  %r = fptosi <4 x float> %n to <4 x i32>
+  ret <4 x i32> %r
+}
+
+define <2 x float> @CVTDQ2PS.2xf32(<2 x i32> "reg"="xh" %n) "enc"="rex(0, d, 0, n) | 00001111 | 01011011 | rr(d, n)" "asm"="cvtdq2ps {n}, {d}" "dclass"="xh" "nodecode" {
+  %r = sitofp <2 x i32> %n to <2 x float>
+  ret <2 x float> %r
+}
+
+define <2 x i32> @CVTTPS2DQ.2xi32(<2 x float> "reg"="xh" %n) "enc"="11110011 | rex(0, d, 0, n) | 00001111 | 01011011 | rr(d, n)" "asm"="cvttps2dq {n}, {d}" "dclass"="xh" "nodecode" {
+  %r = fptosi <2 x float> %n to <2 x i32>
+  ret <2 x i32> %r
+}
+
+define <2 x double> @CVTPS2PD(<2 x float> "reg"="xh" %n) "enc"="rex(0, d, 0, n) | 00001111 | 01011010 | rr(d, n)" "asm"="cvtps2pd {n}, {d}" "dclass"="xv" "nodecode" {
+  %r = fpext <2 x float> %n to <2 x double>
+  ret <2 x double> %r
+}
+
+define <2 x float> @CVTPD2PS(<2 x double> "reg"="xv" %n) "enc"="01100110 | rex(0, d, 0, n) | 00001111 | 01011010 | rr(d, n)" "asm"="cvtpd2ps {n}, {d}" "dclass"="xh" "nodecode" {
+  %r = fptrunc <2 x double> %n to <2 x float>
+  ret <2 x float> %r
+}
+
+define <2 x double> @CVTDQ2PD(<2 x i32> "reg"="xh" %n) "enc"="11110011 | rex(0, d, 0, n) | 00001111 | 11100110 | rr(d, n)" "asm"="cvtdq2pd {n}, {d}" "dclass"="xv" "nodecode" {
+  %r = sitofp <2 x i32> %n to <2 x double>
+  ret <2 x double> %r
+}
+
+define <2 x i32> @CVTTPD2DQ(<2 x double> "reg"="xv" %n) "enc"="01100110 | rex(0, d, 0, n) | 00001111 | 11100110 | rr(d, n)" "asm"="cvttpd2dq {n}, {d}" "dclass"="xh" "nodecode" {
+  %r = fptosi <2 x double> %n to <2 x i32>
+  ret <2 x i32> %r
+}
+
+define <16 x i8> @vselect.16xi8(<16 x i1> "reg"="xv" %c, <16 x i8> "reg"="xv" %a, <16 x i8> "reg"="xv" %b) "recipe"="vselect.16xi8.expand" {
+  %r = select <16 x i1> %c, <16 x i8> %a, <16 x i8> %b
+  ret <16 x i8> %r
+}
+
+define <16 x i8> @vselect.16xi8.expand(<16 x i1> %c, <16 x i8> %a, <16 x i8> %b) {
+  %cs = sext <16 x i1> %c to <16 x i8>
+  %ci = bitcast <16 x i8> %cs to <2 x i64>
+  %ti = bitcast <16 x i8> %a to <2 x i64>
+  %fi = bitcast <16 x i8> %b to <2 x i64>
+  %x = call <2 x i64> @PAND.2xi64(<2 x i64> %ci, <2 x i64> %ti)
+  %y = call <2 x i64> @PANDN.xv(<2 x i64> %ci, <2 x i64> %fi)
+  %z = call <2 x i64> @POR.2xi64(<2 x i64> %x, <2 x i64> %y)
+  %r = bitcast <2 x i64> %z to <16 x i8>
+  ret <16 x i8> %r
+}
+
+define <8 x i16> @vselect.8xi16(<8 x i1> "reg"="xv" %c, <8 x i16> "reg"="xv" %a, <8 x i16> "reg"="xv" %b) "recipe"="vselect.8xi16.expand" {
+  %r = select <8 x i1> %c, <8 x i16> %a, <8 x i16> %b
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @vselect.8xi16.expand(<8 x i1> %c, <8 x i16> %a, <8 x i16> %b) {
+  %cs = sext <8 x i1> %c to <8 x i16>
+  %ci = bitcast <8 x i16> %cs to <2 x i64>
+  %ti = bitcast <8 x i16> %a to <2 x i64>
+  %fi = bitcast <8 x i16> %b to <2 x i64>
+  %x = call <2 x i64> @PAND.2xi64(<2 x i64> %ci, <2 x i64> %ti)
+  %y = call <2 x i64> @PANDN.xv(<2 x i64> %ci, <2 x i64> %fi)
+  %z = call <2 x i64> @POR.2xi64(<2 x i64> %x, <2 x i64> %y)
+  %r = bitcast <2 x i64> %z to <8 x i16>
+  ret <8 x i16> %r
+}
+
+define <4 x i32> @vselect.4xi32(<4 x i1> "reg"="xv" %c, <4 x i32> "reg"="xv" %a, <4 x i32> "reg"="xv" %b) "recipe"="vselect.4xi32.expand" {
+  %r = select <4 x i1> %c, <4 x i32> %a, <4 x i32> %b
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @vselect.4xi32.expand(<4 x i1> %c, <4 x i32> %a, <4 x i32> %b) {
+  %cs = sext <4 x i1> %c to <4 x i32>
+  %ci = bitcast <4 x i32> %cs to <2 x i64>
+  %ti = bitcast <4 x i32> %a to <2 x i64>
+  %fi = bitcast <4 x i32> %b to <2 x i64>
+  %x = call <2 x i64> @PAND.2xi64(<2 x i64> %ci, <2 x i64> %ti)
+  %y = call <2 x i64> @PANDN.xv(<2 x i64> %ci, <2 x i64> %fi)
+  %z = call <2 x i64> @POR.2xi64(<2 x i64> %x, <2 x i64> %y)
+  %r = bitcast <2 x i64> %z to <4 x i32>
+  ret <4 x i32> %r
+}
+
+define <2 x i64> @vselect.2xi64(<2 x i1> "reg"="xv" %c, <2 x i64> "reg"="xv" %a, <2 x i64> "reg"="xv" %b) "recipe"="vselect.2xi64.expand" {
+  %r = select <2 x i1> %c, <2 x i64> %a, <2 x i64> %b
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @vselect.2xi64.expand(<2 x i1> %c, <2 x i64> %a, <2 x i64> %b) {
+  %cs = sext <2 x i1> %c to <2 x i64>
+  %ci = bitcast <2 x i64> %cs to <2 x i64>
+  %ti = bitcast <2 x i64> %a to <2 x i64>
+  %fi = bitcast <2 x i64> %b to <2 x i64>
+  %x = call <2 x i64> @PAND.2xi64(<2 x i64> %ci, <2 x i64> %ti)
+  %y = call <2 x i64> @PANDN.xv(<2 x i64> %ci, <2 x i64> %fi)
+  %z = call <2 x i64> @POR.2xi64(<2 x i64> %x, <2 x i64> %y)
+  %r = bitcast <2 x i64> %z to <2 x i64>
+  ret <2 x i64> %r
+}
+
+define <8 x i8> @vselect.8xi8(<8 x i1> "reg"="xv" %c, <8 x i8> "reg"="xh" %a, <8 x i8> "reg"="xh" %b) "recipe"="vselect.8xi8.expand" {
+  %r = select <8 x i1> %c, <8 x i8> %a, <8 x i8> %b
+  ret <8 x i8> %r
+}
+
+define <8 x i8> @vselect.8xi8.expand(<8 x i1> %c, <8 x i8> %a, <8 x i8> %b) {
+  %cs = sext <8 x i1> %c to <8 x i8>
+  %ci = bitcast <8 x i8> %cs to <2 x i32>
+  %ti = bitcast <8 x i8> %a to <2 x i32>
+  %fi = bitcast <8 x i8> %b to <2 x i32>
+  %x = call <2 x i32> @PAND.2xi32(<2 x i32> %ci, <2 x i32> %ti)
+  %y = call <2 x i32> @PANDN.xh(<2 x i32> %ci, <2 x i32> %fi)
+  %z = call <2 x i32> @POR.2xi32(<2 x i32> %x, <2 x i32> %y)
+  %r = bitcast <2 x i32> %z to <8 x i8>
+  ret <8 x i8> %r
+}
+
+define <4 x i16> @vselect.4xi16(<4 x i1> "reg"="xv" %c, <4 x i16> "reg"="xh" %a, <4 x i16> "reg"="xh" %b) "recipe"="vselect.4xi16.expand" {
+  %r = select <4 x i1> %c, <4 x i16> %a, <4 x i16> %b
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @vselect.4xi16.expand(<4 x i1> %c, <4 x i16> %a, <4 x i16> %b) {
+  %cs = sext <4 x i1> %c to <4 x i16>
+  %ci = bitcast <4 x i16> %cs to <2 x i32>
+  %ti = bitcast <4 x i16> %a to <2 x i32>
+  %fi = bitcast <4 x i16> %b to <2 x i32>
+  %x = call <2 x i32> @PAND.2xi32(<2 x i32> %ci, <2 x i32> %ti)
+  %y = call <2 x i32> @PANDN.xh(<2 x i32> %ci, <2 x i32> %fi)
+  %z = call <2 x i32> @POR.2xi32(<2 x i32> %x, <2 x i32> %y)
+  %r = bitcast <2 x i32> %z to <4 x i16>
+  ret <4 x i16> %r
+}
+
+define <2 x i32> @vselect.2xi32(<2 x i1> "reg"="xv" %c, <2 x i32> "reg"="xh" %a, <2 x i32> "reg"="xh" %b) "recipe"="vselect.2xi32.expand" {
+  %r = select <2 x i1> %c, <2 x i32> %a, <2 x i32> %b
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @vselect.2xi32.expand(<2 x i1> %c, <2 x i32> %a, <2 x i32> %b) {
+  %cs = sext <2 x i1> %c to <2 x i32>
+  %ci = bitcast <2 x i32> %cs to <2 x i32>
+  %ti = bitcast <2 x i32> %a to <2 x i32>
+  %fi = bitcast <2 x i32> %b to <2 x i32>
+  %x = call <2 x i32> @PAND.2xi32(<2 x i32> %ci, <2 x i32> %ti)
+  %y = call <2 x i32> @PANDN.xh(<2 x i32> %ci, <2 x i32> %fi)
+  %z = call <2 x i32> @POR.2xi32(<2 x i32> %x, <2 x i32> %y)
+  %r = bitcast <2 x i32> %z to <2 x i32>
+  ret <2 x i32> %r
+}
+
+define <4 x float> @vselect.4xf32(<4 x i1> "reg"="xv" %c, <4 x float> "reg"="xv" %a, <4 x float> "reg"="xv" %b) "recipe"="vselect.4xf32.expand" {
+  %r = select <4 x i1> %c, <4 x float> %a, <4 x float> %b
+  ret <4 x float> %r
+}
+
+define <4 x float> @vselect.4xf32.expand(<4 x i1> %c, <4 x float> %a, <4 x float> %b) {
+  %cs = sext <4 x i1> %c to <4 x i32>
+  %ci = bitcast <4 x i32> %cs to <2 x i64>
+  %ti = bitcast <4 x float> %a to <2 x i64>
+  %fi = bitcast <4 x float> %b to <2 x i64>
+  %x = call <2 x i64> @PAND.2xi64(<2 x i64> %ci, <2 x i64> %ti)
+  %y = call <2 x i64> @PANDN.xv(<2 x i64> %ci, <2 x i64> %fi)
+  %z = call <2 x i64> @POR.2xi64(<2 x i64> %x, <2 x i64> %y)
+  %r = bitcast <2 x i64> %z to <4 x float>
+  ret <4 x float> %r
+}
+
+define <2 x double> @vselect.2xf64(<2 x i1> "reg"="xv" %c, <2 x double> "reg"="xv" %a, <2 x double> "reg"="xv" %b) "recipe"="vselect.2xf64.expand" {
+  %r = select <2 x i1> %c, <2 x double> %a, <2 x double> %b
+  ret <2 x double> %r
+}
+
+define <2 x double> @vselect.2xf64.expand(<2 x i1> %c, <2 x double> %a, <2 x double> %b) {
+  %cs = sext <2 x i1> %c to <2 x i64>
+  %ci = bitcast <2 x i64> %cs to <2 x i64>
+  %ti = bitcast <2 x double> %a to <2 x i64>
+  %fi = bitcast <2 x double> %b to <2 x i64>
+  %x = call <2 x i64> @PAND.2xi64(<2 x i64> %ci, <2 x i64> %ti)
+  %y = call <2 x i64> @PANDN.xv(<2 x i64> %ci, <2 x i64> %fi)
+  %z = call <2 x i64> @POR.2xi64(<2 x i64> %x, <2 x i64> %y)
+  %r = bitcast <2 x i64> %z to <2 x double>
+  ret <2 x double> %r
+}
+
+define <2 x float> @vselect.2xf32(<2 x i1> "reg"="xv" %c, <2 x float> "reg"="xh" %a, <2 x float> "reg"="xh" %b) "recipe"="vselect.2xf32.expand" {
+  %r = select <2 x i1> %c, <2 x float> %a, <2 x float> %b
+  ret <2 x float> %r
+}
+
+define <2 x float> @vselect.2xf32.expand(<2 x i1> %c, <2 x float> %a, <2 x float> %b) {
+  %cs = sext <2 x i1> %c to <2 x i32>
+  %ci = bitcast <2 x i32> %cs to <2 x i32>
+  %ti = bitcast <2 x float> %a to <2 x i32>
+  %fi = bitcast <2 x float> %b to <2 x i32>
+  %x = call <2 x i32> @PAND.2xi32(<2 x i32> %ci, <2 x i32> %ti)
+  %y = call <2 x i32> @PANDN.xh(<2 x i32> %ci, <2 x i32> %fi)
+  %z = call <2 x i32> @POR.2xi32(<2 x i32> %x, <2 x i32> %y)
+  %r = bitcast <2 x i32> %z to <2 x float>
+  ret <2 x float> %r
+}
+
+define i16 @PEXTRW.8xi16(<8 x i16> "reg"="xv" %v, i64 "imm" %k) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 11000101 | rr(d, v) | ib:8=k" "asm"="pextrw ${k}, {v}, {d:r32}" "dclass"="r32" "zext"="16" "nodecode" {
+  %r = extractelement <8 x i16> %v, i64 %k
+  ret i16 %r
+}
+
+define <8 x i16> @PINSRW.8xi16(<8 x i16> "reg"="xv" "tied" %v, i16 "reg"="r32" %e, i64 "imm" %k) "enc"="01100110 | rex(0, d, 0, e) | 00001111 | 11000100 | rr(d, e) | ib:8=k" "asm"="pinsrw ${k}, {e:r32}, {d}" "dclass"="xv" "nodecode" {
+  %r = insertelement <8 x i16> %v, i16 %e, i64 %k
+  ret <8 x i16> %r
+}
+
+define i16 @PEXTRW.4xi16(<4 x i16> "reg"="xh" %v, i64 "imm" %k) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 11000101 | rr(d, v) | ib:8=k" "asm"="pextrw ${k}, {v}, {d:r32}" "dclass"="r32" "zext"="16" "nodecode" {
+  %r = extractelement <4 x i16> %v, i64 %k
+  ret i16 %r
+}
+
+define <4 x i16> @PINSRW.4xi16(<4 x i16> "reg"="xh" "tied" %v, i16 "reg"="r32" %e, i64 "imm" %k) "enc"="01100110 | rex(0, d, 0, e) | 00001111 | 11000100 | rr(d, e) | ib:8=k" "asm"="pinsrw ${k}, {e:r32}, {d}" "dclass"="xh" "nodecode" {
+  %r = insertelement <4 x i16> %v, i16 %e, i64 %k
+  ret <4 x i16> %r
+}
+
+define i32 @MOVDlane0.4xi32(<4 x i32> "reg"="xv" %v) "enc"="01100110 | rex(0, v, 0, d) | 00001111 | 01111110 | rr(v, d)" "asm"="movd {v}, {d}" "dclass"="r32" "nodecode" {
+  %r = extractelement <4 x i32> %v, i64 0
+  ret i32 %r
+}
+
+define <4 x i32> @PSHUFDlane.4xi32(<4 x i32> "reg"="xv" %v, i64 "imm" %k) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | ib:8=k" "asm"="pshufd ${k}, {v}, {d}" "dclass"="xv" "nomatch" "nodecode" {
+  ret <4 x i32> %v
+}
+
+define i32 @lane.4xi32(<4 x i32> "reg"="xv" %v, i64 %k) "recipe"="lane.4xi32.expand" {
+  %r = extractelement <4 x i32> %v, i64 %k
+  ret i32 %r
+}
+
+define i32 @lane.4xi32.expand(<4 x i32> %v, i64 %k) {
+  %s = call <4 x i32> @PSHUFDlane.4xi32(<4 x i32> %v, i64 %k)
+  %r = call i32 @MOVDlane0.4xi32(<4 x i32> %s)
+  ret i32 %r
+}
+
+define i32 @MOVDlane0.2xi32(<2 x i32> "reg"="xh" %v) "enc"="01100110 | rex(0, v, 0, d) | 00001111 | 01111110 | rr(v, d)" "asm"="movd {v}, {d}" "dclass"="r32" "nodecode" {
+  %r = extractelement <2 x i32> %v, i64 0
+  ret i32 %r
+}
+
+define <2 x i32> @PSHUFDlane.2xi32(<2 x i32> "reg"="xh" %v, i64 "imm" %k) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | ib:8=k" "asm"="pshufd ${k}, {v}, {d}" "dclass"="xh" "nomatch" "nodecode" {
+  ret <2 x i32> %v
+}
+
+define i32 @lane.2xi32(<2 x i32> "reg"="xh" %v, i64 %k) "recipe"="lane.2xi32.expand" {
+  %r = extractelement <2 x i32> %v, i64 %k
+  ret i32 %r
+}
+
+define i32 @lane.2xi32.expand(<2 x i32> %v, i64 %k) {
+  %s = call <2 x i32> @PSHUFDlane.2xi32(<2 x i32> %v, i64 %k)
+  %r = call i32 @MOVDlane0.2xi32(<2 x i32> %s)
+  ret i32 %r
+}
+
+define i64 @MOVQlane0(<2 x i64> "reg"="xv" %v) "enc"="01100110 | rex(1, v, 0, d) | 00001111 | 01111110 | rr(v, d)" "asm"="movq {v}, {d}" "dclass"="r64" "nodecode" {
+  %r = extractelement <2 x i64> %v, i64 0
+  ret i64 %r
+}
+
+define <2 x i64> @PUNPCKHQDQself(<2 x i64> "reg"="xv" "tied" %v) "enc"="01100110 | rex(0, d, 0, d) | 00001111 | 01101101 | rr(d, d)" "asm"="punpckhqdq {d}, {d}" "dclass"="xv" "nomatch" "nodecode" {
+  ret <2 x i64> %v
+}
+
+define i64 @lane1.2xi64(<2 x i64> "reg"="xv" %v) "recipe"="lane1.2xi64.expand" {
+  %r = extractelement <2 x i64> %v, i64 1
+  ret i64 %r
+}
+
+define i64 @lane1.2xi64.expand(<2 x i64> %v) {
+  %s = call <2 x i64> @PUNPCKHQDQself(<2 x i64> %v)
+  %r = call i64 @MOVQlane0(<2 x i64> %s)
+  ret i64 %r
+}
+
+define float @PSHUFDf.4xf32(<4 x float> "reg"="xv" %v, i64 "imm" %k) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | ib:8=k" "asm"="pshufd ${k}, {v}, {d}" "dclass"="s" "nodecode" {
+  %r = extractelement <4 x float> %v, i64 %k
+  ret float %r
+}
+
+define float @PSHUFDf.2xf32(<2 x float> "reg"="xh" %v, i64 "imm" %k) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | ib:8=k" "asm"="pshufd ${k}, {v}, {d}" "dclass"="s" "nodecode" {
+  %r = extractelement <2 x float> %v, i64 %k
+  ret float %r
+}
+
+define double @MOVAPDlane0(<2 x double> "reg"="xv" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v}, {d}" "dclass"="d" "nodecode" {
+  %r = extractelement <2 x double> %v, i64 0
+  ret double %r
+}
+
+define double @UNPCKHPDlane1(<2 x double> "reg"="xv" "tied" %v) "enc"="01100110 | rex(0, d, 0, d) | 00001111 | 00010101 | rr(d, d)" "asm"="unpckhpd {d}, {d}" "dclass"="d" "nodecode" {
+  %r = extractelement <2 x double> %v, i64 1
+  ret double %r
+}
+
+define <4 x i32> @MOVDto(i32 "reg"="r32" %n) "enc"="01100110 | rex(0, d, 0, n) | 00001111 | 01101110 | rr(d, n)" "asm"="movd {n}, {d}" "dclass"="xv" "nodecode" {
+  %r = insertelement <4 x i32> zeroinitializer, i32 %n, i64 0
+  ret <4 x i32> %r
+}
+
+define <2 x i64> @MOVQto(i64 "reg"="r64" %n) "enc"="01100110 | rex(1, d, 0, n) | 00001111 | 01101110 | rr(d, n)" "asm"="movq {n}, {d}" "dclass"="xv" "role"="vec.from.x" "nodecode" {
+  %r = insertelement <2 x i64> zeroinitializer, i64 %n, i64 0
+  ret <2 x i64> %r
+}
+
+define <8 x i8> @MOVQtoh(i64 "reg"="r64" %n) "enc"="01100110 | rex(1, d, 0, n) | 00001111 | 01101110 | rr(d, n)" "asm"="movq {n}, {d}" "dclass"="xh" "nodecode" {
+  %r = bitcast i64 %n to <8 x i8>
+  ret <8 x i8> %r
+}
+
+define i64 @MOVQfromh(<8 x i8> "reg"="xh" %v) "enc"="01100110 | rex(1, v, 0, d) | 00001111 | 01111110 | rr(v, d)" "asm"="movq {v}, {d}" "dclass"="r64" "nodecode" {
+  %r = bitcast <8 x i8> %v to i64
+  ret i64 %r
+}
+
+define <2 x i64> @PUNPCKLQDQ(<2 x i64> "reg"="xv" "tied" %n, <2 x i64> "reg"="xv" %m) "enc"="01100110 | rex(0, d, 0, m) | 00001111 | 01101100 | rr(d, m)" "asm"="punpcklqdq {m}, {d}" "dclass"="xv" "role"="vec.join.d" "nomatch" "nodecode" {
+  ret <2 x i64> %n
+}
+
+define <16 x i8> @BITS.16x8(<16 x i1> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 00101000 | rr(d, m)" "asm"="movaps {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = call <16 x i8> @llvm.epitome.mask.bits.v16i8(<16 x i1> %m)
+  ret <16 x i8> %r
+}
+
+define <16 x i1> @MASK.16x8(<16 x i8> "reg"="xv" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v}, {d}" "dclass"="xv" "nodecode" {
+  %r = call <16 x i1> @llvm.epitome.bits.mask.v16i8(<16 x i8> %v)
+  ret <16 x i1> %r
+}
+
+declare <16 x i8> @llvm.epitome.mask.bits.v16i8(<16 x i1>)
+declare <16 x i1> @llvm.epitome.bits.mask.v16i8(<16 x i8>)
+
+define <8 x i16> @BITS.8x16(<8 x i1> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 00101000 | rr(d, m)" "asm"="movaps {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = call <8 x i16> @llvm.epitome.mask.bits.v8i16(<8 x i1> %m)
+  ret <8 x i16> %r
+}
+
+define <8 x i1> @MASK.8x16(<8 x i16> "reg"="xv" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v}, {d}" "dclass"="xv" "nodecode" {
+  %r = call <8 x i1> @llvm.epitome.bits.mask.v8i16(<8 x i16> %v)
+  ret <8 x i1> %r
+}
+
+declare <8 x i16> @llvm.epitome.mask.bits.v8i16(<8 x i1>)
+declare <8 x i1> @llvm.epitome.bits.mask.v8i16(<8 x i16>)
+
+define <4 x i32> @BITS.4x32(<4 x i1> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 00101000 | rr(d, m)" "asm"="movaps {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = call <4 x i32> @llvm.epitome.mask.bits.v4i32(<4 x i1> %m)
+  ret <4 x i32> %r
+}
+
+define <4 x i1> @MASK.4x32(<4 x i32> "reg"="xv" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v}, {d}" "dclass"="xv" "nodecode" {
+  %r = call <4 x i1> @llvm.epitome.bits.mask.v4i32(<4 x i32> %v)
+  ret <4 x i1> %r
+}
+
+declare <4 x i32> @llvm.epitome.mask.bits.v4i32(<4 x i1>)
+declare <4 x i1> @llvm.epitome.bits.mask.v4i32(<4 x i32>)
+
+define <2 x i64> @BITS.2x64(<2 x i1> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 00101000 | rr(d, m)" "asm"="movaps {m}, {d}" "dclass"="xv" "nodecode" {
+  %r = call <2 x i64> @llvm.epitome.mask.bits.v2i64(<2 x i1> %m)
+  ret <2 x i64> %r
+}
+
+define <2 x i1> @MASK.2x64(<2 x i64> "reg"="xv" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v}, {d}" "dclass"="xv" "nodecode" {
+  %r = call <2 x i1> @llvm.epitome.bits.mask.v2i64(<2 x i64> %v)
+  ret <2 x i1> %r
+}
+
+declare <2 x i64> @llvm.epitome.mask.bits.v2i64(<2 x i1>)
+declare <2 x i1> @llvm.epitome.bits.mask.v2i64(<2 x i64>)
+
+define <8 x i8> @BITS.8x8(<8 x i1> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 00101000 | rr(d, m)" "asm"="movaps {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = call <8 x i8> @llvm.epitome.mask.bits.v8i8(<8 x i1> %m)
+  ret <8 x i8> %r
+}
+
+define <8 x i1> @MASK.8x8(<8 x i8> "reg"="xh" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v}, {d}" "dclass"="xv" "nodecode" {
+  %r = call <8 x i1> @llvm.epitome.bits.mask.v8i8(<8 x i8> %v)
+  ret <8 x i1> %r
+}
+
+declare <8 x i8> @llvm.epitome.mask.bits.v8i8(<8 x i1>)
+declare <8 x i1> @llvm.epitome.bits.mask.v8i8(<8 x i8>)
+
+define <4 x i16> @BITS.4x16(<4 x i1> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 00101000 | rr(d, m)" "asm"="movaps {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = call <4 x i16> @llvm.epitome.mask.bits.v4i16(<4 x i1> %m)
+  ret <4 x i16> %r
+}
+
+define <4 x i1> @MASK.4x16(<4 x i16> "reg"="xh" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v}, {d}" "dclass"="xv" "nodecode" {
+  %r = call <4 x i1> @llvm.epitome.bits.mask.v4i16(<4 x i16> %v)
+  ret <4 x i1> %r
+}
+
+declare <4 x i16> @llvm.epitome.mask.bits.v4i16(<4 x i1>)
+declare <4 x i1> @llvm.epitome.bits.mask.v4i16(<4 x i16>)
+
+define <2 x i32> @BITS.2x32(<2 x i1> "reg"="xv" %m) "enc"="rex(0, d, 0, m) | 00001111 | 00101000 | rr(d, m)" "asm"="movaps {m}, {d}" "dclass"="xh" "nodecode" {
+  %r = call <2 x i32> @llvm.epitome.mask.bits.v2i32(<2 x i1> %m)
+  ret <2 x i32> %r
+}
+
+define <2 x i1> @MASK.2x32(<2 x i32> "reg"="xh" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v}, {d}" "dclass"="xv" "nodecode" {
+  %r = call <2 x i1> @llvm.epitome.bits.mask.v2i32(<2 x i32> %v)
+  ret <2 x i1> %r
+}
+
+declare <2 x i32> @llvm.epitome.mask.bits.v2i32(<2 x i1>)
+declare <2 x i1> @llvm.epitome.bits.mask.v2i32(<2 x i32>)
+
+define <4 x i32> @PSHUFD(<4 x i32> "reg"="xv" %v, i64 "imm" %k) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | ib:8=k" "asm"="pshufd ${k}, {v}, {d}" "dclass"="xv" "nomatch" "nodecode" {
+  ret <4 x i32> %v
+}
+
+define <8 x i16> @PSHUFLW(<8 x i16> "reg"="xv" %v, i64 "imm" %k) "enc"="11110010 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | ib:8=k" "asm"="pshuflw ${k}, {v}, {d}" "dclass"="xv" "nomatch" "nodecode" {
+  ret <8 x i16> %v
+}
+
+define <16 x i8> @PUNPCKLBWself(<16 x i8> "reg"="xv" "tied" %v) "enc"="01100110 | rex(0, d, 0, d) | 00001111 | 01100000 | rr(d, d)" "asm"="punpcklbw {d}, {d}" "dclass"="xv" "nomatch" "nodecode" {
+  ret <16 x i8> %v
+}
+
+define <4 x i32> @splat.4xi32(i32 "reg"="r32" %x) "recipe"="splat.4xi32.expand" {
+  %i = insertelement <4 x i32> poison, i32 %x, i64 0
+  %r = shufflevector <4 x i32> %i, <4 x i32> poison, <4 x i32> zeroinitializer
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @splat.4xi32.expand(i32 %x) {
+  %v = call <4 x i32> @MOVDto(i32 %x)
+  %s = call <4 x i32> @PSHUFD(<4 x i32> %v, i64 0)
+  %r = bitcast <4 x i32> %s to <4 x i32>
+  ret <4 x i32> %r
+}
+
+define <2 x i32> @splat.2xi32(i32 "reg"="r32" %x) "recipe"="splat.2xi32.expand" {
+  %i = insertelement <2 x i32> poison, i32 %x, i64 0
+  %r = shufflevector <2 x i32> %i, <2 x i32> poison, <2 x i32> zeroinitializer
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @splat.2xi32.expand(i32 %x) {
+  %v = call <4 x i32> @MOVDto(i32 %x)
+  %s = call <4 x i32> @PSHUFD(<4 x i32> %v, i64 0)
+  %r = bitcast <4 x i32> %s to <2 x i32>
+  ret <2 x i32> %r
+}
+
+define <2 x i64> @splat.2xi64(i64 "reg"="r64" %x) "recipe"="splat.2xi64.expand" {
+  %i = insertelement <2 x i64> poison, i64 %x, i64 0
+  %r = shufflevector <2 x i64> %i, <2 x i64> poison, <2 x i32> zeroinitializer
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @splat.2xi64.expand(i64 %x) {
+  %v = call <2 x i64> @MOVQto(i64 %x)
+  %vi = bitcast <2 x i64> %v to <4 x i32>
+  %s = call <4 x i32> @PSHUFD(<4 x i32> %vi, i64 68)
+  %r = bitcast <4 x i32> %s to <2 x i64>
+  ret <2 x i64> %r
+}
+
+define <8 x i16> @splat.8xi16(i16 "reg"="r32" %x) "recipe"="splat.8xi16.expand" {
+  %i = insertelement <8 x i16> poison, i16 %x, i64 0
+  %r = shufflevector <8 x i16> %i, <8 x i16> poison, <8 x i32> zeroinitializer
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @splat.8xi16.expand(i16 %x) {
+  %w = zext i16 %x to i32
+  %v = call <4 x i32> @MOVDto(i32 %w)
+  %h = bitcast <4 x i32> %v to <8 x i16>
+  %l = call <8 x i16> @PSHUFLW(<8 x i16> %h, i64 0)
+  %v3 = bitcast <8 x i16> %l to <4 x i32>
+  %s = call <4 x i32> @PSHUFD(<4 x i32> %v3, i64 0)
+  %r = bitcast <4 x i32> %s to <8 x i16>
+  ret <8 x i16> %r
+}
+
+define <4 x i16> @splat.4xi16(i16 "reg"="r32" %x) "recipe"="splat.4xi16.expand" {
+  %i = insertelement <4 x i16> poison, i16 %x, i64 0
+  %r = shufflevector <4 x i16> %i, <4 x i16> poison, <4 x i32> zeroinitializer
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @splat.4xi16.expand(i16 %x) {
+  %w = zext i16 %x to i32
+  %v = call <4 x i32> @MOVDto(i32 %w)
+  %h = bitcast <4 x i32> %v to <8 x i16>
+  %l = call <8 x i16> @PSHUFLW(<8 x i16> %h, i64 0)
+  %v3 = bitcast <8 x i16> %l to <4 x i32>
+  %s = call <4 x i32> @PSHUFD(<4 x i32> %v3, i64 0)
+  %r = bitcast <4 x i32> %s to <4 x i16>
+  ret <4 x i16> %r
+}
+
+define <16 x i8> @splat.16xi8(i8 "reg"="r32" %x) "recipe"="splat.16xi8.expand" {
+  %i = insertelement <16 x i8> poison, i8 %x, i64 0
+  %r = shufflevector <16 x i8> %i, <16 x i8> poison, <16 x i32> zeroinitializer
+  ret <16 x i8> %r
+}
+
+define <16 x i8> @splat.16xi8.expand(i8 %x) {
+  %w = zext i8 %x to i32
+  %v = call <4 x i32> @MOVDto(i32 %w)
+  %vb = bitcast <4 x i32> %v to <16 x i8>
+  %u = call <16 x i8> @PUNPCKLBWself(<16 x i8> %vb)
+  %v2 = bitcast <16 x i8> %u to <4 x i32>
+  %h = bitcast <4 x i32> %v2 to <8 x i16>
+  %l = call <8 x i16> @PSHUFLW(<8 x i16> %h, i64 0)
+  %v3 = bitcast <8 x i16> %l to <4 x i32>
+  %s = call <4 x i32> @PSHUFD(<4 x i32> %v3, i64 0)
+  %r = bitcast <4 x i32> %s to <16 x i8>
+  ret <16 x i8> %r
+}
+
+define <8 x i8> @splat.8xi8(i8 "reg"="r32" %x) "recipe"="splat.8xi8.expand" {
+  %i = insertelement <8 x i8> poison, i8 %x, i64 0
+  %r = shufflevector <8 x i8> %i, <8 x i8> poison, <8 x i32> zeroinitializer
+  ret <8 x i8> %r
+}
+
+define <8 x i8> @splat.8xi8.expand(i8 %x) {
+  %w = zext i8 %x to i32
+  %v = call <4 x i32> @MOVDto(i32 %w)
+  %vb = bitcast <4 x i32> %v to <16 x i8>
+  %u = call <16 x i8> @PUNPCKLBWself(<16 x i8> %vb)
+  %v2 = bitcast <16 x i8> %u to <4 x i32>
+  %h = bitcast <4 x i32> %v2 to <8 x i16>
+  %l = call <8 x i16> @PSHUFLW(<8 x i16> %h, i64 0)
+  %v3 = bitcast <8 x i16> %l to <4 x i32>
+  %s = call <4 x i32> @PSHUFD(<4 x i32> %v3, i64 0)
+  %r = bitcast <4 x i32> %s to <8 x i8>
+  ret <8 x i8> %r
+}
+
+define <4 x float> @splat.4xf32(float "reg"="s" %x) "recipe"="splat.4xf32.expand" {
+  %i = insertelement <4 x float> poison, float %x, i64 0
+  %r = shufflevector <4 x float> %i, <4 x float> poison, <4 x i32> zeroinitializer
+  ret <4 x float> %r
+}
+
+define <4 x float> @splat.4xf32.expand(float %x) {
+  %vi = bitcast float %x to <4 x i32>
+  %s = call <4 x i32> @PSHUFD(<4 x i32> %vi, i64 0)
+  %r = bitcast <4 x i32> %s to <4 x float>
+  ret <4 x float> %r
+}
+
+define <2 x float> @splat.2xf32(float "reg"="s" %x) "recipe"="splat.2xf32.expand" {
+  %i = insertelement <2 x float> poison, float %x, i64 0
+  %r = shufflevector <2 x float> %i, <2 x float> poison, <2 x i32> zeroinitializer
+  ret <2 x float> %r
+}
+
+define <2 x float> @splat.2xf32.expand(float %x) {
+  %vi = bitcast float %x to <4 x i32>
+  %s = call <4 x i32> @PSHUFD(<4 x i32> %vi, i64 0)
+  %r = bitcast <4 x i32> %s to <2 x float>
+  ret <2 x float> %r
+}
+
+define <2 x double> @splat.2xf64(double "reg"="d" %x) "recipe"="splat.2xf64.expand" {
+  %i = insertelement <2 x double> poison, double %x, i64 0
+  %r = shufflevector <2 x double> %i, <2 x double> poison, <2 x i32> zeroinitializer
+  ret <2 x double> %r
+}
+
+define <2 x double> @splat.2xf64.expand(double %x) {
+  %vi = bitcast double %x to <4 x i32>
+  %s = call <4 x i32> @PSHUFD(<4 x i32> %vi, i64 68)
+  %r = bitcast <4 x i32> %s to <2 x double>
+  ret <2 x double> %r
+}
+
+define <8 x i8> @LOW.16xi8(<16 x i8> "reg"="xv" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v}, {d}" "dclass"="xh" "nodecode" {
+  %r = shufflevector <16 x i8> %v, <16 x i8> poison, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
+  ret <8 x i8> %r
+}
+
+define <8 x i8> @HIGH.16xi8(<16 x i8> "reg"="xv" %v) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | 11101110" "asm"="pshufd $238, {v}, {d}" "dclass"="xh" "nodecode" {
+  %r = shufflevector <16 x i8> %v, <16 x i8> poison, <8 x i32> <i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15>
+  ret <8 x i8> %r
+}
+
+define <16 x i8> @JOIN.16xi8(<8 x i8> "reg"="xh" "tied" %a, <8 x i8> "reg"="xh" %b) "enc"="01100110 | rex(0, d, 0, b) | 00001111 | 01101100 | rr(d, b)" "asm"="punpcklqdq {b}, {d}" "dclass"="xv" "nodecode" {
+  %r = shufflevector <8 x i8> %a, <8 x i8> %b, <16 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15>
+  ret <16 x i8> %r
+}
+
+define <4 x i16> @LOW.8xi16(<8 x i16> "reg"="xv" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v}, {d}" "dclass"="xh" "nodecode" {
+  %r = shufflevector <8 x i16> %v, <8 x i16> poison, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
+  ret <4 x i16> %r
+}
+
+define <4 x i16> @HIGH.8xi16(<8 x i16> "reg"="xv" %v) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | 11101110" "asm"="pshufd $238, {v}, {d}" "dclass"="xh" "nodecode" {
+  %r = shufflevector <8 x i16> %v, <8 x i16> poison, <4 x i32> <i32 4, i32 5, i32 6, i32 7>
+  ret <4 x i16> %r
+}
+
+define <8 x i16> @JOIN.8xi16(<4 x i16> "reg"="xh" "tied" %a, <4 x i16> "reg"="xh" %b) "enc"="01100110 | rex(0, d, 0, b) | 00001111 | 01101100 | rr(d, b)" "asm"="punpcklqdq {b}, {d}" "dclass"="xv" "nodecode" {
+  %r = shufflevector <4 x i16> %a, <4 x i16> %b, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
+  ret <8 x i16> %r
+}
+
+define <2 x i32> @LOW.4xi32(<4 x i32> "reg"="xv" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v}, {d}" "dclass"="xh" "nodecode" {
+  %r = shufflevector <4 x i32> %v, <4 x i32> poison, <2 x i32> <i32 0, i32 1>
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @HIGH.4xi32(<4 x i32> "reg"="xv" %v) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | 11101110" "asm"="pshufd $238, {v}, {d}" "dclass"="xh" "nodecode" {
+  %r = shufflevector <4 x i32> %v, <4 x i32> poison, <2 x i32> <i32 2, i32 3>
+  ret <2 x i32> %r
+}
+
+define <4 x i32> @JOIN.4xi32(<2 x i32> "reg"="xh" "tied" %a, <2 x i32> "reg"="xh" %b) "enc"="01100110 | rex(0, d, 0, b) | 00001111 | 01101100 | rr(d, b)" "asm"="punpcklqdq {b}, {d}" "dclass"="xv" "nodecode" {
+  %r = shufflevector <2 x i32> %a, <2 x i32> %b, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
+  ret <4 x i32> %r
+}
+
+define <2 x float> @LOW.4xf32(<4 x float> "reg"="xv" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v}, {d}" "dclass"="xh" "nodecode" {
+  %r = shufflevector <4 x float> %v, <4 x float> poison, <2 x i32> <i32 0, i32 1>
+  ret <2 x float> %r
+}
+
+define <2 x float> @HIGH.4xf32(<4 x float> "reg"="xv" %v) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | 11101110" "asm"="pshufd $238, {v}, {d}" "dclass"="xh" "nodecode" {
+  %r = shufflevector <4 x float> %v, <4 x float> poison, <2 x i32> <i32 2, i32 3>
+  ret <2 x float> %r
+}
+
+define <4 x float> @JOIN.4xf32(<2 x float> "reg"="xh" "tied" %a, <2 x float> "reg"="xh" %b) "enc"="01100110 | rex(0, d, 0, b) | 00001111 | 01101100 | rr(d, b)" "asm"="punpcklqdq {b}, {d}" "dclass"="xv" "nodecode" {
+  %r = shufflevector <2 x float> %a, <2 x float> %b, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
+  ret <4 x float> %r
+}
+
+define <8 x i16> @UNPCKLz.8xi8(<8 x i8> "reg"="xh" "tied" %v, <2 x i64> "reg"="xv" %z) "enc"="01100110 | rex(0, d, 0, z) | 00001111 | 01100000 | rr(d, z)" "asm"="punpcklbw {z}, {d}" "dclass"="xv" "nomatch" "nodecode" {
+  ret <8 x i16> poison
+}
+
+define <8 x i16> @UNPCKLs.8xi8(<8 x i8> "reg"="xh" "tied" %v) "enc"="01100110 | rex(0, d, 0, d) | 00001111 | 01100000 | rr(d, d)" "asm"="punpcklbw {d}, {d}" "dclass"="xv" "nomatch" "nodecode" {
+  ret <8 x i16> poison
+}
+
+define <8 x i16> @zext.8xi8(<8 x i8> "reg"="xh" %v) "recipe"="zext.8xi8.expand" {
+  %r = zext <8 x i8> %v to <8 x i16>
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @zext.8xi8.expand(<8 x i8> %v) {
+  %z = call <2 x i64> @PXORzero()
+  %r = call <8 x i16> @UNPCKLz.8xi8(<8 x i8> %v, <2 x i64> %z)
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @sext.8xi8(<8 x i8> "reg"="xh" %v) "recipe"="sext.8xi8.expand" {
+  %r = sext <8 x i8> %v to <8 x i16>
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @sext.8xi8.expand(<8 x i8> %v) {
+  %u = call <8 x i16> @UNPCKLs.8xi8(<8 x i8> %v)
+  %r = call <8 x i16> @PSRAWi.8xi16(<8 x i16> %u, i16 8)
+  ret <8 x i16> %r
+}
+
+define <4 x i32> @UNPCKLz.4xi16(<4 x i16> "reg"="xh" "tied" %v, <2 x i64> "reg"="xv" %z) "enc"="01100110 | rex(0, d, 0, z) | 00001111 | 01100001 | rr(d, z)" "asm"="punpcklwd {z}, {d}" "dclass"="xv" "nomatch" "nodecode" {
+  ret <4 x i32> poison
+}
+
+define <4 x i32> @UNPCKLs.4xi16(<4 x i16> "reg"="xh" "tied" %v) "enc"="01100110 | rex(0, d, 0, d) | 00001111 | 01100001 | rr(d, d)" "asm"="punpcklwd {d}, {d}" "dclass"="xv" "nomatch" "nodecode" {
+  ret <4 x i32> poison
+}
+
+define <4 x i32> @zext.4xi16(<4 x i16> "reg"="xh" %v) "recipe"="zext.4xi16.expand" {
+  %r = zext <4 x i16> %v to <4 x i32>
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @zext.4xi16.expand(<4 x i16> %v) {
+  %z = call <2 x i64> @PXORzero()
+  %r = call <4 x i32> @UNPCKLz.4xi16(<4 x i16> %v, <2 x i64> %z)
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @sext.4xi16(<4 x i16> "reg"="xh" %v) "recipe"="sext.4xi16.expand" {
+  %r = sext <4 x i16> %v to <4 x i32>
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @sext.4xi16.expand(<4 x i16> %v) {
+  %u = call <4 x i32> @UNPCKLs.4xi16(<4 x i16> %v)
+  %r = call <4 x i32> @PSRADi.4xi32(<4 x i32> %u, i32 16)
+  ret <4 x i32> %r
+}
+
+define <2 x i64> @UNPCKLz.2xi32(<2 x i32> "reg"="xh" "tied" %v, <2 x i64> "reg"="xv" %z) "enc"="01100110 | rex(0, d, 0, z) | 00001111 | 01100010 | rr(d, z)" "asm"="punpckldq {z}, {d}" "dclass"="xv" "nomatch" "nodecode" {
+  ret <2 x i64> poison
+}
+
+define <2 x i64> @UNPCKLs.2xi32(<2 x i32> "reg"="xh" "tied" %v) "enc"="01100110 | rex(0, d, 0, d) | 00001111 | 01100010 | rr(d, d)" "asm"="punpckldq {d}, {d}" "dclass"="xv" "nomatch" "nodecode" {
+  ret <2 x i64> poison
+}
+
+define <2 x i64> @zext.2xi32(<2 x i32> "reg"="xh" %v) "recipe"="zext.2xi32.expand" {
+  %r = zext <2 x i32> %v to <2 x i64>
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @zext.2xi32.expand(<2 x i32> %v) {
+  %z = call <2 x i64> @PXORzero()
+  %r = call <2 x i64> @UNPCKLz.2xi32(<2 x i32> %v, <2 x i64> %z)
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @sext.2xi32(<2 x i32> "reg"="xh" %v) "recipe"="sext.2xi32.expand" {
+  %r = sext <2 x i32> %v to <2 x i64>
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @sext.2xi32.expand(<2 x i32> %v) {
+  %z = call <2 x i64> @PXORzero()
+  %zi = bitcast <2 x i64> %z to <2 x i32>
+  %s = call <2 x i1> @PCMPGTD.2xi32(<2 x i32> %zi, <2 x i32> %v)
+  %si = sext <2 x i1> %s to <2 x i32>
+  %sw = bitcast <2 x i32> %si to <2 x i64>
+  %r = call <2 x i64> @UNPCKLz.2xi32(<2 x i32> %v, <2 x i64> %sw)
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @MOVAPSrr(<2 x i64> "reg"="x" %n) "enc"="rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)" "asm"="movaps {n}, {d}" "copy"="x" "dclass"="x" "nodecode" {
   ret <2 x i64> %n
 }
 
@@ -1994,7 +3543,7 @@ define <4 x i64> @VMOVAPSye(<4 x i64> "reg"="ye" %n) "enc"="{ if(n<8) vex(d, 0, 
   ret <4 x i64> %n
 }
 
-define <8 x i64> @VMOVAPSz(<8 x i64> "reg"="z" %n) "enc"="evexr(d, n, 1, 0, 0, 2, 0, 0, 0, 0) | 00101000 | rr(d, n)" "asm"="vmovaps {n}, {d}" "copy"="z" "nodecode" {
+define <8 x i64> @VMOVAPSz(<8 x i64> "reg"="z" %n) "enc"="evexr(d, n, 1, 0, 0, 2, 0, 0, 0, 0) | 00101000 | rr(d, n)" "asm"="vmovaps {n}, {d}" "copy"="z" "dclass"="z" "nodecode" {
   ret <8 x i64> %n
 }
 

@@ -35,6 +35,7 @@ const PROGRAMS: &[&str] = &[
     "floats",
     "frames",
     "half",
+    "hfa",
     "loops",
     "structs",
     "tails",

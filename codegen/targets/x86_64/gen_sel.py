@@ -119,11 +119,12 @@ def moves():
         role = f' "role"="{roles[1:]}"' if roles else ''
         entry(ty, f'{mn.upper()}{dst}', [f'{src} "reg"="r32" %n'], f'{pre} | 00001111 | {op} | rr(d, n)',
               f'{mn} {{n:{view}}}, {d}', [f'%r = {ext} {src} %n to {ty}', f'ret {ty} %r'], zb + role)
-    # A boolean (a byte of 0 or 1, as setcc writes it) widened.
-    entry('i32', 'MOVZBL1', ['i1 "reg"="r32" %n'], f'{rex8("d", "n")} | 00001111 | 10110110 | rr(d, n)',
-          'movzbl {n:r8}, {d}', ['%r = zext i1 %n to i32', 'ret i32 %r'], ' "zext"="1" "role"="zext.1" "nodecode"')
-    entry('i64', 'MOVZBQ1', ['i1 "reg"="r32" %n'], f'{rex8("d", "n")} | 00001111 | 10110110 | rr(d, n)',
-          'movzbl {n:r8}, {d:r32}', ['%r = zext i1 %n to i64', 'ret i64 %r'], ' "zext"="1" "nodecode"')
+    # A boolean widened: its lowest bit (what is above it is undefined: a
+    # truncation leaves it).
+    entry('i32', 'ZEXT1', ['i1 "reg"="r32" "tied" %n'], 'rex(0, 0, 0, d) | 10000011 | rr(4, d) | 00000001',
+          'andl $1, {d}', ['%r = zext i1 %n to i32', 'ret i32 %r'], ' "zext"="1" "role"="zext.1"' + FLAGS)
+    entry('i64', 'ZEXT1q', ['i1 "reg"="r32" "tied" %n'], 'rex(0, 0, 0, d) | 10000011 | rr(4, d) | 00000001',
+          'andl $1, {d:r32}', ['%r = zext i1 %n to i64', 'ret i64 %r'], ' "zext"="1" "dclass"="r64"' + FLAGS)
     entry('i64', 'MOVSLQ', ['i32 "reg"="r32" %n'], 'rex(1, d, 0, n) | 01100011 | rr(d, n)', 'movslq {n}, {d}',
           ['%r = sext i32 %n to i64', 'ret i64 %r'], ' "role"="sext.32"')
     # Addresses, three-address and leaving the flags alone: the code
@@ -592,10 +593,294 @@ def x87():
                    f'  ret i1 %r\n}}\n')
 
 
+def sse_vectors():
+    """SSE2's vectors, for selection: 128 bits in xv, 64 in xh (an xmm
+    register's low half, as LLVM widens them). What SSE2 has no instruction
+    for is done lane by lane (legalize.rs)."""
+    P66 = '01100110 | '
+    def leg(pre, op, r, m, w=0):
+        return f'{pre}rex({w}, {r}, 0, {m}) | 00001111 | {op} | rr({r}, {m})'
+    def mem(pre, op, r, w=0):
+        return f'{pre}rex({w}, {r}, 4, n) | 00001111 | {op} | rm({r}, n, 4, 1, off, 0, 1)'
+    INT = [('<16 x i8>', 'b', 8, 16, 'xv'), ('<8 x i16>', 'w', 16, 8, 'xv'), ('<4 x i32>', 'd', 32, 4, 'xv'),
+           ('<2 x i64>', 'q', 64, 2, 'xv'), ('<8 x i8>', 'b', 8, 8, 'xh'), ('<4 x i16>', 'w', 16, 4, 'xh'),
+           ('<2 x i32>', 'd', 32, 2, 'xh')]
+    FLT = [('<4 x float>', 'ps', 'float', 4, 'xv'), ('<2 x double>', 'pd', 'double', 2, 'xv'),
+           ('<2 x float>', 'ps', 'float', 2, 'xh')]
+    tag = lambda ty: ty.strip('<>').replace(' x ', 'x').replace('i', 'i').replace('float', 'f32').replace('double', 'f64')
+    # Memory, copies and zero. (Spills by class: load.xv, store.xv.)
+    for ty, cls in [(t, c) for t, *_, c in INT] + [(t, c) for t, *_, c in FLT]:
+        T = tag(ty)
+        role = cls == 'xv' and ty == '<2 x i64>' or cls == 'xh' and ty == '<2 x i32>'
+        # (Vectors passed on the stack: load.q and store.q, too.)
+        if cls == 'xv':
+            ld, st = (mem('', '00010000', 'd'), 'movups {off}({n}), {d}'), (mem('', '00010001', 't'), 'movups {t}, {off}({n})')
+        else:
+            ld = (mem('11110011 | ', '01111110', 'd'), 'movq {off}({n}), {d}')
+            st = (mem(P66, '11010110', 't'), 'movq {t}, {off}({n})')
+        entry(ty, f'LDV.{T}', ['ptr "reg"="r64" %n', 'i64 "imm" %off'], ld[0], ld[1],
+              ['%a = getelementptr i8, ptr %n, i64 %off', f'%r = load {ty}, ptr %a', f'ret {ty} %r'],
+              f' "dclass"="{cls}"' + (f' "role"="load.{cls}' + (',load.q' if cls == 'xv' else '') + '"' if role else ''))
+        entry('void', f'STV.{T}', [f'{ty} "reg"="{cls}" %t', 'ptr "reg"="r64" %n', 'i64 "imm" %off'], st[0], st[1],
+              ['%a = getelementptr i8, ptr %n, i64 %off', f'store {ty} %t, ptr %a', 'ret void'],
+              f' "role"="store.{cls}' + (',store.q' if cls == 'xv' else '') + '"' if role else '')
+    for cls, ty in [('xv', '<2 x i64>'), ('xh', '<2 x i32>')]:
+        entry(ty, f'MOVAPS{cls}', [f'{ty} "reg"="{cls}" %n'], 'rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)',
+              'movaps {n}, {d}', [f'ret {ty} %n'], f' "copy"="{cls}" "dclass"="{cls}"')
+    entry('<2 x i64>', 'PXORzero', [], leg(P66, '11101111', 'd', 'd'), 'pxor {d}, {d}', ['ret <2 x i64> zeroinitializer'],
+          ' "dclass"="xv" "role"="movi.zero" "nomatch"')
+    # Integer lanes: two-address, the first source the destination.
+    def two(ty, cls, name, pre, op, mn, body, rty=None, dcls=None):
+        rty = rty or ty
+        entry(rty, name, [f'{ty} "reg"="{cls}" "tied" %n', f'{ty} "reg"="{cls}" %m'], leg(pre, op, 'd', 'm'),
+              f'{mn} {{m}}, {{d}}', body, f' "dclass"="{dcls or cls}"')
+    for ty, sfx, eb, n, cls in INT:
+        T = tag(ty)
+        ops = [('add', 'padd', {8: 'FC', 16: 'FD', 32: 'FE', 64: 'D4'}), ('sub', 'psub', {8: 'F8', 16: 'F9', 32: 'FA', 64: 'FB'})]
+        if eb == 16:
+            ops.append(('mul', 'pmull', {16: 'D5'}))
+        for ir, mn, opc in ops:
+            two(ty, cls, f'{mn.upper()}{sfx.upper()}.{T}', P66, bits(int(opc[eb], 16)), f'{mn}{sfx}',
+                [f'%r = {ir} {ty} %n, %m', f'ret {ty} %r'])
+        for ir, mn, opc in [('and', 'pand', 0xDB), ('or', 'por', 0xEB), ('xor', 'pxor', 0xEF)]:
+            two(ty, cls, f'{mn.upper()}.{T}', P66, bits(opc), mn, [f'%r = {ir} {ty} %n, %m', f'ret {ty} %r'])
+        # Shifts by an immediate (none of bytes; no arithmetic one of i64).
+        for ir, r in [('shl', 6), ('lshr', 2), ('ashr', 4)]:
+            if eb == 8 or (ir == 'ashr' and eb == 64):
+                continue
+            op = {16: '01110001', 32: '01110010', 64: '01110011'}[eb]
+            mn = {'shl': 'psll', 'lshr': 'psrl', 'ashr': 'psra'}[ir] + sfx
+            entry(ty, f'{mn.upper()}i.{T}', [f'{ty} "reg"="{cls}" "tied" %n', f'{ty} "imm" %sh'],
+                  f'{P66}rex(0, 0, 0, d) | 00001111 | {op} | rr({r}, d) | ib:8=sh', f'{mn} ${{sh}}, {{d}}',
+                  [f'%r = {ir} {ty} %n, %sh', f'ret {ty} %r'], f' "dclass"="{cls}"')
+        # Comparisons, to masks: eq and sgt (not of i64: SSE4).
+        M = f'<{n} x i1>'
+        if eb < 64:
+            k = {8: 0, 16: 1, 32: 2}[eb]
+            two(ty, cls, f'PCMPEQ{sfx.upper()}.{T}', P66, bits(0x74 + k), f'pcmpeq{sfx}',
+                [f'%r = icmp eq {ty} %n, %m', f'ret {M} %r'], M, 'xv')
+            two(ty, cls, f'PCMPGT{sfx.upper()}.{T}', P66, bits(0x64 + k), f'pcmpgt{sfx}',
+                [f'%r = icmp sgt {ty} %n, %m', f'ret {M} %r'], M, 'xv')
+        # A mask's lanes as 0 or 1: its top bit shifted down.
+        if eb > 8:
+            op = {16: '01110001', 32: '01110010', 64: '01110011'}[eb]
+            entry(ty, f'MASK.{T}', [f'{M} "reg"="xv" "tied" %n'],
+                  f'{P66}rex(0, 0, 0, d) | 00001111 | {op} | rr(2, d) | ib:8={eb - 1}', f'psrl{sfx} ${eb - 1}, {{d}}',
+                  [f'%r = zext {M} %n to {ty}', f'ret {ty} %r'], f' "dclass"="{cls}"')
+    # Masks' logic.
+    for n, cls in [(16, 'xv'), (8, 'xv'), (4, 'xv'), (2, 'xv')]:
+        M = f'<{n} x i1>'
+        for ir, mn, opc in [('and', 'pand', 0xDB), ('or', 'por', 0xEB), ('xor', 'pxor', 0xEF)]:
+            two(M, cls, f'{mn.upper()}.m{n}', P66, bits(opc), mn, [f'%r = {ir} {M} %n, %m', f'ret {M} %r'])
+    # The plain bitwise operations recipes use, and andn: ~n & m.
+    for cls, ty in [('xv', '<2 x i64>'), ('xh', '<2 x i32>')]:
+        T = tag(ty)
+        two(ty, cls, f'PANDN.{cls}', P66, bits(0xDF), 'pandn',
+            [f'%x = xor {ty} %n, splat ({ty.split()[-1][:-1]} -1)', f'%r = and {ty} %x, %m', f'ret {ty} %r'])
+    # Floating point.
+    for ty, sfx, et, n, cls in FLT:
+        T = tag(ty)
+        pre = P66 if sfx == 'pd' else ''
+        for ir, opc in [('fadd', 0x58), ('fsub', 0x5C), ('fmul', 0x59), ('fdiv', 0x5E)]:
+            two(ty, cls, f'{ir.upper()}{sfx.upper()}.{T}', pre, bits(opc), f'{ir[1:]}{sfx}',
+                [f'%r = {ir} {ty} %n, %m', f'ret {ty} %r'])
+        it = f'v{n}f{32 if et == "float" else 64}'
+        entry(ty, f'SQRT{sfx.upper()}.{T}', [f'{ty} "reg"="{cls}" %n'], leg(pre, '01010001', 'd', 'n'), f'sqrt{sfx} {{n}}, {{d}}',
+              [f'%r = call {ty} @llvm.sqrt.{it}({ty} %n)', f'ret {ty} %r'], f' "dclass"="{cls}"')
+        out.append(f'declare {ty} @llvm.sqrt.{it}({ty})\n')
+        # cmpps's predicates; the others with the operands swapped.
+        M = f'<{n} x i1>'
+        for pred, k, swap in [('oeq', 0, 0), ('olt', 1, 0), ('ole', 2, 0), ('uno', 3, 0), ('une', 4, 0), ('uge', 5, 0),
+                              ('ugt', 6, 0), ('ord', 7, 0), ('ogt', 1, 1), ('oge', 2, 1), ('ult', 6, 1), ('ule', 5, 1)]:
+            a, b = ('%m', '%n') if swap else ('%n', '%m')
+            entry(M, f'CMP{pred.upper()}{sfx.upper()}.{T}', [f'{ty} "reg"="{cls}" "tied" %n', f'{ty} "reg"="{cls}" %m'],
+                  leg(pre, '11000010', 'd', 'm') + f' | {bits(k)}', f'cmp{sfx} ${k}, {{m}}, {{d}}',
+                  [f'%r = fcmp {pred} {ty} {a}, {b}', f'ret {M} %r'], ' "dclass"="xv"')
+    # Conversions between 32-bit integers and floats, lane for lane.
+    for ity, fty, cls in [('<4 x i32>', '<4 x float>', 'xv'), ('<2 x i32>', '<2 x float>', 'xh')]:
+        entry(fty, f'CVTDQ2PS.{tag(fty)}', [f'{ity} "reg"="{cls}" %n'], leg('', '01011011', 'd', 'n'), 'cvtdq2ps {n}, {d}',
+              [f'%r = sitofp {ity} %n to {fty}', f'ret {fty} %r'], f' "dclass"="{cls}"')
+        entry(ity, f'CVTTPS2DQ.{tag(ity)}', [f'{fty} "reg"="{cls}" %n'], leg('11110011 | ', '01011011', 'd', 'n'),
+              'cvttps2dq {n}, {d}', [f'%r = fptosi {fty} %n to {ity}', f'ret {ity} %r'], f' "dclass"="{cls}"')
+    entry('<2 x double>', 'CVTPS2PD', ['<2 x float> "reg"="xh" %n'], leg('', '01011010', 'd', 'n'), 'cvtps2pd {n}, {d}',
+          ['%r = fpext <2 x float> %n to <2 x double>', 'ret <2 x double> %r'], ' "dclass"="xv"')
+    entry('<2 x float>', 'CVTPD2PS', ['<2 x double> "reg"="xv" %n'], leg(P66, '01011010', 'd', 'n'), 'cvtpd2ps {n}, {d}',
+          ['%r = fptrunc <2 x double> %n to <2 x float>', 'ret <2 x float> %r'], ' "dclass"="xh"')
+    entry('<2 x double>', 'CVTDQ2PD', ['<2 x i32> "reg"="xh" %n'], leg('11110011 | ', '11100110', 'd', 'n'), 'cvtdq2pd {n}, {d}',
+          ['%r = sitofp <2 x i32> %n to <2 x double>', 'ret <2 x double> %r'], ' "dclass"="xv"')
+    entry('<2 x i32>', 'CVTTPD2DQ', ['<2 x double> "reg"="xv" %n'], leg(P66, '11100110', 'd', 'n'), 'cvttpd2dq {n}, {d}',
+          ['%r = fptosi <2 x double> %n to <2 x i32>', 'ret <2 x i32> %r'], ' "dclass"="xh"')
+    # Selects by a mask: (c & a) | (~c & b).
+    for ty, *rest in INT + FLT:
+        cls = rest[-1]
+        n = int(ty[1:].split()[0])
+        M = f'<{n} x i1>'
+        wide, el = ('<2 x i64>', 'i64') if cls == 'xv' else ('<2 x i32>', 'i32')
+        T = tag(ty)
+        ety = ty.split()[-1][:-1]
+        lane = {'float': 'i32', 'double': 'i64'}.get(ety, ety)
+        ity = f'<{n} x {lane}>'
+        cast = (f'  %ti = bitcast {ty} %a to {wide}\n  %fi = bitcast {ty} %b to {wide}\n')
+        out.append(f'define {ty} @vselect.{T}({M} "reg"="xv" %c, {ty} "reg"="{cls}" %a, {ty} "reg"="{cls}" %b) '
+                   f'"recipe"="vselect.{T}.expand" {{\n  %r = select {M} %c, {ty} %a, {ty} %b\n  ret {ty} %r\n}}\n')
+        pand, pandn, por = (('PAND.2xi64', 'PANDN.xv', 'POR.2xi64') if cls == 'xv' else ('PAND.2xi32', 'PANDN.xh', 'POR.2xi32'))
+        out.append(f'define {ty} @vselect.{T}.expand({M} %c, {ty} %a, {ty} %b) {{\n'
+                   f'  %cs = sext {M} %c to {ity}\n  %ci = bitcast {ity} %cs to {wide}\n' + cast +
+                   f'  %x = call {wide} @{pand}({wide} %ci, {wide} %ti)\n'
+                   f'  %y = call {wide} @{pandn}({wide} %ci, {wide} %fi)\n'
+                   f'  %z = call {wide} @{por}({wide} %x, {wide} %y)\n  %r = bitcast {wide} %z to {ty}\n  ret {ty} %r\n}}\n')
+    # Lanes. i16: pextrw and pinsrw.
+    for ty, cls in [('<8 x i16>', 'xv'), ('<4 x i16>', 'xh')]:
+        T = tag(ty)
+        entry('i16', f'PEXTRW.{T}', [f'{ty} "reg"="{cls}" %v', 'i64 "imm" %k'], leg(P66, '11000101', 'd', 'v') + ' | ib:8=k',
+              'pextrw ${k}, {v}, {d:r32}', [f'%r = extractelement {ty} %v, i64 %k', 'ret i16 %r'],
+              ' "dclass"="r32" "zext"="16"')
+        entry(ty, f'PINSRW.{T}', [f'{ty} "reg"="{cls}" "tied" %v', 'i16 "reg"="r32" %e', 'i64 "imm" %k'],
+              leg(P66, '11000100', 'd', 'e') + ' | ib:8=k', 'pinsrw ${k}, {e:r32}, {d}',
+              [f'%r = insertelement {ty} %v, i16 %e, i64 %k', f'ret {ty} %r'], f' "dclass"="{cls}"')
+    # Lane 0 of 32- and 64-bit integers: movd, movq; lane k, a pshufd first.
+    for ty, cls in [('<4 x i32>', 'xv'), ('<2 x i32>', 'xh')]:
+        T = tag(ty)
+        entry('i32', f'MOVDlane0.{T}', [f'{ty} "reg"="{cls}" %v'], f'{P66}rex(0, v, 0, d) | 00001111 | 01111110 | rr(v, d)',
+              'movd {v}, {d}', [f'%r = extractelement {ty} %v, i64 0', 'ret i32 %r'], ' "dclass"="r32"')
+        entry(ty, f'PSHUFDlane.{T}', [f'{ty} "reg"="{cls}" %v', 'i64 "imm" %k'], leg(P66, '01110000', 'd', 'v') + ' | ib:8=k',
+              'pshufd ${k}, {v}, {d}', [f'ret {ty} %v'], f' "dclass"="{cls}" "nomatch"')
+        out.append(f'define i32 @lane.{T}({ty} "reg"="{cls}" %v, i64 %k) "recipe"="lane.{T}.expand" {{\n'
+                   f'  %r = extractelement {ty} %v, i64 %k\n  ret i32 %r\n}}\n')
+        out.append(f'define i32 @lane.{T}.expand({ty} %v, i64 %k) {{\n  %s = call {ty} @PSHUFDlane.{T}({ty} %v, i64 %k)\n'
+                   f'  %r = call i32 @MOVDlane0.{T}({ty} %s)\n  ret i32 %r\n}}\n')
+    entry('i64', 'MOVQlane0', ['<2 x i64> "reg"="xv" %v'], f'{P66}rex(1, v, 0, d) | 00001111 | 01111110 | rr(v, d)',
+          'movq {v}, {d}', ['%r = extractelement <2 x i64> %v, i64 0', 'ret i64 %r'], ' "dclass"="r64"')
+    entry('<2 x i64>', 'PUNPCKHQDQself', ['<2 x i64> "reg"="xv" "tied" %v'], leg(P66, '01101101', 'd', 'd'),
+          'punpckhqdq {d}, {d}', ['ret <2 x i64> %v'], ' "dclass"="xv" "nomatch"')
+    out.append('define i64 @lane1.2xi64(<2 x i64> "reg"="xv" %v) "recipe"="lane1.2xi64.expand" {\n'
+               '  %r = extractelement <2 x i64> %v, i64 1\n  ret i64 %r\n}\n')
+    out.append('define i64 @lane1.2xi64.expand(<2 x i64> %v) {\n  %s = call <2 x i64> @PUNPCKHQDQself(<2 x i64> %v)\n'
+               '  %r = call i64 @MOVQlane0(<2 x i64> %s)\n  ret i64 %r\n}\n')
+    # Floats: lane k brought to lane 0 (pshufd), where the float is.
+    for ty, cls in [('<4 x float>', 'xv'), ('<2 x float>', 'xh')]:
+        entry('float', f'PSHUFDf.{tag(ty)}', [f'{ty} "reg"="{cls}" %v', 'i64 "imm" %k'], leg(P66, '01110000', 'd', 'v') + ' | ib:8=k',
+              'pshufd ${k}, {v}, {d}', [f'%r = extractelement {ty} %v, i64 %k', 'ret float %r'], ' "dclass"="s"')
+    entry('double', 'MOVAPDlane0', ['<2 x double> "reg"="xv" %v'], 'rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)',
+          'movaps {v}, {d}', ['%r = extractelement <2 x double> %v, i64 0', 'ret double %r'], ' "dclass"="d"')
+    entry('double', 'UNPCKHPDlane1', ['<2 x double> "reg"="xv" "tied" %v'], leg(P66, '00010101', 'd', 'd'),
+          'unpckhpd {d}, {d}', ['%r = extractelement <2 x double> %v, i64 1', 'ret double %r'], ' "dclass"="d"')
+    # Splats.
+    def splat_body(ty, et, x):
+        return (f'  %i = insertelement {ty} poison, {et} {x}, i64 0\n'
+                f'  %r = shufflevector {ty} %i, {ty} poison, {ty.replace(et, "i32")} zeroinitializer\n')
+    entry('<4 x i32>', 'MOVDto', ['i32 "reg"="r32" %n'], f'{P66}rex(0, d, 0, n) | 00001111 | 01101110 | rr(d, n)',
+          'movd {n}, {d}', ['%r = insertelement <4 x i32> zeroinitializer, i32 %n, i64 0', 'ret <4 x i32> %r'], ' "dclass"="xv"')
+    entry('<2 x i64>', 'MOVQto', ['i64 "reg"="r64" %n'], f'{P66}rex(1, d, 0, n) | 00001111 | 01101110 | rr(d, n)',
+          'movq {n}, {d}', ['%r = insertelement <2 x i64> zeroinitializer, i64 %n, i64 0', 'ret <2 x i64> %r'],
+          ' "dclass"="xv" "role"="vec.from.x"')
+    # A 64-bit vector's bits from and to an integer register.
+    entry('<8 x i8>', 'MOVQtoh', ['i64 "reg"="r64" %n'], f'{P66}rex(1, d, 0, n) | 00001111 | 01101110 | rr(d, n)',
+          'movq {n}, {d}', ['%r = bitcast i64 %n to <8 x i8>', 'ret <8 x i8> %r'], ' "dclass"="xh"')
+    entry('i64', 'MOVQfromh', ['<8 x i8> "reg"="xh" %v'], f'{P66}rex(1, v, 0, d) | 00001111 | 01111110 | rr(v, d)',
+          'movq {v}, {d}', ['%r = bitcast <8 x i8> %v to i64', 'ret i64 %r'], ' "dclass"="r64"')
+    # (Constants are made of 64-bit words: the second joined above the
+    # first.)
+    entry('<2 x i64>', 'PUNPCKLQDQ', ['<2 x i64> "reg"="xv" "tied" %n', '<2 x i64> "reg"="xv" %m'], leg(P66, '01101100', 'd', 'm'),
+          'punpcklqdq {m}, {d}', ['ret <2 x i64> %n'], ' "dclass"="xv" "role"="vec.join.d" "nomatch"')
+    # A mask as the integers of its lanes (all ones or zeros), and back:
+    # the same bits (legalize.rs, for lanes done one at a time).
+    for n, w, cls in [(16, 8, 'xv'), (8, 16, 'xv'), (4, 32, 'xv'), (2, 64, 'xv'), (8, 8, 'xh'), (4, 16, 'xh'), (2, 32, 'xh')]:
+        M, I = f'<{n} x i1>', f'<{n} x i{w}>'
+        entry(I, f'BITS.{n}x{w}', [f'{M} "reg"="xv" %m'], 'rex(0, d, 0, m) | 00001111 | 00101000 | rr(d, m)',
+              'movaps {m}, {d}', [f'%r = call {I} @llvm.epitome.mask.bits.v{n}i{w}({M} %m)', f'ret {I} %r'], f' "dclass"="{cls}"')
+        entry(M, f'MASK.{n}x{w}', [f'{I} "reg"="{cls}" %v'], 'rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)',
+              'movaps {v}, {d}', [f'%r = call {M} @llvm.epitome.bits.mask.v{n}i{w}({I} %v)', f'ret {M} %r'], ' "dclass"="xv"')
+        out.append(f'declare {I} @llvm.epitome.mask.bits.v{n}i{w}({M})\ndeclare {M} @llvm.epitome.bits.mask.v{n}i{w}({I})\n')
+    entry('<4 x i32>', 'PSHUFD', ['<4 x i32> "reg"="xv" %v', 'i64 "imm" %k'], leg(P66, '01110000', 'd', 'v') + ' | ib:8=k',
+          'pshufd ${k}, {v}, {d}', ['ret <4 x i32> %v'], ' "dclass"="xv" "nomatch"')
+    entry('<8 x i16>', 'PSHUFLW', ['<8 x i16> "reg"="xv" %v', 'i64 "imm" %k'], leg('11110010 | ', '01110000', 'd', 'v') + ' | ib:8=k',
+          'pshuflw ${k}, {v}, {d}', ['ret <8 x i16> %v'], ' "dclass"="xv" "nomatch"')
+    entry('<16 x i8>', 'PUNPCKLBWself', ['<16 x i8> "reg"="xv" "tied" %v'], leg(P66, '01100000', 'd', 'd'),
+          'punpcklbw {d}, {d}', ['ret <16 x i8> %v'], ' "dclass"="xv" "nomatch"')
+    for ty, et, cls, steps in [('<4 x i32>', 'i32', 'xv', ['d']), ('<2 x i32>', 'i32', 'xh', ['d']),
+                               ('<2 x i64>', 'i64', 'xv', ['q']), ('<8 x i16>', 'i16', 'xv', ['w']),
+                               ('<4 x i16>', 'i16', 'xh', ['w']), ('<16 x i8>', 'i8', 'xv', ['b']), ('<8 x i8>', 'i8', 'xh', ['b']),
+                               ('<4 x float>', 'float', 'xv', ['f']), ('<2 x float>', 'float', 'xh', ['f']),
+                               ('<2 x double>', 'double', 'xv', ['g'])]:
+        T = tag(ty)
+        src = {'i32': 'i32 "reg"="r32"', 'i16': 'i16 "reg"="r32"', 'i8': 'i8 "reg"="r32"', 'i64': 'i64 "reg"="r64"',
+               'float': 'float "reg"="s"', 'double': 'double "reg"="d"'}[et]
+        out.append(f'define {ty} @splat.{T}({src} %x) "recipe"="splat.{T}.expand" {{\n' + splat_body(ty, et, '%x') +
+                   f'  ret {ty} %r\n}}\n')
+        if et in ('i32', 'i16', 'i8'):
+            x = '%x' if et == 'i32' else '%w'
+            pre = '' if et == 'i32' else f'  %w = zext {et} %x to i32\n'
+            body = pre + f'  %v = call <4 x i32> @MOVDto(i32 {x})\n'
+            if et == 'i8':
+                body += ('  %vb = bitcast <4 x i32> %v to <16 x i8>\n  %u = call <16 x i8> @PUNPCKLBWself(<16 x i8> %vb)\n'
+                         '  %v2 = bitcast <16 x i8> %u to <4 x i32>\n')
+                v = '%v2'
+            else:
+                v = '%v'
+            if et != 'i32':
+                body += (f'  %h = bitcast <4 x i32> {v} to <8 x i16>\n  %l = call <8 x i16> @PSHUFLW(<8 x i16> %h, i64 0)\n'
+                         '  %v3 = bitcast <8 x i16> %l to <4 x i32>\n')
+                v = '%v3'
+            body += f'  %s = call <4 x i32> @PSHUFD(<4 x i32> {v}, i64 0)\n  %r = bitcast <4 x i32> %s to {ty}\n'
+        elif et == 'i64':
+            body = '  %v = call <2 x i64> @MOVQto(i64 %x)\n  %vi = bitcast <2 x i64> %v to <4 x i32>\n' \
+                   '  %s = call <4 x i32> @PSHUFD(<4 x i32> %vi, i64 68)\n  %r = bitcast <4 x i32> %s to <2 x i64>\n'
+        elif et == 'float':
+            body = '  %vi = bitcast float %x to <4 x i32>\n  %s = call <4 x i32> @PSHUFD(<4 x i32> %vi, i64 0)\n' \
+                   f'  %r = bitcast <4 x i32> %s to {ty}\n'
+        else:
+            body = '  %vi = bitcast double %x to <4 x i32>\n  %s = call <4 x i32> @PSHUFD(<4 x i32> %vi, i64 68)\n' \
+                   f'  %r = bitcast <4 x i32> %s to {ty}\n'
+        out.append(f'define {ty} @splat.{T}.expand({src.split()[0]} %x) {{\n' + body + f'  ret {ty} %r\n}}\n')
+    # Halves of 128-bit vectors (as legalisation splits them): the low one
+    # in place, the high one moved down; and two joined.
+    for full, half, n in [('<16 x i8>', '<8 x i8>', 16), ('<8 x i16>', '<4 x i16>', 8), ('<4 x i32>', '<2 x i32>', 4),
+                          ('<4 x float>', '<2 x float>', 4)]:
+        h = n // 2
+        lo = ', '.join(f'i32 {k}' for k in range(h))
+        hi = ', '.join(f'i32 {k}' for k in range(h, n))
+        both = ', '.join(f'i32 {k}' for k in range(n))
+        entry(half, f'LOW.{tag(full)}', [f'{full} "reg"="xv" %v'], 'rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)',
+              'movaps {v}, {d}', [f'%r = shufflevector {full} %v, {full} poison, <{h} x i32> <{lo}>', f'ret {half} %r'],
+              ' "dclass"="xh"')
+        entry(half, f'HIGH.{tag(full)}', [f'{full} "reg"="xv" %v'], leg(P66, '01110000', 'd', 'v') + ' | 11101110',
+              'pshufd $238, {v}, {d}', [f'%r = shufflevector {full} %v, {full} poison, <{h} x i32> <{hi}>', f'ret {half} %r'],
+              ' "dclass"="xh"')
+        entry(full, f'JOIN.{tag(full)}', [f'{half} "reg"="xh" "tied" %a', f'{half} "reg"="xh" %b'], leg(P66, '01101100', 'd', 'b'),
+              'punpcklqdq {b}, {d}', [f'%r = shufflevector {half} %a, {half} %b, <{n} x i32> <{both}>', f'ret {full} %r'],
+              ' "dclass"="xv"')
+    # Widening a 64-bit vector's lanes: interleaved with zeros (zext), or
+    # with themselves and shifted down (sext; 32 to 64 bits with their signs).
+    for nar, wid, k, unp in [('<8 x i8>', '<8 x i16>', 8, '01100000'), ('<4 x i16>', '<4 x i32>', 16, '01100001'),
+                             ('<2 x i32>', '<2 x i64>', 32, '01100010')]:
+        T = tag(nar)
+        mn = {8: 'punpcklbw', 16: 'punpcklwd', 32: 'punpckldq'}[k]
+        entry(wid, f'UNPCKLz.{T}', [f'{nar} "reg"="xh" "tied" %v', '<2 x i64> "reg"="xv" %z'], leg(P66, unp, 'd', 'z'),
+              f'{mn} {{z}}, {{d}}', [f'ret {wid} poison'], ' "dclass"="xv" "nomatch"')
+        entry(wid, f'UNPCKLs.{T}', [f'{nar} "reg"="xh" "tied" %v'], leg(P66, unp, 'd', 'd'),
+              f'{mn} {{d}}, {{d}}', [f'ret {wid} poison'], ' "dclass"="xv" "nomatch"')
+        out.append(f'define {wid} @zext.{T}({nar} "reg"="xh" %v) "recipe"="zext.{T}.expand" {{\n'
+                   f'  %r = zext {nar} %v to {wid}\n  ret {wid} %r\n}}\n')
+        out.append(f'define {wid} @zext.{T}.expand({nar} %v) {{\n  %z = call <2 x i64> @PXORzero()\n'
+                   f'  %r = call {wid} @UNPCKLz.{T}({nar} %v, <2 x i64> %z)\n  ret {wid} %r\n}}\n')
+        out.append(f'define {wid} @sext.{T}({nar} "reg"="xh" %v) "recipe"="sext.{T}.expand" {{\n'
+                   f'  %r = sext {nar} %v to {wid}\n  ret {wid} %r\n}}\n')
+        if k < 32:
+            out.append(f'define {wid} @sext.{T}.expand({nar} %v) {{\n  %u = call {wid} @UNPCKLs.{T}({nar} %v)\n'
+                       f'  %r = call {wid} @PSRA{"W" if k == 8 else "D"}i.{tag(wid)}({wid} %u, {wid.split()[-1][:-1]} {k})\n'
+                       f'  ret {wid} %r\n}}\n')
+        else:
+            out.append(f'define {wid} @sext.{T}.expand({nar} %v) {{\n  %z = call <2 x i64> @PXORzero()\n'
+                       f'  %zi = bitcast <2 x i64> %z to <2 x i32>\n  %s = call <2 x i1> @PCMPGTD.2xi32(<2 x i32> %zi, <2 x i32> %v)\n'
+                       f'  %si = sext <2 x i1> %s to <2 x i32>\n  %sw = bitcast <2 x i32> %si to <2 x i64>\n'
+                       f'  %r = call {wid} @UNPCKLz.{T}({nar} %v, <2 x i64> %sw)\n  ret {wid} %r\n}}\n')
+
+
 def vector_copies():
     """Copies of the vector and mask registers (the register allocator's)."""
     entry('<2 x i64>', 'MOVAPSrr', ['<2 x i64> "reg"="x" %n'], 'rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)',
-          'movaps {n}, {d}', ['ret <2 x i64> %n'], ' "copy"="x"')
+          'movaps {n}, {d}', ['ret <2 x i64> %n'], ' "copy"="x" "dclass"="x"')
     for cls, ty, l, ll in [('xe', '<2 x i64>', 0, 0), ('ye', '<4 x i64>', 1, 1)]:
         # (The store form where only it has the two-byte prefix, as llvm-mc
         # writes it.)
@@ -606,7 +891,7 @@ def vector_copies():
               f'evexr(d, n, 1, 0, 0, {ll}, 0, 0, 0, 0) | 00101000 | rr(d, n) }}',
               'vmovaps {n}, {d}', [f'ret {ty} %n'], f' "copy"="{cls}" "dclass"="{cls}"')
     entry('<8 x i64>', 'VMOVAPSz', ['<8 x i64> "reg"="z" %n'], 'evexr(d, n, 1, 0, 0, 2, 0, 0, 0, 0) | 00101000 | rr(d, n)',
-          'vmovaps {n}, {d}', ['ret <8 x i64> %n'], ' "copy"="z"')
+          'vmovaps {n}, {d}', ['ret <8 x i64> %n'], ' "copy"="z" "dclass"="z"')
     entry('i64', 'KMOVQ', ['i64 "reg"="k" %n'], 'vex(d, 0, n, 1, 1, 0, 0, 0) | 10010000 | rr(d, n)', 'kmovq {n}, {d}',
           ['ret i64 %n'], ' "copy"="k" "dclass"="k"')
 
@@ -626,6 +911,7 @@ def main():
     floats()
     atomics()
     x87()
+    sse_vectors()
     vector_copies()
     sys.stdout.write('\n'.join(out))
 
