@@ -480,58 +480,16 @@ define i64 @LDI32S64X1(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(
   ret i64 %r
 }
 
-define void @STI64X1(i64 "reg"="r64" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(1, t, m.index, n) | 10001001 | rm(t, n, m.index, 1, 0, 0, 1)" "asm"="movq {t}, ({n},{m.index},1)" "nodecode" {
-  %a = getelementptr i8, ptr %n, i64 %m.index
-  store i64 %t, ptr %a
-  ret void
-}
-
-define void @STI32X1(i32 "reg"="r32" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(0, t, m.index, n) | 10001001 | rm(t, n, m.index, 1, 0, 0, 1)" "asm"="movl {t}, ({n},{m.index},1)" "nodecode" {
-  %a = getelementptr i8, ptr %n, i64 %m.index
-  store i32 %t, ptr %a
-  ret void
-}
-
-define void @STI16X1(i16 "reg"="r32" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="01100110 | rex(0, t, m.index, n) | 10001001 | rm(t, n, m.index, 1, 0, 0, 1)" "asm"="movw {t:r16}, ({n},{m.index},1)" "nodecode" {
-  %a = getelementptr i8, ptr %n, i64 %m.index
-  store i16 %t, ptr %a
-  ret void
-}
-
-define void @STI8X1(i8 "reg"="r32" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="{ if(t<4) rex(0, t, m.index, n) ; 0100 0 R:1=(t)>>3 X:1=(m.index)>>3 B:1=(n)>>3 } | 10001000 | rm(t, n, m.index, 1, 0, 0, 1)" "asm"="movb {t:r8}, ({n},{m.index},1)" "nodecode" {
-  %a = getelementptr i8, ptr %n, i64 %m.index
-  store i8 %t, ptr %a
-  ret void
-}
-
-define void @STPTRX1(ptr "reg"="r64" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(1, t, m.index, n) | 10001001 | rm(t, n, m.index, 1, 0, 0, 1)" "asm"="movq {t}, ({n},{m.index},1)" "nodecode" {
-  %a = getelementptr i8, ptr %n, i64 %m.index
-  store ptr %t, ptr %a
-  ret void
-}
-
 define double @LDDX1(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110010 | rex(0, d, m.index, n) | 00001111 | 00010000 | rm(d, n, m.index, 1, 0, 0, 1)" "asm"="movsd ({n},{m.index},1), {d}" "dclass"="d" "nodecode" {
   %a = getelementptr i8, ptr %n, i64 %m.index
   %r = load double, ptr %a
   ret double %r
 }
 
-define void @STDX1(double "reg"="d" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110010 | rex(0, t, m.index, n) | 00001111 | 00010001 | rm(t, n, m.index, 1, 0, 0, 1)" "asm"="movsd {t}, ({n},{m.index},1)" "nodecode" {
-  %a = getelementptr i8, ptr %n, i64 %m.index
-  store double %t, ptr %a
-  ret void
-}
-
 define float @LDSX1(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110011 | rex(0, d, m.index, n) | 00001111 | 00010000 | rm(d, n, m.index, 1, 0, 0, 1)" "asm"="movss ({n},{m.index},1), {d}" "dclass"="s" "nodecode" {
   %a = getelementptr i8, ptr %n, i64 %m.index
   %r = load float, ptr %a
   ret float %r
-}
-
-define void @STSX1(float "reg"="s" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110011 | rex(0, t, m.index, n) | 00001111 | 00010001 | rm(t, n, m.index, 1, 0, 0, 1)" "asm"="movss {t}, ({n},{m.index},1)" "nodecode" {
-  %a = getelementptr i8, ptr %n, i64 %m.index
-  store float %t, ptr %a
-  ret void
 }
 
 define i64 @LDI64X2(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(1, d, m.index, n) | 10001011 | rm(d, n, m.index, 2, 0, 0, 1)" "asm"="movq ({n},{m.index},2), {d}" "dclass"="r64" "nodecode" {
@@ -609,41 +567,6 @@ define i64 @LDI32S64X2(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(
   ret i64 %r
 }
 
-define void @STI64X2(i64 "reg"="r64" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(1, t, m.index, n) | 10001001 | rm(t, n, m.index, 2, 0, 0, 1)" "asm"="movq {t}, ({n},{m.index},2)" "nodecode" {
-  %o = shl i64 %m.index, 1
-  %a = getelementptr i8, ptr %n, i64 %o
-  store i64 %t, ptr %a
-  ret void
-}
-
-define void @STI32X2(i32 "reg"="r32" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(0, t, m.index, n) | 10001001 | rm(t, n, m.index, 2, 0, 0, 1)" "asm"="movl {t}, ({n},{m.index},2)" "nodecode" {
-  %o = shl i64 %m.index, 1
-  %a = getelementptr i8, ptr %n, i64 %o
-  store i32 %t, ptr %a
-  ret void
-}
-
-define void @STI16X2(i16 "reg"="r32" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="01100110 | rex(0, t, m.index, n) | 10001001 | rm(t, n, m.index, 2, 0, 0, 1)" "asm"="movw {t:r16}, ({n},{m.index},2)" "nodecode" {
-  %o = shl i64 %m.index, 1
-  %a = getelementptr i8, ptr %n, i64 %o
-  store i16 %t, ptr %a
-  ret void
-}
-
-define void @STI8X2(i8 "reg"="r32" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="{ if(t<4) rex(0, t, m.index, n) ; 0100 0 R:1=(t)>>3 X:1=(m.index)>>3 B:1=(n)>>3 } | 10001000 | rm(t, n, m.index, 2, 0, 0, 1)" "asm"="movb {t:r8}, ({n},{m.index},2)" "nodecode" {
-  %o = shl i64 %m.index, 1
-  %a = getelementptr i8, ptr %n, i64 %o
-  store i8 %t, ptr %a
-  ret void
-}
-
-define void @STPTRX2(ptr "reg"="r64" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(1, t, m.index, n) | 10001001 | rm(t, n, m.index, 2, 0, 0, 1)" "asm"="movq {t}, ({n},{m.index},2)" "nodecode" {
-  %o = shl i64 %m.index, 1
-  %a = getelementptr i8, ptr %n, i64 %o
-  store ptr %t, ptr %a
-  ret void
-}
-
 define double @LDDX2(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110010 | rex(0, d, m.index, n) | 00001111 | 00010000 | rm(d, n, m.index, 2, 0, 0, 1)" "asm"="movsd ({n},{m.index},2), {d}" "dclass"="d" "nodecode" {
   %o = shl i64 %m.index, 1
   %a = getelementptr i8, ptr %n, i64 %o
@@ -651,25 +574,11 @@ define double @LDDX2(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="111100
   ret double %r
 }
 
-define void @STDX2(double "reg"="d" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110010 | rex(0, t, m.index, n) | 00001111 | 00010001 | rm(t, n, m.index, 2, 0, 0, 1)" "asm"="movsd {t}, ({n},{m.index},2)" "nodecode" {
-  %o = shl i64 %m.index, 1
-  %a = getelementptr i8, ptr %n, i64 %o
-  store double %t, ptr %a
-  ret void
-}
-
 define float @LDSX2(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110011 | rex(0, d, m.index, n) | 00001111 | 00010000 | rm(d, n, m.index, 2, 0, 0, 1)" "asm"="movss ({n},{m.index},2), {d}" "dclass"="s" "nodecode" {
   %o = shl i64 %m.index, 1
   %a = getelementptr i8, ptr %n, i64 %o
   %r = load float, ptr %a
   ret float %r
-}
-
-define void @STSX2(float "reg"="s" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110011 | rex(0, t, m.index, n) | 00001111 | 00010001 | rm(t, n, m.index, 2, 0, 0, 1)" "asm"="movss {t}, ({n},{m.index},2)" "nodecode" {
-  %o = shl i64 %m.index, 1
-  %a = getelementptr i8, ptr %n, i64 %o
-  store float %t, ptr %a
-  ret void
 }
 
 define ptr @LEA64X2(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(1, d, m.index, n) | 10001101 | rm(d, n, m.index, 2, 0, 0, 1)" "asm"="leaq ({n},{m.index},2), {d}" "nodecode" {
@@ -753,41 +662,6 @@ define i64 @LDI32S64X4(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(
   ret i64 %r
 }
 
-define void @STI64X4(i64 "reg"="r64" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(1, t, m.index, n) | 10001001 | rm(t, n, m.index, 4, 0, 0, 1)" "asm"="movq {t}, ({n},{m.index},4)" "nodecode" {
-  %o = shl i64 %m.index, 2
-  %a = getelementptr i8, ptr %n, i64 %o
-  store i64 %t, ptr %a
-  ret void
-}
-
-define void @STI32X4(i32 "reg"="r32" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(0, t, m.index, n) | 10001001 | rm(t, n, m.index, 4, 0, 0, 1)" "asm"="movl {t}, ({n},{m.index},4)" "nodecode" {
-  %o = shl i64 %m.index, 2
-  %a = getelementptr i8, ptr %n, i64 %o
-  store i32 %t, ptr %a
-  ret void
-}
-
-define void @STI16X4(i16 "reg"="r32" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="01100110 | rex(0, t, m.index, n) | 10001001 | rm(t, n, m.index, 4, 0, 0, 1)" "asm"="movw {t:r16}, ({n},{m.index},4)" "nodecode" {
-  %o = shl i64 %m.index, 2
-  %a = getelementptr i8, ptr %n, i64 %o
-  store i16 %t, ptr %a
-  ret void
-}
-
-define void @STI8X4(i8 "reg"="r32" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="{ if(t<4) rex(0, t, m.index, n) ; 0100 0 R:1=(t)>>3 X:1=(m.index)>>3 B:1=(n)>>3 } | 10001000 | rm(t, n, m.index, 4, 0, 0, 1)" "asm"="movb {t:r8}, ({n},{m.index},4)" "nodecode" {
-  %o = shl i64 %m.index, 2
-  %a = getelementptr i8, ptr %n, i64 %o
-  store i8 %t, ptr %a
-  ret void
-}
-
-define void @STPTRX4(ptr "reg"="r64" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(1, t, m.index, n) | 10001001 | rm(t, n, m.index, 4, 0, 0, 1)" "asm"="movq {t}, ({n},{m.index},4)" "nodecode" {
-  %o = shl i64 %m.index, 2
-  %a = getelementptr i8, ptr %n, i64 %o
-  store ptr %t, ptr %a
-  ret void
-}
-
 define double @LDDX4(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110010 | rex(0, d, m.index, n) | 00001111 | 00010000 | rm(d, n, m.index, 4, 0, 0, 1)" "asm"="movsd ({n},{m.index},4), {d}" "dclass"="d" "nodecode" {
   %o = shl i64 %m.index, 2
   %a = getelementptr i8, ptr %n, i64 %o
@@ -795,25 +669,11 @@ define double @LDDX4(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="111100
   ret double %r
 }
 
-define void @STDX4(double "reg"="d" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110010 | rex(0, t, m.index, n) | 00001111 | 00010001 | rm(t, n, m.index, 4, 0, 0, 1)" "asm"="movsd {t}, ({n},{m.index},4)" "nodecode" {
-  %o = shl i64 %m.index, 2
-  %a = getelementptr i8, ptr %n, i64 %o
-  store double %t, ptr %a
-  ret void
-}
-
 define float @LDSX4(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110011 | rex(0, d, m.index, n) | 00001111 | 00010000 | rm(d, n, m.index, 4, 0, 0, 1)" "asm"="movss ({n},{m.index},4), {d}" "dclass"="s" "nodecode" {
   %o = shl i64 %m.index, 2
   %a = getelementptr i8, ptr %n, i64 %o
   %r = load float, ptr %a
   ret float %r
-}
-
-define void @STSX4(float "reg"="s" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110011 | rex(0, t, m.index, n) | 00001111 | 00010001 | rm(t, n, m.index, 4, 0, 0, 1)" "asm"="movss {t}, ({n},{m.index},4)" "nodecode" {
-  %o = shl i64 %m.index, 2
-  %a = getelementptr i8, ptr %n, i64 %o
-  store float %t, ptr %a
-  ret void
 }
 
 define ptr @LEA64X4(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(1, d, m.index, n) | 10001101 | rm(d, n, m.index, 4, 0, 0, 1)" "asm"="leaq ({n},{m.index},4), {d}" "nodecode" {
@@ -897,41 +757,6 @@ define i64 @LDI32S64X8(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(
   ret i64 %r
 }
 
-define void @STI64X8(i64 "reg"="r64" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(1, t, m.index, n) | 10001001 | rm(t, n, m.index, 8, 0, 0, 1)" "asm"="movq {t}, ({n},{m.index},8)" "nodecode" {
-  %o = shl i64 %m.index, 3
-  %a = getelementptr i8, ptr %n, i64 %o
-  store i64 %t, ptr %a
-  ret void
-}
-
-define void @STI32X8(i32 "reg"="r32" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(0, t, m.index, n) | 10001001 | rm(t, n, m.index, 8, 0, 0, 1)" "asm"="movl {t}, ({n},{m.index},8)" "nodecode" {
-  %o = shl i64 %m.index, 3
-  %a = getelementptr i8, ptr %n, i64 %o
-  store i32 %t, ptr %a
-  ret void
-}
-
-define void @STI16X8(i16 "reg"="r32" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="01100110 | rex(0, t, m.index, n) | 10001001 | rm(t, n, m.index, 8, 0, 0, 1)" "asm"="movw {t:r16}, ({n},{m.index},8)" "nodecode" {
-  %o = shl i64 %m.index, 3
-  %a = getelementptr i8, ptr %n, i64 %o
-  store i16 %t, ptr %a
-  ret void
-}
-
-define void @STI8X8(i8 "reg"="r32" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="{ if(t<4) rex(0, t, m.index, n) ; 0100 0 R:1=(t)>>3 X:1=(m.index)>>3 B:1=(n)>>3 } | 10001000 | rm(t, n, m.index, 8, 0, 0, 1)" "asm"="movb {t:r8}, ({n},{m.index},8)" "nodecode" {
-  %o = shl i64 %m.index, 3
-  %a = getelementptr i8, ptr %n, i64 %o
-  store i8 %t, ptr %a
-  ret void
-}
-
-define void @STPTRX8(ptr "reg"="r64" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(1, t, m.index, n) | 10001001 | rm(t, n, m.index, 8, 0, 0, 1)" "asm"="movq {t}, ({n},{m.index},8)" "nodecode" {
-  %o = shl i64 %m.index, 3
-  %a = getelementptr i8, ptr %n, i64 %o
-  store ptr %t, ptr %a
-  ret void
-}
-
 define double @LDDX8(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110010 | rex(0, d, m.index, n) | 00001111 | 00010000 | rm(d, n, m.index, 8, 0, 0, 1)" "asm"="movsd ({n},{m.index},8), {d}" "dclass"="d" "nodecode" {
   %o = shl i64 %m.index, 3
   %a = getelementptr i8, ptr %n, i64 %o
@@ -939,25 +764,11 @@ define double @LDDX8(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="111100
   ret double %r
 }
 
-define void @STDX8(double "reg"="d" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110010 | rex(0, t, m.index, n) | 00001111 | 00010001 | rm(t, n, m.index, 8, 0, 0, 1)" "asm"="movsd {t}, ({n},{m.index},8)" "nodecode" {
-  %o = shl i64 %m.index, 3
-  %a = getelementptr i8, ptr %n, i64 %o
-  store double %t, ptr %a
-  ret void
-}
-
 define float @LDSX8(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110011 | rex(0, d, m.index, n) | 00001111 | 00010000 | rm(d, n, m.index, 8, 0, 0, 1)" "asm"="movss ({n},{m.index},8), {d}" "dclass"="s" "nodecode" {
   %o = shl i64 %m.index, 3
   %a = getelementptr i8, ptr %n, i64 %o
   %r = load float, ptr %a
   ret float %r
-}
-
-define void @STSX8(float "reg"="s" %t, ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="11110011 | rex(0, t, m.index, n) | 00001111 | 00010001 | rm(t, n, m.index, 8, 0, 0, 1)" "asm"="movss {t}, ({n},{m.index},8)" "nodecode" {
-  %o = shl i64 %m.index, 3
-  %a = getelementptr i8, ptr %n, i64 %o
-  store float %t, ptr %a
-  ret void
 }
 
 define ptr @LEA64X8(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(1, d, m.index, n) | 10001101 | rm(d, n, m.index, 8, 0, 0, 1)" "asm"="leaq ({n},{m.index},8), {d}" "nodecode" {
