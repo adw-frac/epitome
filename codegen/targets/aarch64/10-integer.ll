@@ -329,6 +329,362 @@ define i64 @MVNX(i64 "reg"="x" %m) "enc"="1 01 01010 00 1 m:5 000000 11111 d:5" 
   ret i64 %r
 }
 
+; ORN and EON: or and exclusive or with the complement.
+define i32 @ORNW(i32 "reg"="w" %n, i32 "reg"="w" %m) "enc"="0 01 01010 00 1 m:5 000000 n:5 d:5" "asm"="orn {d}, {n}, {m}" "nodecode" {
+  %nm = xor i32 %m, -1
+  %r = or i32 %n, %nm
+  ret i32 %r
+}
+define i32 @EONW(i32 "reg"="w" %n, i32 "reg"="w" %m) "enc"="0 10 01010 00 1 m:5 000000 n:5 d:5" "asm"="eon {d}, {n}, {m}" "nodecode" {
+  %nm = xor i32 %m, -1
+  %r = xor i32 %n, %nm
+  ret i32 %r
+}
+define i64 @ORNX(i64 "reg"="x" %n, i64 "reg"="x" %m) "enc"="1 01 01010 00 1 m:5 000000 n:5 d:5" "asm"="orn {d}, {n}, {m}" "nodecode" {
+  %nm = xor i64 %m, -1
+  %r = or i64 %n, %nm
+  ret i64 %r
+}
+define i64 @EONX(i64 "reg"="x" %n, i64 "reg"="x" %m) "enc"="1 10 01010 00 1 m:5 000000 n:5 d:5" "asm"="eon {d}, {n}, {m}" "nodecode" {
+  %nm = xor i64 %m, -1
+  %r = xor i64 %n, %nm
+  ret i64 %r
+}
+
+; The logical operations with their second operand shifted or rotated by a
+; constant: lsl, lsr, asr, and ror (a funnel shift right of the operand
+; with itself; one left is a rotation right by the rest of the width).
+define i32 @ANDWrs_lsl(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 00 01010 00 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="and {d}, {n}, {m}, lsl #{sh}" "nodecode" {
+  %s = shl i32 %m, %sh
+  %r = and i32 %n, %s
+  ret i32 %r
+}
+define i32 @ANDWrs_lsr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 00 01010 01 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="and {d}, {n}, {m}, lsr #{sh}" "nodecode" {
+  %s = lshr i32 %m, %sh
+  %r = and i32 %n, %s
+  ret i32 %r
+}
+define i32 @ANDWrs_asr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 00 01010 10 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="and {d}, {n}, {m}, asr #{sh}" "nodecode" {
+  %s = ashr i32 %m, %sh
+  %r = and i32 %n, %s
+  ret i32 %r
+}
+define i32 @ANDWrs_ror(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 00 01010 11 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="and {d}, {n}, {m}, ror #{sh}" "nodecode" {
+  %s = call i32 @llvm.fshr.i32(i32 %m, i32 %m, i32 %sh)
+  %r = and i32 %n, %s
+  ret i32 %r
+}
+define i32 @ANDWrs_rol(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 00 01010 11 0 m:5 imm6:6=(32-sh)%32 n:5 d:5" "asm"="and {d}, {n}, {m}, ror #{=32-sh}" "nodecode" {
+  %s = call i32 @llvm.fshl.i32(i32 %m, i32 %m, i32 %sh)
+  %r = and i32 %n, %s
+  ret i32 %r
+}
+define i32 @ORRWrs_lsl(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 01 01010 00 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="orr {d}, {n}, {m}, lsl #{sh}" "nodecode" {
+  %s = shl i32 %m, %sh
+  %r = or i32 %n, %s
+  ret i32 %r
+}
+define i32 @ORRWrs_lsr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 01 01010 01 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="orr {d}, {n}, {m}, lsr #{sh}" "nodecode" {
+  %s = lshr i32 %m, %sh
+  %r = or i32 %n, %s
+  ret i32 %r
+}
+define i32 @ORRWrs_asr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 01 01010 10 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="orr {d}, {n}, {m}, asr #{sh}" "nodecode" {
+  %s = ashr i32 %m, %sh
+  %r = or i32 %n, %s
+  ret i32 %r
+}
+define i32 @ORRWrs_ror(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 01 01010 11 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="orr {d}, {n}, {m}, ror #{sh}" "nodecode" {
+  %s = call i32 @llvm.fshr.i32(i32 %m, i32 %m, i32 %sh)
+  %r = or i32 %n, %s
+  ret i32 %r
+}
+define i32 @ORRWrs_rol(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 01 01010 11 0 m:5 imm6:6=(32-sh)%32 n:5 d:5" "asm"="orr {d}, {n}, {m}, ror #{=32-sh}" "nodecode" {
+  %s = call i32 @llvm.fshl.i32(i32 %m, i32 %m, i32 %sh)
+  %r = or i32 %n, %s
+  ret i32 %r
+}
+define i32 @EORWrs_lsl(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 10 01010 00 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="eor {d}, {n}, {m}, lsl #{sh}" "nodecode" {
+  %s = shl i32 %m, %sh
+  %r = xor i32 %n, %s
+  ret i32 %r
+}
+define i32 @EORWrs_lsr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 10 01010 01 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="eor {d}, {n}, {m}, lsr #{sh}" "nodecode" {
+  %s = lshr i32 %m, %sh
+  %r = xor i32 %n, %s
+  ret i32 %r
+}
+define i32 @EORWrs_asr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 10 01010 10 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="eor {d}, {n}, {m}, asr #{sh}" "nodecode" {
+  %s = ashr i32 %m, %sh
+  %r = xor i32 %n, %s
+  ret i32 %r
+}
+define i32 @EORWrs_ror(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 10 01010 11 0 m:5 imm6:6=sh%32 n:5 d:5" "asm"="eor {d}, {n}, {m}, ror #{sh}" "nodecode" {
+  %s = call i32 @llvm.fshr.i32(i32 %m, i32 %m, i32 %sh)
+  %r = xor i32 %n, %s
+  ret i32 %r
+}
+define i32 @EORWrs_rol(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 10 01010 11 0 m:5 imm6:6=(32-sh)%32 n:5 d:5" "asm"="eor {d}, {n}, {m}, ror #{=32-sh}" "nodecode" {
+  %s = call i32 @llvm.fshl.i32(i32 %m, i32 %m, i32 %sh)
+  %r = xor i32 %n, %s
+  ret i32 %r
+}
+define i32 @BICWrs_lsl(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 00 01010 00 1 m:5 imm6:6=sh%32 n:5 d:5" "asm"="bic {d}, {n}, {m}, lsl #{sh}" "nodecode" {
+  %s = shl i32 %m, %sh
+  %t = xor i32 %s, -1
+  %r = and i32 %n, %t
+  ret i32 %r
+}
+define i32 @BICWrs_lsr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 00 01010 01 1 m:5 imm6:6=sh%32 n:5 d:5" "asm"="bic {d}, {n}, {m}, lsr #{sh}" "nodecode" {
+  %s = lshr i32 %m, %sh
+  %t = xor i32 %s, -1
+  %r = and i32 %n, %t
+  ret i32 %r
+}
+define i32 @BICWrs_asr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 00 01010 10 1 m:5 imm6:6=sh%32 n:5 d:5" "asm"="bic {d}, {n}, {m}, asr #{sh}" "nodecode" {
+  %s = ashr i32 %m, %sh
+  %t = xor i32 %s, -1
+  %r = and i32 %n, %t
+  ret i32 %r
+}
+define i32 @BICWrs_ror(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 00 01010 11 1 m:5 imm6:6=sh%32 n:5 d:5" "asm"="bic {d}, {n}, {m}, ror #{sh}" "nodecode" {
+  %s = call i32 @llvm.fshr.i32(i32 %m, i32 %m, i32 %sh)
+  %t = xor i32 %s, -1
+  %r = and i32 %n, %t
+  ret i32 %r
+}
+define i32 @BICWrs_rol(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 00 01010 11 1 m:5 imm6:6=(32-sh)%32 n:5 d:5" "asm"="bic {d}, {n}, {m}, ror #{=32-sh}" "nodecode" {
+  %s = call i32 @llvm.fshl.i32(i32 %m, i32 %m, i32 %sh)
+  %t = xor i32 %s, -1
+  %r = and i32 %n, %t
+  ret i32 %r
+}
+define i32 @ORNWrs_lsl(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 01 01010 00 1 m:5 imm6:6=sh%32 n:5 d:5" "asm"="orn {d}, {n}, {m}, lsl #{sh}" "nodecode" {
+  %s = shl i32 %m, %sh
+  %t = xor i32 %s, -1
+  %r = or i32 %n, %t
+  ret i32 %r
+}
+define i32 @ORNWrs_lsr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 01 01010 01 1 m:5 imm6:6=sh%32 n:5 d:5" "asm"="orn {d}, {n}, {m}, lsr #{sh}" "nodecode" {
+  %s = lshr i32 %m, %sh
+  %t = xor i32 %s, -1
+  %r = or i32 %n, %t
+  ret i32 %r
+}
+define i32 @ORNWrs_asr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 01 01010 10 1 m:5 imm6:6=sh%32 n:5 d:5" "asm"="orn {d}, {n}, {m}, asr #{sh}" "nodecode" {
+  %s = ashr i32 %m, %sh
+  %t = xor i32 %s, -1
+  %r = or i32 %n, %t
+  ret i32 %r
+}
+define i32 @ORNWrs_ror(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 01 01010 11 1 m:5 imm6:6=sh%32 n:5 d:5" "asm"="orn {d}, {n}, {m}, ror #{sh}" "nodecode" {
+  %s = call i32 @llvm.fshr.i32(i32 %m, i32 %m, i32 %sh)
+  %t = xor i32 %s, -1
+  %r = or i32 %n, %t
+  ret i32 %r
+}
+define i32 @ORNWrs_rol(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 01 01010 11 1 m:5 imm6:6=(32-sh)%32 n:5 d:5" "asm"="orn {d}, {n}, {m}, ror #{=32-sh}" "nodecode" {
+  %s = call i32 @llvm.fshl.i32(i32 %m, i32 %m, i32 %sh)
+  %t = xor i32 %s, -1
+  %r = or i32 %n, %t
+  ret i32 %r
+}
+define i32 @EONWrs_lsl(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 10 01010 00 1 m:5 imm6:6=sh%32 n:5 d:5" "asm"="eon {d}, {n}, {m}, lsl #{sh}" "nodecode" {
+  %s = shl i32 %m, %sh
+  %t = xor i32 %s, -1
+  %r = xor i32 %n, %t
+  ret i32 %r
+}
+define i32 @EONWrs_lsr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 10 01010 01 1 m:5 imm6:6=sh%32 n:5 d:5" "asm"="eon {d}, {n}, {m}, lsr #{sh}" "nodecode" {
+  %s = lshr i32 %m, %sh
+  %t = xor i32 %s, -1
+  %r = xor i32 %n, %t
+  ret i32 %r
+}
+define i32 @EONWrs_asr(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 10 01010 10 1 m:5 imm6:6=sh%32 n:5 d:5" "asm"="eon {d}, {n}, {m}, asr #{sh}" "nodecode" {
+  %s = ashr i32 %m, %sh
+  %t = xor i32 %s, -1
+  %r = xor i32 %n, %t
+  ret i32 %r
+}
+define i32 @EONWrs_ror(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 10 01010 11 1 m:5 imm6:6=sh%32 n:5 d:5" "asm"="eon {d}, {n}, {m}, ror #{sh}" "nodecode" {
+  %s = call i32 @llvm.fshr.i32(i32 %m, i32 %m, i32 %sh)
+  %t = xor i32 %s, -1
+  %r = xor i32 %n, %t
+  ret i32 %r
+}
+define i32 @EONWrs_rol(i32 "reg"="w" %n, i32 "reg"="w" %m, i32 "imm" %sh) "enc"="0 10 01010 11 1 m:5 imm6:6=(32-sh)%32 n:5 d:5" "asm"="eon {d}, {n}, {m}, ror #{=32-sh}" "nodecode" {
+  %s = call i32 @llvm.fshl.i32(i32 %m, i32 %m, i32 %sh)
+  %t = xor i32 %s, -1
+  %r = xor i32 %n, %t
+  ret i32 %r
+}
+define i64 @ANDXrs_lsl(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 00 01010 00 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="and {d}, {n}, {m}, lsl #{sh}" "nodecode" {
+  %s = shl i64 %m, %sh
+  %r = and i64 %n, %s
+  ret i64 %r
+}
+define i64 @ANDXrs_lsr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 00 01010 01 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="and {d}, {n}, {m}, lsr #{sh}" "nodecode" {
+  %s = lshr i64 %m, %sh
+  %r = and i64 %n, %s
+  ret i64 %r
+}
+define i64 @ANDXrs_asr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 00 01010 10 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="and {d}, {n}, {m}, asr #{sh}" "nodecode" {
+  %s = ashr i64 %m, %sh
+  %r = and i64 %n, %s
+  ret i64 %r
+}
+define i64 @ANDXrs_ror(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 00 01010 11 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="and {d}, {n}, {m}, ror #{sh}" "nodecode" {
+  %s = call i64 @llvm.fshr.i64(i64 %m, i64 %m, i64 %sh)
+  %r = and i64 %n, %s
+  ret i64 %r
+}
+define i64 @ANDXrs_rol(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 00 01010 11 0 m:5 imm6:6=(64-sh)%64 n:5 d:5" "asm"="and {d}, {n}, {m}, ror #{=64-sh}" "nodecode" {
+  %s = call i64 @llvm.fshl.i64(i64 %m, i64 %m, i64 %sh)
+  %r = and i64 %n, %s
+  ret i64 %r
+}
+define i64 @ORRXrs_lsl(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 01 01010 00 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="orr {d}, {n}, {m}, lsl #{sh}" "nodecode" {
+  %s = shl i64 %m, %sh
+  %r = or i64 %n, %s
+  ret i64 %r
+}
+define i64 @ORRXrs_lsr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 01 01010 01 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="orr {d}, {n}, {m}, lsr #{sh}" "nodecode" {
+  %s = lshr i64 %m, %sh
+  %r = or i64 %n, %s
+  ret i64 %r
+}
+define i64 @ORRXrs_asr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 01 01010 10 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="orr {d}, {n}, {m}, asr #{sh}" "nodecode" {
+  %s = ashr i64 %m, %sh
+  %r = or i64 %n, %s
+  ret i64 %r
+}
+define i64 @ORRXrs_ror(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 01 01010 11 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="orr {d}, {n}, {m}, ror #{sh}" "nodecode" {
+  %s = call i64 @llvm.fshr.i64(i64 %m, i64 %m, i64 %sh)
+  %r = or i64 %n, %s
+  ret i64 %r
+}
+define i64 @ORRXrs_rol(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 01 01010 11 0 m:5 imm6:6=(64-sh)%64 n:5 d:5" "asm"="orr {d}, {n}, {m}, ror #{=64-sh}" "nodecode" {
+  %s = call i64 @llvm.fshl.i64(i64 %m, i64 %m, i64 %sh)
+  %r = or i64 %n, %s
+  ret i64 %r
+}
+define i64 @EORXrs_lsl(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 10 01010 00 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="eor {d}, {n}, {m}, lsl #{sh}" "nodecode" {
+  %s = shl i64 %m, %sh
+  %r = xor i64 %n, %s
+  ret i64 %r
+}
+define i64 @EORXrs_lsr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 10 01010 01 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="eor {d}, {n}, {m}, lsr #{sh}" "nodecode" {
+  %s = lshr i64 %m, %sh
+  %r = xor i64 %n, %s
+  ret i64 %r
+}
+define i64 @EORXrs_asr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 10 01010 10 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="eor {d}, {n}, {m}, asr #{sh}" "nodecode" {
+  %s = ashr i64 %m, %sh
+  %r = xor i64 %n, %s
+  ret i64 %r
+}
+define i64 @EORXrs_ror(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 10 01010 11 0 m:5 imm6:6=sh%64 n:5 d:5" "asm"="eor {d}, {n}, {m}, ror #{sh}" "nodecode" {
+  %s = call i64 @llvm.fshr.i64(i64 %m, i64 %m, i64 %sh)
+  %r = xor i64 %n, %s
+  ret i64 %r
+}
+define i64 @EORXrs_rol(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 10 01010 11 0 m:5 imm6:6=(64-sh)%64 n:5 d:5" "asm"="eor {d}, {n}, {m}, ror #{=64-sh}" "nodecode" {
+  %s = call i64 @llvm.fshl.i64(i64 %m, i64 %m, i64 %sh)
+  %r = xor i64 %n, %s
+  ret i64 %r
+}
+define i64 @BICXrs_lsl(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 00 01010 00 1 m:5 imm6:6=sh%64 n:5 d:5" "asm"="bic {d}, {n}, {m}, lsl #{sh}" "nodecode" {
+  %s = shl i64 %m, %sh
+  %t = xor i64 %s, -1
+  %r = and i64 %n, %t
+  ret i64 %r
+}
+define i64 @BICXrs_lsr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 00 01010 01 1 m:5 imm6:6=sh%64 n:5 d:5" "asm"="bic {d}, {n}, {m}, lsr #{sh}" "nodecode" {
+  %s = lshr i64 %m, %sh
+  %t = xor i64 %s, -1
+  %r = and i64 %n, %t
+  ret i64 %r
+}
+define i64 @BICXrs_asr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 00 01010 10 1 m:5 imm6:6=sh%64 n:5 d:5" "asm"="bic {d}, {n}, {m}, asr #{sh}" "nodecode" {
+  %s = ashr i64 %m, %sh
+  %t = xor i64 %s, -1
+  %r = and i64 %n, %t
+  ret i64 %r
+}
+define i64 @BICXrs_ror(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 00 01010 11 1 m:5 imm6:6=sh%64 n:5 d:5" "asm"="bic {d}, {n}, {m}, ror #{sh}" "nodecode" {
+  %s = call i64 @llvm.fshr.i64(i64 %m, i64 %m, i64 %sh)
+  %t = xor i64 %s, -1
+  %r = and i64 %n, %t
+  ret i64 %r
+}
+define i64 @BICXrs_rol(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 00 01010 11 1 m:5 imm6:6=(64-sh)%64 n:5 d:5" "asm"="bic {d}, {n}, {m}, ror #{=64-sh}" "nodecode" {
+  %s = call i64 @llvm.fshl.i64(i64 %m, i64 %m, i64 %sh)
+  %t = xor i64 %s, -1
+  %r = and i64 %n, %t
+  ret i64 %r
+}
+define i64 @ORNXrs_lsl(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 01 01010 00 1 m:5 imm6:6=sh%64 n:5 d:5" "asm"="orn {d}, {n}, {m}, lsl #{sh}" "nodecode" {
+  %s = shl i64 %m, %sh
+  %t = xor i64 %s, -1
+  %r = or i64 %n, %t
+  ret i64 %r
+}
+define i64 @ORNXrs_lsr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 01 01010 01 1 m:5 imm6:6=sh%64 n:5 d:5" "asm"="orn {d}, {n}, {m}, lsr #{sh}" "nodecode" {
+  %s = lshr i64 %m, %sh
+  %t = xor i64 %s, -1
+  %r = or i64 %n, %t
+  ret i64 %r
+}
+define i64 @ORNXrs_asr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 01 01010 10 1 m:5 imm6:6=sh%64 n:5 d:5" "asm"="orn {d}, {n}, {m}, asr #{sh}" "nodecode" {
+  %s = ashr i64 %m, %sh
+  %t = xor i64 %s, -1
+  %r = or i64 %n, %t
+  ret i64 %r
+}
+define i64 @ORNXrs_ror(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 01 01010 11 1 m:5 imm6:6=sh%64 n:5 d:5" "asm"="orn {d}, {n}, {m}, ror #{sh}" "nodecode" {
+  %s = call i64 @llvm.fshr.i64(i64 %m, i64 %m, i64 %sh)
+  %t = xor i64 %s, -1
+  %r = or i64 %n, %t
+  ret i64 %r
+}
+define i64 @ORNXrs_rol(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 01 01010 11 1 m:5 imm6:6=(64-sh)%64 n:5 d:5" "asm"="orn {d}, {n}, {m}, ror #{=64-sh}" "nodecode" {
+  %s = call i64 @llvm.fshl.i64(i64 %m, i64 %m, i64 %sh)
+  %t = xor i64 %s, -1
+  %r = or i64 %n, %t
+  ret i64 %r
+}
+define i64 @EONXrs_lsl(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 10 01010 00 1 m:5 imm6:6=sh%64 n:5 d:5" "asm"="eon {d}, {n}, {m}, lsl #{sh}" "nodecode" {
+  %s = shl i64 %m, %sh
+  %t = xor i64 %s, -1
+  %r = xor i64 %n, %t
+  ret i64 %r
+}
+define i64 @EONXrs_lsr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 10 01010 01 1 m:5 imm6:6=sh%64 n:5 d:5" "asm"="eon {d}, {n}, {m}, lsr #{sh}" "nodecode" {
+  %s = lshr i64 %m, %sh
+  %t = xor i64 %s, -1
+  %r = xor i64 %n, %t
+  ret i64 %r
+}
+define i64 @EONXrs_asr(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 10 01010 10 1 m:5 imm6:6=sh%64 n:5 d:5" "asm"="eon {d}, {n}, {m}, asr #{sh}" "nodecode" {
+  %s = ashr i64 %m, %sh
+  %t = xor i64 %s, -1
+  %r = xor i64 %n, %t
+  ret i64 %r
+}
+define i64 @EONXrs_ror(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 10 01010 11 1 m:5 imm6:6=sh%64 n:5 d:5" "asm"="eon {d}, {n}, {m}, ror #{sh}" "nodecode" {
+  %s = call i64 @llvm.fshr.i64(i64 %m, i64 %m, i64 %sh)
+  %t = xor i64 %s, -1
+  %r = xor i64 %n, %t
+  ret i64 %r
+}
+define i64 @EONXrs_rol(i64 "reg"="x" %n, i64 "reg"="x" %m, i64 "imm" %sh) "enc"="1 10 01010 11 1 m:5 imm6:6=(64-sh)%64 n:5 d:5" "asm"="eon {d}, {n}, {m}, ror #{=64-sh}" "nodecode" {
+  %s = call i64 @llvm.fshl.i64(i64 %m, i64 %m, i64 %sh)
+  %t = xor i64 %s, -1
+  %r = xor i64 %n, %t
+  ret i64 %r
+}
+
 define i32 @ANDWri(i32 "reg"="w" %n, i32 "imm" %imm) "enc"="0 00 100100 nimm:13=bitmask32(imm) n:5 d:5" "asm"="and {d}, {n}, #{imm:h32}" "dclass"="wsp" {
   %r = and i32 %n, %imm
   ret i32 %r

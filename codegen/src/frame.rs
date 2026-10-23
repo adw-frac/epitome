@@ -49,9 +49,14 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
         None
     };
     saved.sort();
-    // Arguments for calls go at the bottom, where the callee finds them.
+    // Arguments for calls go at the bottom, where the callee finds them;
+    // then the slots, smallest first, so that the most of them (spill
+    // slots, small locals) are near enough sp for pairs' offsets.
     let mut off: i64 = f.out_size;
-    for s in &mut f.slots {
+    let mut order: Vec<usize> = (0..f.slots.len()).collect();
+    order.sort_by_key(|&k| (f.slots[k].size, k));
+    for k in order {
+        let s = &mut f.slots[k];
         let a = s.align as i64;
         off = (off + a - 1) / a * a;
         s.offset = off;

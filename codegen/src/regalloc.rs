@@ -291,13 +291,24 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool) -> Result<bool, String> 
     let mut spilled: Vec<VReg> = Vec::new();
     let mut moved: HashSet<VReg> = HashSet::new();
     let mut work: std::collections::VecDeque<VReg> = order.into_iter().collect();
+    // Each value: is a call strictly inside one of its segments (calls are
+    // in order)?
+    let across: Vec<bool> = segs
+        .iter()
+        .map(|mine| {
+            mine.iter().any(|s| {
+                let k = calls.partition_point(|&c| c <= s.0);
+                k < calls.len() && calls[k] < s.1
+            })
+        })
+        .collect();
     while let Some(v) = work.pop_front() {
         let mine = &segs[v as usize];
-        // A call strictly inside one of its segments (calls are in order).
-        let across_call = mine.iter().any(|s| {
-            let k = calls.partition_point(|&c| c <= s.0);
-            k < calls.len() && calls[k] < s.1
-        });
+        let across_call = across[v as usize];
+        // A value copied to or from one that lives across a call (a loop's
+        // phi and its next value, with a call in the loop) tries the
+        // callee-saved registers first too, so that both may share one.
+        let partner_across = hints[v as usize].iter().any(|h| matches!(h, Reg::V(x) if across[*x as usize]));
         // Registers of values joined to this one by copies, nearest first.
         let mut cands: Vec<u8> = Vec::new();
         let mut seen: HashSet<VReg> = HashSet::from([v]);
@@ -330,7 +341,7 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool) -> Result<bool, String> 
         let (callee, fp_callee) = if wide { (&no_saved, &no_saved) } else { (&callee_saved, &fp_callee_saved) };
         let caller = caller_saved.iter().chain(&fp_caller_saved);
         let callee = callee.iter().chain(fp_callee);
-        if across_call {
+        if across_call || partner_across {
             cands.extend(callee.chain(caller).copied());
         } else {
             cands.extend(caller.chain(callee).copied());
@@ -402,6 +413,52 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool) -> Result<bool, String> 
         return Ok(false);
     }
 
+    // A spilled value that appears more than once in a block, and for which
+    // a register is free there from its first appearance to its last, is
+    // held in that register in the block: loaded once (if read before it is
+    // written), and stored after each definition as everywhere.
+    let spilled_set: HashSet<VReg> = spilled.iter().copied().collect();
+    let mut local: HashMap<(VReg, usize), u8> = HashMap::new();
+    {
+        let mut idx = 0u32;
+        for (bi, b) in f.blocks.iter().enumerate() {
+            // Each spilled value's (first, last, appearances) in the block.
+            let mut seen: HashMap<VReg, (u32, u32, u32)> = HashMap::new();
+            for inst in &b.insts {
+                let (defs, uses) = regs_of(t, inst);
+                for (r, p) in uses.iter().map(|r| (r, 2 * idx)).chain(defs.iter().map(|r| (r, 2 * idx + 1))) {
+                    if let Reg::V(v) = r
+                        && spilled_set.contains(v)
+                    {
+                        let e = seen.entry(*v).or_insert((p, p, 0));
+                        e.1 = e.1.max(p);
+                        e.2 += 1;
+                    }
+                }
+                idx += 1;
+            }
+            let mut vs: Vec<_> = seen.into_iter().filter(|(_, e)| e.2 > 1).collect();
+            vs.sort_by_key(|(v, e)| (e.0, *v));
+            for (v, (a, z, _)) in vs {
+                let file = file_of_v(v);
+                let wide = too_wide(v);
+                let cands = caller_saved
+                    .iter()
+                    .chain(&fp_caller_saved)
+                    .chain(callee_saved.iter().chain(&fp_callee_saved).filter(|_| !wide))
+                    .copied()
+                    .filter(|&p| m.file_of(p) == file);
+                let free = cands.into_iter().find(|p| taken.get(p).is_none_or(|busy| !busy.meets((a, z))));
+                if let Some(p) = free
+                    && epitome_ir::chop::allow(|| format!("{}: hold a spilled value in a register in a block", f.name))
+                {
+                    taken.entry(p).or_default().add((a, z));
+                    local.insert((v, bi), p);
+                }
+            }
+        }
+    }
+
     // Spill slots, and loads and stores around each use and definition.
     let mut slot_of: HashMap<VReg, usize> = HashMap::new();
     for &v in &spilled {
@@ -428,14 +485,19 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool) -> Result<bool, String> 
     let pool_of = |file: usize| -> Vec<u8> {
         abi.scratch.iter().chain(&abi.fp_scratch).copied().filter(|&r| m.file_of(r) == file).collect()
     };
-    for b in &mut f.blocks {
+    for (bi, b) in f.blocks.iter_mut().enumerate() {
         let old = std::mem::take(&mut b.insts);
         let mut new = Vec::with_capacity(old.len());
+        // Values held in their block's register that it now holds.
+        let mut loaded: HashSet<VReg> = HashSet::new();
+        let held = |r: Reg| matches!(r, Reg::V(v) if local.contains_key(&(v, bi)));
         for mut inst in old {
             // A copy between a spilled value and one in a register is the
             // spill code alone: the register loaded or stored directly.
             if inst.op == Opcode::Copy
                 && let [MOp::Reg(d), MOp::Reg(s)] = inst.ops[..]
+                && !held(d)
+                && !held(s)
             {
                 let slot = |r: Reg| match r {
                     Reg::V(v) => slot_of.get(&v).copied(),
@@ -479,6 +541,29 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool) -> Result<bool, String> 
                     && !scratch.contains_key(v)
                 {
                     let class = vclass[*v as usize];
+                    if let Some(&p) = local.get(&(*v, bi)) {
+                        let (ld, st) = spill_of(class).ok_or_else(|| {
+                            format!(
+                                "{fname}: no instructions load and store a {} register to spill it",
+                                m.def(class).name
+                            )
+                        })?;
+                        scratch.insert(*v, p);
+                        if uses.contains(r) && !loaded.contains(v) {
+                            new.push(MInst::new(
+                                ld,
+                                vec![MOp::Reg(Reg::P(p)), MOp::Reg(Reg::P(t.machine.sp)), MOp::Frame(slot, 0)],
+                            ));
+                        }
+                        if defs.contains(r) {
+                            after.push(MInst::new(
+                                st,
+                                vec![MOp::Reg(Reg::P(p)), MOp::Reg(Reg::P(t.machine.sp)), MOp::Frame(slot, 0)],
+                            ));
+                        }
+                        loaded.insert(*v);
+                        continue;
+                    }
                     let pool = pool_of(m.def(class).file);
                     let k = next.entry(m.def(class).file).or_default();
                     let s = match pool.get(*k) {
@@ -602,8 +687,10 @@ fn reused_reloads(t: &Target, insts: &mut Vec<MInst>, slots: &HashSet<usize>, op
 /// class) until either is written: a copy from such a register copies
 /// from its source instead, and a copy between registers holding the same
 /// value goes. Then a copy whose register is written again in the block
-/// before anything reads it goes. (Phi copies, sequenced through spare
-/// registers, and copies around calls and landing pads make all three.)
+/// before anything reads it goes, as does a constant's. And a copy of a
+/// constant made in one instruction makes it again in place, so the first
+/// often goes. (Phi copies, sequenced through spare registers, and copies
+/// around calls and landing pads make all of these.)
 /// Each change is an elective one (autochop). Returns how many copies went.
 fn redundant_copies(t: &Target, f: &mut MFunc) -> usize {
     let name = f.name.clone();
@@ -611,12 +698,38 @@ fn redundant_copies(t: &Target, f: &mut MFunc) -> usize {
         (Opcode::Copy, [MOp::Reg(d @ Reg::P(_)), MOp::Reg(s @ Reg::P(_))]) => Some((*d, *s)),
         _ => None,
     };
+    // A constant made in one instruction from immediates alone (`mov x0,
+    // #1`): its register.
+    let konst = |i: &MInst| match (i.op, i.ops.first()) {
+        (Opcode::Instr(k), Some(MOp::Reg(d @ Reg::P(_))))
+            if t.constants.contains(&k)
+                && t.instrs[k].sets.is_none()
+                && i.imp_defs.is_empty()
+                && i.ops[1..].iter().all(|o| matches!(o, MOp::Imm(_))) =>
+        {
+            Some(*d)
+        }
+        _ => None,
+    };
+    let m = &t.machine;
     let mut removed = 0;
     for b in &mut f.blocks {
         // Register -> the register whose value it holds, and the class.
         let mut of: HashMap<Reg, (Reg, Option<crate::target::Class>)> = HashMap::new();
+        // Register -> the instruction that made the constant it holds.
+        let mut made: HashMap<Reg, MInst> = HashMap::new();
         let mut keep = Vec::with_capacity(b.insts.len());
         for mut inst in std::mem::take(&mut b.insts) {
+            // A copy of a constant is the constant made again in place.
+            if let Some((Reg::P(d), Reg::P(s))) = regs(&inst)
+                && m.file_of(d) == m.file_of(s)
+                && let Some(k) = made.get(&Reg::P(s))
+                && epitome_ir::chop::allow(|| format!("{name}: make a copied constant in place"))
+            {
+                let mut k = k.clone();
+                k.ops[0] = MOp::Reg(Reg::P(d));
+                inst = k;
+            }
             if let Some((d, s)) = regs(&inst) {
                 let src = match of.get(&s) {
                     Some(&(r, c)) if c == inst.class => r,
@@ -638,27 +751,33 @@ fn redundant_copies(t: &Target, f: &mut MFunc) -> usize {
             }
             let (defs, _) = regs_of(t, &inst);
             of.retain(|r, (x, _)| !defs.contains(r) && !defs.contains(x));
+            made.retain(|r, _| !defs.contains(r));
             if let Some((d, s)) = regs(&inst)
                 && d != s
             {
                 of.insert(d, (s, inst.class));
             }
+            if let Some(d) = konst(&inst) {
+                made.insert(d, inst.clone());
+            }
             keep.push(inst);
         }
         let mut dead = vec![false; keep.len()];
         for k in 0..keep.len() {
-            let Some((d, s)) = regs(&keep[k]) else { continue };
-            if d == s {
-                continue;
-            }
+            let d = match (regs(&keep[k]), konst(&keep[k])) {
+                (Some((d, s)), _) if d != s => d,
+                (None, Some(d)) => d,
+                _ => continue,
+            };
             for later in &keep[k + 1..] {
                 let (defs, uses) = regs_of(t, later);
                 if uses.contains(&d) || matches!(later.op, Opcode::Asm { .. }) {
                     break;
                 }
                 if defs.contains(&d) {
-                    dead[k] =
-                        epitome_ir::chop::allow(|| format!("{name}: remove a copy written over before it is read"));
+                    dead[k] = epitome_ir::chop::allow(|| {
+                        format!("{name}: remove a copy or constant written over before it is read")
+                    });
                     break;
                 }
             }

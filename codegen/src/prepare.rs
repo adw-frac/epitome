@@ -187,6 +187,7 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     crate::aggregates::scalarize(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     crate::wide::split_wide(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     identity_ops(cx, &mut f);
+    extended_bool_compares(cx, &mut f);
     crate::bitmaps::simplify(cx, &mut f);
     crate::aggregates::scalarize(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     split_struct_selects(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
@@ -216,6 +217,8 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     const_multiplies(cx, &mut f);
     if cx.t.machine.compare_booleans {
         compare_boolean_branches(cx, &mut f);
+    } else {
+        compares_per_use(cx, &mut f);
     }
     split_phi_edges(&mut f);
     Ok(f)
@@ -2485,11 +2488,82 @@ fn identity_ops(cx: &mut Ctx, f: &mut Function) {
             changed.insert(r, v);
         }
     }
-    let mut all: Vec<LocalId> = changed.keys().copied().collect();
-    all.sort();
-    for r in all {
-        let v = resolve(&changed, Value::Local(r));
-        f.replace_uses(Value::Local(r), v);
+    f.replace_many(&changed);
+}
+
+/// A boolean extended and compared with what it was extended from
+/// (`icmp eq (zext i1 %c to i32), 0`, as Rust makes for `!c`) is the
+/// boolean, or the boolean inverted: the inverse comparison where it is a
+/// comparison (so that a branch on it is one compare), else an `xor` with
+/// true.
+fn extended_bool_compares(cx: &mut Ctx, f: &mut Function) {
+    let i1 = cx.m.types.int(1);
+    for b in f.layout.clone() {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            k += 1;
+            let Op::ICmp { pred: pred @ (ICmpPred::Eq | ICmpPred::Ne), lhs, rhs, .. } = f.insts[i.index()].op else {
+                continue;
+            };
+            let Some(r) = f.insts[i.index()].result else { continue };
+            let ext = |v: Value| match v {
+                Value::Local(l) => match f.locals[l.index()].def {
+                    LocalDef::Inst(d) => match f.insts[d.index()].op {
+                        Op::Cast { op: op @ (CastOp::ZExt | CastOp::SExt), value, .. }
+                            if cx.value_ty(f, value) == i1 =>
+                        {
+                            Some((value, if op == CastOp::ZExt { 1 } else { -1 }))
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                },
+                _ => None,
+            };
+            let ((bv, one), c) = match (ext(lhs), ext(rhs)) {
+                (Some(e), None) => (e, cx.const_int(rhs)),
+                (None, Some(e)) => (e, cx.const_int(lhs)),
+                _ => continue,
+            };
+            let Some(c) = c else { continue };
+            // Whether the result is the boolean itself (else its inverse).
+            let same = match (pred, c) {
+                (ICmpPred::Ne, 0) => true,
+                (ICmpPred::Eq, 0) => false,
+                (ICmpPred::Eq, x) if x == one => true,
+                (ICmpPred::Ne, x) if x == one => false,
+                _ => continue,
+            };
+            let v = if same {
+                bv
+            } else {
+                let def = match bv {
+                    Value::Local(l) => match f.locals[l.index()].def {
+                        LocalDef::Inst(d) => Some(f.insts[d.index()].op.clone()),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let op = match def {
+                    Some(Op::ICmp { pred, samesign, lhs, rhs }) => {
+                        Op::ICmp { pred: crate::target::inverse(pred), samesign, lhs, rhs }
+                    }
+                    Some(Op::FCmp { pred, fmf, lhs, rhs }) if crate::target::inverse_f(pred).is_some() => {
+                        Op::FCmp { pred: crate::target::inverse_f(pred).unwrap(), fmf, lhs, rhs }
+                    }
+                    _ => {
+                        let t = cx.int(i1, 1);
+                        Op::Binary { op: BinOp::Xor, flags: IntFlags::NONE, fmf: FastMath::default(), lhs: bv, rhs: t }
+                    }
+                };
+                let n = f.add_inst(op, Some((None, i1)));
+                f.blocks[b.index()].insts.insert(k - 1, n);
+                k += 1;
+                f.result(n)
+            };
+            f.replace_uses(Value::Local(r), v);
+        }
     }
 }
 
@@ -3320,6 +3394,61 @@ fn constant_addresses(f: &mut Function) {
                 *ptr = new;
             }
             count[l.index()] -= 1;
+        }
+    }
+}
+
+/// A scalar comparison used by more than one instruction: each select and
+/// conditional branch in its block that it decides gets its own copy, just
+/// before it, so that selection (which folds only what one instruction
+/// uses) makes the compare and the `csel` or `b.cond` together, rather
+/// than the flags made into a boolean (`cset`) and tested again (`tst`).
+/// For a machine with flags; each copy is an elective change (autochop).
+fn compares_per_use(cx: &Ctx, f: &mut Function) {
+    let mut count = vec![0u32; f.locals.len()];
+    for i in f.insts_in_order() {
+        f.insts[i.index()].op.for_each_value(|v| {
+            if let Value::Local(l) = v {
+                count[l.index()] += 1;
+            }
+        });
+    }
+    let blocks = f.inst_blocks();
+    for b in f.layout.clone() {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            k += 1;
+            let cond = match f.insts[i.index()].op {
+                Op::Select { cond: Value::Local(l), .. } | Op::CondBr { cond: Value::Local(l), .. } => l,
+                _ => continue,
+            };
+            let LocalDef::Inst(d) = f.locals[cond.index()].def else { continue };
+            let compare = match &f.insts[d.index()].op {
+                Op::ICmp { lhs, .. } | Op::FCmp { lhs, .. } => {
+                    !matches!(cx.m.types.get(cx.value_ty(f, *lhs)), Type::Vector { .. })
+                }
+                _ => false,
+            };
+            if !compare
+                || count[cond.index()] < 2
+                || blocks[d.index()] != Some(b)
+                || !epitome_ir::chop::allow(|| {
+                    format!("copy the compare {} for one use", epitome_ir::printer::local_name(f, cond))
+                })
+            {
+                continue;
+            }
+            let ty = f.locals[cond.index()].ty;
+            let copy = f.add_inst(f.insts[d.index()].op.clone(), Some((None, ty)));
+            f.blocks[b.index()].insts.insert(k - 1, copy);
+            k += 1;
+            let new = f.result(copy);
+            match &mut f.insts[i.index()].op {
+                Op::Select { cond, .. } | Op::CondBr { cond, .. } => *cond = new,
+                _ => {}
+            }
+            count[cond.index()] -= 1;
         }
     }
 }

@@ -6,7 +6,7 @@ not a clone of LLVM: it reads and writes the same IR, and its tools take
 the same kinds of input and give the same kinds of output, but how it gets
 there is its own.
 
-**256 crates' own test suites pass with their code compiled by Epitome**
+**255 crates' own test suites pass with their code compiled by Epitome**
 (on an AArch64 Mac; see [Crates that build](#crates-that-build)).
 
 > **Experimental.** Epitome is young and changes quickly, and it is
@@ -194,13 +194,13 @@ Copyright (c) 2026 Amy Thomason. No license has been chosen yet; see
 These crates' own tests (`cargo test --release`) pass with their code,
 and their dependencies', compiled by Epitome through `epitome-rustc` (see
 [Building Rust crates with Epitome](#building-rust-crates-with-epitome)),
-on an AArch64 Mac with Rust 1.99.1: 256 crates, at the versions given.
+on an AArch64 Mac with Rust 1.99.1: 255 crates, at the versions given.
 chrono's pass too, but for 8 tests of time-zone files its package leaves
 out. Crates whose tests fail for reasons of their own (files or crates
 missing from the package, or failing under plain rustc) are not listed.
 
 - **a**: adler2 2.0.1, ahash 0.8.12, aho-corasick 1.1.5, allocator-api2 0.4.0, anstyle 1.0.14, anyhow 1.0.104, approx 0.5.1, arbitrary 1.4.2, arrayref 0.3.9, arrayvec 0.7.8, assert_matches 1.5.0, async-channel 2.5.0, async-lock 3.4.2, async-task 4.7.1, atomic-waker 1.1.2
-- **b**: base64 0.22.1, bincode 1.3.3, bit-set 0.9.1, bit-vec 0.9.1, bit_field 0.10.1, bitflags 2.13.2, bitstream-io 4.9.0, bitvec 1.0.1, block-buffer 0.12.1, bumpalo 3.20.3, bytecount 0.6.9, bytemuck 1.25.2, byteorder 1.5.0, bytes 1.12.1
+- **b**: base64 0.22.1, bincode 1.3.3, bit-set 0.9.1, bit-vec 0.9.1, bit_field 0.10.1, bitflags 2.13.2, bitstream-io 4.9.0, bitvec 1.0.1, bumpalo 3.20.3, bytecount 0.6.9, bytemuck 1.25.2, byteorder 1.5.0, bytes 1.12.1
 - **c**: castaway 0.2.4, cfg-if 1.0.5, chacha20 0.10.2, cipher 0.5.2, cobs 0.3.0, color_quant 1.1.0, colorchoice 1.0.5, combine 4.6.8, compact_str 0.9.1, concurrent-queue 2.5.0, const-oid 0.10.2, constant_time_eq 0.4.2, crc32fast 1.5.3, crossbeam-channel 0.5.17, crossbeam-deque 0.8.8, crossbeam-epoch 0.9.21, crossbeam-queue 0.3.14, crossbeam-utils 0.8.23, crunchy 0.2.4, crypto-common 0.2.2, csv 1.4.0, csv-core 0.1.13, ctor 1.0.13
 - **d**: dary_heap 0.3.9, data-encoding 2.11.1, deranged 0.5.9, diff 0.1.13, dissimilar 1.0.11, downcast-rs 2.0.2, dunce 1.0.5
 - **e**: either 1.19.0, encode_unicode 1.0.0, encoding_rs 0.8.42, env_logger 0.11.11, equivalent 1.0.3, erased-serde 0.4.10, errno 0.3.14, euclid 0.22.14, event-listener 5.4.2

@@ -75,6 +75,31 @@ fn split(t: &Target, f: &MFunc) -> Vec<(Vec<MInst>, Exit)> {
     out
 }
 
+/// Edges to an empty block that only goes on somewhere else go there
+/// directly, whether they were branches or fall-throughs.
+fn skip_empty(parts: &mut [(Vec<MInst>, Exit)]) {
+    let n = parts.len();
+    let skip = |parts: &[(Vec<MInst>, Exit)], mut b: usize| {
+        for _ in 0..n {
+            match &parts[b] {
+                (body, Exit::Goto(x)) if body.is_empty() && *x != b => b = *x,
+                _ => break,
+            }
+        }
+        b
+    };
+    for k in 0..n {
+        let exit = match parts[k].1.clone() {
+            Exit::Goto(x) => Exit::Goto(skip(parts, x)),
+            Exit::Cond { branch, taken, other } => {
+                Exit::Cond { branch, taken: skip(parts, taken), other: skip(parts, other) }
+            }
+            e => e,
+        };
+        parts[k].1 = exit;
+    }
+}
+
 /// Whether two instructions are the same instruction.
 fn same(a: &MInst, b: &MInst) -> bool {
     a.op == b.op
@@ -90,7 +115,8 @@ fn same(a: &MInst, b: &MInst) -> bool {
 /// share one copy of them. A block whose whole body is the shared tail is
 /// the copy; else the tail becomes a block of its own, which both go on to.
 /// Tails shorter than two instructions are left (the branch to the copy
-/// costs one), and so are tails that leave the function no longer than
+/// costs one) unless they are a whole block (left empty, its edges then go
+/// to the copy), and so are tails that leave the function no longer than
 /// those copied into blocks (`MAX_TAIL`, the other way). Each merge is an
 /// elective change (autochop).
 fn merge_tails(f: &mut MFunc, parts: &mut Vec<(Vec<MInst>, Exit)>) {
@@ -118,6 +144,9 @@ fn merge_tails(f: &mut MFunc, parts: &mut Vec<(Vec<MInst>, Exit)>) {
                 .map(|i| (tail_of(&parts[i].0, &parts[j].0), i))
                 .max();
             let Some((len, i)) = best else { continue };
+            // A block that is all tail is left empty, its edges going to the
+            // copy: no branch is added, so one instruction is worth it.
+            let least = if kj.is_some() && len == parts[j].0.len() { 1 } else { least };
             if len < least || !epitome_ir::chop::allow(|| format!("{name}: merge a tail of {len} instructions")) {
                 continue;
             }
@@ -171,27 +200,7 @@ pub fn place(t: &Target, f: &mut MFunc) {
     let mut parts = split(t, f);
     let n = parts.len();
 
-    // Edges to an empty block that only goes on somewhere else go there
-    // directly, whether they were branches or fall-throughs.
-    let skip = |parts: &Vec<(Vec<MInst>, Exit)>, mut b: usize| {
-        for _ in 0..n {
-            match &parts[b] {
-                (body, Exit::Goto(x)) if body.is_empty() && *x != b => b = *x,
-                _ => break,
-            }
-        }
-        b
-    };
-    for k in 0..n {
-        let exit = match parts[k].1.clone() {
-            Exit::Goto(x) => Exit::Goto(skip(&parts, x)),
-            Exit::Cond { branch, taken, other } => {
-                Exit::Cond { branch, taken: skip(&parts, taken), other: skip(&parts, other) }
-            }
-            e => e,
-        };
-        parts[k].1 = exit;
-    }
+    skip_empty(&mut parts);
 
     // Copy small return blocks into the blocks that go to them. (Only
     // returns: a block that traps or calls a function that does not return
@@ -213,6 +222,7 @@ pub fn place(t: &Target, f: &mut MFunc) {
     }
 
     merge_tails(f, &mut parts);
+    skip_empty(&mut parts);
     let n = parts.len();
 
     let succs = |e: &Exit| -> Vec<usize> {

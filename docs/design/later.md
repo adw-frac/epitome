@@ -152,9 +152,9 @@ these are for after.
   callee's), and its sign is changed through a stack slot and two `eor`s
   (one with `xzr`) where `eor v.16b` with a constant would do.
 - **Register allocation's moves and spills** (`regalloc.rs`): across a
-  sample of crates we make 1.20 times llc's instructions (82,943 against
-  68,885), the most of the excess register moves (16,713 against 11,769)
-  and spill code (loads 7,474 against 4,871, stores 4,958 against 2,674).
+  sample of crates we make 1.17 times llc's instructions (80,800 against
+  68,885), the most of the excess register moves (16,076 against 11,769)
+  and spill code (loads 7,234 against 4,871, stores 4,622 against 2,674).
   The moves left are mostly arguments copied into registers and out again
   when a register an argument arrived in is needed for another, and loop
   phis whose incoming values were allocated elsewhere: linear scan
@@ -173,5 +173,13 @@ these are for after.
   for its whole frame), where slots of allocas whose lifetimes
   (`llvm.lifetime.start` and `.end`) do not meet could share, as LLVM's
   stack colouring does; and spill slots are never shared.
+- **Conditions combined** (`isel.rs`, `00-base.ll`): an `and` or `or` of
+  two comparisons that a branch or select reads is each compare made into
+  a boolean (`cset`), the two combined and tested again (`cmp`, `cset`,
+  `cmp`, `cset`, `and`, `tbnz`), where AArch64's conditional compare does
+  it in the flags (`cmp`, `ccmp`, `b.cc`; llc uses 126 in regex-syntax
+  alone). Needs a condition form that reads one condition and sets the
+  flags from a compare only when it holds, else to a constant chosen so
+  the result's condition fails (for `and`) or holds (for `or`).
 - **Acquire loads** use `ldar`; with RCpc (the M1 has it) `ldapr` is
   enough for C++'s and Rust's acquire, as LLVM's back end uses.

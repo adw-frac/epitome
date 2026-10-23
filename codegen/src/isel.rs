@@ -106,6 +106,9 @@ pub struct Sel<'a, 'b> {
     pos: Vec<usize>,
     /// The bits above which a register is known to be zero.
     zbits: HashMap<VReg, u32>,
+    /// Booleans whose registers hold exactly 0 or 1 wherever they are made
+    /// (`clean_bools`).
+    clean: HashSet<LocalId>,
     /// Instructions whose values are wanted in registers.
     needed: HashSet<InstId>,
     covered: HashSet<InstId>,
@@ -223,6 +226,58 @@ fn statements(template: &str, comment: &str) -> u32 {
         .count() as u32
 }
 
+/// The booleans whose registers hold exactly 0 or 1 however they are
+/// reached: comparisons (made by `cset`), and phis, selects, `and`s, `or`s
+/// and `xor`s of those and of constants. (Not truncations, loads, or
+/// arguments and results marked `zeroext`, which are extended only to 32
+/// bits.) Found optimistically, then those with an operand that is not one
+/// taken out until none are.
+fn clean_bools(cx: &Ctx, f: &Function) -> HashSet<LocalId> {
+    let i1 = |ty: TypeId| matches!(cx.m.types.get(ty), Type::Int(1));
+    let mut set: HashSet<LocalId> = HashSet::new();
+    for i in f.insts_in_order() {
+        let Some(r) = f.insts[i.index()].result else { continue };
+        if i1(f.locals[r.index()].ty)
+            && matches!(
+                f.insts[i.index()].op,
+                Op::ICmp { .. }
+                    | Op::FCmp { .. }
+                    | Op::Phi { .. }
+                    | Op::Select { .. }
+                    | Op::Binary { op: BinOp::And | BinOp::Or | BinOp::Xor, .. }
+            )
+        {
+            set.insert(r);
+        }
+    }
+    loop {
+        let ok = |set: &HashSet<LocalId>, v: Value| match v {
+            Value::Local(l) => set.contains(&l),
+            Value::Const(_) => cx.const_int(v).is_some(),
+            _ => false,
+        };
+        let out: Vec<LocalId> = set
+            .iter()
+            .copied()
+            .filter(|&l| {
+                let LocalDef::Inst(d) = f.locals[l.index()].def else { return true };
+                match &f.insts[d.index()].op {
+                    Op::Phi { incoming, .. } => !incoming.iter().all(|&(v, _)| ok(&set, v)),
+                    Op::Select { then_value, else_value, .. } => !(ok(&set, *then_value) && ok(&set, *else_value)),
+                    Op::Binary { lhs, rhs, .. } => !(ok(&set, *lhs) && ok(&set, *rhs)),
+                    _ => false,
+                }
+            })
+            .collect();
+        if out.is_empty() {
+            return set;
+        }
+        for l in out {
+            set.remove(&l);
+        }
+    }
+}
+
 fn side_effects(op: &Op) -> bool {
     matches!(
         op,
@@ -285,6 +340,7 @@ impl<'a, 'b> Sel<'a, 'b> {
                 mf.abi.reserved.push(b);
             }
         }
+        let clean = clean_bools(cx, f);
         let mut bmap = HashMap::new();
         for (k, &b) in f.layout.iter().enumerate() {
             bmap.insert(b, k);
@@ -302,6 +358,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             inst_block,
             pos,
             zbits: HashMap::new(),
+            clean,
             needed: HashSet::new(),
             covered: HashSet::new(),
             chosen: HashMap::new(),
@@ -1475,6 +1532,25 @@ impl<'a, 'b> Sel<'a, 'b> {
         Ok(Reg::V(d))
     }
 
+    /// The largest value instruction `i`'s `!range` allows, if it is one
+    /// range of non-negative numbers.
+    fn range_top(&self, i: InstId) -> Option<u64> {
+        let a = self.f.insts[i.index()].attachments.iter().find(|a| a.kind == "range")?;
+        let Metadata::Tuple { ops, .. } = &self.cx.m.metadata[a.node.index()].data else { return None };
+        let [Some(lo), Some(hi)] = ops[..] else { return None };
+        let int = |m: MdId| match &self.cx.m.metadata[m.index()].data {
+            Metadata::Value(v) => self.cx.const_int(*v),
+            _ => None,
+        };
+        let (lo, hi) = (int(lo)?, int(hi)?);
+        (lo >= 0 && hi > lo).then(|| (hi - 1) as u64)
+    }
+
+    /// What is known of the zero bits of a value already given a register.
+    fn vregs_zbits(&self, l: LocalId) -> Option<&u32> {
+        self.vreg.get(&l).and_then(|v| self.zbits.get(v))
+    }
+
     fn set_zbits(&mut self, r: Reg, z: u32) {
         if let Reg::V(v) = r {
             self.zbits.insert(v, z);
@@ -1490,7 +1566,7 @@ impl<'a, 'b> Sel<'a, 'b> {
         {
             let from = self.bits(self.f.locals[x.index()].ty);
             let src = self.vreg_of(x);
-            if self.zbits.get(&src).is_some_and(|&z| z <= from) {
+            if self.zbits.get(&src).is_some_and(|&z| z <= from) || (from == 1 && self.clean.contains(&x)) {
                 let r = self.f.insts[root.index()].result.unwrap();
                 if self.alias(r, Value::Local(x)) {
                     return Ok(());
@@ -1594,6 +1670,40 @@ impl<'a, 'b> Sel<'a, 'b> {
                 && (bits >= 64 || c < 1 << (bits - 1))
             {
                 let z = 64 - (c as u64).leading_zeros();
+                let e = self.zbits.entry(r).or_insert(z);
+                *e = (*e).min(z);
+            }
+        }
+        // A load whose value is known to be in a range of non-negative
+        // numbers (`!range !{i8 0, i8 2}`, a bool): zero above the largest.
+        if let Op::Load { .. } = self.f.insts[root.index()].op
+            && let Some(Reg::V(r)) = result.map(Reg::V)
+            && let Some(hi) = self.range_top(root)
+        {
+            let z = 64 - hi.leading_zeros();
+            let e = self.zbits.entry(r).or_insert(z);
+            *e = (*e).min(z);
+        }
+        // An `or` or `xor` alone of a value zero above some bit with such a
+        // constant: zero above the higher of the two.
+        if p.nodes == 1
+            && let Op::Binary { op: BinOp::Or | BinOp::Xor, lhs, rhs, .. } = self.f.insts[root.index()].op
+            && let Some(Reg::V(r)) = result.map(Reg::V)
+        {
+            let ty = self.f.locals[self.f.insts[root.index()].result.unwrap().index()].ty;
+            let (x, c) = match (self.cx.const_int(lhs), self.cx.const_int(rhs)) {
+                (None, Some(c)) => (lhs, c),
+                (Some(c), None) => (rhs, c),
+                _ => (lhs, -1),
+            };
+            let bits = self.bits(ty);
+            if let Value::Local(xl) = x
+                && c >= 0
+                && !self.is_vector(ty)
+                && (bits >= 64 || c < 1 << (bits - 1))
+                && let Some(&zx) = self.vregs_zbits(xl)
+            {
+                let z = zx.max(64 - (c as u64).leading_zeros());
                 let e = self.zbits.entry(r).or_insert(z);
                 *e = (*e).min(z);
             }
