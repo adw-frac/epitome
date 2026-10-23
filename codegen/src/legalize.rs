@@ -1030,7 +1030,12 @@ fn expand_lanewise(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                     fmf,
                     lhs,
                     rhs,
-                } if vec_info(cx, rt).is_some_and(|(_, _, eb)| eb == 64 || op != BinOp::Mul) => {
+                } if vec_info(cx, rt).is_some_and(|(_, _, eb)| eb == 64 || op != BinOp::Mul)
+                    // (Unless the description has it: x86's multiplication of
+                    // 64-bit lanes is a recipe.)
+                    && !(op == BinOp::Mul
+                        && cx.selects_head(|h| *h == crate::target::Head::Bin(BinOp::Mul, crate::target::head_bits(cx.m, rt)))) =>
+                {
                     let (len, elem, _) = vec_info(cx, rt).unwrap();
                     let a = lanes(&mut bld, cx, lhs, len, elem);
                     let b = lanes(&mut bld, cx, rhs, len, elem);
