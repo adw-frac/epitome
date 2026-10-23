@@ -5125,6 +5125,949 @@ define <2 x float> @fabs.2xf32.expand(<2 x float> %a) {
 
 declare <2 x float> @llvm.fabs.v2f32(<2 x float>)
 
+define <32 x i8> @VLD.32xi8(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="{ vexm(d, n, 4, 1, 0, 0, 1, 0) | 00010000 | rm(d, n, 4, 1, off, 0, 1) ; evexm(d, n, 4, 1, 0, 0, 1, 0, 0, 0, 0) | 00010000 | rm(d, n, 4, 1, off, 0, 32) }" "asm"="vmovups {off}({n}), {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <32 x i8>, ptr %a
+  ret <32 x i8> %r
+}
+
+define void @VST.32xi8(<32 x i8> "reg"="yv" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="{ vexm(t, n, 4, 1, 0, 0, 1, 0) | 00010001 | rm(t, n, 4, 1, off, 0, 1) ; evexm(t, n, 4, 1, 0, 0, 1, 0, 0, 0, 0) | 00010001 | rm(t, n, 4, 1, off, 0, 32) }" "asm"="vmovups {t}, {off}({n})" "feature"="avx2" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <32 x i8> %t, ptr %a
+  ret void
+}
+
+define <16 x i16> @VLD.16xi16(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="{ vexm(d, n, 4, 1, 0, 0, 1, 0) | 00010000 | rm(d, n, 4, 1, off, 0, 1) ; evexm(d, n, 4, 1, 0, 0, 1, 0, 0, 0, 0) | 00010000 | rm(d, n, 4, 1, off, 0, 32) }" "asm"="vmovups {off}({n}), {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <16 x i16>, ptr %a
+  ret <16 x i16> %r
+}
+
+define void @VST.16xi16(<16 x i16> "reg"="yv" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="{ vexm(t, n, 4, 1, 0, 0, 1, 0) | 00010001 | rm(t, n, 4, 1, off, 0, 1) ; evexm(t, n, 4, 1, 0, 0, 1, 0, 0, 0, 0) | 00010001 | rm(t, n, 4, 1, off, 0, 32) }" "asm"="vmovups {t}, {off}({n})" "feature"="avx2" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <16 x i16> %t, ptr %a
+  ret void
+}
+
+define <8 x i32> @VLD.8xi32(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="{ vexm(d, n, 4, 1, 0, 0, 1, 0) | 00010000 | rm(d, n, 4, 1, off, 0, 1) ; evexm(d, n, 4, 1, 0, 0, 1, 0, 0, 0, 0) | 00010000 | rm(d, n, 4, 1, off, 0, 32) }" "asm"="vmovups {off}({n}), {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <8 x i32>, ptr %a
+  ret <8 x i32> %r
+}
+
+define void @VST.8xi32(<8 x i32> "reg"="yv" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="{ vexm(t, n, 4, 1, 0, 0, 1, 0) | 00010001 | rm(t, n, 4, 1, off, 0, 1) ; evexm(t, n, 4, 1, 0, 0, 1, 0, 0, 0, 0) | 00010001 | rm(t, n, 4, 1, off, 0, 32) }" "asm"="vmovups {t}, {off}({n})" "feature"="avx2" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <8 x i32> %t, ptr %a
+  ret void
+}
+
+define <4 x i64> @VLD.4xi64(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="{ vexm(d, n, 4, 1, 0, 0, 1, 0) | 00010000 | rm(d, n, 4, 1, off, 0, 1) ; evexm(d, n, 4, 1, 0, 0, 1, 0, 0, 0, 0) | 00010000 | rm(d, n, 4, 1, off, 0, 32) }" "asm"="vmovups {off}({n}), {d}" "dclass"="yv" "role"="load.yv" "feature"="avx2" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <4 x i64>, ptr %a
+  ret <4 x i64> %r
+}
+
+define void @VST.4xi64(<4 x i64> "reg"="yv" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="{ vexm(t, n, 4, 1, 0, 0, 1, 0) | 00010001 | rm(t, n, 4, 1, off, 0, 1) ; evexm(t, n, 4, 1, 0, 0, 1, 0, 0, 0, 0) | 00010001 | rm(t, n, 4, 1, off, 0, 32) }" "asm"="vmovups {t}, {off}({n})" "role"="store.yv" "feature"="avx2" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <4 x i64> %t, ptr %a
+  ret void
+}
+
+define <8 x float> @VLD.8xf32(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="{ vexm(d, n, 4, 1, 0, 0, 1, 0) | 00010000 | rm(d, n, 4, 1, off, 0, 1) ; evexm(d, n, 4, 1, 0, 0, 1, 0, 0, 0, 0) | 00010000 | rm(d, n, 4, 1, off, 0, 32) }" "asm"="vmovups {off}({n}), {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <8 x float>, ptr %a
+  ret <8 x float> %r
+}
+
+define void @VST.8xf32(<8 x float> "reg"="yv" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="{ vexm(t, n, 4, 1, 0, 0, 1, 0) | 00010001 | rm(t, n, 4, 1, off, 0, 1) ; evexm(t, n, 4, 1, 0, 0, 1, 0, 0, 0, 0) | 00010001 | rm(t, n, 4, 1, off, 0, 32) }" "asm"="vmovups {t}, {off}({n})" "feature"="avx2" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <8 x float> %t, ptr %a
+  ret void
+}
+
+define <4 x double> @VLD.4xf64(ptr "reg"="r64" %n, i64 "imm" %off) "enc"="{ vexm(d, n, 4, 1, 0, 0, 1, 0) | 00010000 | rm(d, n, 4, 1, off, 0, 1) ; evexm(d, n, 4, 1, 0, 0, 1, 0, 0, 0, 0) | 00010000 | rm(d, n, 4, 1, off, 0, 32) }" "asm"="vmovups {off}({n}), {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %r = load <4 x double>, ptr %a
+  ret <4 x double> %r
+}
+
+define void @VST.4xf64(<4 x double> "reg"="yv" %t, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="{ vexm(t, n, 4, 1, 0, 0, 1, 0) | 00010001 | rm(t, n, 4, 1, off, 0, 1) ; evexm(t, n, 4, 1, 0, 0, 1, 0, 0, 0, 0) | 00010001 | rm(t, n, 4, 1, off, 0, 32) }" "asm"="vmovups {t}, {off}({n})" "feature"="avx2" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  store <4 x double> %t, ptr %a
+  ret void
+}
+
+define <4 x i64> @VMOVAPSyv(<4 x i64> "reg"="yv" %n) "enc"="{ if(n<8) vex(d, 0, n, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=n&7 ; if(d<8) vex(n, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=n&7 rm:3=d&7 ; vex(d, 0, n, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=n&7 ; vex(n, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=n&7 rm:3=d&7 ; evexr(d, n, 1, 0, 0, 1, 0, 0, 0, 0) | 00101000 | 11 reg:3=d&7 rm:3=n&7 ; evexr(n, d, 1, 0, 0, 1, 0, 0, 0, 0) | 00101001 | 11 reg:3=n&7 rm:3=d&7 }" "asm"="vmovaps {n}, {d}" "copy"="yv" "dclass"="yv" "nodecode" {
+  ret <4 x i64> %n
+}
+
+define <4 x i64> @VPXORzero() "enc"="{ if(d<8) vex(d, 0, d, 1, 0, d, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=d&7 ; if(d<8) vex(d, 0, d, 1, 0, d, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=d&7 ; vex(d, 0, d, 1, 0, d, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=d&7 ; vex(d, 0, d, 1, 0, d, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=d&7 }" "asm"="vpxor {d}, {d}, {d}" "dclass"="yv" "role"="movi.zero.yv" "nomatch" "nodecode" {
+  ret <4 x i64> zeroinitializer
+}
+
+define <4 x i64> @VINSERTI128hi(<4 x i64> "reg"="yv" "tied" %n, <2 x i64> "reg"="xv" %h) "enc"="vex(d, 0, h, 3, 0, n, 1, 1) | 00111000 | 11 reg:3=d&7 rm:3=h&7 | 00000001" "asm"="vinserti128 $1, {h}, {d}, {d}" "dclass"="yv" "role"="vec.join.q" "nomatch" "nodecode" {
+  ret <4 x i64> %n
+}
+
+define <32 x i8> @VPADDB.32xi8(<32 x i8> "reg"="yv" %n, <32 x i8> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11111100 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11111100 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11111100 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 0, n, 1, 1, 0, 0, 0) | 11111100 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11111100 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpaddb {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = add <32 x i8> %n, %m
+  ret <32 x i8> %r
+}
+
+define <32 x i8> @VPSUBB.32xi8(<32 x i8> "reg"="yv" %n, <32 x i8> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 1, 0, n, 1, 1) | 11111000 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 0, n, 1, 1, 0, 0, 0) | 11111000 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpsubb {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = sub <32 x i8> %n, %m
+  ret <32 x i8> %r
+}
+
+define <32 x i8> @VPAND.32xi8(<32 x i8> "reg"="yv" %n, <32 x i8> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpand {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = and <32 x i8> %n, %m
+  ret <32 x i8> %r
+}
+
+define <32 x i8> @VPOR.32xi8(<32 x i8> "reg"="yv" %n, <32 x i8> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpor {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = or <32 x i8> %n, %m
+  ret <32 x i8> %r
+}
+
+define <32 x i8> @VPXOR.32xi8(<32 x i8> "reg"="yv" %n, <32 x i8> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpxor {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = xor <32 x i8> %n, %m
+  ret <32 x i8> %r
+}
+
+define <32 x i1> @VPCMPEQB.32xi8(<32 x i8> "reg"="yv" %n, <32 x i8> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 01110100 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 01110100 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 01110100 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 01110100 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpcmpeqb {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = icmp eq <32 x i8> %n, %m
+  ret <32 x i1> %r
+}
+
+define <32 x i1> @VPCMPGTB.32xi8(<32 x i8> "reg"="yv" %n, <32 x i8> "reg"="yv" %m) "enc"="vex(d, 0, m, 1, 0, n, 1, 1) | 01100100 | 11 reg:3=d&7 rm:3=m&7" "asm"="vpcmpgtb {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = icmp sgt <32 x i8> %n, %m
+  ret <32 x i1> %r
+}
+
+define <32 x i8> @VPMINSB.32xi8(<32 x i8> "reg"="yv" %n, <32 x i8> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 2, 0, n, 1, 1) | 00111000 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 0, n, 1, 1, 0, 0, 0) | 00111000 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpminsb {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <32 x i8> @llvm.smin.v32i8(<32 x i8> %n, <32 x i8> %m)
+  ret <32 x i8> %r
+}
+
+declare <32 x i8> @llvm.smin.v32i8(<32 x i8>, <32 x i8>)
+
+define <32 x i8> @VPMAXSB.32xi8(<32 x i8> "reg"="yv" %n, <32 x i8> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 2, 0, n, 1, 1) | 00111100 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 0, n, 1, 1, 0, 0, 0) | 00111100 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpmaxsb {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <32 x i8> @llvm.smax.v32i8(<32 x i8> %n, <32 x i8> %m)
+  ret <32 x i8> %r
+}
+
+declare <32 x i8> @llvm.smax.v32i8(<32 x i8>, <32 x i8>)
+
+define <32 x i8> @VPMINUB.32xi8(<32 x i8> "reg"="yv" %n, <32 x i8> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11011010 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11011010 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11011010 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 0, n, 1, 1, 0, 0, 0) | 11011010 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11011010 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpminub {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <32 x i8> @llvm.umin.v32i8(<32 x i8> %n, <32 x i8> %m)
+  ret <32 x i8> %r
+}
+
+declare <32 x i8> @llvm.umin.v32i8(<32 x i8>, <32 x i8>)
+
+define <32 x i8> @VPMAXUB.32xi8(<32 x i8> "reg"="yv" %n, <32 x i8> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11011110 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11011110 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11011110 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 0, n, 1, 1, 0, 0, 0) | 11011110 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11011110 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpmaxub {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <32 x i8> @llvm.umax.v32i8(<32 x i8> %n, <32 x i8> %m)
+  ret <32 x i8> %r
+}
+
+declare <32 x i8> @llvm.umax.v32i8(<32 x i8>, <32 x i8>)
+
+define <32 x i8> @VPBLENDVB.32xi8(<32 x i1> "reg"="yv" %c, <32 x i8> "reg"="yv" %a, <32 x i8> "reg"="yv" %b) "enc"="vex(d, 0, a, 3, 0, b, 1, 1) | 01001100 | 11 reg:3=d&7 rm:3=a&7 | is4:4=c 0000" "asm"="vpblendvb {c}, {a}, {b}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = select <32 x i1> %c, <32 x i8> %a, <32 x i8> %b
+  ret <32 x i8> %r
+}
+
+define <16 x i16> @VPADDW.16xi16(<16 x i16> "reg"="yv" %n, <16 x i16> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11111101 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11111101 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11111101 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 0, n, 1, 1, 0, 0, 0) | 11111101 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11111101 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpaddw {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = add <16 x i16> %n, %m
+  ret <16 x i16> %r
+}
+
+define <16 x i16> @VPSUBW.16xi16(<16 x i16> "reg"="yv" %n, <16 x i16> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 1, 0, n, 1, 1) | 11111001 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 0, n, 1, 1, 0, 0, 0) | 11111001 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpsubw {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = sub <16 x i16> %n, %m
+  ret <16 x i16> %r
+}
+
+define <16 x i16> @VPMULLW.16xi16(<16 x i16> "reg"="yv" %n, <16 x i16> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11010101 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11010101 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11010101 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 0, n, 1, 1, 0, 0, 0) | 11010101 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11010101 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpmullw {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = mul <16 x i16> %n, %m
+  ret <16 x i16> %r
+}
+
+define <16 x i16> @VPAND.16xi16(<16 x i16> "reg"="yv" %n, <16 x i16> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpand {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = and <16 x i16> %n, %m
+  ret <16 x i16> %r
+}
+
+define <16 x i16> @VPOR.16xi16(<16 x i16> "reg"="yv" %n, <16 x i16> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpor {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = or <16 x i16> %n, %m
+  ret <16 x i16> %r
+}
+
+define <16 x i16> @VPXOR.16xi16(<16 x i16> "reg"="yv" %n, <16 x i16> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpxor {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = xor <16 x i16> %n, %m
+  ret <16 x i16> %r
+}
+
+define <16 x i1> @VPCMPEQW.16xi16(<16 x i16> "reg"="yv" %n, <16 x i16> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 01110101 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 01110101 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 01110101 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 01110101 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpcmpeqw {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = icmp eq <16 x i16> %n, %m
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @VPCMPGTW.16xi16(<16 x i16> "reg"="yv" %n, <16 x i16> "reg"="yv" %m) "enc"="vex(d, 0, m, 1, 0, n, 1, 1) | 01100101 | 11 reg:3=d&7 rm:3=m&7" "asm"="vpcmpgtw {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = icmp sgt <16 x i16> %n, %m
+  ret <16 x i1> %r
+}
+
+define <16 x i16> @VPMINSW.16xi16(<16 x i16> "reg"="yv" %n, <16 x i16> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11101010 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11101010 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11101010 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 0, n, 1, 1, 0, 0, 0) | 11101010 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11101010 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpminsw {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <16 x i16> @llvm.smin.v16i16(<16 x i16> %n, <16 x i16> %m)
+  ret <16 x i16> %r
+}
+
+declare <16 x i16> @llvm.smin.v16i16(<16 x i16>, <16 x i16>)
+
+define <16 x i16> @VPMAXSW.16xi16(<16 x i16> "reg"="yv" %n, <16 x i16> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11101110 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11101110 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11101110 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 0, n, 1, 1, 0, 0, 0) | 11101110 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11101110 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpmaxsw {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <16 x i16> @llvm.smax.v16i16(<16 x i16> %n, <16 x i16> %m)
+  ret <16 x i16> %r
+}
+
+declare <16 x i16> @llvm.smax.v16i16(<16 x i16>, <16 x i16>)
+
+define <16 x i16> @VPMINUW.16xi16(<16 x i16> "reg"="yv" %n, <16 x i16> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 2, 0, n, 1, 1) | 00111010 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 0, n, 1, 1, 0, 0, 0) | 00111010 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpminuw {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <16 x i16> @llvm.umin.v16i16(<16 x i16> %n, <16 x i16> %m)
+  ret <16 x i16> %r
+}
+
+declare <16 x i16> @llvm.umin.v16i16(<16 x i16>, <16 x i16>)
+
+define <16 x i16> @VPMAXUW.16xi16(<16 x i16> "reg"="yv" %n, <16 x i16> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 2, 0, n, 1, 1) | 00111110 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 0, n, 1, 1, 0, 0, 0) | 00111110 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpmaxuw {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <16 x i16> @llvm.umax.v16i16(<16 x i16> %n, <16 x i16> %m)
+  ret <16 x i16> %r
+}
+
+declare <16 x i16> @llvm.umax.v16i16(<16 x i16>, <16 x i16>)
+
+define <16 x i16> @VPSLLWi.16xi16(<16 x i16> "reg"="yv" %n, <16 x i16> "imm" %sh) "enc"="{ vex(6, 0, n, 1, 0, d, 1, 1) | 01110001 | 11 110 rm:3=n&7 | i1:8=sh ; evexr(6, n, 1, 0, d, 1, 1, 0, 0, 0) | 01110001 | 11 110 rm:3=n&7 | i1:8=sh }" "asm"="vpsllw ${sh}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = shl <16 x i16> %n, %sh
+  ret <16 x i16> %r
+}
+
+define <16 x i16> @VPSRLWi.16xi16(<16 x i16> "reg"="yv" %n, <16 x i16> "imm" %sh) "enc"="{ vex(2, 0, n, 1, 0, d, 1, 1) | 01110001 | 11 010 rm:3=n&7 | i1:8=sh ; evexr(2, n, 1, 0, d, 1, 1, 0, 0, 0) | 01110001 | 11 010 rm:3=n&7 | i1:8=sh }" "asm"="vpsrlw ${sh}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = lshr <16 x i16> %n, %sh
+  ret <16 x i16> %r
+}
+
+define <16 x i16> @VPSRAWi.16xi16(<16 x i16> "reg"="yv" %n, <16 x i16> "imm" %sh) "enc"="{ vex(4, 0, n, 1, 0, d, 1, 1) | 01110001 | 11 100 rm:3=n&7 | i1:8=sh ; evexr(4, n, 1, 0, d, 1, 1, 0, 0, 0) | 01110001 | 11 100 rm:3=n&7 | i1:8=sh }" "asm"="vpsraw ${sh}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = ashr <16 x i16> %n, %sh
+  ret <16 x i16> %r
+}
+
+define <16 x i16> @VMASK.16xi16(<16 x i1> "reg"="yv" %n) "enc"="{ vex(2, 0, n, 1, 0, d, 1, 1) | 01110001 | 11 010 rm:3=n&7 | 00001111 ; evexr(2, n, 1, 0, d, 1, 1, 0, 0, 0) | 01110001 | 11 010 rm:3=n&7 | 00001111 }" "asm"="vpsrlw $15, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = zext <16 x i1> %n to <16 x i16>
+  ret <16 x i16> %r
+}
+
+define <16 x i16> @VPBLENDVB.16xi16(<16 x i1> "reg"="yv" %c, <16 x i16> "reg"="yv" %a, <16 x i16> "reg"="yv" %b) "enc"="vex(d, 0, a, 3, 0, b, 1, 1) | 01001100 | 11 reg:3=d&7 rm:3=a&7 | is4:4=c 0000" "asm"="vpblendvb {c}, {a}, {b}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = select <16 x i1> %c, <16 x i16> %a, <16 x i16> %b
+  ret <16 x i16> %r
+}
+
+define <8 x i32> @VPADDD.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11111110 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11111110 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11111110 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 0, n, 1, 1, 0, 0, 0) | 11111110 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11111110 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpaddd {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = add <8 x i32> %n, %m
+  ret <8 x i32> %r
+}
+
+define <8 x i32> @VPSUBD.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 1, 0, n, 1, 1) | 11111010 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 0, n, 1, 1, 0, 0, 0) | 11111010 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpsubd {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = sub <8 x i32> %n, %m
+  ret <8 x i32> %r
+}
+
+define <8 x i32> @VPMULLD.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 2, 0, n, 1, 1) | 01000000 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 0, n, 1, 1, 0, 0, 0) | 01000000 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpmulld {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = mul <8 x i32> %n, %m
+  ret <8 x i32> %r
+}
+
+define <8 x i32> @VPAND.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpand {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = and <8 x i32> %n, %m
+  ret <8 x i32> %r
+}
+
+define <8 x i32> @VPOR.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpor {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = or <8 x i32> %n, %m
+  ret <8 x i32> %r
+}
+
+define <8 x i32> @VPXOR.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpxor {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = xor <8 x i32> %n, %m
+  ret <8 x i32> %r
+}
+
+define <8 x i1> @VPCMPEQD.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 01110110 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 01110110 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 01110110 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 01110110 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpcmpeqd {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = icmp eq <8 x i32> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @VPCMPGTD.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "reg"="yv" %m) "enc"="vex(d, 0, m, 1, 0, n, 1, 1) | 01100110 | 11 reg:3=d&7 rm:3=m&7" "asm"="vpcmpgtd {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = icmp sgt <8 x i32> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i32> @VPMINSD.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 2, 0, n, 1, 1) | 00111001 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 0, n, 1, 1, 0, 0, 0) | 00111001 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpminsd {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <8 x i32> @llvm.smin.v8i32(<8 x i32> %n, <8 x i32> %m)
+  ret <8 x i32> %r
+}
+
+declare <8 x i32> @llvm.smin.v8i32(<8 x i32>, <8 x i32>)
+
+define <8 x i32> @VPMAXSD.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 2, 0, n, 1, 1) | 00111101 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 0, n, 1, 1, 0, 0, 0) | 00111101 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpmaxsd {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <8 x i32> @llvm.smax.v8i32(<8 x i32> %n, <8 x i32> %m)
+  ret <8 x i32> %r
+}
+
+declare <8 x i32> @llvm.smax.v8i32(<8 x i32>, <8 x i32>)
+
+define <8 x i32> @VPMINUD.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 2, 0, n, 1, 1) | 00111011 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 0, n, 1, 1, 0, 0, 0) | 00111011 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpminud {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <8 x i32> @llvm.umin.v8i32(<8 x i32> %n, <8 x i32> %m)
+  ret <8 x i32> %r
+}
+
+declare <8 x i32> @llvm.umin.v8i32(<8 x i32>, <8 x i32>)
+
+define <8 x i32> @VPMAXUD.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 2, 0, n, 1, 1) | 00111111 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 0, n, 1, 1, 0, 0, 0) | 00111111 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpmaxud {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <8 x i32> @llvm.umax.v8i32(<8 x i32> %n, <8 x i32> %m)
+  ret <8 x i32> %r
+}
+
+declare <8 x i32> @llvm.umax.v8i32(<8 x i32>, <8 x i32>)
+
+define <8 x i32> @VPSLLDi.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "imm" %sh) "enc"="{ vex(6, 0, n, 1, 0, d, 1, 1) | 01110010 | 11 110 rm:3=n&7 | i1:8=sh ; evexr(6, n, 1, 0, d, 1, 1, 0, 0, 0) | 01110010 | 11 110 rm:3=n&7 | i1:8=sh }" "asm"="vpslld ${sh}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = shl <8 x i32> %n, %sh
+  ret <8 x i32> %r
+}
+
+define <8 x i32> @VPSLLVD.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 2, 0, n, 1, 1) | 01000111 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 0, n, 1, 1, 0, 0, 0) | 01000111 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpsllvd {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = shl <8 x i32> %n, %m
+  ret <8 x i32> %r
+}
+
+define <8 x i32> @VPSRLDi.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "imm" %sh) "enc"="{ vex(2, 0, n, 1, 0, d, 1, 1) | 01110010 | 11 010 rm:3=n&7 | i1:8=sh ; evexr(2, n, 1, 0, d, 1, 1, 0, 0, 0) | 01110010 | 11 010 rm:3=n&7 | i1:8=sh }" "asm"="vpsrld ${sh}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = lshr <8 x i32> %n, %sh
+  ret <8 x i32> %r
+}
+
+define <8 x i32> @VPSRLVD.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 2, 0, n, 1, 1) | 01000101 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 0, n, 1, 1, 0, 0, 0) | 01000101 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpsrlvd {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = lshr <8 x i32> %n, %m
+  ret <8 x i32> %r
+}
+
+define <8 x i32> @VPSRADi.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "imm" %sh) "enc"="{ vex(4, 0, n, 1, 0, d, 1, 1) | 01110010 | 11 100 rm:3=n&7 | i1:8=sh ; evexr(4, n, 1, 0, d, 1, 1, 0, 0, 0) | 01110010 | 11 100 rm:3=n&7 | i1:8=sh }" "asm"="vpsrad ${sh}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = ashr <8 x i32> %n, %sh
+  ret <8 x i32> %r
+}
+
+define <8 x i32> @VPSRAVD.8xi32(<8 x i32> "reg"="yv" %n, <8 x i32> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 2, 0, n, 1, 1) | 01000110 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 0, n, 1, 1, 0, 0, 0) | 01000110 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpsravd {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = ashr <8 x i32> %n, %m
+  ret <8 x i32> %r
+}
+
+define <8 x i32> @VMASK.8xi32(<8 x i1> "reg"="yv" %n) "enc"="{ vex(2, 0, n, 1, 0, d, 1, 1) | 01110010 | 11 010 rm:3=n&7 | 00011111 ; evexr(2, n, 1, 0, d, 1, 1, 0, 0, 0) | 01110010 | 11 010 rm:3=n&7 | 00011111 }" "asm"="vpsrld $31, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = zext <8 x i1> %n to <8 x i32>
+  ret <8 x i32> %r
+}
+
+define <8 x i32> @VPBLENDVB.8xi32(<8 x i1> "reg"="yv" %c, <8 x i32> "reg"="yv" %a, <8 x i32> "reg"="yv" %b) "enc"="vex(d, 0, a, 3, 0, b, 1, 1) | 01001100 | 11 reg:3=d&7 rm:3=a&7 | is4:4=c 0000" "asm"="vpblendvb {c}, {a}, {b}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = select <8 x i1> %c, <8 x i32> %a, <8 x i32> %b
+  ret <8 x i32> %r
+}
+
+define <4 x i64> @VPADDQ.4xi64(<4 x i64> "reg"="yv" %n, <4 x i64> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11010100 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11010100 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11010100 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 1, n, 1, 1, 0, 0, 0) | 11010100 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11010100 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpaddq {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = add <4 x i64> %n, %m
+  ret <4 x i64> %r
+}
+
+define <4 x i64> @VPSUBQ.4xi64(<4 x i64> "reg"="yv" %n, <4 x i64> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 1, 0, n, 1, 1) | 11111011 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 1, n, 1, 1, 0, 0, 0) | 11111011 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpsubq {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = sub <4 x i64> %n, %m
+  ret <4 x i64> %r
+}
+
+define <4 x i64> @VPAND.4xi64(<4 x i64> "reg"="yv" %n, <4 x i64> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11011011 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpand {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = and <4 x i64> %n, %m
+  ret <4 x i64> %r
+}
+
+define <4 x i64> @VPOR.4xi64(<4 x i64> "reg"="yv" %n, <4 x i64> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11101011 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpor {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = or <4 x i64> %n, %m
+  ret <4 x i64> %r
+}
+
+define <4 x i64> @VPXOR.4xi64(<4 x i64> "reg"="yv" %n, <4 x i64> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11101111 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpxor {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = xor <4 x i64> %n, %m
+  ret <4 x i64> %r
+}
+
+define <4 x i1> @VPCMPEQQ.4xi64(<4 x i64> "reg"="yv" %n, <4 x i64> "reg"="yv" %m) "enc"="vex(d, 0, m, 2, 0, n, 1, 1) | 00101001 | 11 reg:3=d&7 rm:3=m&7" "asm"="vpcmpeqq {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = icmp eq <4 x i64> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @VPCMPGTQ.4xi64(<4 x i64> "reg"="yv" %n, <4 x i64> "reg"="yv" %m) "enc"="vex(d, 0, m, 2, 0, n, 1, 1) | 00110111 | 11 reg:3=d&7 rm:3=m&7" "asm"="vpcmpgtq {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = icmp sgt <4 x i64> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i64> @VPSLLQi.4xi64(<4 x i64> "reg"="yv" %n, <4 x i64> "imm" %sh) "enc"="{ vex(6, 0, n, 1, 0, d, 1, 1) | 01110011 | 11 110 rm:3=n&7 | i1:8=sh ; evexr(6, n, 1, 1, d, 1, 1, 0, 0, 0) | 01110011 | 11 110 rm:3=n&7 | i1:8=sh }" "asm"="vpsllq ${sh}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = shl <4 x i64> %n, %sh
+  ret <4 x i64> %r
+}
+
+define <4 x i64> @VPSLLVQ.4xi64(<4 x i64> "reg"="yv" %n, <4 x i64> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 2, 1, n, 1, 1) | 01000111 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 1, n, 1, 1, 0, 0, 0) | 01000111 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpsllvq {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = shl <4 x i64> %n, %m
+  ret <4 x i64> %r
+}
+
+define <4 x i64> @VPSRLQi.4xi64(<4 x i64> "reg"="yv" %n, <4 x i64> "imm" %sh) "enc"="{ vex(2, 0, n, 1, 0, d, 1, 1) | 01110011 | 11 010 rm:3=n&7 | i1:8=sh ; evexr(2, n, 1, 1, d, 1, 1, 0, 0, 0) | 01110011 | 11 010 rm:3=n&7 | i1:8=sh }" "asm"="vpsrlq ${sh}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = lshr <4 x i64> %n, %sh
+  ret <4 x i64> %r
+}
+
+define <4 x i64> @VPSRLVQ.4xi64(<4 x i64> "reg"="yv" %n, <4 x i64> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 2, 1, n, 1, 1) | 01000101 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 1, n, 1, 1, 0, 0, 0) | 01000101 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vpsrlvq {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = lshr <4 x i64> %n, %m
+  ret <4 x i64> %r
+}
+
+define <4 x i64> @VMASK.4xi64(<4 x i1> "reg"="yv" %n) "enc"="{ vex(2, 0, n, 1, 0, d, 1, 1) | 01110011 | 11 010 rm:3=n&7 | 00111111 ; evexr(2, n, 1, 1, d, 1, 1, 0, 0, 0) | 01110011 | 11 010 rm:3=n&7 | 00111111 }" "asm"="vpsrlq $63, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = zext <4 x i1> %n to <4 x i64>
+  ret <4 x i64> %r
+}
+
+define <4 x i64> @VPBLENDVB.4xi64(<4 x i1> "reg"="yv" %c, <4 x i64> "reg"="yv" %a, <4 x i64> "reg"="yv" %b) "enc"="vex(d, 0, a, 3, 0, b, 1, 1) | 01001100 | 11 reg:3=d&7 rm:3=a&7 | is4:4=c 0000" "asm"="vpblendvb {c}, {a}, {b}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = select <4 x i1> %c, <4 x i64> %a, <4 x i64> %b
+  ret <4 x i64> %r
+}
+
+define <8 x float> @VADDPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 01011000 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 0) | 01011000 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 0) | 01011000 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 0, n, 1, 0, 0, 0, 0) | 01011000 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 0) | 01011000 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vaddps {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fadd <8 x float> %n, %m
+  ret <8 x float> %r
+}
+
+define <8 x float> @VSUBPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 1, 0, n, 1, 0) | 01011100 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 0, n, 1, 0, 0, 0, 0) | 01011100 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vsubps {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fsub <8 x float> %n, %m
+  ret <8 x float> %r
+}
+
+define <8 x float> @VMULPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 01011001 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 0) | 01011001 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 0) | 01011001 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 0, n, 1, 0, 0, 0, 0) | 01011001 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 0) | 01011001 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vmulps {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fmul <8 x float> %n, %m
+  ret <8 x float> %r
+}
+
+define <8 x float> @VDIVPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 1, 0, n, 1, 0) | 01011110 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 0, n, 1, 0, 0, 0, 0) | 01011110 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vdivps {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fdiv <8 x float> %n, %m
+  ret <8 x float> %r
+}
+
+define <8 x float> @VSQRTPS.8xf32(<8 x float> "reg"="yv" %n) "enc"="{ vex(d, 0, n, 1, 0, 0, 1, 0) | 01010001 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 1, 0, 0, 1, 0, 0, 0, 0) | 01010001 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vsqrtps {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <8 x float> @llvm.sqrt.v8f32(<8 x float> %n)
+  ret <8 x float> %r
+}
+
+declare <8 x float> @llvm.sqrt.v8f32(<8 x float>)
+
+define <8 x i1> @VCMPOEQPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=0 ; if(n<8) if(((0&3)==0)|((0&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=0 ; vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=0 ; if(((0&3)==0)|((0&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=0 }" "asm"="vcmpps $0, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp oeq <8 x float> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @VCMPOLTPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=1 ; if(n<8) if(((1&3)==0)|((1&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=1 ; vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=1 ; if(((1&3)==0)|((1&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=1 }" "asm"="vcmpps $1, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp olt <8 x float> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @VCMPOLEPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=2 ; if(n<8) if(((2&3)==0)|((2&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=2 ; vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=2 ; if(((2&3)==0)|((2&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=2 }" "asm"="vcmpps $2, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp ole <8 x float> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @VCMPUNOPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=3 ; if(n<8) if(((3&3)==0)|((3&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=3 ; vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=3 ; if(((3&3)==0)|((3&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=3 }" "asm"="vcmpps $3, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp uno <8 x float> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @VCMPUNEPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=4 ; if(n<8) if(((4&3)==0)|((4&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=4 ; vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=4 ; if(((4&3)==0)|((4&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=4 }" "asm"="vcmpps $4, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp une <8 x float> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @VCMPUGEPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=5 ; if(n<8) if(((5&3)==0)|((5&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=5 ; vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=5 ; if(((5&3)==0)|((5&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=5 }" "asm"="vcmpps $5, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp uge <8 x float> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @VCMPUGTPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=6 ; if(n<8) if(((6&3)==0)|((6&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=6 ; vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=6 ; if(((6&3)==0)|((6&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=6 }" "asm"="vcmpps $6, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp ugt <8 x float> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @VCMPORDPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=7 ; if(n<8) if(((7&3)==0)|((7&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=7 ; vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=7 ; if(((7&3)==0)|((7&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=7 }" "asm"="vcmpps $7, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp ord <8 x float> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @VCMPUEQPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=8 ; if(n<8) if(((8&3)==0)|((8&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=8 ; vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=8 ; if(((8&3)==0)|((8&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=8 }" "asm"="vcmpps $8, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp ueq <8 x float> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @VCMPULTPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=9 ; if(n<8) if(((9&3)==0)|((9&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=9 ; vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=9 ; if(((9&3)==0)|((9&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=9 }" "asm"="vcmpps $9, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp ult <8 x float> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @VCMPULEPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=10 ; if(n<8) if(((10&3)==0)|((10&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=10 ; vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=10 ; if(((10&3)==0)|((10&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=10 }" "asm"="vcmpps $10, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp ule <8 x float> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @VCMPONEPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=12 ; if(n<8) if(((12&3)==0)|((12&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=12 ; vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=12 ; if(((12&3)==0)|((12&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=12 }" "asm"="vcmpps $12, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp one <8 x float> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @VCMPOGEPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=13 ; if(n<8) if(((13&3)==0)|((13&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=13 ; vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=13 ; if(((13&3)==0)|((13&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=13 }" "asm"="vcmpps $13, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp oge <8 x float> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @VCMPOGTPS.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=14 ; if(n<8) if(((14&3)==0)|((14&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=14 ; vex(d, 0, m, 1, 0, n, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=14 ; if(((14&3)==0)|((14&3)==3)) vex(d, 0, n, 1, 0, m, 1, 0) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=14 }" "asm"="vcmpps $14, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp ogt <8 x float> %n, %m
+  ret <8 x i1> %r
+}
+
+define <8 x float> @VBLENDVPS.8xf32(<8 x i1> "reg"="yv" %c, <8 x float> "reg"="yv" %a, <8 x float> "reg"="yv" %b) "enc"="vex(d, 0, a, 3, 0, b, 1, 1) | 01001010 | 11 reg:3=d&7 rm:3=a&7 | is4:4=c 0000" "asm"="vblendvps {c}, {a}, {b}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = select <8 x i1> %c, <8 x float> %a, <8 x float> %b
+  ret <8 x float> %r
+}
+
+define <8 x float> @VFMADD231PS.fma.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m, <8 x float> "reg"="yv" "tied" %acc) "enc"="{ vex(d, 0, m, 2, 0, n, 1, 1) | 10111000 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 0, n, 1, 1, 0, 0, 0) | 10111000 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vfmadd231ps {m}, {n}, {d}" "dclass"="yv" "feature"="avx2,fma" "nodecode" {
+  %r = call <8 x float> @llvm.fma.v8f32(<8 x float> %n, <8 x float> %m, <8 x float> %acc)
+  ret <8 x float> %r
+}
+
+declare <8 x float> @llvm.fma.v8f32(<8 x float>, <8 x float>, <8 x float>)
+
+define <8 x float> @VFMADD231PS.fmuladd.8xf32(<8 x float> "reg"="yv" %n, <8 x float> "reg"="yv" %m, <8 x float> "reg"="yv" "tied" %acc) "enc"="{ vex(d, 0, m, 2, 0, n, 1, 1) | 10111000 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 0, n, 1, 1, 0, 0, 0) | 10111000 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vfmadd231ps {m}, {n}, {d}" "dclass"="yv" "feature"="avx2,fma" "nodecode" {
+  %r = call <8 x float> @llvm.fmuladd.v8f32(<8 x float> %n, <8 x float> %m, <8 x float> %acc)
+  ret <8 x float> %r
+}
+
+declare <8 x float> @llvm.fmuladd.v8f32(<8 x float>, <8 x float>, <8 x float>)
+
+define <4 x double> @VADDPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 01011000 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 01011000 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 01011000 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 1, n, 1, 1, 0, 0, 0) | 01011000 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 01011000 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vaddpd {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fadd <4 x double> %n, %m
+  ret <4 x double> %r
+}
+
+define <4 x double> @VSUBPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 1, 0, n, 1, 1) | 01011100 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 1, n, 1, 1, 0, 0, 0) | 01011100 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vsubpd {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fsub <4 x double> %n, %m
+  ret <4 x double> %r
+}
+
+define <4 x double> @VMULPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 01011001 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 01011001 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 01011001 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 1, n, 1, 1, 0, 0, 0) | 01011001 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 01011001 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vmulpd {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fmul <4 x double> %n, %m
+  ret <4 x double> %r
+}
+
+define <4 x double> @VDIVPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ vex(d, 0, m, 1, 0, n, 1, 1) | 01011110 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 1, n, 1, 1, 0, 0, 0) | 01011110 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vdivpd {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fdiv <4 x double> %n, %m
+  ret <4 x double> %r
+}
+
+define <4 x double> @VSQRTPD.4xf64(<4 x double> "reg"="yv" %n) "enc"="{ vex(d, 0, n, 1, 0, 0, 1, 1) | 01010001 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 1, 1, 0, 1, 1, 0, 0, 0) | 01010001 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vsqrtpd {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <4 x double> @llvm.sqrt.v4f64(<4 x double> %n)
+  ret <4 x double> %r
+}
+
+declare <4 x double> @llvm.sqrt.v4f64(<4 x double>)
+
+define <4 x i1> @VCMPOEQPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=0 ; if(n<8) if(((0&3)==0)|((0&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=0 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=0 ; if(((0&3)==0)|((0&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=0 }" "asm"="vcmppd $0, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp oeq <4 x double> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @VCMPOLTPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=1 ; if(n<8) if(((1&3)==0)|((1&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=1 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=1 ; if(((1&3)==0)|((1&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=1 }" "asm"="vcmppd $1, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp olt <4 x double> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @VCMPOLEPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=2 ; if(n<8) if(((2&3)==0)|((2&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=2 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=2 ; if(((2&3)==0)|((2&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=2 }" "asm"="vcmppd $2, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp ole <4 x double> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @VCMPUNOPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=3 ; if(n<8) if(((3&3)==0)|((3&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=3 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=3 ; if(((3&3)==0)|((3&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=3 }" "asm"="vcmppd $3, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp uno <4 x double> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @VCMPUNEPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=4 ; if(n<8) if(((4&3)==0)|((4&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=4 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=4 ; if(((4&3)==0)|((4&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=4 }" "asm"="vcmppd $4, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp une <4 x double> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @VCMPUGEPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=5 ; if(n<8) if(((5&3)==0)|((5&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=5 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=5 ; if(((5&3)==0)|((5&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=5 }" "asm"="vcmppd $5, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp uge <4 x double> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @VCMPUGTPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=6 ; if(n<8) if(((6&3)==0)|((6&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=6 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=6 ; if(((6&3)==0)|((6&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=6 }" "asm"="vcmppd $6, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp ugt <4 x double> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @VCMPORDPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=7 ; if(n<8) if(((7&3)==0)|((7&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=7 ; if(((7&3)==0)|((7&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=7 }" "asm"="vcmppd $7, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp ord <4 x double> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @VCMPUEQPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=8 ; if(n<8) if(((8&3)==0)|((8&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=8 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=8 ; if(((8&3)==0)|((8&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=8 }" "asm"="vcmppd $8, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp ueq <4 x double> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @VCMPULTPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=9 ; if(n<8) if(((9&3)==0)|((9&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=9 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=9 ; if(((9&3)==0)|((9&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=9 }" "asm"="vcmppd $9, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp ult <4 x double> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @VCMPULEPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=10 ; if(n<8) if(((10&3)==0)|((10&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=10 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=10 ; if(((10&3)==0)|((10&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=10 }" "asm"="vcmppd $10, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp ule <4 x double> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @VCMPONEPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=12 ; if(n<8) if(((12&3)==0)|((12&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=12 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=12 ; if(((12&3)==0)|((12&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=12 }" "asm"="vcmppd $12, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp one <4 x double> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @VCMPOGEPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=13 ; if(n<8) if(((13&3)==0)|((13&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=13 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=13 ; if(((13&3)==0)|((13&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=13 }" "asm"="vcmppd $13, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp oge <4 x double> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @VCMPOGTPD.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=14 ; if(n<8) if(((14&3)==0)|((14&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=14 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=m&7 | i1:8=14 ; if(((14&3)==0)|((14&3)==3)) vex(d, 0, n, 1, 0, m, 1, 1) | 11000010 | 11 reg:3=d&7 rm:3=n&7 | i1:8=14 }" "asm"="vcmppd $14, {m}, {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fcmp ogt <4 x double> %n, %m
+  ret <4 x i1> %r
+}
+
+define <4 x double> @VBLENDVPD.4xf64(<4 x i1> "reg"="yv" %c, <4 x double> "reg"="yv" %a, <4 x double> "reg"="yv" %b) "enc"="vex(d, 0, a, 3, 0, b, 1, 1) | 01001011 | 11 reg:3=d&7 rm:3=a&7 | is4:4=c 0000" "asm"="vblendvpd {c}, {a}, {b}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = select <4 x i1> %c, <4 x double> %a, <4 x double> %b
+  ret <4 x double> %r
+}
+
+define <4 x double> @VFMADD231PD.fma.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m, <4 x double> "reg"="yv" "tied" %acc) "enc"="{ vex(d, 0, m, 2, 1, n, 1, 1) | 10111000 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 1, n, 1, 1, 0, 0, 0) | 10111000 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vfmadd231pd {m}, {n}, {d}" "dclass"="yv" "feature"="avx2,fma" "nodecode" {
+  %r = call <4 x double> @llvm.fma.v4f64(<4 x double> %n, <4 x double> %m, <4 x double> %acc)
+  ret <4 x double> %r
+}
+
+declare <4 x double> @llvm.fma.v4f64(<4 x double>, <4 x double>, <4 x double>)
+
+define <4 x double> @VFMADD231PD.fmuladd.4xf64(<4 x double> "reg"="yv" %n, <4 x double> "reg"="yv" %m, <4 x double> "reg"="yv" "tied" %acc) "enc"="{ vex(d, 0, m, 2, 1, n, 1, 1) | 10111000 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 2, 1, n, 1, 1, 0, 0, 0) | 10111000 | 11 reg:3=d&7 rm:3=m&7 }" "asm"="vfmadd231pd {m}, {n}, {d}" "dclass"="yv" "feature"="avx2,fma" "nodecode" {
+  %r = call <4 x double> @llvm.fmuladd.v4f64(<4 x double> %n, <4 x double> %m, <4 x double> %acc)
+  ret <4 x double> %r
+}
+
+declare <4 x double> @llvm.fmuladd.v4f64(<4 x double>, <4 x double>, <4 x double>)
+
+define <8 x float> @VCVTDQ2PS.8xf32(<8 x i32> "reg"="yv" %n) "enc"="{ vex(d, 0, n, 1, 0, 0, 1, 0) | 01011011 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 1, 0, 0, 1, 0, 0, 0, 0) | 01011011 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vcvtdq2ps {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = sitofp <8 x i32> %n to <8 x float>
+  ret <8 x float> %r
+}
+
+define <8 x i32> @VCVTTPS2DQ.8xi32(<8 x float> "reg"="yv" %n) "enc"="{ vex(d, 0, n, 1, 0, 0, 1, 2) | 01011011 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 1, 0, 0, 1, 2, 0, 0, 0) | 01011011 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vcvttps2dq {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fptosi <8 x float> %n to <8 x i32>
+  ret <8 x i32> %r
+}
+
+define <4 x double> @VCVTPS2PD.4xf64(<4 x float> "reg"="xv" %n) "enc"="{ vex(d, 0, n, 1, 0, 0, 1, 0) | 01011010 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 1, 0, 0, 1, 0, 0, 0, 0) | 01011010 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vcvtps2pd {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = fpext <4 x float> %n to <4 x double>
+  ret <4 x double> %r
+}
+
+define <4 x double> @VCVTDQ2PD.4xf64(<4 x i32> "reg"="xv" %n) "enc"="{ vex(d, 0, n, 1, 0, 0, 1, 2) | 11100110 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 1, 0, 0, 1, 2, 0, 0, 0) | 11100110 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vcvtdq2pd {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = sitofp <4 x i32> %n to <4 x double>
+  ret <4 x double> %r
+}
+
+define <16 x i8> @VLOW.32xi8(<32 x i8> "reg"="yv" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v:x}, {d}" "dclass"="xv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <32 x i8> %v, <32 x i8> poison, <16 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15>
+  ret <16 x i8> %r
+}
+
+define <16 x i8> @VHIGH.32xi8(<32 x i8> "reg"="yv" %v) "enc"="vex(v, 0, d, 3, 0, 0, 1, 1) | 00111001 | 11 reg:3=v&7 rm:3=d&7 | 00000001" "asm"="vextracti128 $1, {v}, {d}" "dclass"="xv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <32 x i8> %v, <32 x i8> poison, <16 x i32> <i32 16, i32 17, i32 18, i32 19, i32 20, i32 21, i32 22, i32 23, i32 24, i32 25, i32 26, i32 27, i32 28, i32 29, i32 30, i32 31>
+  ret <16 x i8> %r
+}
+
+define <32 x i8> @VJOIN.32xi8(<16 x i8> "reg"="xv" %a, <16 x i8> "reg"="xv" %b) "enc"="vex(d, 0, b, 3, 0, a, 1, 1) | 00111000 | 11 reg:3=d&7 rm:3=b&7 | 00000001" "asm"="vinserti128 $1, {b}, {a:y}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <16 x i8> %a, <16 x i8> %b, <32 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15, i32 16, i32 17, i32 18, i32 19, i32 20, i32 21, i32 22, i32 23, i32 24, i32 25, i32 26, i32 27, i32 28, i32 29, i32 30, i32 31>
+  ret <32 x i8> %r
+}
+
+define <8 x i16> @VLOW.16xi16(<16 x i16> "reg"="yv" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v:x}, {d}" "dclass"="xv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <16 x i16> %v, <16 x i16> poison, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @VHIGH.16xi16(<16 x i16> "reg"="yv" %v) "enc"="vex(v, 0, d, 3, 0, 0, 1, 1) | 00111001 | 11 reg:3=v&7 rm:3=d&7 | 00000001" "asm"="vextracti128 $1, {v}, {d}" "dclass"="xv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <16 x i16> %v, <16 x i16> poison, <8 x i32> <i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15>
+  ret <8 x i16> %r
+}
+
+define <16 x i16> @VJOIN.16xi16(<8 x i16> "reg"="xv" %a, <8 x i16> "reg"="xv" %b) "enc"="vex(d, 0, b, 3, 0, a, 1, 1) | 00111000 | 11 reg:3=d&7 rm:3=b&7 | 00000001" "asm"="vinserti128 $1, {b}, {a:y}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <8 x i16> %a, <8 x i16> %b, <16 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15>
+  ret <16 x i16> %r
+}
+
+define <4 x i32> @VLOW.8xi32(<8 x i32> "reg"="yv" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v:x}, {d}" "dclass"="xv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <8 x i32> %v, <8 x i32> poison, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @VHIGH.8xi32(<8 x i32> "reg"="yv" %v) "enc"="vex(v, 0, d, 3, 0, 0, 1, 1) | 00111001 | 11 reg:3=v&7 rm:3=d&7 | 00000001" "asm"="vextracti128 $1, {v}, {d}" "dclass"="xv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <8 x i32> %v, <8 x i32> poison, <4 x i32> <i32 4, i32 5, i32 6, i32 7>
+  ret <4 x i32> %r
+}
+
+define <8 x i32> @VJOIN.8xi32(<4 x i32> "reg"="xv" %a, <4 x i32> "reg"="xv" %b) "enc"="vex(d, 0, b, 3, 0, a, 1, 1) | 00111000 | 11 reg:3=d&7 rm:3=b&7 | 00000001" "asm"="vinserti128 $1, {b}, {a:y}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <4 x i32> %a, <4 x i32> %b, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
+  ret <8 x i32> %r
+}
+
+define <2 x i64> @VLOW.4xi64(<4 x i64> "reg"="yv" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v:x}, {d}" "dclass"="xv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <4 x i64> %v, <4 x i64> poison, <2 x i32> <i32 0, i32 1>
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @VHIGH.4xi64(<4 x i64> "reg"="yv" %v) "enc"="vex(v, 0, d, 3, 0, 0, 1, 1) | 00111001 | 11 reg:3=v&7 rm:3=d&7 | 00000001" "asm"="vextracti128 $1, {v}, {d}" "dclass"="xv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <4 x i64> %v, <4 x i64> poison, <2 x i32> <i32 2, i32 3>
+  ret <2 x i64> %r
+}
+
+define <4 x i64> @VJOIN.4xi64(<2 x i64> "reg"="xv" %a, <2 x i64> "reg"="xv" %b) "enc"="vex(d, 0, b, 3, 0, a, 1, 1) | 00111000 | 11 reg:3=d&7 rm:3=b&7 | 00000001" "asm"="vinserti128 $1, {b}, {a:y}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <2 x i64> %a, <2 x i64> %b, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
+  ret <4 x i64> %r
+}
+
+define <4 x float> @VLOW.8xf32(<8 x float> "reg"="yv" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v:x}, {d}" "dclass"="xv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <8 x float> %v, <8 x float> poison, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
+  ret <4 x float> %r
+}
+
+define <4 x float> @VHIGH.8xf32(<8 x float> "reg"="yv" %v) "enc"="vex(v, 0, d, 3, 0, 0, 1, 1) | 00111001 | 11 reg:3=v&7 rm:3=d&7 | 00000001" "asm"="vextracti128 $1, {v}, {d}" "dclass"="xv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <8 x float> %v, <8 x float> poison, <4 x i32> <i32 4, i32 5, i32 6, i32 7>
+  ret <4 x float> %r
+}
+
+define <8 x float> @VJOIN.8xf32(<4 x float> "reg"="xv" %a, <4 x float> "reg"="xv" %b) "enc"="vex(d, 0, b, 3, 0, a, 1, 1) | 00111000 | 11 reg:3=d&7 rm:3=b&7 | 00000001" "asm"="vinserti128 $1, {b}, {a:y}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <4 x float> %a, <4 x float> %b, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
+  ret <8 x float> %r
+}
+
+define <2 x double> @VLOW.4xf64(<4 x double> "reg"="yv" %v) "enc"="rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)" "asm"="movaps {v:x}, {d}" "dclass"="xv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <4 x double> %v, <4 x double> poison, <2 x i32> <i32 0, i32 1>
+  ret <2 x double> %r
+}
+
+define <2 x double> @VHIGH.4xf64(<4 x double> "reg"="yv" %v) "enc"="vex(v, 0, d, 3, 0, 0, 1, 1) | 00111001 | 11 reg:3=v&7 rm:3=d&7 | 00000001" "asm"="vextracti128 $1, {v}, {d}" "dclass"="xv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <4 x double> %v, <4 x double> poison, <2 x i32> <i32 2, i32 3>
+  ret <2 x double> %r
+}
+
+define <4 x double> @VJOIN.4xf64(<2 x double> "reg"="xv" %a, <2 x double> "reg"="xv" %b) "enc"="vex(d, 0, b, 3, 0, a, 1, 1) | 00111000 | 11 reg:3=d&7 rm:3=b&7 | 00000001" "asm"="vinserti128 $1, {b}, {a:y}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = shufflevector <2 x double> %a, <2 x double> %b, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
+  ret <4 x double> %r
+}
+
+define <16 x i16> @VPMOVSXBW(<16 x i8> "reg"="xv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 00100000 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 00100000 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpmovsxbw {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = sext <16 x i8> %n to <16 x i16>
+  ret <16 x i16> %r
+}
+
+define <16 x i16> @VPMOVZXBW(<16 x i8> "reg"="xv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 00110000 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 00110000 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpmovzxbw {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = zext <16 x i8> %n to <16 x i16>
+  ret <16 x i16> %r
+}
+
+define <8 x i32> @VPMOVSXWD(<8 x i16> "reg"="xv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 00100011 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 00100011 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpmovsxwd {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = sext <8 x i16> %n to <8 x i32>
+  ret <8 x i32> %r
+}
+
+define <8 x i32> @VPMOVZXWD(<8 x i16> "reg"="xv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 00110011 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 00110011 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpmovzxwd {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = zext <8 x i16> %n to <8 x i32>
+  ret <8 x i32> %r
+}
+
+define <4 x i64> @VPMOVSXDQ(<4 x i32> "reg"="xv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 00100101 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 00100101 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpmovsxdq {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = sext <4 x i32> %n to <4 x i64>
+  ret <4 x i64> %r
+}
+
+define <4 x i64> @VPMOVZXDQ(<4 x i32> "reg"="xv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 00110101 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 00110101 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpmovzxdq {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = zext <4 x i32> %n to <4 x i64>
+  ret <4 x i64> %r
+}
+
+define <32 x i8> @VBITS.32x8(<32 x i1> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=m&7 ; if(d<8) vex(m, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=m&7 rm:3=d&7 ; vex(d, 0, m, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=m&7 ; vex(m, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=m&7 rm:3=d&7 ; evexr(d, m, 1, 0, 0, 1, 0, 0, 0, 0) | 00101000 | 11 reg:3=d&7 rm:3=m&7 ; evexr(m, d, 1, 0, 0, 1, 0, 0, 0, 0) | 00101001 | 11 reg:3=m&7 rm:3=d&7 }" "asm"="vmovaps {m}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <32 x i8> @llvm.epitome.mask.bits.v32i8(<32 x i1> %m)
+  ret <32 x i8> %r
+}
+
+define <32 x i1> @VMASK.32x8(<32 x i8> "reg"="yv" %v) "enc"="{ if(v<8) vex(d, 0, v, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=v&7 ; if(d<8) vex(v, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=v&7 rm:3=d&7 ; vex(d, 0, v, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=v&7 ; vex(v, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=v&7 rm:3=d&7 ; evexr(d, v, 1, 0, 0, 1, 0, 0, 0, 0) | 00101000 | 11 reg:3=d&7 rm:3=v&7 ; evexr(v, d, 1, 0, 0, 1, 0, 0, 0, 0) | 00101001 | 11 reg:3=v&7 rm:3=d&7 }" "asm"="vmovaps {v}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <32 x i1> @llvm.epitome.bits.mask.v32i8(<32 x i8> %v)
+  ret <32 x i1> %r
+}
+
+declare <32 x i8> @llvm.epitome.mask.bits.v32i8(<32 x i1>)
+declare <32 x i1> @llvm.epitome.bits.mask.v32i8(<32 x i8>)
+
+define <16 x i16> @VBITS.16x16(<16 x i1> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=m&7 ; if(d<8) vex(m, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=m&7 rm:3=d&7 ; vex(d, 0, m, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=m&7 ; vex(m, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=m&7 rm:3=d&7 ; evexr(d, m, 1, 0, 0, 1, 0, 0, 0, 0) | 00101000 | 11 reg:3=d&7 rm:3=m&7 ; evexr(m, d, 1, 0, 0, 1, 0, 0, 0, 0) | 00101001 | 11 reg:3=m&7 rm:3=d&7 }" "asm"="vmovaps {m}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <16 x i16> @llvm.epitome.mask.bits.v16i16(<16 x i1> %m)
+  ret <16 x i16> %r
+}
+
+define <16 x i1> @VMASK.16x16(<16 x i16> "reg"="yv" %v) "enc"="{ if(v<8) vex(d, 0, v, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=v&7 ; if(d<8) vex(v, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=v&7 rm:3=d&7 ; vex(d, 0, v, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=v&7 ; vex(v, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=v&7 rm:3=d&7 ; evexr(d, v, 1, 0, 0, 1, 0, 0, 0, 0) | 00101000 | 11 reg:3=d&7 rm:3=v&7 ; evexr(v, d, 1, 0, 0, 1, 0, 0, 0, 0) | 00101001 | 11 reg:3=v&7 rm:3=d&7 }" "asm"="vmovaps {v}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <16 x i1> @llvm.epitome.bits.mask.v16i16(<16 x i16> %v)
+  ret <16 x i1> %r
+}
+
+declare <16 x i16> @llvm.epitome.mask.bits.v16i16(<16 x i1>)
+declare <16 x i1> @llvm.epitome.bits.mask.v16i16(<16 x i16>)
+
+define <8 x i32> @VBITS.8x32(<8 x i1> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=m&7 ; if(d<8) vex(m, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=m&7 rm:3=d&7 ; vex(d, 0, m, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=m&7 ; vex(m, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=m&7 rm:3=d&7 ; evexr(d, m, 1, 0, 0, 1, 0, 0, 0, 0) | 00101000 | 11 reg:3=d&7 rm:3=m&7 ; evexr(m, d, 1, 0, 0, 1, 0, 0, 0, 0) | 00101001 | 11 reg:3=m&7 rm:3=d&7 }" "asm"="vmovaps {m}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <8 x i32> @llvm.epitome.mask.bits.v8i32(<8 x i1> %m)
+  ret <8 x i32> %r
+}
+
+define <8 x i1> @VMASK.8x32(<8 x i32> "reg"="yv" %v) "enc"="{ if(v<8) vex(d, 0, v, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=v&7 ; if(d<8) vex(v, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=v&7 rm:3=d&7 ; vex(d, 0, v, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=v&7 ; vex(v, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=v&7 rm:3=d&7 ; evexr(d, v, 1, 0, 0, 1, 0, 0, 0, 0) | 00101000 | 11 reg:3=d&7 rm:3=v&7 ; evexr(v, d, 1, 0, 0, 1, 0, 0, 0, 0) | 00101001 | 11 reg:3=v&7 rm:3=d&7 }" "asm"="vmovaps {v}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <8 x i1> @llvm.epitome.bits.mask.v8i32(<8 x i32> %v)
+  ret <8 x i1> %r
+}
+
+declare <8 x i32> @llvm.epitome.mask.bits.v8i32(<8 x i1>)
+declare <8 x i1> @llvm.epitome.bits.mask.v8i32(<8 x i32>)
+
+define <4 x i64> @VBITS.4x64(<4 x i1> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=m&7 ; if(d<8) vex(m, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=m&7 rm:3=d&7 ; vex(d, 0, m, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=m&7 ; vex(m, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=m&7 rm:3=d&7 ; evexr(d, m, 1, 0, 0, 1, 0, 0, 0, 0) | 00101000 | 11 reg:3=d&7 rm:3=m&7 ; evexr(m, d, 1, 0, 0, 1, 0, 0, 0, 0) | 00101001 | 11 reg:3=m&7 rm:3=d&7 }" "asm"="vmovaps {m}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <4 x i64> @llvm.epitome.mask.bits.v4i64(<4 x i1> %m)
+  ret <4 x i64> %r
+}
+
+define <4 x i1> @VMASK.4x64(<4 x i64> "reg"="yv" %v) "enc"="{ if(v<8) vex(d, 0, v, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=v&7 ; if(d<8) vex(v, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=v&7 rm:3=d&7 ; vex(d, 0, v, 1, 0, 0, 1, 0) | 00101000 | 11 reg:3=d&7 rm:3=v&7 ; vex(v, 0, d, 1, 0, 0, 1, 0) | 00101001 | 11 reg:3=v&7 rm:3=d&7 ; evexr(d, v, 1, 0, 0, 1, 0, 0, 0, 0) | 00101000 | 11 reg:3=d&7 rm:3=v&7 ; evexr(v, d, 1, 0, 0, 1, 0, 0, 0, 0) | 00101001 | 11 reg:3=v&7 rm:3=d&7 }" "asm"="vmovaps {v}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <4 x i1> @llvm.epitome.bits.mask.v4i64(<4 x i64> %v)
+  ret <4 x i1> %r
+}
+
+declare <4 x i64> @llvm.epitome.mask.bits.v4i64(<4 x i1>)
+declare <4 x i1> @llvm.epitome.bits.mask.v4i64(<4 x i64>)
+
+define <8 x i32> @VPBROADCASTD(<2 x i64> "reg"="xv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 01011000 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 01011000 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpbroadcastd {n}, {d}" "dclass"="yv" "nomatch" "feature"="avx2" "nodecode" {
+  ret <8 x i32> poison
+}
+
+define <8 x i32> @vsplat.8xi32(i32 "reg"="r32" %x) "recipe"="vsplat.8xi32.expand" "feature"="avx2" {
+  %i = insertelement <8 x i32> poison, i32 %x, i64 0
+  %r = shufflevector <8 x i32> %i, <8 x i32> poison, <8 x i32> zeroinitializer
+  ret <8 x i32> %r
+}
+
+define <8 x i32> @vsplat.8xi32.expand(i32 %x) {
+  %v4 = call <4 x i32> @MOVDto(i32 %x)
+  %v = bitcast <4 x i32> %v4 to <2 x i64>
+  %r = call <8 x i32> @VPBROADCASTD(<2 x i64> %v)
+  ret <8 x i32> %r
+}
+
+define <4 x i64> @VPBROADCASTQ(<2 x i64> "reg"="xv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 01011001 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 1, 0, 1, 1, 0, 0, 0) | 01011001 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpbroadcastq {n}, {d}" "dclass"="yv" "nomatch" "feature"="avx2" "nodecode" {
+  ret <4 x i64> poison
+}
+
+define <4 x i64> @vsplat.4xi64(i64 "reg"="r64" %x) "recipe"="vsplat.4xi64.expand" "feature"="avx2" {
+  %i = insertelement <4 x i64> poison, i64 %x, i64 0
+  %r = shufflevector <4 x i64> %i, <4 x i64> poison, <4 x i32> zeroinitializer
+  ret <4 x i64> %r
+}
+
+define <4 x i64> @vsplat.4xi64.expand(i64 %x) {
+  %v = call <2 x i64> @MOVQto(i64 %x)
+  %r = call <4 x i64> @VPBROADCASTQ(<2 x i64> %v)
+  ret <4 x i64> %r
+}
+
+define <16 x i16> @VPBROADCASTW(<2 x i64> "reg"="xv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 01111001 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 01111001 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpbroadcastw {n}, {d}" "dclass"="yv" "nomatch" "feature"="avx2" "nodecode" {
+  ret <16 x i16> poison
+}
+
+define <16 x i16> @vsplat.16xi16(i16 "reg"="r32" %x) "recipe"="vsplat.16xi16.expand" "feature"="avx2" {
+  %i = insertelement <16 x i16> poison, i16 %x, i64 0
+  %r = shufflevector <16 x i16> %i, <16 x i16> poison, <16 x i32> zeroinitializer
+  ret <16 x i16> %r
+}
+
+define <16 x i16> @vsplat.16xi16.expand(i16 %x) {
+  %w = zext i16 %x to i32
+  %v4 = call <4 x i32> @MOVDto(i32 %w)
+  %v = bitcast <4 x i32> %v4 to <2 x i64>
+  %r = call <16 x i16> @VPBROADCASTW(<2 x i64> %v)
+  ret <16 x i16> %r
+}
+
+define <32 x i8> @VPBROADCASTB(<2 x i64> "reg"="xv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 01111000 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 01111000 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpbroadcastb {n}, {d}" "dclass"="yv" "nomatch" "feature"="avx2" "nodecode" {
+  ret <32 x i8> poison
+}
+
+define <32 x i8> @vsplat.32xi8(i8 "reg"="r32" %x) "recipe"="vsplat.32xi8.expand" "feature"="avx2" {
+  %i = insertelement <32 x i8> poison, i8 %x, i64 0
+  %r = shufflevector <32 x i8> %i, <32 x i8> poison, <32 x i32> zeroinitializer
+  ret <32 x i8> %r
+}
+
+define <32 x i8> @vsplat.32xi8.expand(i8 %x) {
+  %w = zext i8 %x to i32
+  %v4 = call <4 x i32> @MOVDto(i32 %w)
+  %v = bitcast <4 x i32> %v4 to <2 x i64>
+  %r = call <32 x i8> @VPBROADCASTB(<2 x i64> %v)
+  ret <32 x i8> %r
+}
+
+define <8 x float> @VBROADCASTSS(<2 x i64> "reg"="xv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 00011000 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 00011000 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vbroadcastss {n}, {d}" "dclass"="yv" "nomatch" "feature"="avx2" "nodecode" {
+  ret <8 x float> poison
+}
+
+define <8 x float> @vsplat.8xf32(float "reg"="s" %x) "recipe"="vsplat.8xf32.expand" "feature"="avx2" {
+  %i = insertelement <8 x float> poison, float %x, i64 0
+  %r = shufflevector <8 x float> %i, <8 x float> poison, <8 x i32> zeroinitializer
+  ret <8 x float> %r
+}
+
+define <8 x float> @vsplat.8xf32.expand(float %x) {
+  %v = bitcast float %x to <2 x i64>
+  %r = call <8 x float> @VBROADCASTSS(<2 x i64> %v)
+  ret <8 x float> %r
+}
+
+define <4 x double> @VBROADCASTSD(<2 x i64> "reg"="xv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 00011001 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 1, 0, 1, 1, 0, 0, 0) | 00011001 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vbroadcastsd {n}, {d}" "dclass"="yv" "nomatch" "feature"="avx2" "nodecode" {
+  ret <4 x double> poison
+}
+
+define <4 x double> @vsplat.4xf64(double "reg"="d" %x) "recipe"="vsplat.4xf64.expand" "feature"="avx2" {
+  %i = insertelement <4 x double> poison, double %x, i64 0
+  %r = shufflevector <4 x double> %i, <4 x double> poison, <4 x i32> zeroinitializer
+  ret <4 x double> %r
+}
+
+define <4 x double> @vsplat.4xf64.expand(double %x) {
+  %v = bitcast double %x to <2 x i64>
+  %r = call <4 x double> @VBROADCASTSD(<2 x i64> %v)
+  ret <4 x double> %r
+}
+
 define <2 x i64> @MOVAPSrr(<2 x i64> "reg"="x" %n) "enc"="rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)" "asm"="movaps {n}, {d}" "copy"="x" "dclass"="x" "nodecode" {
   ret <2 x i64> %n
 }

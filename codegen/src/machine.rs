@@ -274,6 +274,18 @@ pub struct Machine {
     pub relocs: Vec<RelocDef>,
     /// The feature the vector registers come with, if they are optional.
     pub vector_feature: Option<String>,
+    /// Every width of vector registers, with the feature each needs (x86's
+    /// 128 bits, 256 with `avx2`): a function's vectors are the widest its
+    /// features allow.
+    pub vector_widths: Vec<(u32, Option<String>)>,
+    /// The class masks (vectors of `i1`) are held in, by the width of the
+    /// vectors in use (`mask-class`), where it is not the smallest that
+    /// holds vectors (x86's 256-bit masks are in ymm registers).
+    pub mask_classes: Vec<(u32, Class)>,
+    /// The narrowest vector kept in a register (`min-vector-bits`; half the
+    /// vector registers' width unless the description says: x86's 64-bit
+    /// vectors are in xmm registers whatever the width in use).
+    pub min_vector_bits: Option<u32>,
     /// CPUs, with the features each has.
     pub cpus: Vec<(String, Vec<String>)>,
     /// The CPU to assume when none is named.
@@ -455,6 +467,9 @@ impl Machine {
             lazy_encodings: false,
             relocs: Vec::new(),
             vector_feature: None,
+            vector_widths: Vec::new(),
+            mask_classes: Vec::new(),
+            min_vector_bits: None,
             cpus: Vec::new(),
             default_cpu: None,
             compare_booleans: false,
@@ -492,6 +507,16 @@ impl Machine {
         mc.zero = params.get("zero").map(|z| mc.reg(z)).transpose()?;
         mc.vector_bits = num("vector-bits")?.unwrap_or(0) as u32;
         mc.vector_feature = all_params.iter().find(|t| t[0] == "vector-bits").and_then(|t| t.get(2).cloned());
+        for t in all_params.iter().filter(|t| t[0] == "vector-bits") {
+            let bits = t.get(1).and_then(|b| b.parse().ok()).ok_or("target parameter vector-bits: a width")?;
+            mc.vector_widths.push((bits, t.get(2).cloned()));
+        }
+        mc.min_vector_bits = num("min-vector-bits")?.map(|b| b as u32);
+        for t in all_params.iter().filter(|t| t[0] == "mask-class") {
+            let bits = t.get(1).and_then(|b| b.parse().ok()).ok_or("target parameter mask-class: a width")?;
+            let class = t.get(2).and_then(|c| mc.class(c)).ok_or("target parameter mask-class: a class")?;
+            mc.mask_classes.push((bits, class));
+        }
         mc.default_cpu = params.get("cpu").cloned();
         mc.compare_booleans = match params.get("boolean-branches").map(String::as_str) {
             None | Some("bit") => false,

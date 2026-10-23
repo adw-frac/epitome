@@ -5,8 +5,9 @@
 //! For each `tests/programs/NAME.c` of `PROGRAMS` (and `tests/x86/NAME.c` of
 //! `X86_PROGRAMS`) and its `NAME.main.c`, in
 //! the configurations of `tests/programs.rs` (clang -O0, that through
-//! epitome-opt, -O2 without vectorising, and -O2), and `-O2 -fPIC` (linked
-//! into a shared library the main calls), the test:
+//! epitome-opt, -O2 without vectorising, and -O2), `-O2 -fPIC` (linked
+//! into a shared library the main calls), and `-O2 -mavx2 -mfma` (256-bit
+//! vectors), the test:
 //!
 //! 1. compiles clang's IR for `x86_64-linux-gnu` to assembly, assembles it
 //!    with epitome-as, links it with the main (built by clang), runs it,
@@ -97,6 +98,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<(), S
         ("O2", &["-O2", "-fno-vectorize", "-fno-slp-vectorize", "-fno-unroll-loops"]),
         ("vec", &["-O2"]),
         ("pic", &["-O2", "-fPIC"]),
+        ("avx2", &["-O2", "-mavx2", "-mfma"]),
     ];
     for (config, flags) in configs {
         if tails && matches!(*config, "O0" | "opt") {

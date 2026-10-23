@@ -63,7 +63,7 @@ fn split_count(cx: &Ctx, ty: TypeId) -> Option<usize> {
     }
     let bits = len * eb;
     let vb = cx.vector_bits();
-    if vb == 0 || !len.is_power_of_two() || bits < vb / 2 {
+    if vb == 0 || !len.is_power_of_two() || bits < cx.min_vector_bits() {
         return Some(len as usize);
     }
     (bits > vb).then_some((bits / vb) as usize)
@@ -75,7 +75,7 @@ fn split_count(cx: &Ctx, ty: TypeId) -> Option<usize> {
 /// lanes compared.
 fn part(cx: &mut Ctx, len: u32, elem: TypeId, eb: u32) -> TypeId {
     let vb = cx.vector_bits();
-    if vb > 0 && len.is_power_of_two() && len * eb >= vb / 2 { vec_ty(cx, vb / eb, elem) } else { elem }
+    if vb > 0 && len.is_power_of_two() && len * eb >= cx.min_vector_bits() { vec_ty(cx, vb / eb, elem) } else { elem }
 }
 
 fn is_vec(cx: &Ctx, ty: TypeId) -> bool {
@@ -1791,7 +1791,7 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         // A legal vector cast to a scalarised one: its lanes.
                         v if res_split.is_some()
                             && fe > 1
-                            && (!len.is_power_of_two() || len * te < cx.vector_bits() / 2) =>
+                            && (!len.is_power_of_two() || len * te < cx.min_vector_bits()) =>
                         {
                             let i64t = cx.m.types.int(64);
                             (0..len)

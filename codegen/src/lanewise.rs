@@ -119,21 +119,34 @@ fn selectable(cx: &Ctx, f: &Function, op: &Op, res: Option<TypeId>) -> bool {
     cx.selects_head(|h| *h == head)
 }
 
+/// How many times `v` is used.
+fn uses(f: &Function, v: Value) -> usize {
+    f.insts_in_order()
+        .map(|j| {
+            let mut n = 0;
+            f.insts[j.index()].op.for_each_value(|w| n += usize::from(*w == v));
+            n
+        })
+        .sum()
+}
+
 /// Is there a pattern for this shuffle: of any vector, or of an insert's
 /// (a splat's), if `a` is one?
 fn shuffle_selectable(cx: &Ctx, f: &Function, a: Value, mask: ConstId, rty: TypeId) -> bool {
     use crate::target::Tree;
     let Some(id) = crate::target::mask_lanes(cx.m, mask).and_then(|l| cx.t.find_mask(&l)) else { return false };
     let head = Head::Shuffle(id, head_bits(cx.m, rty));
-    // (A splat's: an insert into poison at lane 0.)
-    let from_insert = matches!(a, Value::Local(x)
+    // (A splat's: an insert into poison at lane 0, used once, as selection
+    // folds only what has one use.)
+    let from_insert = uses(f, a) == 1
+        && matches!(a, Value::Local(x)
         if matches!(f.locals[x.index()].def, LocalDef::Inst(d)
             if matches!(f.insts[d.index()].op, Op::InsertElement { vector: Value::Const(c), index, .. }
                 if matches!(cx.m.constant(c).kind, ConstKind::Poison | ConstKind::Undef) && cx.const_int(index) == Some(0))));
     cx.t.patterns.iter().any(|p| match &p.tree {
         Tree::Op(h, kids) if *h == head => match kids.first() {
             Some(Tree::Leaf(_)) => true,
-            Some(Tree::Op(Head::InsertElement(_), _)) => from_insert,
+            Some(Tree::Op(Head::InsertElement(b), _)) => from_insert && *b == head_bits(cx.m, cx.value_ty(f, a)),
             _ => false,
         },
         _ => false,
@@ -452,16 +465,14 @@ fn one_lane(cx: &mut Ctx, f: &mut Function, lanes: &mut Lanes, i: InstId) -> Opt
         s.f.replace_uses(Value::Local(r), v);
         return Some(s.new);
     }
-    // An insert making a splat's source, which its shuffle's pattern takes.
+    // An insert making a splat's source, which its shuffle's pattern takes
+    // (used once, by the shuffle).
     if let Op::InsertElement { vector: Value::Const(c), .. } = op
         && matches!(cx.m.constant(c).kind, ConstKind::Poison | ConstKind::Undef)
-        && f.insts_in_order().all(|j| match &f.insts[j.index()].op {
-            Op::ShuffleVector { b, mask, .. } => *b != Value::Local(r) && *mask != c,
-            o => {
-                let mut uses = false;
-                o.for_each_value(|v| uses |= *v == Value::Local(r));
-                !uses
-            }
+        && uses(f, Value::Local(r)) == 1
+        && f.insts_in_order().any(|j| {
+            matches!(&f.insts[j.index()].op, Op::ShuffleVector { a, mask, .. }
+                if *a == Value::Local(r) && shuffle_selectable(cx, f, *a, *mask, f.locals[f.insts[j.index()].result.unwrap().index()].ty))
         })
     {
         return None;

@@ -378,6 +378,14 @@ impl<'a, 'b> Sel<'a, 'b> {
     fn class_of_ty(&self, ty: TypeId) -> Class {
         let bits = self.bits(ty).max(1);
         let m = &self.t.machine;
+        // A mask, in the class for the vectors in use, where the
+        // description says.
+        if let Type::Vector { elem, .. } = self.cx.m.types.get(ty)
+            && matches!(self.cx.m.types.get(*elem), Type::Int(1))
+            && let Some(&(_, c)) = m.mask_classes.iter().find(|(b, _)| *b == self.cx.vector_bits())
+        {
+            return c;
+        }
         m.value_class(self.holds(ty), bits)
             .or_else(|| m.value_class(Holds::Int, 64))
             .expect("the description has an integer register class")
@@ -755,9 +763,13 @@ impl<'a, 'b> Sel<'a, 'b> {
                     let bits = self.bits(ty);
                     let def = self.t.machine.def(class);
                     let holds = self.holds(ty);
+                    // (A mask is as wide as the vectors it was made of: any
+                    // class of vectors holds it.)
+                    let mask = matches!(self.cx.m.types.get(ty), Type::Vector { elem, .. }
+                        if matches!(self.cx.m.types.get(*elem), Type::Int(1)));
                     if bits == 0
                         || self.t.machine.holds_of(class) != Some(holds)
-                        || (holds == Holds::Vector && bits != def.bits)
+                        || (holds == Holds::Vector && bits != def.bits && !mask)
                         || (holds != Holds::Vector && (bits > 64 || (bits > 32) != (pp.bits > 32)))
                     {
                         return None;
@@ -1309,19 +1321,34 @@ impl<'a, 'b> Sel<'a, 'b> {
         // `vec.join.d`: a second word into the high half; x86's).
         if let (Some(from), false) = (self.t.role("vec.from.x"), lanes.iter().all(|&l| l == 0)) {
             let mask = if ebits >= 64 { u64::MAX } else { (1u64 << ebits) - 1 };
-            let mut words = [0u64; 2];
+            let mut words = [0u64; 4];
             for (k, &l) in lanes.iter().enumerate() {
                 let at = k as u32 * ebits;
                 words[(at / 64) as usize] |= (l as u64 & mask) << (at % 64);
             }
-            let wide = len * ebits > 64;
-            let lo = self.int_reg(words[0] as i64, true, false)?;
-            self.push(MInst::new(from, vec![MOp::Reg(Reg::V(d)), MOp::Reg(lo)]));
-            if wide && words[1] != 0 {
-                let join = self.t.by_role("vec.join.d");
+            let n = (len * ebits).div_ceil(64) as usize;
+            // Each 128 bits: a word, the next joined above it.
+            let half = |this: &mut Self, w: &[u64], into: VReg| -> Result<(), String> {
+                let lo = this.int_reg(w[0] as i64, true, false)?;
+                this.push(MInst::new(from, vec![MOp::Reg(Reg::V(into)), MOp::Reg(lo)]));
+                if w.len() > 1 && w[1] != 0 {
+                    let join = this.t.by_role("vec.join.d");
+                    let t = this.mf.new_vreg(class);
+                    let hi = this.int_reg(w[1] as i64, true, false)?;
+                    this.push(MInst::new(from, vec![MOp::Reg(Reg::V(t)), MOp::Reg(hi)]));
+                    this.push(MInst::new(
+                        join,
+                        vec![MOp::Reg(Reg::V(into)), MOp::Reg(Reg::V(into)), MOp::Reg(Reg::V(t))],
+                    ));
+                }
+                Ok(())
+            };
+            half(self, &words[..n.min(2)], d)?;
+            // Wider (256 bits): the high 128 inserted (`vec.join.q`).
+            if n > 2 {
                 let t = self.mf.new_vreg(class);
-                let hi = self.int_reg(words[1] as i64, true, false)?;
-                self.push(MInst::new(from, vec![MOp::Reg(Reg::V(t)), MOp::Reg(hi)]));
+                half(self, &words[2..n], t)?;
+                let join = self.t.by_role("vec.join.q");
                 self.push(MInst::new(join, vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(t))]));
             }
             return Ok(Reg::V(d));
@@ -1332,7 +1359,10 @@ impl<'a, 'b> Sel<'a, 'b> {
             self.push(MInst::new(dup, vec![MOp::Reg(Reg::V(d)), MOp::Reg(g)]));
             return Ok(Reg::V(d));
         }
-        let zero = self.t.by_role("movi.zero");
+        // (The class's own, if it has one: x86's pxor leaves a ymm
+        // register's high half.)
+        let own = format!("movi.zero.{}", self.t.machine.def(class).name);
+        let zero = self.t.role(&own).unwrap_or_else(|| self.t.by_role("movi.zero"));
         self.push(MInst::new(zero, vec![MOp::Reg(Reg::V(d))]));
         if lanes.iter().all(|&l| l == 0) {
             return Ok(Reg::V(d));

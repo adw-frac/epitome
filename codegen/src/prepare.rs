@@ -51,10 +51,22 @@ impl Ctx<'_> {
     /// The width of the vector registers, or 0 if there are none (or their
     /// feature is off): then vectors are done lane by lane.
     pub fn vector_bits(&self) -> u32 {
-        match &self.t.machine.vector_feature {
-            Some(f) if !self.features.contains(f) => 0,
-            _ => self.t.machine.vector_bits,
-        }
+        // The widest whose feature is on (x86: 256 bits with avx2).
+        self.t
+            .machine
+            .vector_widths
+            .iter()
+            .filter(|(_, f)| f.as_ref().is_none_or(|f| self.features.contains(f)))
+            .map(|&(b, _)| b)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The narrowest vector kept whole in a register: narrower ones are
+    /// done lane by lane.
+    pub fn min_vector_bits(&self) -> u32 {
+        let vb = self.vector_bits();
+        self.t.machine.min_vector_bits.map_or(vb / 2, |m| m.min(vb))
     }
 
     /// Are instruction `i`'s features on?

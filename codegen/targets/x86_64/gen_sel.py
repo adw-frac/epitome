@@ -12,6 +12,7 @@ three-address, for the code generator's own adds (roles addi, add).
 Usage: gen_sel.py > 10-integer.ll
 """
 
+import os
 import sys
 
 out = []
@@ -1102,6 +1103,218 @@ def sse_recipes():
         out.append(f'declare {ty} @llvm.fabs.v{n}{et}({ty})\n')
 
 
+XED = None
+
+
+def xed(asm, classes):
+    """The encoding of 02-xed.ll's entry written `asm` whose registers are
+    of `classes` (in order), and its operands' names: VEX's encodings as
+    llvm-mc writes them, its swapped sources included."""
+    global XED
+    if XED is None:
+        import re
+        XED = {}
+        for line in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '02-xed.ll')):
+            m = re.match(r'define void @\w+\((.*?)\) "enc"="([^"]*)" "asm"="([^"]*)"', line)
+            if m:
+                ps = re.findall(r'"(reg|imm|sym)"(?:="(\w+)")? %([\w.]+)', m.group(1))
+                XED.setdefault(m.group(3), []).append((ps, m.group(2)))
+    # (VEX's alone are x and y; with EVEX's too, xe and ye.)
+    plain = lambda cs: [c.rstrip('e') for c in cs]
+    for exact in (True, False):
+        for ps, enc in XED.get(asm, []):
+            regs = [c for k, c, n in ps if k == 'reg' and n not in ('m.base', 'm.index')]
+            if regs == list(classes) if exact else plain(regs) == plain(classes):
+                return enc, [n for _, _, n in ps]
+    raise KeyError(f'no XED entry {asm!r} of {classes}')
+
+
+def renamed(enc, names):
+    """`enc` with its operands renamed (`o2` to `d`)."""
+    import re
+    return re.sub(r'(?<![\w.])(o\d|c|m\.disp|m\.base)(?![\w.])', lambda m: names.get(m.group(1), m.group(1)), enc)
+
+
+def avx2():
+    """AVX and AVX2's 256-bit vectors, in yv (ymm0-15), for functions with
+    avx2: VEX encodings from 02-xed.ll. Masks of them are in yv too."""
+    feat = ' "feature"="avx2"'
+    INT = [('<32 x i8>', 'b', 8, 32), ('<16 x i16>', 'w', 16, 16), ('<8 x i32>', 'd', 32, 8), ('<4 x i64>', 'q', 64, 4)]
+    FLT = [('<8 x float>', 'ps', 'float', 8, 32), ('<4 x double>', 'pd', 'double', 4, 64)]
+    tag = lambda ty: ty.strip('<>').replace(' x ', 'x').replace('float', 'f32').replace('double', 'f64')
+    Y = 'ye'
+    def three(ty, name, asm, body, rty=None, dcls='yv', classes=(Y, Y, Y), extra=''):
+        # AT&T: src2, src1, dst; o0 src2 (m), o1 src1 (n), o2 dst.
+        enc, _ = xed(asm, classes)
+        enc = renamed(enc, {'o0': 'm', 'o1': 'n', 'o2': 'd'})
+        entry(rty or ty, name, [f'{ty} "reg"="yv" %n', f'{ty} "reg"="yv" %m'], enc,
+              asm.replace('{o0}', '{m}').replace('{o1}', '{n}').replace('{o2}', '{d}'), body,
+              f' "dclass"="{dcls}"' + feat + extra)
+    # Memory, copies, zero.
+    for ty, *_ in INT + FLT:
+        T = tag(ty)
+        role = ty == '<4 x i64>'
+        enc, _ = xed('vmovups {m.disp}({m.base}), {o0}', (Y,))
+        entry(ty, f'VLD.{T}', ['ptr "reg"="r64" %n', 'i64 "imm" %off'], renamed(enc, {'o0': 'd', 'm.disp': 'off', 'm.base': 'n'}),
+              'vmovups {off}({n}), {d}', ['%a = getelementptr i8, ptr %n, i64 %off', f'%r = load {ty}, ptr %a', f'ret {ty} %r'],
+              ' "dclass"="yv"' + (' "role"="load.yv"' if role else '') + feat)
+        enc, _ = xed('vmovups {o0}, {m.disp}({m.base})', (Y,))
+        entry('void', f'VST.{T}', [f'{ty} "reg"="yv" %t', 'ptr "reg"="r64" %n', 'i64 "imm" %off'],
+              renamed(enc, {'o0': 't', 'm.disp': 'off', 'm.base': 'n'}), 'vmovups {t}, {off}({n})',
+              ['%a = getelementptr i8, ptr %n, i64 %off', f'store {ty} %t, ptr %a', 'ret void'],
+              (' "role"="store.yv"' if role else '') + feat)
+    enc, _ = xed('vmovaps {o0}, {o1}', (Y, Y))
+    entry('<4 x i64>', 'VMOVAPSyv', ['<4 x i64> "reg"="yv" %n'], renamed(enc, {'o0': 'n', 'o1': 'd'}), 'vmovaps {n}, {d}',
+          ['ret <4 x i64> %n'], ' "copy"="yv" "dclass"="yv"')
+    enc, _ = xed('vpxor {o0}, {o1}, {o2}', (Y, Y, Y))
+    entry('<4 x i64>', 'VPXORzero', [], renamed(enc, {'o0': 'd', 'o1': 'd', 'o2': 'd'}), 'vpxor {d}, {d}, {d}',
+          ['ret <4 x i64> zeroinitializer'], ' "dclass"="yv" "role"="movi.zero.yv" "nomatch"')
+    # The high 128 bits of a constant, inserted.
+    enc, _ = xed('vinserti128 ${c}, {o0}, {o1}, {o2}', ('x', 'y', 'y'))
+    entry('<4 x i64>', 'VINSERTI128hi', ['<4 x i64> "reg"="yv" "tied" %n', '<2 x i64> "reg"="xv" %h'],
+          renamed(enc, {'c': '1', 'o0': 'h', 'o1': 'n', 'o2': 'd'}).replace('i1:8=1', '00000001'),
+          'vinserti128 $1, {h}, {d}, {d}', ['ret <4 x i64> %n'], ' "dclass"="yv" "role"="vec.join.q" "nomatch"')
+    # Integer lanes.
+    for ty, sfx, eb, n in INT:
+        T = tag(ty)
+        S = sfx.upper()
+        ops = [('add', 'vpadd'), ('sub', 'vpsub')]
+        if eb == 16:
+            ops.append(('mul', 'vpmull'))
+        if eb == 32:
+            ops.append(('mul', 'vpmull'))
+        for ir, mn in ops:
+            three(ty, f'{mn.upper()}{S}.{T}', f'{mn}{sfx} {{o0}}, {{o1}}, {{o2}}', [f'%r = {ir} {ty} %n, %m', f'ret {ty} %r'])
+        for ir, mn in [('and', 'vpand'), ('or', 'vpor'), ('xor', 'vpxor')]:
+            three(ty, f'{mn.upper()}.{T}', f'{mn} {{o0}}, {{o1}}, {{o2}}', [f'%r = {ir} {ty} %n, %m', f'ret {ty} %r'])
+        M = f'<{n} x i1>'
+        three(ty, f'VPCMPEQ{S}.{T}', f'vpcmpeq{sfx} {{o0}}, {{o1}}, {{o2}}', [f'%r = icmp eq {ty} %n, %m', f'ret {M} %r'], M)
+        three(ty, f'VPCMPGT{S}.{T}', f'vpcmpgt{sfx} {{o0}}, {{o1}}, {{o2}}', [f'%r = icmp sgt {ty} %n, %m', f'ret {M} %r'], M)
+        if eb < 64:
+            for ir, mn in [('smin', 'vpmins'), ('smax', 'vpmaxs'), ('umin', 'vpminu'), ('umax', 'vpmaxu')]:
+                three(ty, f'{mn.upper()}{S}.{T}', f'{mn}{sfx} {{o0}}, {{o1}}, {{o2}}',
+                      [f'%r = call {ty} @llvm.{ir}.v{n}i{eb}({ty} %n, {ty} %m)', f'ret {ty} %r'])
+                out.append(f'declare {ty} @llvm.{ir}.v{n}i{eb}({ty}, {ty})\n')
+        # Shifts by an immediate, and (32 and 64 bits) by a vector.
+        for ir, mn in [('shl', 'vpsll'), ('lshr', 'vpsrl'), ('ashr', 'vpsra')]:
+            if eb == 8 or (ir == 'ashr' and eb == 64):
+                continue
+            enc, _ = xed(f'{mn}{sfx} ${{c}}, {{o0}}, {{o1}}', (Y, Y))
+            entry(ty, f'{mn.upper()}{S}i.{T}', [f'{ty} "reg"="yv" %n', f'{ty} "imm" %sh'],
+                  renamed(enc, {'c': 'sh', 'o0': 'n', 'o1': 'd'}), f'{mn}{sfx} ${{sh}}, {{n}}, {{d}}',
+                  [f'%r = {ir} {ty} %n, %sh', f'ret {ty} %r'], ' "dclass"="yv"' + feat)
+            if eb >= 32 and not (ir == 'ashr' and eb == 64):
+                three(ty, f'{mn.upper()}V{S}.{T}', f'{mn}v{sfx} {{o0}}, {{o1}}, {{o2}}', [f'%r = {ir} {ty} %n, %m', f'ret {ty} %r'])
+        # A mask's lanes as 0 or 1.
+        if eb > 8:
+            enc, _ = xed(f'vpsrl{sfx} ${{c}}, {{o0}}, {{o1}}', (Y, Y))
+            entry(ty, f'VMASK.{T}', [f'{M} "reg"="yv" %n'], renamed(enc, {'c': str(eb - 1), 'o0': 'n', 'o1': 'd'}).replace(f'i1:8={eb - 1}', bits(eb - 1)),
+                  f'vpsrl{sfx} ${eb - 1}, {{n}}, {{d}}', [f'%r = zext {M} %n to {ty}', f'ret {ty} %r'], ' "dclass"="yv"' + feat)
+        # Selects by a mask: each byte by its top bit, which a mask's lanes
+        # all have.
+        enc, _ = xed('vpblendvb {o0}, {o1}, {o2}, {o3}', ('y', 'y', 'y', 'y'))
+        entry(ty, f'VPBLENDVB.{T}', [f'{M} "reg"="yv" %c', f'{ty} "reg"="yv" %a', f'{ty} "reg"="yv" %b'],
+              renamed(enc, {'o0': 'c', 'o1': 'a', 'o2': 'b', 'o3': 'd'}).replace('o3', 'd'), 'vpblendvb {c}, {a}, {b}, {d}',
+              [f'%r = select {M} %c, {ty} %a, {ty} %b', f'ret {ty} %r'], ' "dclass"="yv"' + feat)
+    # Floating point.
+    for ty, sfx, et, n, eb in FLT:
+        T = tag(ty)
+        S = sfx.upper()
+        for ir, mn in [('fadd', 'vadd'), ('fsub', 'vsub'), ('fmul', 'vmul'), ('fdiv', 'vdiv')]:
+            three(ty, f'{mn.upper()}{S}.{T}', f'{mn}{sfx} {{o0}}, {{o1}}, {{o2}}', [f'%r = {ir} {ty} %n, %m', f'ret {ty} %r'])
+        it = f'v{n}f{eb}'
+        enc, _ = xed(f'vsqrt{sfx} {{o0}}, {{o1}}', (Y, Y))
+        entry(ty, f'VSQRT{S}.{T}', [f'{ty} "reg"="yv" %n'], renamed(enc, {'o0': 'n', 'o1': 'd'}), f'vsqrt{sfx} {{n}}, {{d}}',
+              [f'%r = call {ty} @llvm.sqrt.{it}({ty} %n)', f'ret {ty} %r'], ' "dclass"="yv"' + feat)
+        out.append(f'declare {ty} @llvm.sqrt.{it}({ty})\n')
+        M = f'<{n} x i1>'
+        enc, _ = xed(f'vcmp{sfx} ${{c}}, {{o0}}, {{o1}}, {{o2}}', ('y', 'y', 'y'))
+        for pred, k in [('oeq', 0), ('olt', 1), ('ole', 2), ('uno', 3), ('une', 4), ('uge', 5), ('ugt', 6), ('ord', 7),
+                        ('ueq', 8), ('ult', 9), ('ule', 10), ('one', 12), ('oge', 13), ('ogt', 14)]:
+            entry(M, f'VCMP{pred.upper()}{S}.{T}', [f'{ty} "reg"="yv" %n', f'{ty} "reg"="yv" %m'],
+                  renamed(enc, {'o0': 'm', 'o1': 'n', 'o2': 'd', 'c': str(k)}),
+                  f'vcmp{sfx} ${k}, {{m}}, {{n}}, {{d}}', [f'%r = fcmp {pred} {ty} %n, %m', f'ret {M} %r'], ' "dclass"="yv"' + feat)
+        enc, _ = xed(f'vblendv{sfx} {{o0}}, {{o1}}, {{o2}}, {{o3}}', ('y', 'y', 'y', 'y'))
+        entry(ty, f'VBLENDV{S}.{T}', [f'{M} "reg"="yv" %c', f'{ty} "reg"="yv" %a', f'{ty} "reg"="yv" %b'],
+              renamed(enc, {'o0': 'c', 'o1': 'a', 'o2': 'b', 'o3': 'd'}).replace('o3', 'd'), f'vblendv{sfx} {{c}}, {{a}}, {{b}}, {{d}}',
+              [f'%r = select {M} %c, {ty} %a, {ty} %b', f'ret {ty} %r'], ' "dclass"="yv"' + feat)
+        # Fused multiply-add: d = n * m + d.
+        enc, _ = xed(f'vfmadd231{sfx} {{o0}}, {{o1}}, {{o2}}', (Y, Y, Y))
+        for intr in ('fma', 'fmuladd'):
+            entry(ty, f'VFMADD231{S}.{intr}.{T}', [f'{ty} "reg"="yv" %n', f'{ty} "reg"="yv" %m', f'{ty} "reg"="yv" "tied" %acc'],
+                  renamed(enc, {'o0': 'm', 'o1': 'n', 'o2': 'd'}), f'vfmadd231{sfx} {{m}}, {{n}}, {{d}}',
+                  [f'%r = call {ty} @llvm.{intr}.{it}({ty} %n, {ty} %m, {ty} %acc)', f'ret {ty} %r'],
+                  ' "dclass"="yv" "feature"="avx2,fma"')
+            out.append(f'declare {ty} @llvm.{intr}.{it}({ty}, {ty}, {ty})\n')
+    # Conversions.
+    for asm, classes, src, dst, ir in [('vcvtdq2ps {o0}, {o1}', (Y, Y), '<8 x i32>', '<8 x float>', 'sitofp'),
+                                       ('vcvttps2dq {o0}, {o1}', (Y, Y), '<8 x float>', '<8 x i32>', 'fptosi'),
+                                       ('vcvtps2pd {o0}, {o1}', ('xe', Y), '<4 x float>', '<4 x double>', 'fpext'),
+                                       ('vcvtdq2pd {o0}, {o1}', ('xe', Y), '<4 x i32>', '<4 x double>', 'sitofp')]:
+        enc, _ = xed(asm, classes)
+        scls = 'xv' if classes[0] == 'xe' else 'yv'
+        entry(dst, f'{asm.split()[0].upper()}.{tag(dst)}', [f'{src} "reg"="{scls}" %n'], renamed(enc, {'o0': 'n', 'o1': 'd'}),
+              asm.replace('{o0}', '{n}').replace('{o1}', '{d}'), [f'%r = {ir} {src} %n to {dst}', f'ret {dst} %r'],
+              ' "dclass"="yv"' + feat)
+    # Halves (legalisation's): the low in place, the high extracted; two
+    # joined; and 128-bit lanes widened to 256 (vpmovsx, vpmovzx).
+    for full, half, n in [('<32 x i8>', '<16 x i8>', 32), ('<16 x i16>', '<8 x i16>', 16), ('<8 x i32>', '<4 x i32>', 8),
+                          ('<4 x i64>', '<2 x i64>', 4), ('<8 x float>', '<4 x float>', 8), ('<4 x double>', '<2 x double>', 4)]:
+        h = n // 2
+        lo = ', '.join(f'i32 {k}' for k in range(h))
+        hi = ', '.join(f'i32 {k}' for k in range(h, n))
+        both = ', '.join(f'i32 {k}' for k in range(n))
+        T = tag(full)
+        entry(half, f'VLOW.{T}', [f'{full} "reg"="yv" %v'], 'rex(0, d, 0, v) | 00001111 | 00101000 | rr(d, v)',
+              'movaps {v:x}, {d}', [f'%r = shufflevector {full} %v, {full} poison, <{h} x i32> <{lo}>', f'ret {half} %r'],
+              ' "dclass"="xv"' + feat)
+        enc, _ = xed('vextracti128 ${c}, {o0}, {o1}', ('y', 'x'))
+        entry(half, f'VHIGH.{T}', [f'{full} "reg"="yv" %v'], renamed(enc, {'o0': 'v', 'o1': 'd'}).replace('i1:8=c', '00000001'),
+              'vextracti128 $1, {v}, {d}', [f'%r = shufflevector {full} %v, {full} poison, <{h} x i32> <{hi}>', f'ret {half} %r'],
+              ' "dclass"="xv"' + feat)
+        enc, _ = xed('vinserti128 ${c}, {o0}, {o1}, {o2}', ('x', 'y', 'y'))
+        entry(full, f'VJOIN.{T}', [f'{half} "reg"="xv" %a', f'{half} "reg"="xv" %b'],
+              renamed(enc, {'o0': 'b', 'o1': 'a', 'o2': 'd'}).replace('i1:8=c', '00000001'), 'vinserti128 $1, {b}, {a:y}, {d}',
+              [f'%r = shufflevector {half} %a, {half} %b, <{n} x i32> <{both}>', f'ret {full} %r'], ' "dclass"="yv"' + feat)
+    for src, dst, mn in [('<16 x i8>', '<16 x i16>', 'bw'), ('<8 x i16>', '<8 x i32>', 'wd'), ('<4 x i32>', '<4 x i64>', 'dq')]:
+        for ext, pre in [('sext', 'vpmovsx'), ('zext', 'vpmovzx')]:
+            enc, _ = xed(f'{pre}{mn} {{o0}}, {{o1}}', ('xe', Y))
+            entry(dst, f'{pre.upper()}{mn.upper()}', [f'{src} "reg"="xv" %n'], renamed(enc, {'o0': 'n', 'o1': 'd'}),
+                  f'{pre}{mn} {{n}}, {{d}}', [f'%r = {ext} {src} %n to {dst}', f'ret {dst} %r'], ' "dclass"="yv"' + feat)
+    # Masks' bits, as copies (lanewise.rs).
+    for n, w in [(32, 8), (16, 16), (8, 32), (4, 64)]:
+        M, I = f'<{n} x i1>', f'<{n} x i{w}>'
+        enc, _ = xed('vmovaps {o0}, {o1}', (Y, Y))
+        entry(I, f'VBITS.{n}x{w}', [f'{M} "reg"="yv" %m'], renamed(enc, {'o0': 'm', 'o1': 'd'}), 'vmovaps {m}, {d}',
+              [f'%r = call {I} @llvm.epitome.mask.bits.v{n}i{w}({M} %m)', f'ret {I} %r'], ' "dclass"="yv"' + feat)
+        entry(M, f'VMASK.{n}x{w}', [f'{I} "reg"="yv" %v'], renamed(enc, {'o0': 'v', 'o1': 'd'}), 'vmovaps {v}, {d}',
+              [f'%r = call {M} @llvm.epitome.bits.mask.v{n}i{w}({I} %v)', f'ret {M} %r'], ' "dclass"="yv"' + feat)
+        out.append(f'declare {I} @llvm.epitome.mask.bits.v{n}i{w}({M})\ndeclare {M} @llvm.epitome.bits.mask.v{n}i{w}({I})\n')
+    # Splats, from an xmm register's lane 0 (vpbroadcast, vbroadcastss).
+    for ty, et, mn, src, srccls in [('<8 x i32>', 'i32', 'vpbroadcastd', 'i32 "reg"="r32"', 'r32'),
+                                    ('<4 x i64>', 'i64', 'vpbroadcastq', 'i64 "reg"="r64"', 'r64'),
+                                    ('<16 x i16>', 'i16', 'vpbroadcastw', 'i16 "reg"="r32"', 'r32'),
+                                    ('<32 x i8>', 'i8', 'vpbroadcastb', 'i8 "reg"="r32"', 'r32'),
+                                    ('<8 x float>', 'float', 'vbroadcastss', 'float "reg"="s"', 's'),
+                                    ('<4 x double>', 'double', 'vbroadcastsd', 'double "reg"="d"', 'd')]:
+        T = tag(ty)
+        enc, _ = xed(f'{mn} {{o0}}, {{o1}}', ('xe', Y))
+        entry(ty, f'{mn.upper()}', ['<2 x i64> "reg"="xv" %n'], renamed(enc, {'o0': 'n', 'o1': 'd'}), f'{mn} {{n}}, {{d}}',
+              [f'ret {ty} poison'], ' "dclass"="yv" "nomatch"' + feat)
+        body = (f'  %i = insertelement {ty} poison, {et} %x, i64 0\n'
+                f'  %r = shufflevector {ty} %i, {ty} poison, <{ty[1:].split()[0]} x i32> zeroinitializer\n  ret {ty} %r\n')
+        out.append(f'define {ty} @vsplat.{T}({src} %x) "recipe"="vsplat.{T}.expand" "feature"="avx2" {{\n{body}}}\n')
+        if srccls == 'r64':
+            move = '  %v = call <2 x i64> @MOVQto(i64 %x)\n'
+        elif srccls == 'r32':
+            move = (f'  %w = zext {et} %x to i32\n' if et != 'i32' else '') + \
+                   f'  %v4 = call <4 x i32> @MOVDto(i32 {"%w" if et != "i32" else "%x"})\n  %v = bitcast <4 x i32> %v4 to <2 x i64>\n'
+        else:
+            move = f'  %v = bitcast {et} %x to <2 x i64>\n'
+        out.append(f'define {ty} @vsplat.{T}.expand({et} %x) {{\n{move}  %r = call {ty} @{mn.upper()}(<2 x i64> %v)\n'
+                   f'  ret {ty} %r\n}}\n')
+
+
 def vector_copies():
     """Copies of the vector and mask registers (the register allocator's)."""
     entry('<2 x i64>', 'MOVAPSrr', ['<2 x i64> "reg"="x" %n'], 'rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)',
@@ -1141,6 +1354,7 @@ def main():
     x87()
     sse_vectors()
     sse_recipes()
+    avx2()
     vector_copies()
     sys.stdout.write('\n'.join(out))
 
