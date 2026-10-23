@@ -1877,13 +1877,19 @@ impl<'a, 'b> Sel<'a, 'b> {
         let mut early: Vec<bool> = Vec::new();
         let mut args = call.args.iter().map(|x| x.value);
         let mut next_result = 0;
-        let named = |name: &str| -> Option<u8> { name.strip_prefix('{')?.strip_suffix('}').and_then(|n| m.lookup(n)) };
+        // A register by its name, as constraints and clobbers write it
+        // (without AT&T's %: `{r9}`, `~{rbx}`).
+        let by_name = |n: &str| m.lookup(n).or_else(|| m.lookup(&format!("%{n}")));
+        let named = |name: &str| -> Option<u8> { name.strip_prefix('{')?.strip_suffix('}').and_then(by_name) };
         for c in &cons {
             if c.clobber {
                 let name = c.codes.trim_start_matches('{').trim_end_matches('}');
-                match m.lookup(name) {
+                match by_name(name) {
                     Some(p) => clobbers.push(p),
-                    None if matches!(name, "memory" | "cc" | "flags" | "dirflag" | "fpsr" | "fpcr" | "nzcv") => {}
+                    None if matches!(
+                        name,
+                        "memory" | "cc" | "flags" | "eflags" | "dirflag" | "fpsr" | "fpcr" | "nzcv"
+                    ) => {}
                     None => return Err(bad(format!("no register {name} to clobber"))),
                 }
                 continue;
