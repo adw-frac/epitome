@@ -361,6 +361,47 @@ def rip_memory():
               [f'store {ty} %t, ptr %s', 'ret void'], ' "reloc"="pc32x"')
 
 
+def load_op():
+    """Arithmetic and comparisons of a register with memory at a base plus
+    a displacement (`addl 8(%rdi), %eax`, `cmpl $0, 16(%rax)`): the load
+    folded in, one instruction and one register fewer."""
+    for w in (64, 32):
+        ty, cls, rw, sfx, _ = W[w]
+        zext = '' if w == 64 else ' "zext"="32"'
+        prm = ['ptr "reg"="r64" %n', 'i64 "imm" %off']
+        ld = ['%a = getelementptr i8, ptr %n, i64 %off', f'%v = load {ty}, ptr %a']
+        for mn, k, ir in [('add', 0, 'add'), ('or', 1, 'or'), ('and', 4, 'and'), ('sub', 5, 'sub'), ('xor', 6, 'xor')]:
+            entry(ty, f'{mn.upper()}{w}rm', [f'{ty} "reg"="{cls}" "tied" %x'] + prm,
+                  f'rex({rw}, d, 4, n) | {bits(k * 8 + 3)} | rm(d, n, 4, 1, off, 0, 1)', f'{mn}{sfx} {{off}}({{n}}), {{d}}',
+                  ld + [f'%r = {ir} {ty} %x, %v', f'ret {ty} %r'], FLAGS + zext)
+        entry(ty, f'IMUL{w}rm', [f'{ty} "reg"="{cls}" "tied" %x'] + prm,
+              f'rex({rw}, d, 4, n) | 00001111 | 10101111 | rm(d, n, 4, 1, off, 0, 1)', f'imul{sfx} {{off}}({{n}}), {{d}}',
+              ld + [f'%r = mul {ty} %x, %v', f'ret {ty} %r'], FLAGS + zext)
+        # cmp: the flags of x - the memory (3B /r), and of the memory less
+        # an immediate (83 or 81 /7).
+        ext = (lambda a, b: [f'%ea = sext i32 {a} to i64', f'%eb = sext i32 {b} to i64']) if w == 32 else (lambda a, b: [])
+        A = lambda a: '%ea' if w == 32 else a
+        B = lambda b: '%eb' if w == 32 else b
+        entry('%flags', f'CMP{w}rm', [f'{ty} "reg"="{cls}" %x'] + prm,
+              f'rex({rw}, x, 4, n) | 00111011 | rm(x, n, 4, 1, off, 0, 1)', f'cmp{sfx} {{off}}({{n}}), {{x}}',
+              ld + ext('%x', '%v') + [f'%f0 = insertvalue %flags poison, i64 {A("%x")}, 0',
+                                       f'%f = insertvalue %flags %f0, i64 {B("%v")}, 1', 'ret %flags %f'], ' "sets"="zcso"')
+        entry('%flags', f'CMP{w}mi', prm + [f'{ty} "imm" %imm'],
+              f'{{ rex({rw}, 0, 4, n) | 10000011 | rm(7, n, 4, 1, off, 0, 1) | ib:s8=imm ; '
+              f'rex({rw}, 0, 4, n) | 10000001 | rm(7, n, 4, 1, off, 0, 1) | iv:s32=imm }}',
+              f'cmp{sfx} ${{imm}}, {{off}}({{n}})',
+              ld + ext('%v', '%imm') + [f'%f0 = insertvalue %flags poison, i64 {A("%v")}, 0',
+                                         f'%f = insertvalue %flags %f0, i64 {B("%imm")}, 1', 'ret %flags %f'], ' "sets"="zcso"')
+    for ty, (pre, sfx, cls, _) in FP.items():
+        T = sfx.upper()
+        prm = ['ptr "reg"="r64" %n', 'i64 "imm" %off']
+        ld = ['%a = getelementptr i8, ptr %n, i64 %off', f'%v = load {ty}, ptr %a']
+        for mn, op, ir in [('add', 0x58, 'fadd'), ('sub', 0x5C, 'fsub'), ('mul', 0x59, 'fmul'), ('div', 0x5E, 'fdiv')]:
+            entry(ty, f'{mn.upper()}{T}rm', [f'{ty} "reg"="{cls}" "tied" %x'] + prm,
+                  f'{pre}rex(0, d, 4, n) | 00001111 | {bits(op)} | rm(d, n, 4, 1, off, 0, 1)', f'{mn}{sfx} {{off}}({{n}}), {{d}}',
+                  ld + [f'%r = {ir} {ty} %x, %v', f'ret {ty} %r'], f' "dclass"="{cls}"')
+
+
 def recipes():
     """Minimum and maximum: compare, then move one over the other if it
     wins."""
@@ -1095,6 +1136,7 @@ def main():
     division()
     recipes()
     floats()
+    load_op()
     atomics()
     x87()
     sse_vectors()

@@ -1877,6 +1877,182 @@ define float @CVTSD2SS(double "reg"="d" %n) "enc"="11110010 | rex(0, d, 0, n) | 
   ret float %r
 }
 
+define i64 @ADD64rm(i64 "reg"="r64" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(1, d, 4, n) | 00000011 | rm(d, n, 4, 1, off, 0, 1)" "asm"="addq {off}({n}), {d}" "clobbers"="flags" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i64, ptr %a
+  %r = add i64 %x, %v
+  ret i64 %r
+}
+
+define i64 @OR64rm(i64 "reg"="r64" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(1, d, 4, n) | 00001011 | rm(d, n, 4, 1, off, 0, 1)" "asm"="orq {off}({n}), {d}" "clobbers"="flags" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i64, ptr %a
+  %r = or i64 %x, %v
+  ret i64 %r
+}
+
+define i64 @AND64rm(i64 "reg"="r64" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(1, d, 4, n) | 00100011 | rm(d, n, 4, 1, off, 0, 1)" "asm"="andq {off}({n}), {d}" "clobbers"="flags" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i64, ptr %a
+  %r = and i64 %x, %v
+  ret i64 %r
+}
+
+define i64 @SUB64rm(i64 "reg"="r64" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(1, d, 4, n) | 00101011 | rm(d, n, 4, 1, off, 0, 1)" "asm"="subq {off}({n}), {d}" "clobbers"="flags" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i64, ptr %a
+  %r = sub i64 %x, %v
+  ret i64 %r
+}
+
+define i64 @XOR64rm(i64 "reg"="r64" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(1, d, 4, n) | 00110011 | rm(d, n, 4, 1, off, 0, 1)" "asm"="xorq {off}({n}), {d}" "clobbers"="flags" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i64, ptr %a
+  %r = xor i64 %x, %v
+  ret i64 %r
+}
+
+define i64 @IMUL64rm(i64 "reg"="r64" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(1, d, 4, n) | 00001111 | 10101111 | rm(d, n, 4, 1, off, 0, 1)" "asm"="imulq {off}({n}), {d}" "clobbers"="flags" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i64, ptr %a
+  %r = mul i64 %x, %v
+  ret i64 %r
+}
+
+define %flags @CMP64rm(i64 "reg"="r64" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(1, x, 4, n) | 00111011 | rm(x, n, 4, 1, off, 0, 1)" "asm"="cmpq {off}({n}), {x}" "sets"="zcso" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i64, ptr %a
+  %f0 = insertvalue %flags poison, i64 %x, 0
+  %f = insertvalue %flags %f0, i64 %v, 1
+  ret %flags %f
+}
+
+define %flags @CMP64mi(ptr "reg"="r64" %n, i64 "imm" %off, i64 "imm" %imm) "enc"="{ rex(1, 0, 4, n) | 10000011 | rm(7, n, 4, 1, off, 0, 1) | ib:s8=imm ; rex(1, 0, 4, n) | 10000001 | rm(7, n, 4, 1, off, 0, 1) | iv:s32=imm }" "asm"="cmpq ${imm}, {off}({n})" "sets"="zcso" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i64, ptr %a
+  %f0 = insertvalue %flags poison, i64 %v, 0
+  %f = insertvalue %flags %f0, i64 %imm, 1
+  ret %flags %f
+}
+
+define i32 @ADD32rm(i32 "reg"="r32" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, d, 4, n) | 00000011 | rm(d, n, 4, 1, off, 0, 1)" "asm"="addl {off}({n}), {d}" "clobbers"="flags" "zext"="32" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i32, ptr %a
+  %r = add i32 %x, %v
+  ret i32 %r
+}
+
+define i32 @OR32rm(i32 "reg"="r32" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, d, 4, n) | 00001011 | rm(d, n, 4, 1, off, 0, 1)" "asm"="orl {off}({n}), {d}" "clobbers"="flags" "zext"="32" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i32, ptr %a
+  %r = or i32 %x, %v
+  ret i32 %r
+}
+
+define i32 @AND32rm(i32 "reg"="r32" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, d, 4, n) | 00100011 | rm(d, n, 4, 1, off, 0, 1)" "asm"="andl {off}({n}), {d}" "clobbers"="flags" "zext"="32" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i32, ptr %a
+  %r = and i32 %x, %v
+  ret i32 %r
+}
+
+define i32 @SUB32rm(i32 "reg"="r32" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, d, 4, n) | 00101011 | rm(d, n, 4, 1, off, 0, 1)" "asm"="subl {off}({n}), {d}" "clobbers"="flags" "zext"="32" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i32, ptr %a
+  %r = sub i32 %x, %v
+  ret i32 %r
+}
+
+define i32 @XOR32rm(i32 "reg"="r32" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, d, 4, n) | 00110011 | rm(d, n, 4, 1, off, 0, 1)" "asm"="xorl {off}({n}), {d}" "clobbers"="flags" "zext"="32" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i32, ptr %a
+  %r = xor i32 %x, %v
+  ret i32 %r
+}
+
+define i32 @IMUL32rm(i32 "reg"="r32" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, d, 4, n) | 00001111 | 10101111 | rm(d, n, 4, 1, off, 0, 1)" "asm"="imull {off}({n}), {d}" "clobbers"="flags" "zext"="32" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i32, ptr %a
+  %r = mul i32 %x, %v
+  ret i32 %r
+}
+
+define %flags @CMP32rm(i32 "reg"="r32" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="rex(0, x, 4, n) | 00111011 | rm(x, n, 4, 1, off, 0, 1)" "asm"="cmpl {off}({n}), {x}" "sets"="zcso" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i32, ptr %a
+  %ea = sext i32 %x to i64
+  %eb = sext i32 %v to i64
+  %f0 = insertvalue %flags poison, i64 %ea, 0
+  %f = insertvalue %flags %f0, i64 %eb, 1
+  ret %flags %f
+}
+
+define %flags @CMP32mi(ptr "reg"="r64" %n, i64 "imm" %off, i32 "imm" %imm) "enc"="{ rex(0, 0, 4, n) | 10000011 | rm(7, n, 4, 1, off, 0, 1) | ib:s8=imm ; rex(0, 0, 4, n) | 10000001 | rm(7, n, 4, 1, off, 0, 1) | iv:s32=imm }" "asm"="cmpl ${imm}, {off}({n})" "sets"="zcso" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load i32, ptr %a
+  %ea = sext i32 %v to i64
+  %eb = sext i32 %imm to i64
+  %f0 = insertvalue %flags poison, i64 %ea, 0
+  %f = insertvalue %flags %f0, i64 %eb, 1
+  ret %flags %f
+}
+
+define double @ADDSDrm(double "reg"="d" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110010 | rex(0, d, 4, n) | 00001111 | 01011000 | rm(d, n, 4, 1, off, 0, 1)" "asm"="addsd {off}({n}), {d}" "dclass"="d" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load double, ptr %a
+  %r = fadd double %x, %v
+  ret double %r
+}
+
+define double @SUBSDrm(double "reg"="d" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110010 | rex(0, d, 4, n) | 00001111 | 01011100 | rm(d, n, 4, 1, off, 0, 1)" "asm"="subsd {off}({n}), {d}" "dclass"="d" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load double, ptr %a
+  %r = fsub double %x, %v
+  ret double %r
+}
+
+define double @MULSDrm(double "reg"="d" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110010 | rex(0, d, 4, n) | 00001111 | 01011001 | rm(d, n, 4, 1, off, 0, 1)" "asm"="mulsd {off}({n}), {d}" "dclass"="d" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load double, ptr %a
+  %r = fmul double %x, %v
+  ret double %r
+}
+
+define double @DIVSDrm(double "reg"="d" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110010 | rex(0, d, 4, n) | 00001111 | 01011110 | rm(d, n, 4, 1, off, 0, 1)" "asm"="divsd {off}({n}), {d}" "dclass"="d" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load double, ptr %a
+  %r = fdiv double %x, %v
+  ret double %r
+}
+
+define float @ADDSSrm(float "reg"="s" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110011 | rex(0, d, 4, n) | 00001111 | 01011000 | rm(d, n, 4, 1, off, 0, 1)" "asm"="addss {off}({n}), {d}" "dclass"="s" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load float, ptr %a
+  %r = fadd float %x, %v
+  ret float %r
+}
+
+define float @SUBSSrm(float "reg"="s" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110011 | rex(0, d, 4, n) | 00001111 | 01011100 | rm(d, n, 4, 1, off, 0, 1)" "asm"="subss {off}({n}), {d}" "dclass"="s" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load float, ptr %a
+  %r = fsub float %x, %v
+  ret float %r
+}
+
+define float @MULSSrm(float "reg"="s" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110011 | rex(0, d, 4, n) | 00001111 | 01011001 | rm(d, n, 4, 1, off, 0, 1)" "asm"="mulss {off}({n}), {d}" "dclass"="s" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load float, ptr %a
+  %r = fmul float %x, %v
+  ret float %r
+}
+
+define float @DIVSSrm(float "reg"="s" "tied" %x, ptr "reg"="r64" %n, i64 "imm" %off) "enc"="11110011 | rex(0, d, 4, n) | 00001111 | 01011110 | rm(d, n, 4, 1, off, 0, 1)" "asm"="divss {off}({n}), {d}" "dclass"="s" "nodecode" {
+  %a = getelementptr i8, ptr %n, i64 %off
+  %v = load float, ptr %a
+  %r = fdiv float %x, %v
+  ret float %r
+}
+
 define i8 @LDAI8(ptr "reg"="r64" %n) "enc"="rex(0, d, 4, n) | 00001111 | 10110110 | rm(d, n, 4, 1, 0, 0, 1)" "asm"="movzbl 0({n}), {d:r32}" "dclass"="r32" "nodecode" "zext"="8" {
   %r = load atomic i8, ptr %n acquire, align 1
   ret i8 %r
