@@ -12,9 +12,13 @@
 //! therefore end up in callee-saved registers. Copies give hints, so that a
 //! copy's two sides often share a register and the copy disappears.
 //!
-//! When no register is free, the value goes to a stack slot and is loaded
-//! into a scratch register (`x16`, `x17`, `x15`) before each use and stored
-//! after each definition.
+//! When no register is free, the value takes one from values it overlaps
+//! that are all worth less than it (used less often for how long they
+//! live: a pointer live through a function, used twice, gives way to a
+//! loop's counter), and they are spilled instead; failing that, it is
+//! spilled. A spilled value goes to a stack slot and is loaded into a
+//! scratch register (`x16`, `x17`, `x15`) before each use and stored after
+//! each definition.
 
 use std::collections::{HashMap, HashSet};
 
@@ -44,7 +48,7 @@ type Interval = (u32, u32);
 /// Where a physical register is taken: closed intervals, kept as their
 /// union, disjoint and by start, so that whether an interval meets any of
 /// them is one lookup (the last one starting at or before its end).
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Busy(std::collections::BTreeMap<u32, u32>);
 
 impl Busy {
@@ -265,6 +269,30 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool) -> Result<bool, String> 
             busy.add(s);
         }
     }
+    // What is taken for good (arguments, results, calls), and which values
+    // each register was given: a value may take a register from values
+    // that are worth less (used less often for how long they live), which
+    // are spilled instead.
+    let fixed_busy = taken.clone();
+    let mut owners: HashMap<u8, Vec<VReg>> = HashMap::new();
+    let mut count = vec![0u32; nv];
+    for b in &f.blocks {
+        for inst in &b.insts {
+            let (defs, uses) = regs_of(t, inst);
+            for r in defs.iter().chain(&uses) {
+                if let Reg::V(v) = r {
+                    count[*v as usize] += 1;
+                }
+            }
+        }
+    }
+    let weight: Vec<f64> = (0..nv)
+        .map(|v| {
+            let len: u32 = segs[v].iter().map(|&(a, b)| b - a + 1).sum();
+            f64::from(count[v]) / f64::from(len + 1)
+        })
+        .collect();
+    let overlaps = |a: &[Interval], b: &[Interval]| a.iter().any(|&(s, e)| b.iter().any(|&(t, u)| s <= u && t <= e));
     let mut assigned: Vec<Option<u8>> = vec![None; nv];
     let mut spilled: Vec<VReg> = Vec::new();
     for v in order {
@@ -314,10 +342,55 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool) -> Result<bool, String> 
         // Only registers of the value's own file.
         let file = file_of_v(v);
         cands.retain(|&p| m.file_of(p) == file);
-        let free = cands.into_iter().find(|p| taken.get(p).is_none_or(|busy| mine.iter().all(|&m| !busy.meets(m))));
-        match free {
+        let free = cands.iter().copied().find(|p| taken.get(p).is_none_or(|busy| mine.iter().all(|&m| !busy.meets(m))));
+        // Else the register whose values in the way are all worth less
+        // than this one, and least in all.
+        let evict = match free {
+            Some(_) => None,
+            None => {
+                let mut best: Option<(u8, f64, Vec<VReg>)> = None;
+                for &p in &cands {
+                    if fixed_busy.get(&p).is_some_and(|b| mine.iter().any(|&m| b.meets(m))) {
+                        continue;
+                    }
+                    let away: Vec<VReg> = owners
+                        .get(&p)
+                        .into_iter()
+                        .flatten()
+                        .copied()
+                        .filter(|&w| overlaps(&segs[w as usize], mine))
+                        .collect();
+                    if away.is_empty() || away.iter().any(|&w| weight[w as usize] >= weight[v as usize]) {
+                        continue;
+                    }
+                    let cost: f64 = away.iter().map(|&w| weight[w as usize]).sum();
+                    if best.as_ref().is_none_or(|b| cost < b.1) {
+                        best = Some((p, cost, away));
+                    }
+                }
+                best
+            }
+        };
+        if let Some((p, _, away)) = &evict {
+            let p = *p;
+            for &w in away {
+                assigned[w as usize] = None;
+                spilled.push(w);
+            }
+            let list = owners.entry(p).or_default();
+            list.retain(|w| !away.contains(w));
+            let mut busy = fixed_busy.get(&p).cloned().unwrap_or_default();
+            for &w in list.iter() {
+                for &s in &segs[w as usize] {
+                    busy.add(s);
+                }
+            }
+            taken.insert(p, busy);
+        }
+        match free.or(evict.as_ref().map(|e| e.0)) {
             Some(p) => {
                 assigned[v as usize] = Some(p);
+                owners.entry(p).or_default().push(v);
                 let busy = taken.entry(p).or_default();
                 for &s in mine {
                     busy.add(s);
