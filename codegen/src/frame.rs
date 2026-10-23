@@ -50,9 +50,14 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
         None
     };
     saved.sort();
-    // Arguments for calls go at the bottom, where the callee finds them.
+    // Arguments for calls go at the bottom, where the callee finds them;
+    // then the slots, smallest first, so that the most of them (spill
+    // slots, small locals) are near enough sp for pairs' offsets.
     let mut off: i64 = f.out_size;
-    for s in &mut f.slots {
+    let mut order: Vec<usize> = (0..f.slots.len()).collect();
+    order.sort_by_key(|&k| (f.slots[k].size, k));
+    for k in order {
+        let s = &mut f.slots[k];
         let a = s.align as i64;
         off = (off + a - 1) / a * a;
         s.offset = off;
@@ -61,13 +66,24 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     off = (off + 7) / 8 * 8;
     let save_at: Vec<(u8, i64)> = saved.iter().enumerate().map(|(k, &r)| (r, off + 8 * k as i64)).collect();
     off += 8 * saved.len() as i64;
-    let calls =
-        f.blocks.iter().any(|b| b.insts.iter().any(|i| !i.imp_defs.is_empty() && !matches!(i.op, Opcode::Asm { .. })));
-    let record = if calls { 16 } else { 0 };
+    let calls = f.blocks.iter().any(|b| b.insts.iter().any(|i| i.is_call(t)));
+    // With the return address on the stack (x86), the call pushed it: no
+    // record, and the frame keeps sp aligned below its 8 bytes.
+    let ra = f.abi.ra_on_stack;
+    let record = if calls && !ra { 16 } else { 0 };
     let align = f.abi.stack_align;
-    let size = (off + record + align - 1) / align * align;
+    let size = if !ra {
+        (off + record + align - 1) / align * align
+    } else if off == 0 && !calls {
+        0
+    } else {
+        (off + 8 + align - 1) / align * align - 8
+    };
     let fp_at = size - 16;
     f.frame_size = size;
+    // Where the CFA (sp on entry, before the call pushed the return
+    // address) is from sp after the frame is made.
+    let cfa = size + if ra { 8 } else { 0 };
 
     // Frame offsets become immediates. Where one is more than the
     // instruction's immediate holds (RISC-V's reach 2047 bytes), the
@@ -86,7 +102,7 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
                         at = Some(k);
                     }
                     MOp::Incoming(o) => {
-                        *op = MOp::Imm(size + *o);
+                        *op = MOp::Imm(cfa + *o);
                         at = Some(k);
                     }
                     MOp::OutArea => *op = MOp::Imm(f.out_size),
@@ -133,59 +149,113 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
         }
     }
 
-    // Registers saved and restored two at a time where they can be: two of
-    // the same file at neighbouring slots, at an offset a pair reaches.
-    let mut slots: Vec<(u8, i64)> = Vec::new();
-    if calls {
-        slots.push((fp_reg, fp_at));
-        slots.push((lr_reg, fp_at + 8));
-    }
-    slots.extend(save_at.iter().copied());
-    // Where the saves are too far from sp for a store's offset (RISC-V's
-    // reach 2047 bytes), the frame is made in two steps: the part above the
-    // lowest save first, with the saves near sp, then the rest.
-    let sp = t.machine.sp;
-    let reaches = |slots: &[(u8, i64)]| {
-        slots.iter().all(|&(reg, at)| {
-            let role = format!("store.{}", t.machine.save_name(reg));
-            t.role(&role).is_some_and(|i| t.instrs[i].fits(&[None, None, Some(at)]))
-        })
-    };
-    let low = if reaches(&slots) { 0 } else { slots.iter().map(|s| s.1).min().unwrap_or(0) / align * align };
-    let near: Vec<(u8, i64)> = slots.iter().map(|&(reg, at)| (reg, at - low)).collect();
-    let (saves, restores) = save_restore(t, &near);
-    // The unwind rules (unwind.rs) go after what they describe: where the
-    // CFA (sp on entry) is after each move of sp, and where each register
-    // was saved, from the CFA.
+    // Where the return address is on the stack (x86) and the description
+    // pushes and pops the saved registers (roles push.<class> and
+    // pop.<class>), they are pushed in order, just below it, and popped in
+    // the reverse order, and the rest of the frame made by one adjustment
+    // of sp: a byte or two each, where a store or load at an offset takes
+    // five or more. (The frame's size is the same: the saves are its top.)
+    let push = |r: u8| t.role(&format!("push.{}", t.machine.save_name(r)));
+    let pop = |r: u8| t.role(&format!("pop.{}", t.machine.save_name(r)));
+    let pushing = ra && !saved.is_empty() && saved.iter().all(|&r| push(r).is_some() && pop(r).is_some());
     let cfi = |c: Cfi| MInst { op: Opcode::Cfi(c), ..MInst::new(0, vec![]) };
-    let mut prologue = Vec::new();
-    if size - low > 0 {
-        adjust(t, &mut prologue, sp, sp, -(size - low), &f.abi.scratch)?;
-        prologue.push(cfi(Cfi::DefCfaOffset(size - low)));
-    }
-    prologue.extend(saves);
-    prologue.extend(slots.iter().map(|&(reg, at)| cfi(Cfi::Offset(reg, at - size))));
-    if calls {
-        adjust(t, &mut prologue, fp_reg, sp, fp_at - low, &f.abi.scratch)?;
-    }
-    if low > 0 {
-        adjust(t, &mut prologue, sp, sp, -low, &f.abi.scratch)?;
-        prologue.push(cfi(Cfi::DefCfaOffset(size)));
-    }
-    let mut epilogue = Vec::new();
-    if let Some(b) = base {
-        let addi = t.by_role("addi");
-        prologue.push(MInst::new(addi, vec![MOp::Reg(Reg::P(b)), MOp::Reg(Reg::P(sp)), MOp::Imm(0)]));
-        prologue.push(cfi(Cfi::DefCfa(b, size)));
-        epilogue.push(MInst::new(addi, vec![MOp::Reg(Reg::P(sp)), MOp::Reg(Reg::P(b)), MOp::Imm(0)]));
-    }
-    if low > 0 {
-        adjust(t, &mut epilogue, sp, sp, low, &f.abi.scratch)?;
-    }
-    epilogue.extend(restores);
-    if size - low > 0 {
-        adjust(t, &mut epilogue, sp, sp, size - low, &f.abi.scratch)?;
-    }
+    let sp = t.machine.sp;
+    let (prologue, epilogue) = if pushing {
+        let n = saved.len() as i64;
+        let rest = size - 8 * n;
+        let mut prologue = Vec::new();
+        for (k, &r) in saved.iter().enumerate() {
+            let k = k as i64;
+            prologue.push(MInst::new(push(r).unwrap(), vec![MOp::Reg(Reg::P(r))]));
+            prologue.push(cfi(Cfi::DefCfaOffset(8 + 8 * (k + 1))));
+            prologue.push(cfi(Cfi::Offset(r, -16 - 8 * k)));
+        }
+        if rest > 0 {
+            adjust(t, &mut prologue, sp, sp, -rest, &f.abi.scratch)?;
+            prologue.push(cfi(Cfi::DefCfaOffset(cfa)));
+        }
+        let mut epilogue = Vec::new();
+        if let Some(b) = base {
+            let addi = t.by_role("addi");
+            prologue.push(MInst::new(addi, vec![MOp::Reg(Reg::P(b)), MOp::Reg(Reg::P(sp)), MOp::Imm(0)]));
+            prologue.push(cfi(Cfi::DefCfa(b, cfa)));
+            epilogue.push(MInst::new(addi, vec![MOp::Reg(Reg::P(sp)), MOp::Reg(Reg::P(b)), MOp::Imm(0)]));
+        }
+        if rest > 0 {
+            adjust(t, &mut epilogue, sp, sp, rest, &f.abi.scratch)?;
+        }
+        for &r in saved.iter().rev() {
+            epilogue.push(MInst::new(pop(r).unwrap(), vec![MOp::Reg(Reg::P(r))]));
+        }
+        (prologue, epilogue)
+    } else {
+        // Registers saved and restored two at a time where they can be: two of
+        // the same file at neighbouring slots, at an offset a pair reaches.
+        let mut slots: Vec<(u8, i64)> = Vec::new();
+        if calls && !ra {
+            slots.push((fp_reg, fp_at));
+            slots.push((lr_reg, fp_at + 8));
+        }
+        slots.extend(save_at.iter().copied());
+        // Where the saves are too far from sp for a store's offset (RISC-V's
+        // reach 2047 bytes, AArch64's pairs 504), the frame is made in two
+        // steps: the part above the lowest save first, with the saves near sp,
+        // then the rest.
+        let reaches = |slots: &[(u8, i64)]| {
+            slots.iter().all(|&(reg, at)| {
+                let role = format!("store.{}", t.machine.save_name(reg));
+                t.role(&role).is_some_and(|i| t.instrs[i].fits(&[None, None, Some(at)]))
+            })
+        };
+        // And where pairs would not reach them, with enough saves that pairs
+        // save more than the second step costs.
+        let pairs_reach = |slots: &[(u8, i64)]| {
+            slots.iter().all(|&(reg, at)| {
+                let role = format!("store.pair.{}", t.machine.save_name(reg));
+                t.role(&role).is_none_or(|i| t.instrs[i].fits(&[None, None, None, Some(at)]))
+            })
+        };
+        let low = if reaches(&slots) && (slots.len() < 4 || pairs_reach(&slots)) {
+            0
+        } else {
+            slots.iter().map(|s| s.1).min().unwrap_or(0) / align * align
+        };
+        let near: Vec<(u8, i64)> = slots.iter().map(|&(reg, at)| (reg, at - low)).collect();
+        let (saves, restores) = save_restore(t, &near);
+        // The unwind rules (unwind.rs) go after what they describe: where the
+        // CFA (sp on entry) is after each move of sp, and where each register
+        // was saved, from the CFA.
+        let mut prologue = Vec::new();
+        let extra = cfa - size;
+        if size - low > 0 {
+            adjust(t, &mut prologue, sp, sp, -(size - low), &f.abi.scratch)?;
+            prologue.push(cfi(Cfi::DefCfaOffset(size - low + extra)));
+        }
+        prologue.extend(saves);
+        prologue.extend(slots.iter().map(|&(reg, at)| cfi(Cfi::Offset(reg, at - cfa))));
+        if calls && !ra {
+            adjust(t, &mut prologue, fp_reg, sp, fp_at - low, &f.abi.scratch)?;
+        }
+        if low > 0 {
+            adjust(t, &mut prologue, sp, sp, -low, &f.abi.scratch)?;
+            prologue.push(cfi(Cfi::DefCfaOffset(cfa)));
+        }
+        let mut epilogue = Vec::new();
+        if let Some(b) = base {
+            let addi = t.by_role("addi");
+            prologue.push(MInst::new(addi, vec![MOp::Reg(Reg::P(b)), MOp::Reg(Reg::P(sp)), MOp::Imm(0)]));
+            prologue.push(cfi(Cfi::DefCfa(b, cfa)));
+            epilogue.push(MInst::new(addi, vec![MOp::Reg(Reg::P(sp)), MOp::Reg(Reg::P(b)), MOp::Imm(0)]));
+        }
+        if low > 0 {
+            adjust(t, &mut epilogue, sp, sp, low, &f.abi.scratch)?;
+        }
+        epilogue.extend(restores);
+        if size - low > 0 {
+            adjust(t, &mut epilogue, sp, sp, size - low, &f.abi.scratch)?;
+        }
+        (prologue, epilogue)
+    };
 
     // Before each return, and each tail call (whose callee returns to this
     // function's caller).
@@ -248,6 +318,16 @@ fn save_restore(t: &Target, slots: &[(u8, i64)]) -> (Vec<MInst>, Vec<MInst>) {
 fn adjust(t: &Target, out: &mut Vec<MInst>, dst: u8, src: u8, amount: i64, scratch: &[u8]) -> Result<(), String> {
     let r = |n: u8| MOp::Reg(Reg::P(n));
     let fits = |role: &str, v: i64| t.role(role).filter(|&i| t.instrs[i].fits(&[None, None, Some(v)]));
+    // sp moved by itself, in a frame (where the flags are dead): by the
+    // description's own instructions for that, where it has them (x86's
+    // subq and addq, shorter than leaq).
+    if dst == src {
+        let own = if amount < 0 { fits("frame.subi", -amount) } else { fits("frame.addi", amount) };
+        if let Some(i) = own {
+            out.push(MInst::new(i, vec![r(dst), r(src), MOp::Imm(amount.abs())]));
+            return Ok(());
+        }
+    }
     if let Some(i) = fits("addi", amount) {
         out.push(MInst::new(i, vec![r(dst), r(src), MOp::Imm(amount)]));
         return Ok(());

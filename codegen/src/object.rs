@@ -140,6 +140,13 @@ pub enum Item {
         symbol: String,
         offset: i64,
     },
+    /// The 32-bit distance from the start of the global holding it
+    /// (`base`, as the platform names it) to `symbol` (a relative lookup
+    /// table's entry: `.long symbol-base`).
+    Rel32 {
+        symbol: String,
+        base: String,
+    },
 }
 
 impl Item {
@@ -149,6 +156,7 @@ impl Item {
             Item::Bytes(b) => b.len() as u64,
             Item::Zero(n) => *n,
             Item::Addr { .. } => 8,
+            Item::Rel32 { .. } => 4,
         }
     }
 }
@@ -247,6 +255,9 @@ pub fn build(
         let at = sec.size().next_multiple_of(align);
         if sec.kind == SectionKind::Bss {
             sec.bss_size = at;
+        } else if sec.kind == SectionKind::Text {
+            let fill = t.machine.code_fill(at as usize - sec.data.len());
+            sec.data.extend(fill);
         } else {
             sec.data.resize(at as usize, 0);
         }
@@ -262,15 +273,13 @@ pub fn build(
     for (f, code) in funcs.iter().zip(encoded) {
         let s = section(&mut obj, SectionKind::Text, None);
         let at = place(&mut obj, s, 4);
-        let (words, fixups) = code?;
-        for w in &words {
-            obj.sections[s].data.extend_from_slice(&w.to_le_bytes());
-        }
+        let code = code?;
+        obj.sections[s].data.extend_from_slice(&code.bytes);
         obj.symbols.push(Symbol {
             name: abi.symbol(&f.name),
             section: Some(s),
             value: at,
-            size: 4 * words.len() as u64,
+            size: code.bytes.len() as u64,
             global: f.global,
             kind: SymbolKind::Func,
         });
@@ -314,21 +323,24 @@ pub fn build(
         frames.push(crate::unwind::Frame {
             section: s,
             start: at,
-            len: 4 * words.len() as u64,
+            len: code.bytes.len() as u64,
             symbol,
             rules: mir::cfi_rules(f),
             personality: f.eh.as_ref().map(|e| abi.eh_ref(&e.personality)),
             lsda,
         });
-        for fx in fixups {
+        for fx in code.fixups {
             let i = t.by_name[&fx.instr];
             let kind = t.instrs[i].reloc.ok_or_else(|| format!("{}: {} has no \"reloc\"", f.name, fx.instr))?;
+            // The field measures from the instruction's start; a
+            // PC-relative relocation, from the field's.
+            let pc_rel = t.machine.relocs[kind.0 as usize].pc_relative();
             pending.push(Pending {
                 section: s,
                 offset: at + fx.offset as u64,
                 kind,
                 symbol: abi.symbol(&fx.symbol),
-                addend: 0,
+                addend: fx.addend + if pc_rel { fx.at as i64 } else { 0 },
                 instr: Some(i),
             });
         }
@@ -358,6 +370,23 @@ pub fn build(
                         instr: None,
                     });
                     sec.data.extend_from_slice(&[0; 8]);
+                }
+                // PC-relative, from the field: plus its distance from the
+                // global's start.
+                Item::Rel32 { symbol, base } => {
+                    if *base != g.symbol || abi.syntax == Syntax::MachO {
+                        return Err(format!("{}: a distance from another global in data", g.symbol));
+                    }
+                    let kind = t.machine.reloc_used(RelocUse::EhPcRel).ok_or("no relocation with use eh-pcrel")?;
+                    pending.push(Pending {
+                        section: s,
+                        offset: sec.data.len() as u64,
+                        kind: RelocKind(kind as u16),
+                        symbol: symbol.clone(),
+                        addend: (sec.data.len() as u64 - at) as i64,
+                        instr: None,
+                    });
+                    sec.data.extend_from_slice(&[0; 4]);
                 }
             }
         }
@@ -402,24 +431,63 @@ pub fn resolve(t: &Target, obj: &mut Object, pending: Vec<Pending>, macho: bool)
         };
         let def = obj.symbols[sym].clone();
         // A call within the section: the distance is known.
-        let usage = t.machine.relocs[p.kind.0 as usize].usage;
+        let rd = &t.machine.relocs[p.kind.0 as usize];
+        let usage = rd.usage;
+        // So is any other plain PC-relative reference to a local symbol
+        // there (x86's `leaq sym(%rip)`), for ELF: in a 32-bit field of its
+        // own, it is what a linker would write, S + A - P.
+        let plain = !macho
+            && usage != RelocUse::Call
+            && !def.global
+            && def.section == Some(p.section)
+            && rd.target.as_ref().is_some_and(|e| {
+                use crate::enc::Expr;
+                matches!(e, Expr::Bin('+', a, b) if **a == Expr::Var("pc".into()) && **b == Expr::Var("v".into()))
+            });
+        if plain && let Some(i) = p.instr {
+            let ins = &t.instrs[i];
+            let op = ins.operands.iter().find(|o| o.kind == Kind::Sym).ok_or("a reference without a symbol operand")?;
+            let whole = ins.enc.alts.iter().all(|a| {
+                a.fields
+                    .iter()
+                    .filter(|x| x.names.contains(&op.name))
+                    .all(|x| x.width == 32 && x.lo == 0 && a.pieces[x.piece].bytes == 4)
+            });
+            if whole {
+                let v = def.value as i64 + p.addend - p.offset as i64;
+                let v = i32::try_from(v).map_err(|_| format!("{}: {} is out of range", ins.name, def.name))?;
+                let at = p.offset as usize;
+                obj.sections[p.section].data[at..at + 4].copy_from_slice(&v.to_le_bytes());
+                continue;
+            }
+        }
         if usage == RelocUse::Call
             && (macho || !def.global)
             && def.section == Some(p.section)
             && let Some(i) = p.instr
         {
             let ins = &t.instrs[i];
-            let at = p.offset as usize;
-            let data = &mut obj.sections[p.section].data;
-            let word = u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
-            let mut env = ins.decode(word).ok_or_else(|| format!("cannot decode the {} to {}", ins.name, def.name))?;
             let op = ins.operands.iter().find(|o| o.kind == Kind::Sym).ok_or("a call without a symbol operand")?;
-            env.insert(op.name.clone(), def.value as i64 + p.addend - p.offset as i64);
-            let word = ins
+            // The instruction's start: the field is `at` into it.
+            let at_in = ins
                 .enc
-                .encode(&env)
-                .ok_or_else(|| format!("{}: the call to {} is out of range", ins.name, def.name))?;
-            data[at..at + 4].copy_from_slice(&word.to_le_bytes());
+                .alts
+                .iter()
+                .find_map(|a| a.fields.iter().find(|x| x.names.contains(&op.name)).map(|x| a.pieces[x.piece].offset))
+                .unwrap_or(0) as usize;
+            let start = p.offset as usize - at_in;
+            let data = &mut obj.sections[p.section].data;
+            let (mut env, len) =
+                ins.decode(&data[start..]).ok_or_else(|| format!("cannot decode the {} to {}", ins.name, def.name))?;
+            // (A call's symbol has no addend of its own: the field's
+            // expression gives the rest.)
+            env.insert(op.name.clone(), def.value as i64 - start as i64);
+            let bytes =
+                ins.encode(&env).ok_or_else(|| format!("{}: the call to {} is out of range", ins.name, def.name))?;
+            if bytes.len() != len {
+                return Err(format!("{}: the call to {} changed size", ins.name, def.name));
+            }
+            data[start..start + len].copy_from_slice(&bytes);
             continue;
         }
         let (target, addend) = match def.section {

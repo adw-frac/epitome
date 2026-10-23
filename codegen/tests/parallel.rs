@@ -2,7 +2,7 @@
 //!
 //! 1. The output (assembly and object file) is the same on 1 thread as on
 //!    8, for the C programs of `tests/programs` and for a module of many
-//!    generated functions.
+//!    generated functions, for AArch64 and for x86-64.
 //! 2. No stage takes time growing faster than a block's size: a block four
 //!    times bigger must take well under sixteen times as long in each stage
 //!    (linear is four; the bound allows for noise).
@@ -63,7 +63,12 @@ done:
 #[test]
 fn same_output_on_any_number_of_threads() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
-    let t = Target::aarch64();
+    for (t, triple) in [(Target::aarch64(), "arm64-apple-macos14"), (Target::x86_64(), "x86_64-linux-gnu")] {
+        same_output_for(&t, triple);
+    }
+}
+
+fn same_output_for(t: &Target, triple: &str) {
     let mut sources = vec![("many".to_string(), many_functions(300))];
     let have_clang = Command::new("clang").arg("--version").output().is_ok_and(|o| o.status.success());
     if have_clang {
@@ -76,16 +81,10 @@ fn same_output_on_any_number_of_threads() {
             if !name.ends_with(".c") || name.ends_with(".main.c") {
                 continue;
             }
-            let ll = tmp.join(name.replace(".c", ".ll"));
+            let ll = tmp.join(name.replace(".c", &format!(".{triple}.ll")));
             let ok = Command::new("clang")
-                .args([
-                    "--target=arm64-apple-macos14",
-                    "-O2",
-                    "-fno-vectorize",
-                    "-fno-slp-vectorize",
-                    "-S",
-                    "-emit-llvm",
-                ])
+                .arg(format!("--target={triple}"))
+                .args(["-O2", "-fno-vectorize", "-fno-slp-vectorize", "-S", "-emit-llvm"])
                 .arg(&p)
                 .arg("-o")
                 .arg(&ll)
@@ -99,10 +98,10 @@ fn same_output_on_any_number_of_threads() {
         eprintln!("no clang: only the generated module");
     }
     for (name, ll) in &sources {
-        let one = compiled(&t, ll, 1);
-        let eight = compiled(&t, ll, 8);
-        assert!(one.0 == eight.0, "{name}: the assembly differs between 1 and 8 threads");
-        assert!(one.1 == eight.1, "{name}: the object file differs between 1 and 8 threads");
+        let one = compiled(t, ll, 1);
+        let eight = compiled(t, ll, 8);
+        assert!(one.0 == eight.0, "{name} ({triple}): the assembly differs between 1 and 8 threads");
+        assert!(one.1 == eight.1, "{name} ({triple}): the object file differs between 1 and 8 threads");
     }
 }
 
@@ -164,10 +163,15 @@ fn stage_times(t: &Target, ll: &str) -> [Duration; 5] {
 #[test]
 fn big_blocks_take_linear_time() {
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
-    let t = Target::aarch64();
+    for (name, t) in [("aarch64", Target::aarch64()), ("x86_64", Target::x86_64())] {
+        linear_for(name, &t);
+    }
+}
+
+fn linear_for(target: &str, t: &Target) {
     let (small, large) = (3000, 12000);
-    let a = stage_times(&t, &big_block(small));
-    let b = stage_times(&t, &big_block(large));
+    let a = stage_times(t, &big_block(small));
+    let b = stage_times(t, &big_block(large));
     let names = ["prepare", "selection", "allocation", "frames", "layout"];
     for k in 0..5 {
         // Stages too quick to time well are not judged.
@@ -177,8 +181,9 @@ fn big_blocks_take_linear_time() {
         let ratio = b[k].as_secs_f64() / a[k].as_secs_f64().max(1e-6);
         assert!(
             ratio < 10.0,
-            "{}: {large} instructions took {:.1}x as long as {small} ({:?} and {:?}); linear is 4x",
+            "{} ({}): {large} instructions took {:.1}x as long as {small} ({:?} and {:?}); linear is 4x",
             names[k],
+            target,
             ratio,
             b[k],
             a[k]

@@ -51,10 +51,22 @@ impl Ctx<'_> {
     /// The width of the vector registers, or 0 if there are none (or their
     /// feature is off): then vectors are done lane by lane.
     pub fn vector_bits(&self) -> u32 {
-        match &self.t.machine.vector_feature {
-            Some(f) if !self.features.contains(f) => 0,
-            _ => self.t.machine.vector_bits,
-        }
+        // The widest whose feature is on (x86: 256 bits with avx2).
+        self.t
+            .machine
+            .vector_widths
+            .iter()
+            .filter(|(_, f)| f.as_ref().is_none_or(|f| self.features.contains(f)))
+            .map(|&(b, _)| b)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The narrowest vector kept whole in a register: narrower ones are
+    /// done lane by lane.
+    pub fn min_vector_bits(&self) -> u32 {
+        let vb = self.vector_bits();
+        self.t.machine.min_vector_bits.map_or(vb / 2, |m| m.min(vb))
     }
 
     /// Are instruction `i`'s features on?
@@ -92,6 +104,16 @@ impl Ctx<'_> {
             }
         }
         self.t.patterns.iter().any(|p| has(&p.tree, &want) && p.emit.iter().all(|e| self.enabled(e.instr)))
+    }
+
+    /// Is there a pattern, of instructions that are on, that is `head`
+    /// alone on values (`mul` of any two registers), not only on what some
+    /// other operation made (AArch64's `smull`, a `mul` of extended halves)?
+    pub fn selects_head_alone(&self, head: &Head) -> bool {
+        self.t.patterns.iter().any(|p| {
+            matches!(&p.tree, Tree::Op(h, kids) if h == head && kids.iter().all(|k| !matches!(k, Tree::Op(..))))
+                && p.emit.iter().all(|e| self.enabled(e.instr))
+        })
     }
 
     /// Is there an instruction for intrinsic `name` (`llvm.ctlz.i64`)?
@@ -144,15 +166,23 @@ impl Ctx<'_> {
 pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, String> {
     let mut f = f.clone();
     neon_intrinsics(cx, &mut f);
+    crate::neon::lower(cx, &mut f);
     number_min_max(cx, &mut f);
+    crate::intrinsics::lower(cx, &mut f);
+    // What the runtime does, then types no register holds as what holds
+    // them (fp128 as <2 x i64>), as the description says.
+    crate::runtime::lower(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
+    crate::runtime::hold(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     thread_locals(cx, &mut f);
     const_exprs(cx, &mut f);
     addresses_as_ints(&mut f);
     half_as_int(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
+    crate::x87::lower(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     identity_bitcasts(&mut f);
     one_lane_vectors(cx, &mut f);
     odd_lane_vectors(cx, &mut f);
     bits_of_vectors(cx, &mut f);
+    fields_of_masks(cx, &mut f);
     vector_arguments(cx, &mut f);
     // (Before masks' bitcasts are made other operations, which want to
     // see the comparisons masks come from.)
@@ -169,12 +199,19 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     wide_products(cx, &mut f);
     // (Before wide integers are split, so that a switch of one is their
     // comparisons.)
+    unreachable_edges(&mut f);
     lower_switches(cx, &mut f);
+    // (Integers wider than 128 bits as limbs, before wide.rs sees the
+    // i128s that leaves.)
+    crate::huge::split_huge(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     crate::wide_vectors::scalarize(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     // (Aggregates of wide integers, as the overflow intrinsics' { i128,
     // i1 }, as their fields first, which wide.rs then splits.)
     crate::aggregates::scalarize(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     crate::wide::split_wide(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
+    identity_ops(cx, &mut f);
+    extended_bool_compares(cx, &mut f);
+    crate::bitmaps::simplify(cx, &mut f);
     crate::aggregates::scalarize(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     split_struct_selects(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     split_struct_phis(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
@@ -190,16 +227,24 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     // Lanes of masks legalisation leaves (it handles those of split masks,
     // at their comparisons' widths; before it, this would get in its way).
     mask_lanes(cx, &mut f);
+    // What no instruction does, a lane at a time (after the masks' lanes).
+    crate::lanewise::lanewise(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     // Element-wise intrinsics split into scalars expand as scalars do.
     expand_intrinsics(cx, &mut f);
+    constant_branches(cx, &mut f);
     sink_addresses(&mut f);
+    constant_addresses(&mut f);
     lower_geps(cx, &mut f)?;
+    constant_offsets_last(cx, &mut f);
     promote_odd(cx, &mut f)?;
     widen_narrow(cx, &mut f);
     legalize_fp(cx, &mut f)?;
     lower_const_divs(cx, &mut f);
+    const_multiplies(cx, &mut f);
     if cx.t.machine.compare_booleans {
         compare_boolean_branches(cx, &mut f);
+    } else {
+        compares_per_use(cx, &mut f);
     }
     split_phi_edges(&mut f);
     Ok(f)
@@ -466,7 +511,7 @@ fn addresses_as_ints(f: &mut Function) {
 /// `llvm.minimumnum` and `llvm.maximumnum` (Rust's `f32::min`), which
 /// take a number over any NaN, as `llvm.minnum` and `llvm.maxnum` of the
 /// operands each made quiet by its minnum with itself (fminnm gives NaN
-/// for a signalling NaN).
+/// for a signalling NaN), where the machine has minnum.
 fn number_min_max(cx: &mut Ctx, f: &mut Function) {
     for b in f.layout.clone() {
         let mut k = 0;
@@ -480,6 +525,12 @@ fn number_min_max(cx: &mut Ctx, f: &mut Function) {
                         "maximumnum" => "maxnum",
                         _ => return None,
                     };
+                    // (Where minnum is an instruction that orders -0 below
+                    // +0, AArch64's fminnm; elsewhere the C library's
+                    // fminimum_num is.)
+                    if !cx.selects_intrinsic("llvm.minnum.f32") {
+                        return None;
+                    }
                     let args: Vec<Value> = call.args.iter().map(|a| a.value).collect();
                     Some((format!("llvm.{to}.{suffix}"), format!("llvm.minnum.{suffix}"), args))
                 }),
@@ -525,11 +576,13 @@ fn neon_intrinsics(cx: &mut Ctx, f: &mut Function) {
     ];
     let reductions: &[(&str, &str, Option<CastOp>)] = &[
         ("uaddv", "add", Some(CastOp::ZExt)),
-        ("saddv", "add", Some(CastOp::SExt)),
+        // (Each zero-extended, as LLVM's back end gives them: the lane is
+        // read with `fmov` from its narrow register.)
+        ("saddv", "add", Some(CastOp::ZExt)),
         ("umaxv", "umax", Some(CastOp::ZExt)),
         ("uminv", "umin", Some(CastOp::ZExt)),
-        ("smaxv", "smax", Some(CastOp::SExt)),
-        ("sminv", "smin", Some(CastOp::SExt)),
+        ("smaxv", "smax", Some(CastOp::ZExt)),
+        ("sminv", "smin", Some(CastOp::ZExt)),
         ("fmaxv", "fmaximum", None),
         ("fminv", "fminimum", None),
         ("fmaxnmv", "fmax", None),
@@ -677,14 +730,26 @@ fn neon_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 };
                 Some(s.cast(CastOp::Trunc, x, rt))
             } else if matches!(op, "uaddlv" | "saddlv") && args.len() == 1 {
-                // The lanes widened, then added: as wide as the result.
+                // The lanes widened to twice their width, then added (the
+                // instruction's sum, in a register of that width), then
+                // zero-extended to the result, as LLVM's back end reads it.
                 let vt = cx.value_ty(s.f, args[0]);
-                let Type::Vector { len, .. } = *cx.m.types.get(vt) else { unreachable!() };
-                let wt = cx.m.types.intern(Type::Vector { scalable: false, len, elem: rt });
+                let Type::Vector { len, elem, .. } = *cx.m.types.get(vt) else { unreachable!() };
+                let eb = match cx.m.types.get(elem) {
+                    Type::Int(b) => *b,
+                    _ => 32,
+                };
+                let rb = match cx.m.types.get(rt) {
+                    Type::Int(b) => *b,
+                    _ => 64,
+                };
+                let st = cx.m.types.int((2 * eb).min(rb));
+                let wt = cx.m.types.intern(Type::Vector { scalable: false, len, elem: st });
                 let c = if op == "uaddlv" { CastOp::ZExt } else { CastOp::SExt };
                 let w = s.cast(c, args[0], wt);
                 let mangled = crate::legalize::mangle(cx, wt);
-                Some(call_intrinsic(cx, &mut s, &format!("llvm.vector.reduce.add.{mangled}"), vec![w], rt))
+                let sum = call_intrinsic(cx, &mut s, &format!("llvm.vector.reduce.add.{mangled}"), vec![w], st);
+                Some(if st == rt { sum } else { s.cast(CastOp::ZExt, sum, rt) })
             } else if let Some(&(_, red, ext)) = reductions.iter().find(|(from, _, _)| *from == op)
                 && args.len() == 1
             {
@@ -726,7 +791,9 @@ fn neon_intrinsics(cx: &mut Ctx, f: &mut Function) {
 ///
 /// Where the machine has neither, but has offsets from the thread pointer
 /// (`tprel.*`, as RISC-V's code is a program's): the variable's address
-/// as that sum (`llvm.epitome.tprel`).
+/// as that sum (`llvm.epitome.tprel`). Or, with the offset in the GOT
+/// (`tls.ie`, initial exec: x86's for programs and the libraries they
+/// load), the thread pointer plus that (`llvm.epitome.tls.ie`).
 fn thread_locals(cx: &mut Ctx, f: &mut Function) {
     let darwin = cx.m.triple.as_deref().is_some_and(|t| {
         let t = String::from_utf8_lossy(t);
@@ -734,7 +801,8 @@ fn thread_locals(cx: &mut Ctx, f: &mut Function) {
     });
     let elf = !darwin && cx.t.role("tlsdesc.call").is_some();
     let tprel = !darwin && !elf && cx.t.role("tprel.hi").is_some();
-    if !elf && !tprel && (!darwin || cx.t.role("tlv.hi").is_none()) {
+    let ie = !darwin && !elf && !tprel && cx.t.role("tls.ie").is_some();
+    if !elf && !tprel && !ie && (!darwin || cx.t.role("tlv.hi").is_none()) {
         return;
     }
     let ptr = cx.m.types.ptr(0);
@@ -763,9 +831,10 @@ fn thread_locals(cx: &mut Ctx, f: &mut Function) {
                 k += n;
                 continue;
             }
-            if elf {
+            if elf || ie {
                 let i64t = cx.m.types.int(64);
-                let off = call_intrinsic(cx, &mut s, "llvm.epitome.tlsdesc", vec![var], i64t);
+                let how = if ie { "llvm.epitome.tls.ie" } else { "llvm.epitome.tlsdesc" };
+                let off = call_intrinsic(cx, &mut s, how, vec![var], i64t);
                 let tp = call_intrinsic(cx, &mut s, "llvm.thread.pointer.p0", vec![], ptr);
                 let i8t = cx.m.types.int(8);
                 let addr = s.op(
@@ -1726,6 +1795,66 @@ fn wide_products(cx: &mut Ctx, f: &mut Function) {
     }
 }
 
+/// Lanes of a mask taken as a vector of narrow integers (`extractelement
+/// (bitcast <4 x i1> %m to <2 x i2>), 0`, as glam tests two lanes at
+/// once), at constant indices: the mask's bits as an integer, shifted down
+/// and truncated. The bitcast is removed.
+fn fields_of_masks(cx: &mut Ctx, f: &mut Function) {
+    let i1 = cx.m.types.int(1);
+    for i in f.insts_in_order().collect::<Vec<_>>() {
+        let Op::Cast { op: CastOp::BitCast, value, .. } = f.insts[i.index()].op else { continue };
+        let Some(r) = f.insts[i.index()].result else { continue };
+        let (Type::Vector { len: n, elem: me, scalable: false }, Type::Vector { len: m, elem: fe, scalable: false }) =
+            (cx.m.types.get(cx.value_ty(f, value)).clone(), cx.m.types.get(f.locals[r.index()].ty).clone())
+        else {
+            continue;
+        };
+        let Type::Int(w) = *cx.m.types.get(fe) else { continue };
+        if me != i1 || w == 1 || n > 64 || m * w != n {
+            continue;
+        }
+        let mut users = Vec::new();
+        let mut other = false;
+        for j in f.insts_in_order() {
+            let mut uses = false;
+            f.insts[j.index()].op.for_each_value(|v| uses |= *v == Value::Local(r));
+            if uses {
+                match f.insts[j.index()].op {
+                    Op::ExtractElement { vector: Value::Local(x), index }
+                        if x == r && cx.const_int(index).is_some() =>
+                    {
+                        users.push(j)
+                    }
+                    _ => other = true,
+                }
+            }
+        }
+        if other || users.is_empty() {
+            continue;
+        }
+        let it = cx.m.types.int(n);
+        for j in users {
+            let Op::ExtractElement { index, .. } = f.insts[j.index()].op else { unreachable!() };
+            let k = cx.const_int(index).unwrap();
+            let jr = f.insts[j.index()].result.unwrap();
+            let blk = f.blocks.iter().position(|b| b.insts.contains(&j)).unwrap();
+            let at = f.blocks[blk].insts.iter().position(|&x| x == j).unwrap();
+            let mut s = Seq { f, new: Vec::new() };
+            let bits = s.cast(CastOp::BitCast, value, it);
+            let sh = cx.int(it, k * i64::from(w));
+            let x = s.bin(BinOp::LShr, bits, sh, it);
+            let v = s.cast(CastOp::Trunc, x, fe);
+            let new = std::mem::take(&mut s.new);
+            f.replace_uses(Value::Local(jr), v);
+            f.blocks[blk].insts.splice(at..=at, new);
+        }
+        // The bitcast, now unused (and of a type no register holds).
+        for blk in &mut f.blocks {
+            blk.insts.retain(|&x| x != i);
+        }
+    }
+}
+
 /// A bit of a vector of integers taken as a mask's lane (`extractelement
 /// (bitcast <4 x i32> %v to <128 x i1>), 32`, as chrono tests a bit): the
 /// lane holding it, shifted down, its lowest bit. A bitcast no longer used
@@ -1861,15 +1990,23 @@ fn bitcast_round_trips(cx: &mut Ctx, f: &mut Function) {
 /// Lanes of masks (`<N x i1>`), taken out or put in, through integer
 /// lanes: the mask sign-extended (all ones or zeros a lane), the lane
 /// taken and truncated; or put in sign-extended, and the vector compared
-/// with zero to be a mask again.
+/// with zero to be a mask again. The lanes are as wide as those of the
+/// comparison that made the mask, where that is known (its register's:
+/// after legalisation, an extension to another width would be taken as
+/// free).
 fn mask_lanes(cx: &mut Ctx, f: &mut Function) {
     let i1 = cx.m.types.int(1);
-    let wide = |cx: &mut Ctx, ty: TypeId| -> Option<(TypeId, TypeId)> {
+    let wide = |cx: &mut Ctx, f: &Function, ty: TypeId, mask: Option<Value>| -> Option<(TypeId, TypeId)> {
         let Type::Vector { len, elem, scalable: false } = *cx.m.types.get(ty) else { return None };
         if elem != i1 {
             return None;
         }
-        let w = (128 / len).clamp(8, 64);
+        // (Not narrower than a d register: a comparison of narrower lanes
+        // was done lane by lane, and made no register of them.)
+        let w = mask
+            .and_then(|m| crate::legalize::mask_width(cx, f, m, &mut Vec::new()))
+            .filter(|w| w * len >= 64)
+            .unwrap_or((128 / len).clamp(8, 64));
         let e = cx.m.types.int(w);
         Some((cx.m.types.intern(Type::Vector { len, elem: e, scalable: false }), e))
     };
@@ -1883,15 +2020,15 @@ fn mask_lanes(cx: &mut Ctx, f: &mut Function) {
                 continue;
             };
             let op = f.insts[i.index()].op.clone();
-            let mty = match &op {
-                Op::ExtractElement { vector, .. } => cx.value_ty(f, *vector),
-                Op::InsertElement { .. } => f.locals[r.index()].ty,
+            let (mty, mask) = match &op {
+                Op::ExtractElement { vector, .. } => (cx.value_ty(f, *vector), *vector),
+                Op::InsertElement { vector, .. } => (f.locals[r.index()].ty, *vector),
                 _ => {
                     k += 1;
                     continue;
                 }
             };
-            let Some((wt, e)) = wide(cx, mty) else {
+            let Some((wt, e)) = wide(cx, f, mty, Some(mask)) else {
                 k += 1;
                 continue;
             };
@@ -1979,8 +2116,8 @@ fn bit_masks(cx: &mut Ctx, f: &mut Function) {
 /// i64 %k`), through memory: the vector stored to a stack slot, and the
 /// lane loaded from it (or stored into it, and the vector loaded back).
 /// The index is taken modulo the lanes, a power of two, so that one past
-/// the end (poison in LLVM) stays in the slot. (Not vectors of `i1`,
-/// whose bits memory packs.)
+/// the end (poison in LLVM) stays in the slot. A mask's lanes go through
+/// it as bytes.
 fn variable_lanes(cx: &mut Ctx, f: &mut Function) {
     let (i8t, i64t, ptr) = (cx.m.types.int(8), cx.m.types.int(64), cx.m.types.ptr(0));
     let Some(&entry) = f.layout.first() else { return };
@@ -2005,14 +2142,27 @@ fn variable_lanes(cx: &mut Ctx, f: &mut Function) {
                 k += 1;
                 continue;
             };
-            if matches!(cx.m.types.get(elem), Type::Int(1)) || !len.is_power_of_two() {
+            if !len.is_power_of_two() {
                 k += 1;
                 continue;
             }
             let r = f.insts[i.index()].result.unwrap();
+            let mut s = Seq { f, new: Vec::new() };
+            // A mask's lanes, whose bits memory packs, as bytes (each all
+            // ones or zeros): the byte taken, and truncated; or put in, and
+            // the bytes compared with zero to be a mask again.
+            let mask_ty = matches!(cx.m.types.get(elem), Type::Int(1)).then_some(vty);
+            let (vector, element, vty, elem) = match mask_ty {
+                Some(_) => {
+                    let bty = cx.m.types.intern(Type::Vector { len, elem: i8t, scalable: false });
+                    let v = s.cast(CastOp::SExt, vector, bty);
+                    let e = element.map(|e| s.cast(CastOp::SExt, e, i8t));
+                    (v, e, bty, i8t)
+                }
+                None => (vector, element, vty, elem),
+            };
             let esize = cx.size_of(elem).unwrap_or(1) as i64;
             let align = Some(cx.size_of(vty).unwrap_or(16).next_power_of_two().clamp(1, 16));
-            let mut s = Seq { f, new: Vec::new() };
             let slot = s.f.add_inst(
                 Op::Alloca { inalloca: false, ty: vty, count: None, align, addrspace: None },
                 Some((None, ptr)),
@@ -2041,6 +2191,17 @@ fn variable_lanes(cx: &mut Ctx, f: &mut Function) {
                     s.op_void(Op::Store { volatile: false, atomic: None, value: e, ptr: lane, align: ealign });
                     s.op(Op::Load { volatile: false, atomic: None, ptr: at, align }, vty)
                 }
+            };
+            let v = match (mask_ty, element) {
+                (Some(_), None) => {
+                    let i1 = cx.m.types.int(1);
+                    s.cast(CastOp::Trunc, v, i1)
+                }
+                (Some(mty), Some(_)) => {
+                    let zero = Value::Const(cx.m.consts.intern(Constant { ty: vty, kind: ConstKind::Zero }));
+                    s.op(Op::ICmp { pred: ICmpPred::Ne, samesign: false, lhs: v, rhs: zero }, mty)
+                }
+                _ => v,
             };
             s.f.replace_uses(Value::Local(r), v);
             let new = std::mem::take(&mut s.new);
@@ -2275,6 +2436,194 @@ fn const_exprs(cx: &mut Ctx, f: &mut Function) {
     }
 }
 
+/// Multiplications by constants that a shift does (a power of two), or an
+/// addition of a shifted operand and a shift (`(2^a + 1) << b`: 24 is
+/// `(x + (x << 1)) << 3`), which machines with shifted operands make one
+/// or two instructions without the constant's register (and the shift
+/// often goes into the address it is added to).
+fn const_multiplies(cx: &mut Ctx, f: &mut Function) {
+    for b in f.layout.clone() {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            k += 1;
+            let Op::Binary { op: BinOp::Mul, lhs, rhs, .. } = f.insts[i.index()].op else { continue };
+            let Some(r) = f.insts[i.index()].result else { continue };
+            let ty = f.locals[r.index()].ty;
+            let Type::Int(w) = *cx.m.types.get(ty) else { continue };
+            let (x, c) = match (cx.const_int(lhs), cx.const_int(rhs)) {
+                (None, Some(c)) => (lhs, c),
+                (Some(c), None) => (rhs, c),
+                _ => continue,
+            };
+            if w > 64 || c <= 1 || (w < 64 && c >= 1 << (w - 1)) {
+                continue;
+            }
+            let c = c as u64;
+            let sh = c.trailing_zeros();
+            let odd = c >> sh;
+            if odd != 1 && !(odd - 1).is_power_of_two() {
+                continue;
+            }
+            let mut s = Seq { f, new: Vec::new() };
+            let mut v = x;
+            if odd != 1 {
+                let a = cx.int(ty, i64::from((odd - 1).trailing_zeros()));
+                let up = s.bin(BinOp::Shl, x, a, ty);
+                v = s.bin(BinOp::Add, x, up, ty);
+            }
+            if sh > 0 {
+                let n = cx.int(ty, i64::from(sh));
+                v = s.bin(BinOp::Shl, v, n, ty);
+            }
+            let new = std::mem::take(&mut s.new);
+            let n = new.len();
+            f.blocks[b.index()].insts.splice(k - 1..k - 1, new);
+            k += n;
+            f.replace_uses(Value::Local(r), v);
+        }
+    }
+}
+
+/// Integer operations with an operand that changes nothing (`or %x, 0`,
+/// `xor 0, %x`, `shl %x, 0`, `and %x, -1`, `mul %x, 1`), as the halves of
+/// wide integers with a constant half make many of: the other operand. And
+/// `and %x, 0`, `mul %x, 0`: zero.
+fn identity_ops(cx: &mut Ctx, f: &mut Function) {
+    // What each value replaced so far is, so that chains of them go (an
+    // `add` of a `mul` by zero).
+    let mut changed: std::collections::HashMap<LocalId, Value> = std::collections::HashMap::new();
+    let resolve = |changed: &std::collections::HashMap<LocalId, Value>, mut v: Value| {
+        while let Value::Local(l) = v
+            && let Some(&w) = changed.get(&l)
+        {
+            v = w;
+        }
+        v
+    };
+    for i in f.insts_in_order() {
+        let Op::Binary { op, lhs, rhs, .. } = f.insts[i.index()].op else { continue };
+        let Some(r) = f.insts[i.index()].result else { continue };
+        if !matches!(cx.m.types.get(f.locals[r.index()].ty), Type::Int(_)) {
+            continue;
+        }
+        let (lhs, rhs) = (resolve(&changed, lhs), resolve(&changed, rhs));
+        let (l, rr) = (cx.const_int(lhs), cx.const_int(rhs));
+        let v = match (op, l, rr) {
+            (BinOp::Or | BinOp::Xor | BinOp::Add, Some(0), _) => Some(rhs),
+            (BinOp::Or | BinOp::Xor | BinOp::Add | BinOp::Sub | BinOp::Shl | BinOp::LShr | BinOp::AShr, _, Some(0)) => {
+                Some(lhs)
+            }
+            (BinOp::And, Some(-1), _) | (BinOp::Mul, Some(1), _) => Some(rhs),
+            (BinOp::And, _, Some(-1)) | (BinOp::Mul, _, Some(1)) => Some(lhs),
+            (BinOp::And | BinOp::Mul, Some(0), _) => Some(lhs),
+            (BinOp::And | BinOp::Mul, _, Some(0)) => Some(rhs),
+            _ => None,
+        };
+        if let Some(v) = v {
+            changed.insert(r, v);
+        }
+    }
+    f.replace_many(&changed);
+}
+
+/// A boolean extended and compared with what it was extended from
+/// (`icmp eq (zext i1 %c to i32), 0`, as Rust makes for `!c`) is the
+/// boolean, or the boolean inverted: the inverse comparison where it is a
+/// comparison (so that a branch on it is one compare), else an `xor` with
+/// true.
+fn extended_bool_compares(cx: &mut Ctx, f: &mut Function) {
+    let i1 = cx.m.types.int(1);
+    for b in f.layout.clone() {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            k += 1;
+            let Op::ICmp { pred: pred @ (ICmpPred::Eq | ICmpPred::Ne), lhs, rhs, .. } = f.insts[i.index()].op else {
+                continue;
+            };
+            let Some(r) = f.insts[i.index()].result else { continue };
+            let ext = |v: Value| match v {
+                Value::Local(l) => match f.locals[l.index()].def {
+                    LocalDef::Inst(d) => match f.insts[d.index()].op {
+                        Op::Cast { op: op @ (CastOp::ZExt | CastOp::SExt), value, .. }
+                            if cx.value_ty(f, value) == i1 =>
+                        {
+                            Some((value, if op == CastOp::ZExt { 1 } else { -1 }))
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                },
+                _ => None,
+            };
+            let ((bv, one), c) = match (ext(lhs), ext(rhs)) {
+                (Some(e), None) => (e, cx.const_int(rhs)),
+                (None, Some(e)) => (e, cx.const_int(lhs)),
+                _ => continue,
+            };
+            let Some(c) = c else { continue };
+            // Whether the result is the boolean itself (else its inverse).
+            let same = match (pred, c) {
+                (ICmpPred::Ne, 0) => true,
+                (ICmpPred::Eq, 0) => false,
+                (ICmpPred::Eq, x) if x == one => true,
+                (ICmpPred::Ne, x) if x == one => false,
+                _ => continue,
+            };
+            let v = if same {
+                bv
+            } else {
+                let def = match bv {
+                    Value::Local(l) => match f.locals[l.index()].def {
+                        LocalDef::Inst(d) => Some(f.insts[d.index()].op.clone()),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let op = match def {
+                    Some(Op::ICmp { pred, samesign, lhs, rhs }) => {
+                        Op::ICmp { pred: crate::target::inverse(pred), samesign, lhs, rhs }
+                    }
+                    Some(Op::FCmp { pred, fmf, lhs, rhs }) if crate::target::inverse_f(pred).is_some() => {
+                        Op::FCmp { pred: crate::target::inverse_f(pred).unwrap(), fmf, lhs, rhs }
+                    }
+                    _ => {
+                        let t = cx.int(i1, 1);
+                        Op::Binary { op: BinOp::Xor, flags: IntFlags::NONE, fmf: FastMath::default(), lhs: bv, rhs: t }
+                    }
+                };
+                let n = f.add_inst(op, Some((None, i1)));
+                f.blocks[b.index()].insts.insert(k - 1, n);
+                k += 1;
+                f.result(n)
+            };
+            f.replace_uses(Value::Local(r), v);
+        }
+    }
+}
+
+/// A conditional branch on a constant (`llvm.is.constant`'s answer, at
+/// `-O0`) is a branch to the side it picks; the other side's phis lose
+/// this block.
+fn constant_branches(cx: &Ctx, f: &mut Function) {
+    for b in f.layout.clone() {
+        let Some(&t) = f.blocks[b.index()].insts.last() else { continue };
+        let Op::CondBr { cond, then_dest, else_dest } = f.insts[t.index()].op else { continue };
+        let Some(c) = cx.const_int(cond) else { continue };
+        let (to, other) = if c & 1 != 0 { (then_dest, else_dest) } else { (else_dest, then_dest) };
+        f.insts[t.index()].op = Op::Br(to);
+        if other == to {
+            continue;
+        }
+        for &i in &f.blocks[other.index()].insts {
+            if let Op::Phi { incoming, .. } = &mut f.insts[i.index()].op {
+                incoming.retain(|&(_, from)| from != b);
+            }
+        }
+    }
+}
+
 /// A bitcast to its operand's own type is the operand.
 fn identity_bitcasts(f: &mut Function) {
     for i in f.insts_in_order().collect::<Vec<_>>() {
@@ -2318,6 +2667,18 @@ fn half_as_int(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
     let has_half = |cx: &mut Ctx, ty: TypeId| as_int(cx, ty).is_some();
     if !f.locals.iter().map(|l| l.ty).collect::<Vec<_>>().into_iter().any(|t| has_half(cx, t)) {
         return Ok(());
+    }
+    // C's sqrtf16 (which clang calls where errno may be set): the C
+    // libraries have none; it is llvm.sqrt.f16, but for errno.
+    for i in f.insts_in_order().collect::<Vec<_>>() {
+        if let Op::Call(c) = &f.insts[i.index()].op
+            && callee_name(cx.m, c).as_deref() == Some("sqrtf16")
+        {
+            let callee = crate::legalize::declare(cx, "llvm.sqrt.f16", half, &[half]);
+            if let Op::Call(c) = &mut f.insts[i.index()].op {
+                c.callee = callee;
+            }
+        }
     }
     // Parameters and results of half, and calls' arguments and results:
     // the i16s of their bits, marked as passed where halves are (`HALF`).
@@ -2498,7 +2859,37 @@ fn half_as_int(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         f.insts[i.index()].op = op;
     }
     half_arith(cx, f);
+    half_helpers(cx, f);
     Ok(())
+}
+
+/// Conversions of half the machine has no instruction for (x86-64 without
+/// F16C): calls of the C library's (libgcc's and compiler-rt's
+/// `__extendhfsf2`, `__truncsfhf2`, `__truncdfhf2`), their halves passed
+/// as halves are.
+fn half_helpers(cx: &mut Ctx, f: &mut Function) {
+    for i in f.insts_in_order().collect::<Vec<_>>() {
+        let Op::Call(c) = &f.insts[i.index()].op else { continue };
+        let Some(name) = callee_name(cx.m, c) else { continue };
+        let (helper, arg_half) = match name.as_str() {
+            "llvm.convert.from.fp16.f32" => ("__extendhfsf2", true),
+            "llvm.convert.to.fp16.f32" => ("__truncsfhf2", false),
+            "llvm.convert.to.fp16.f64" => ("__truncdfhf2", false),
+            _ => continue,
+        };
+        if cx.selects_intrinsic(&name) {
+            continue;
+        }
+        let Type::Function { ret, params, .. } = cx.m.types.get(c.fn_ty).clone() else { continue };
+        let callee = crate::legalize::declare(cx, helper, ret, &params);
+        let Op::Call(c) = &mut f.insts[i.index()].op else { unreachable!() };
+        c.callee = callee;
+        if arg_half {
+            c.args[0].attrs.push(Attr::Word(HALF.into()));
+        } else {
+            c.ret_attrs.push(Attr::Word(HALF.into()));
+        }
+    }
 }
 
 /// What intrinsic `name` of `half` (`llvm.sqrt.f16`) is done as: its
@@ -2989,7 +3380,8 @@ fn expand_small_mem_ops(cx: &mut Ctx, f: &mut Function) {
 /// x0, [x1, x2, lsl #3]`) instead of computing it into a register first.
 ///
 /// Only address operands move, and only into blocks that are not on a
-/// cycle the original's block is not on: an address that does not fold
+/// cycle the original's block is not on, unless the address is a constant
+/// offset from its base (which always folds): an address that does not fold
 /// would otherwise be computed every time round a loop. Each block gets one
 /// copy, before its first use there. Each sink is an elective choice
 /// (autochop).
@@ -3018,6 +3410,9 @@ fn sink_addresses(f: &mut Function) {
     for d in gepped {
         let Some(home) = blocks[d.index()] else { continue };
         let r = f.insts[d.index()].result.unwrap();
+        // A constant offset from its base, which folds into any access.
+        let constant = matches!(&f.insts[d.index()].op, Op::Gep { indices, .. }
+            if indices.iter().all(|&x| matches!(x, Value::Const(_))));
         let mut list = uses[&d].clone();
         list.sort_by_key(|&(b, _)| b);
         let mut k = 0;
@@ -3025,7 +3420,7 @@ fn sink_addresses(f: &mut Function) {
             let b = list[k].0;
             let users: Vec<InstId> = list[k..].iter().take_while(|x| x.0 == b).map(|x| x.1).collect();
             k += users.len();
-            if on_cycle[b.index()].is_some() && on_cycle[b.index()] != on_cycle[home.index()] {
+            if on_cycle[b.index()].is_some() && on_cycle[b.index()] != on_cycle[home.index()] && !constant {
                 continue;
             }
             if !epitome_ir::chop::allow(|| {
@@ -3049,6 +3444,110 @@ fn sink_addresses(f: &mut Function) {
                     _ => {}
                 }
             }
+        }
+    }
+}
+
+/// A constant offset from a base used by more than one instruction: each
+/// load or store using it as its address gets its own copy, just before
+/// it, so that selection (which folds only what one instruction uses) can
+/// make it the access's offset (`ldr x0, [x1, #24]`) rather than compute it
+/// into a register for them all. Each copy is an elective change
+/// (autochop).
+fn constant_addresses(f: &mut Function) {
+    let mut count = vec![0u32; f.locals.len()];
+    for i in f.insts_in_order() {
+        f.insts[i.index()].op.for_each_value(|v| {
+            if let Value::Local(l) = v {
+                count[l.index()] += 1;
+            }
+        });
+    }
+    for b in f.layout.clone() {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            k += 1;
+            let (Op::Load { ptr: Value::Local(l), .. } | Op::Store { ptr: Value::Local(l), .. }) =
+                f.insts[i.index()].op
+            else {
+                continue;
+            };
+            let LocalDef::Inst(d) = f.locals[l.index()].def else { continue };
+            let constant = matches!(&f.insts[d.index()].op, Op::Gep { indices, .. }
+                if indices.iter().all(|&x| matches!(x, Value::Const(_))));
+            if !constant
+                || count[l.index()] < 2
+                || !epitome_ir::chop::allow(|| {
+                    format!("copy the address {} for one access", epitome_ir::printer::local_name(f, l))
+                })
+            {
+                continue;
+            }
+            let ty = f.locals[l.index()].ty;
+            let copy = f.add_inst(f.insts[d.index()].op.clone(), Some((None, ty)));
+            f.blocks[b.index()].insts.insert(k - 1, copy);
+            k += 1;
+            let new = f.result(copy);
+            if let Op::Load { ptr, .. } | Op::Store { ptr, .. } = &mut f.insts[i.index()].op {
+                *ptr = new;
+            }
+            count[l.index()] -= 1;
+        }
+    }
+}
+
+/// A scalar comparison used by more than one instruction: each select and
+/// conditional branch in its block that it decides gets its own copy, just
+/// before it, so that selection (which folds only what one instruction
+/// uses) makes the compare and the `csel` or `b.cond` together, rather
+/// than the flags made into a boolean (`cset`) and tested again (`tst`).
+/// For a machine with flags; each copy is an elective change (autochop).
+fn compares_per_use(cx: &Ctx, f: &mut Function) {
+    let mut count = vec![0u32; f.locals.len()];
+    for i in f.insts_in_order() {
+        f.insts[i.index()].op.for_each_value(|v| {
+            if let Value::Local(l) = v {
+                count[l.index()] += 1;
+            }
+        });
+    }
+    let blocks = f.inst_blocks();
+    for b in f.layout.clone() {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            k += 1;
+            let cond = match f.insts[i.index()].op {
+                Op::Select { cond: Value::Local(l), .. } | Op::CondBr { cond: Value::Local(l), .. } => l,
+                _ => continue,
+            };
+            let LocalDef::Inst(d) = f.locals[cond.index()].def else { continue };
+            let compare = match &f.insts[d.index()].op {
+                Op::ICmp { lhs, .. } | Op::FCmp { lhs, .. } => {
+                    !matches!(cx.m.types.get(cx.value_ty(f, *lhs)), Type::Vector { .. })
+                }
+                _ => false,
+            };
+            if !compare
+                || count[cond.index()] < 2
+                || blocks[d.index()] != Some(b)
+                || !epitome_ir::chop::allow(|| {
+                    format!("copy the compare {} for one use", epitome_ir::printer::local_name(f, cond))
+                })
+            {
+                continue;
+            }
+            let ty = f.locals[cond.index()].ty;
+            let copy = f.add_inst(f.insts[d.index()].op.clone(), Some((None, ty)));
+            f.blocks[b.index()].insts.insert(k - 1, copy);
+            k += 1;
+            let new = f.result(copy);
+            match &mut f.insts[i.index()].op {
+                Op::Select { cond, .. } | Op::CondBr { cond, .. } => *cond = new,
+                _ => {}
+            }
+            count[cond.index()] -= 1;
         }
     }
 }
@@ -3293,6 +3792,40 @@ fn drop_noop_calls(cx: &Ctx, f: &mut Function) {
     }
 }
 
+/// Edges to a block that is only `unreachable` are never taken (taking one
+/// is undefined): a conditional branch with one goes the other way, and a
+/// switch drops cases with one (or, for its default, takes its last case
+/// as the default, so that it is not tested).
+fn unreachable_edges(f: &mut Function) {
+    let dead = |f: &Function, b: BlockId| matches!(&f.blocks[b.index()].insts[..], [i] if matches!(f.insts[i.index()].op, Op::Unreachable));
+    for b in f.layout.clone() {
+        let Some(t) = f.terminator(b) else { continue };
+        let op = match f.insts[t.index()].op.clone() {
+            Op::CondBr { then_dest, else_dest, .. } => match (dead(f, then_dest), dead(f, else_dest)) {
+                (true, true) => Op::Unreachable,
+                (true, false) => Op::Br(else_dest),
+                (false, true) => Op::Br(then_dest),
+                (false, false) => continue,
+            },
+            Op::Switch { value, mut default, mut cases } => {
+                let n = cases.len();
+                cases.retain(|&(_, to)| !dead(f, to));
+                if dead(f, default)
+                    && let Some((_, last)) = cases.pop()
+                {
+                    default = last;
+                }
+                if cases.len() == n && !dead(f, default) {
+                    continue;
+                }
+                if cases.is_empty() { Op::Br(default) } else { Op::Switch { value, default, cases } }
+            }
+            _ => continue,
+        };
+        f.insts[t.index()].op = op;
+    }
+}
+
 fn lower_switches(cx: &mut Ctx, f: &mut Function) {
     let blocks: Vec<BlockId> = f.layout.clone();
     for b in blocks {
@@ -3482,6 +4015,57 @@ fn lower_geps(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// A variable offset from an address that is itself a constant offset
+/// from another (`gep i8 (gep i8 %p, 360), %i`, as Rust makes for a field's
+/// array) is the constant offset from the variable one, `gep i8 (gep i8 %p,
+/// %i), 360`, so that the constant can be an addressing-mode offset; and
+/// constant offsets of constant offsets are one.
+fn constant_offsets_last(cx: &mut Ctx, f: &mut Function) {
+    let i8t = cx.i8t();
+    let offset = |f: &Function, v: Value| -> Option<(Value, Value)> {
+        let Value::Local(l) = v else { return None };
+        let LocalDef::Inst(d) = f.locals[l.index()].def else { return None };
+        match &f.insts[d.index()].op {
+            Op::Gep { ptr, indices, source_ty, .. } if *source_ty == i8t && indices.len() == 1 => {
+                Some((*ptr, indices[0]))
+            }
+            _ => None,
+        }
+    };
+    for b in f.layout.clone() {
+        let mut k = 0;
+        while k < f.blocks[b.index()].insts.len() {
+            let i = f.blocks[b.index()].insts[k];
+            k += 1;
+            let Some(r) = f.insts[i.index()].result else { continue };
+            let Some((mut base, t)) = offset(f, Value::Local(r)) else { continue };
+            let mut c: i64 = 0;
+            while let Some((p, o)) = offset(f, base)
+                && let Some(n) = cx.const_int(o)
+            {
+                c = c.wrapping_add(n);
+                base = p;
+            }
+            if c == 0 {
+                continue;
+            }
+            let i64t = cx.i64t();
+            if let Some(n) = cx.const_int(t) {
+                // Constant offsets of constant offsets: one.
+                let cv = cx.int(i64t, c.wrapping_add(n));
+                f.insts[i.index()].op = gep8(i8t, base, cv);
+                continue;
+            }
+            let ptr_ty = f.locals[r.index()].ty;
+            let g = f.add_inst(gep8(i8t, base, t), Some((None, ptr_ty)));
+            let cv = cx.int(i64t, c);
+            f.insts[i.index()].op = gep8(i8t, f.result(g), cv);
+            f.blocks[b.index()].insts.insert(k - 1, g);
+            k += 1;
+        }
+    }
 }
 
 /// The register width an odd-sized integer lives in.
@@ -4043,6 +4627,23 @@ fn libm_base(base: &str) -> Option<&'static str> {
         "fma" => "fma",
         "powi" => "powi",
         "ldexp" => "ldexp",
+        // Rounding, where the machine has no instruction for it (x86-64
+        // before SSE4.1's roundsd).
+        "floor" => "floor",
+        "ceil" => "ceil",
+        "trunc" => "trunc",
+        "rint" => "rint",
+        "nearbyint" => "nearbyint",
+        "round" => "round",
+        "roundeven" => "roundeven",
+        // And the least and greatest: C's fmin and fmax ignore a NaN as
+        // minnum does; fminimum and fmaximum are IEEE 754-2019's.
+        "minnum" => "fmin",
+        "maxnum" => "fmax",
+        "minimum" => "fminimum",
+        "maximum" => "fmaximum",
+        "minimumnum" => "fminimum_num",
+        "maximumnum" => "fmaximum_num",
         _ => return None,
     })
 }
@@ -4050,6 +4651,21 @@ fn libm_base(base: &str) -> Option<&'static str> {
 /// The C library's name for function `c` (`log2`) at floating-point type
 /// `ty` (or its lanes'): `log2` for double, `log2f` for float. `powi` is
 /// the runtime's (`__powidf2`, `__powisf2`); Apple's `exp10` is `__exp10`.
+/// Whether `name`, an intrinsic on vectors (`llvm.floor.v8f32`), has an
+/// instruction for vectors of the same elements at some width
+/// (`llvm.floor.v4f32`).
+fn selects_at_some_width(cx: &Ctx, name: &str) -> bool {
+    let Some((base, ty)) = name.rsplit_once('.') else { return false };
+    let Some(elem) = ty.strip_prefix('v').map(|t| t.trim_start_matches(|c: char| c.is_ascii_digit())) else {
+        return false;
+    };
+    cx.t.intrinsics.iter().any(|n| {
+        n.rsplit_once('.').is_some_and(|(b, t)| {
+            b == base && t.strip_prefix('v').is_some_and(|t| t.trim_start_matches(|c: char| c.is_ascii_digit()) == elem)
+        }) && cx.selects_intrinsic(n)
+    })
+}
+
 fn libm_name(cx: &Ctx, c: &str, ty: TypeId) -> Option<String> {
     let elem = match cx.m.types.get(ty) {
         Type::Vector { elem, .. } => *elem,
@@ -4148,6 +4764,10 @@ fn signed_max(bits: u32) -> ApInt {
         hex.push(char::from_digit((1 << lead) - 1, 16).unwrap());
     }
     hex.push_str(&"f".repeat((ones / 4) as usize));
+    // (Of one bit: 0.)
+    if hex.is_empty() {
+        hex.push('0');
+    }
     ApInt::parse_hex(bits, &hex, false).unwrap()
 }
 
@@ -4356,6 +4976,27 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 }
                 let new = std::mem::take(&mut s.new);
                 f.replace_uses(Value::Local(r), acc);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
+            // A relative lookup table's entry (as clang makes them for x86):
+            // the table's address plus the 32-bit offset at `offset` in it.
+            if name.starts_with("llvm.load.relative.") {
+                let (i8t, i32t, i64t) = (cx.m.types.int(8), cx.m.types.int(32), cx.m.types.int(64));
+                let gep = |s: &mut Seq, p: Value, k: Value| {
+                    s.op(
+                        Op::Gep { flags: Default::default(), inrange: None, source_ty: i8t, ptr: p, indices: vec![k] },
+                        ty,
+                    )
+                };
+                let at = gep(&mut s, args[0], args[1]);
+                let rel = s.op(Op::Load { volatile: false, atomic: None, ptr: at, align: Some(4) }, i32t);
+                let rel = s.cast(CastOp::SExt, rel, i64t);
+                let v = gep(&mut s, args[0], rel);
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), v);
                 let n = new.len();
                 f.blocks[b.index()].insts.splice(k..=k, new);
                 k += n;
@@ -4617,8 +5258,12 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
             }
             // Mathematical functions without an instruction: the C
             // library's (lane by lane, for vectors), as LLVM calls them.
+            // (A vector the description has at another width, as AArch64's
+            // `<4 x float>` for an `<8 x float>`, is left: legalisation makes
+            // it that width.)
             if let Some(c) = libm_base(&base)
                 && !cx.selects_intrinsic(&name)
+                && !selects_at_some_width(cx, &name)
                 && let Some(lib) = libm_name(cx, c, ty)
             {
                 let v = lanewise_call(cx, &mut s, &lib, args.clone(), ty);
@@ -5137,6 +5782,51 @@ pub(crate) fn bool_vector_casts(cx: &mut Ctx, f: &mut Function) {
             };
             let mut s = Seq { f, new: Vec::new() };
             let out = match (lanes_of(cx, from), bits_of(cx, to), bits_of(cx, from), lanes_of(cx, to)) {
+                (Some(n), Some(w), _, _)
+                    if n == w
+                        && (n == 8 || n == 16)
+                        && cx.vector_bits() >= 128
+                        && cx.selects_intrinsic("llvm.vector.reduce.add.v8i8") =>
+                {
+                    // Each lane, as all ones or zeros, kept to its bit
+                    // within its byte, and the bytes of each eight summed.
+                    let i8t = cx.m.types.int(8);
+                    let bytes_ty = cx.m.types.intern(Type::Vector { scalable: false, len: n, elem: i8t });
+                    let ones = s.cast(CastOp::SExt, value, bytes_ty);
+                    let weights: Vec<ConstId> = (0..n)
+                        .map(|k| {
+                            cx.m.consts.intern(Constant {
+                                ty: i8t,
+                                kind: ConstKind::Int(ApInt::from_i64(8, i64::from((1u8 << (k % 8)) as i8))),
+                            })
+                        })
+                        .collect();
+                    let weights =
+                        Value::Const(cx.m.consts.intern(Constant { ty: bytes_ty, kind: ConstKind::Vector(weights) }));
+                    let bits = s.bin(BinOp::And, ones, weights, bytes_ty);
+                    let eight = cx.m.types.intern(Type::Vector { scalable: false, len: 8, elem: i8t });
+                    let mut acc = cx.int(to, 0);
+                    for h in 0..n / 8 {
+                        let part = if n == 8 {
+                            bits
+                        } else {
+                            let p =
+                                Value::Const(cx.m.consts.intern(Constant { ty: bytes_ty, kind: ConstKind::Poison }));
+                            let lanes: Vec<u32> = (h * 8..h * 8 + 8).collect();
+                            shuffle_lanes(cx, &mut s, bits, p, &lanes, eight)
+                        };
+                        let sum = call_intrinsic(cx, &mut s, "llvm.vector.reduce.add.v8i8", vec![part], i8t);
+                        let z = if to == i8t { sum } else { s.cast(CastOp::ZExt, sum, to) };
+                        acc = if h == 0 {
+                            z
+                        } else {
+                            let sh = cx.int(to, 8 * h as i64);
+                            let up = s.bin(BinOp::Shl, z, sh, to);
+                            s.bin(BinOp::Or, acc, up, to)
+                        };
+                    }
+                    acc
+                }
                 (Some(n), Some(w), _, _) if n == w => {
                     // The lanes as bytes of 0 or 1 first: masks have
                     // instructions for that, and bytes can be extracted.
@@ -5188,7 +5878,7 @@ pub(crate) fn bool_vector_casts(cx: &mut Ctx, f: &mut Function) {
 /// Constant lane indices as `i64`, whatever type they were written with
 /// (rustc writes `i32 0`): the description's patterns name them so, and a
 /// lane's number does not depend on its type.
-fn lane_indices(cx: &mut Ctx, f: &mut Function) {
+pub(crate) fn lane_indices(cx: &mut Ctx, f: &mut Function) {
     let i64t = cx.m.types.int(64);
     for b in f.layout.clone() {
         for k in 0..f.blocks[b.index()].insts.len() {
@@ -5412,21 +6102,35 @@ fn legalize_fp(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         replace = Some(s.cast(CastOp::Trunc, w, to_ty));
                     }
                 }
-                Op::FCmp {
-                    pred: pred @ (FCmpPred::One | FCmpPred::Ueq | FCmpPred::True | FCmpPred::False),
-                    lhs,
-                    rhs,
-                    fmf,
-                } => {
+                // (Of scalars: vectors' are legalisation's, and x86's cmppd
+                // has oeq and une.)
+                Op::FCmp { pred, lhs, rhs, fmf }
+                    if !matches!(cx.m.types.get(cx.value_ty(s.f, lhs)), Type::Vector { .. })
+                        && (matches!(pred, FCmpPred::True | FCmpPred::False)
+                            || cx.t.machine.fcmp_split.iter().any(|p| {
+                                matches!(
+                                    (p.as_str(), pred),
+                                    ("one", FCmpPred::One)
+                                        | ("ueq", FCmpPred::Ueq)
+                                        | ("oeq", FCmpPred::Oeq)
+                                        | ("une", FCmpPred::Une)
+                                )
+                            })) =>
+                {
                     replace = Some(match pred {
                         FCmpPred::True => cx.int(i1, 1),
                         FCmpPred::False => cx.int(i1, 0),
                         _ => {
-                            // one: ordered and not equal; ueq: unordered or equal.
-                            let (a, b, op) = if pred == FCmpPred::One {
-                                (FCmpPred::Ord, FCmpPred::Une, BinOp::And)
-                            } else {
-                                (FCmpPred::Uno, FCmpPred::Oeq, BinOp::Or)
+                            // A comparison the machine's conditions do not
+                            // test, of two that they do: one, ordered and not
+                            // equal; ueq, unordered or equal; oeq, ordered and
+                            // (unordered or) equal; une, unordered or ordered
+                            // and not equal.
+                            let (a, b, op) = match pred {
+                                FCmpPred::One => (FCmpPred::Ord, FCmpPred::Une, BinOp::And),
+                                FCmpPred::Ueq => (FCmpPred::Uno, FCmpPred::Oeq, BinOp::Or),
+                                FCmpPred::Oeq => (FCmpPred::Ord, FCmpPred::Ueq, BinOp::And),
+                                _ => (FCmpPred::Uno, FCmpPred::One, BinOp::Or),
                             };
                             let x = s.op(Op::FCmp { pred: a, fmf, lhs, rhs }, i1);
                             let y = s.op(Op::FCmp { pred: b, fmf, lhs, rhs }, i1);

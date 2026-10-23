@@ -28,7 +28,9 @@
 //! (`-C no-prepopulate-passes`) and runs Epitome's own pipeline on it;
 //! otherwise the IR is LLVM's, optimised as the profile says, and only
 //! code generation is ours. `EPITOME_RUSTC_SKIP=a,b` leaves those crates
-//! alone; `EPITOME_RUSTC_ONLY=a,b` takes only those.
+//! alone; `EPITOME_RUSTC_ONLY=a,b` takes only those. `EPITOME_LLC_CHOP`
+//! limits elective changes as for epitome-llc (`epitome_ir::chop`), to
+//! search for the change that miscompiles a crate.
 //!
 //! Cargo already builds several crates at once, so each compilation here
 //! uses `EPITOME_RUSTC_THREADS` threads (default 2), not one per core:
@@ -259,10 +261,17 @@ fn object_of_inner(ll: &Path, ours_opt: bool) -> Result<Vec<u8>, String> {
         epitome_opt::pipeline::run(&mut m, &epitome_opt::pipeline::Options { threads, ..Default::default() });
     }
     let t = Target::aarch64();
-    let compiled = compile(&t, &mut m, &Options { threads, ..Options::default() })?;
+    // A chop limit, as epitome-llc takes, to search a miscompiled crate
+    // (with `EPITOME_RUSTC_ONLY` naming it).
+    let chop = epitome_ir::chop::limit_from(None, "EPITOME_LLC_CHOP")?;
+    let compiled = compile(&t, &mut m, &Options { threads, chop, ..Options::default() })?;
     if !compiled.errors.is_empty() {
         return Err(compiled.errors.join("; "));
     }
+    // Each function's count of elective changes, for epitome-chop.
+    let counts: Vec<u64> = compiled.chop_counts.iter().map(|c| c.steps).collect();
+    epitome_ir::chop::report_counts("llc", &compiled.chop_names, &counts)
+        .map_err(|e| format!("EPITOME_CHOP_COUNTS: {e}"))?;
     compiled.object_file(&t)
 }
 

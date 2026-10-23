@@ -6,12 +6,13 @@
 //! a block, a compare the same as the last instruction that set the flags
 //! (the same instruction, on the same operands) is removed, when nothing
 //! between them wrote the flags or the operands. What may write the flags is
-//! an instruction that sets them (`"sets"` in the description), a call,
-//! anything else that clobbers registers (`imp_defs`), and inline assembly.
+//! an instruction that sets them (`"sets"` in the description), one that
+//! clobbers them (x86's arithmetic: `"clobbers"="flags"`), a call, anything
+//! else that clobbers registers (`imp_defs`), and inline assembly.
 //! Each removal is an elective change (autochop).
 
 use crate::mir::*;
-use crate::target::Target;
+use crate::target::{Kind, Target};
 
 /// Removes redundant compares; returns how many.
 pub fn redundant_compares(t: &Target, mf: &mut MFunc) -> usize {
@@ -23,7 +24,9 @@ pub fn redundant_compares(t: &Target, mf: &mut MFunc) -> usize {
         for inst in std::mem::take(&mut b.insts) {
             let sets = matches!(inst.op, Opcode::Instr(i) if t.instrs[i].sets.is_some());
             if sets {
-                if last.as_ref().is_some_and(|l| l.op == inst.op && l.ops == inst.ops)
+                // (Never a barrier: x86's fucompi also pops the x87 stack.)
+                if !inst.barrier
+                    && last.as_ref().is_some_and(|l| l.op == inst.op && l.ops == inst.ops)
                     && epitome_ir::chop::allow(|| format!("{name}: remove a compare the same as the last"))
                 {
                     removed += 1;
@@ -33,7 +36,8 @@ pub fn redundant_compares(t: &Target, mf: &mut MFunc) -> usize {
                 keep.push(inst);
                 continue;
             }
-            if matches!(inst.op, Opcode::Asm { .. }) || !inst.imp_defs.is_empty() {
+            let clobbers = matches!(inst.op, Opcode::Instr(i) if t.instrs[i].clobbers_flags);
+            if matches!(inst.op, Opcode::Asm { .. }) || !inst.imp_defs.is_empty() || clobbers {
                 last = None;
             } else if let Some(l) = &last {
                 let (defs, _) = inst.defs_uses(t);
@@ -133,7 +137,9 @@ pub fn frame_addresses(t: &Target, mf: &mut MFunc) -> usize {
 }
 
 /// **Load and store pairs.** After frame lowering, when offsets are final:
-/// two neighbouring loads (or stores) of one register class, from one base
+/// two loads (or stores) of one register class, neighbours or with only
+/// instructions between that touch no memory and leave the second's
+/// registers alone (it moves up to the first), from one base
 /// register at offsets one register's width apart, become one pair
 /// instruction (`ldp`, `stp`), when the description has one for the class
 /// (roles `load.pair.<class>`, `store.pair.<class>`) and it holds the lower
@@ -174,23 +180,57 @@ pub fn pair_memory(t: &Target, mf: &mut MFunc) -> usize {
     };
     let name = mf.name.clone();
     let mut made = 0;
+    // What an instruction between two accesses must not be, for the second
+    // to move up to the first: one that touches memory, calls or orders.
+    let fence = |inst: &MInst| {
+        inst.barrier
+            || !inst.imp_defs.is_empty()
+            || match inst.op {
+                Opcode::Instr(k) => t.instrs[k].memory,
+                Opcode::Asm { .. } => true,
+                _ => false,
+            }
+    };
     for b in &mut mf.blocks {
         let old = std::mem::take(&mut b.insts);
+        let mut gone = vec![false; old.len()];
         let mut new = Vec::with_capacity(old.len());
-        let mut k = 0;
-        while k < old.len() {
-            if let (Some((i, ra, base, ka)), Some((j, rb, base_b, kb))) =
-                (access(&old[k]), old.get(k + 1).and_then(access))
-                && i == j
+        for k in 0..old.len() {
+            if gone[k] {
+                continue;
+            }
+            let Some((i, ra, base, ka)) = access(&old[k]) else {
+                new.push(old[k].clone());
+                continue;
+            };
+            let (pair, width, load) = single[&i];
+            // The next access, if nothing between touches memory.
+            let Some(j) = (k + 1..old.len().min(k + 7)).find(|&j| access(&old[j]).is_some() || fence(&old[j])) else {
+                new.push(old[k].clone());
+                continue;
+            };
+            let mut paired = false;
+            if let Some((i2, rb, base_b, kb)) = access(&old[j])
+                && !gone[j]
+                && i2 == i
                 && base == base_b
             {
-                let (pair, width, load) = single[&i];
+                // The second moves up past those between: they must not
+                // write the base, or read or write the second's register
+                // (a load's result; a store's value, written).
+                let clear = old[k + 1..j].iter().all(|between| {
+                    let (defs, uses) = between.defs_uses(t);
+                    let names = |ks: &[usize], r: u8| ks.iter().any(|&q| between.ops[q] == MOp::Reg(Reg::P(r)));
+                    !names(&defs, base) && !names(&defs, rb) && !(load && names(&uses, rb))
+                });
                 let ((lo_r, lo_k), (hi_r, _)) = if ka < kb { ((ra, ka), (rb, kb)) } else { ((rb, kb), (ra, ka)) };
                 let apart = (ka - kb).abs() == width;
                 // A load pair writes both at once: two different registers,
-                // and the first of the two loads must not change the base.
-                let ok_load = !load || (ra != rb && ra != base);
-                if apart
+                // and the first of the two loads must not change the base
+                // (nor the second, moved up past what reads it).
+                let ok_load = !load || (ra != rb && ra != base && (j == k + 1 || rb != base));
+                if clear
+                    && apart
                     && ok_load
                     && t.instrs[pair].fits(&[None, None, None, Some(lo_k)])
                     && epitome_ir::chop::allow(|| format!("{name}: pair two accesses at [{base}, #{lo_k}]"))
@@ -198,14 +238,143 @@ pub fn pair_memory(t: &Target, mf: &mut MFunc) -> usize {
                     let r = |n: u8| MOp::Reg(Reg::P(n));
                     new.push(MInst::new(pair, vec![r(lo_r), r(hi_r), r(base), MOp::Imm(lo_k)]));
                     made += 1;
-                    k += 2;
-                    continue;
+                    gone[j] = true;
+                    paired = true;
                 }
             }
-            new.push(old[k].clone());
-            k += 1;
+            if !paired {
+                new.push(old[k].clone());
+            }
         }
         b.insts = new;
+    }
+    made
+}
+
+/// **Short forms.** After allocation, where the description has them (x86):
+/// a move of 0 into a register becomes its zero idiom (role
+/// `zero.<class>`, x86's `xor` of the register with itself, two bytes for
+/// five) where the flags, which that clobbers, are dead after it: written
+/// again before anything reads them, or never read in the block (nothing
+/// keeps them from one block to the next). And a compare of a register
+/// with 0 (role `cmpi.<class>`) becomes a test of it with itself (role
+/// `test.<class>`, a byte shorter), which sets the flags as the compare
+/// does. Each change is an elective one (autochop). Returns how many.
+pub fn short_forms(t: &Target, mf: &mut MFunc) -> usize {
+    let m = &t.machine;
+    let class_name = |k: usize| match t.instrs[k].operands.first().map(|o| o.kind) {
+        Some(Kind::Reg(c)) => Some(m.def(c).name.clone()),
+        _ => None,
+    };
+    let name = mf.name.clone();
+    let mut made = 0;
+    for b in &mut mf.blocks {
+        for k in 0..b.insts.len() {
+            let Opcode::Instr(op) = b.insts[k].op else { continue };
+            // A compare with 0: a test.
+            if let [MOp::Reg(r), MOp::Imm(0)] = b.insts[k].ops[..]
+                && let Some(c) = class_name(op)
+                && t.has_role(op, &format!("cmpi.{c}"))
+                && let Some(test) = t.role(&format!("test.{c}"))
+                && epitome_ir::chop::allow(|| format!("{name}: test a register against itself for a compare with 0"))
+            {
+                b.insts[k] = MInst::new(test, vec![MOp::Reg(r), MOp::Reg(r)]);
+                made += 1;
+                continue;
+            }
+            // A move of 0: the zero idiom, where the flags are dead.
+            if t.constants.contains(&op)
+                && let [MOp::Reg(d), MOp::Imm(0)] = b.insts[k].ops[..]
+                && let Some(c) = class_name(op)
+                && let Some(zero) = t.role(&format!("zero.{c}"))
+            {
+                let dead = flags_dead(t, &b.insts[k + 1..]);
+                if dead && epitome_ir::chop::allow(|| format!("{name}: zero a register by its zero idiom")) {
+                    b.insts[k] = MInst::new(zero, vec![MOp::Reg(d)]);
+                    made += 1;
+                }
+            }
+        }
+    }
+    made
+}
+
+/// Whether the flags are dead after `rest` begins: written again before
+/// anything reads them, or not read in the rest of the block.
+fn flags_dead(t: &Target, rest: &[MInst]) -> bool {
+    let reads = |i: &MInst| match i.op {
+        Opcode::Instr(k) => t.instrs[k].operands.iter().any(|o| o.kind == Kind::Cond),
+        Opcode::Asm { .. } => true,
+        _ => false,
+    };
+    let writes = |i: &MInst| match i.op {
+        Opcode::Instr(k) => t.instrs[k].sets.is_some() || t.instrs[k].clobbers_flags || i.is_call(t),
+        Opcode::Asm { .. } => true,
+        _ => false,
+    };
+    rest.iter().find(|i| reads(i) || writes(i)).is_none_or(|i| !reads(i))
+}
+
+/// **Three-address adds.** After allocation, where the description has
+/// them (x86): a copy of `s` into `d` followed by a two-address add to `d`
+/// (roles `add2i.<class>`, of an immediate, and `add2.<class>`, of a
+/// register), whose flags are dead, becomes one three-address add that
+/// leaves the flags alone (roles `addi` and `add`, x86's `lea`): `movq
+/// %r15, %rax; addq $1, %rax` is `leaq 1(%r15), %rax`. Each change is an
+/// elective one (autochop). Returns how many.
+pub fn three_address(t: &Target, mf: &mut MFunc) -> usize {
+    let m = &t.machine;
+    let (Some(addi), Some(add)) = (t.role("addi"), t.role("add")) else { return 0 };
+    let copies: Vec<usize> = t.copies.values().copied().collect();
+    let sp = m.sp;
+    let name = mf.name.clone();
+    let mut made = 0;
+    for b in &mut mf.blocks {
+        let mut k = 0;
+        while k + 1 < b.insts.len() {
+            let (c, j) = (&b.insts[k], &b.insts[k + 1]);
+            let (Opcode::Instr(ci), Opcode::Instr(ji)) = (c.op, j.op) else {
+                k += 1;
+                continue;
+            };
+            let [MOp::Reg(Reg::P(d)), MOp::Reg(Reg::P(s))] = c.ops[..] else {
+                k += 1;
+                continue;
+            };
+            let class = match t.instrs[ji].operands.first().map(|o| o.kind) {
+                Some(Kind::Reg(cl)) => m.def(cl).name.clone(),
+                _ => String::new(),
+            };
+            let new = match j.ops[..] {
+                [MOp::Reg(Reg::P(x)), MOp::Reg(Reg::P(y)), MOp::Imm(v)]
+                    if x == d && y == d && t.has_role(ji, &format!("add2i.{class}")) =>
+                {
+                    Some(MInst::new(addi, vec![MOp::Reg(Reg::P(d)), MOp::Reg(Reg::P(s)), MOp::Imm(v)]))
+                }
+                [MOp::Reg(Reg::P(x)), MOp::Reg(Reg::P(y)), MOp::Reg(Reg::P(r))]
+                    if x == d && y == d && t.has_role(ji, &format!("add2.{class}")) =>
+                {
+                    // (d + d is s + s; an index cannot be sp.)
+                    let r = if r == d { s } else { r };
+                    let (base, index) = if r == sp { (r, s) } else { (s, r) };
+                    (index != sp).then(|| {
+                        MInst::new(add, vec![MOp::Reg(Reg::P(d)), MOp::Reg(Reg::P(base)), MOp::Reg(Reg::P(index))])
+                    })
+                }
+                _ => None,
+            };
+            if let Some(new) = new
+                && copies.contains(&ci)
+                && d != s
+                && flags_dead(t, &b.insts[k + 2..])
+                && epitome_ir::chop::allow(|| format!("{name}: a copy and a two-address add as one three-address add"))
+            {
+                b.insts[k] = new;
+                b.insts.remove(k + 1);
+                made += 1;
+            }
+            k += 1;
+        }
     }
     made
 }

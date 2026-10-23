@@ -212,13 +212,20 @@ fn run(cmd: &mut Command) -> String {
 const RUNS: usize = 4;
 const SEED_C: u64 = 88172645463325252;
 
+/// This machine's target, and its triple.
+fn host_target() -> Target {
+    if cfg!(target_arch = "x86_64") { Target::x86_64() } else { Target::aarch64() }
+}
+
+const TRIPLE: &str = if cfg!(target_arch = "x86_64") { "x86_64-unknown-linux-gnu" } else { "arm64-apple-macosx14.0.0" };
+
 #[test]
 fn random_bitcast_chains() {
-    let ok = cfg!(target_arch = "aarch64")
-        && cfg!(target_os = "macos")
+    let ok = (cfg!(target_arch = "aarch64") && cfg!(target_os = "macos")
+        || cfg!(target_arch = "x86_64") && cfg!(target_os = "linux"))
         && Command::new("clang").arg("--version").output().is_ok_and(|o| o.status.success());
     if !ok {
-        eprintln!("needs clang on an AArch64 Mac; skipping");
+        eprintln!("needs clang on an AArch64 Mac or x86-64 Linux; skipping");
         return;
     }
     let seed = std::env::var("EPITOME_BITCAST_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(0x5eed_b17c_a57u64);
@@ -227,7 +234,7 @@ fn random_bitcast_chains() {
     let funcs: Vec<Func> = (0..count).map(|k| function(&mut rng, k)).collect();
     let ll = |keep: &dyn Fn(usize) -> bool| -> String {
         let text: String = funcs.iter().enumerate().filter(|(k, _)| keep(*k)).map(|(_, f)| f.text.as_str()).collect();
-        format!("target triple = \"arm64-apple-macosx14.0.0\"\n{text}")
+        format!("target triple = \"{TRIPLE}\"\n{text}")
     };
     let tmp = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("bitcasts");
     std::fs::create_dir_all(&tmp).unwrap();
@@ -235,7 +242,7 @@ fn random_bitcast_chains() {
     std::fs::write(tmp.join("chains.ll"), &all_ll).unwrap();
 
     // Ours, each function that compiles.
-    let t = Target::aarch64();
+    let t = host_target();
     let mut m = epitome_ir::parse_module(&all_ll).unwrap();
     let opts = Options { keep_going: true, ..Options::default() };
     let compiled = compile(&t, &mut m, &opts).unwrap();

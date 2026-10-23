@@ -1,0 +1,295 @@
+# AArch64's own intrinsics (llvm.aarch64.*, as Rust's std::arch and C's
+# arm_neon.h and arm_acle.h make them): what tests/intrinsics.rs does with
+# each (see there for the form of a line). The machine is an M1 (Armv8.5
+# with crypto, SHA-3, dot products, FP16, FHM, RDM, FCMA, JSCVT and
+# FRINTTS); what it lacks is skipped.
+
+# --- NEON: integers, lane by lane
+test ; llvm.aarch64.neon.abs.{0} ; 0(0) ; nint64 | i64
+test ; llvm.aarch64.neon.sqabs.{0} ; 0(0) ; nint64 | i32 | i64
+test ; llvm.aarch64.neon.sqneg.{0} ; 0(0) ; nint64 | i32 | i64
+test ; llvm.aarch64.neon.cls.{0} ; 0(0) ; nint
+test ; llvm.aarch64.neon.sabd.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.uabd.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.shadd.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.uhadd.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.shsub.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.uhsub.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.srhadd.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.urhadd.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.sqadd.{0} ; 0(0, 0) ; nint64 | i32 | i64
+test ; llvm.aarch64.neon.uqadd.{0} ; 0(0, 0) ; nint64 | i32 | i64
+test ; llvm.aarch64.neon.sqsub.{0} ; 0(0, 0) ; nint64 | i32 | i64
+test ; llvm.aarch64.neon.uqsub.{0} ; 0(0, 0) ; nint64 | i32 | i64
+test ; llvm.aarch64.neon.suqadd.{0} ; 0(0, 0) ; nint64 | i32 | i64
+test ; llvm.aarch64.neon.usqadd.{0} ; 0(0, 0) ; nint64 | i32 | i64
+test ; llvm.aarch64.neon.smax.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.smin.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.umax.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.umin.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.smaxp.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.sminp.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.umaxp.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.uminp.{0} ; 0(0, 0) ; nint
+test ; llvm.aarch64.neon.addp.{0} ; 0(0, 0) ; nint | <2 x i64> | <4 x float> | <2 x double>
+test ; llvm.aarch64.neon.sqdmulh.{0} ; 0(0, 0) ; <4 x i16> | <8 x i16> | <2 x i32> | <4 x i32> | i32
+test ; llvm.aarch64.neon.sqrdmulh.{0} ; 0(0, 0) ; <4 x i16> | <8 x i16> | <2 x i32> | <4 x i32> | i32
+test ; llvm.aarch64.neon.sqdmulh.lane.{0}.{1} ; 0(0, 1, i32 1) ; <4 x i16>, <4 x i16> | <4 x i32>, <2 x i32> | <8 x i16>, <4 x i16>
+test ; llvm.aarch64.neon.sqdmulh.laneq.{0}.{1} ; 0(0, 1, i32 3) ; <4 x i16>, <8 x i16> | <4 x i32>, <4 x i32>
+test ; llvm.aarch64.neon.sqrdmulh.lane.{0}.{1} ; 0(0, 1, i32 1) ; <4 x i16>, <4 x i16> | <4 x i32>, <2 x i32>
+test ; llvm.aarch64.neon.sqrdmulh.laneq.{0}.{1} ; 0(0, 1, i32 3) ; <4 x i16>, <8 x i16> | <4 x i32>, <4 x i32>
+test ; llvm.aarch64.neon.sqrdmlah.{0} ; 0(0, 0, 0) ; <4 x i16> | <8 x i16> | <2 x i32> | <4 x i32> | i32
+test ; llvm.aarch64.neon.sqrdmlsh.{0} ; 0(0, 0, 0) ; <4 x i16> | <8 x i16> | <2 x i32> | <4 x i32> | i32
+test ; llvm.aarch64.neon.pmul.{0} ; 0(0, 0) ; <8 x i8> | <16 x i8>
+
+# --- NEON: shifts by vectors
+test ; llvm.aarch64.neon.sshl.{0} ; 0(0, 0) ; nint64 | i64
+test ; llvm.aarch64.neon.ushl.{0} ; 0(0, 0) ; nint64 | i64
+test ; llvm.aarch64.neon.srshl.{0} ; 0(0, 0) ; nint64 | i64
+test ; llvm.aarch64.neon.urshl.{0} ; 0(0, 0) ; nint64 | i64
+test ; llvm.aarch64.neon.sqshl.{0} ; 0(0, 0) ; nint64 | i32 | i64
+test ; llvm.aarch64.neon.uqshl.{0} ; 0(0, 0) ; nint64 | i32 | i64
+test ; llvm.aarch64.neon.sqrshl.{0} ; 0(0, 0) ; nint64 | i32 | i64
+test ; llvm.aarch64.neon.uqrshl.{0} ; 0(0, 0) ; nint64 | i32 | i64
+# (By a constant, a splat.)
+test ; llvm.aarch64.neon.sqshlu.{0} ; 0(0, 0 splat ({e0} 3)) ; <8 x i8> | <16 x i8> | <4 x i16> | <4 x i32> | <2 x i64>
+test ; llvm.aarch64.neon.sqshlu.{0} ; 0(0, 0 3) ; i32 | i64
+test ; llvm.aarch64.neon.vsli.{0} ; 0(0, 0, i32 3) ; nint64
+test ; llvm.aarch64.neon.vsri.{0} ; 0(0, 0, i32 3) ; nint64
+
+# --- NEON: narrowing and widening
+test ; llvm.aarch64.neon.addhn.{0} ; 0(1, 1) ; narrow
+test ; llvm.aarch64.neon.raddhn.{0} ; 0(1, 1) ; narrow
+test ; llvm.aarch64.neon.subhn.{0} ; 0(1, 1) ; narrow
+test ; llvm.aarch64.neon.rsubhn.{0} ; 0(1, 1) ; narrow
+test ; llvm.aarch64.neon.sqxtn.{0} ; 0(1) ; narrow
+test ; llvm.aarch64.neon.uqxtn.{0} ; 0(1) ; narrow
+test ; llvm.aarch64.neon.sqxtun.{0} ; 0(1) ; narrow
+test ; llvm.aarch64.neon.scalar.sqxtn.{0}.{1} ; 0(1) ; i32, i64
+test ; llvm.aarch64.neon.scalar.uqxtn.{0}.{1} ; 0(1) ; i32, i64
+test ; llvm.aarch64.neon.scalar.sqxtun.{0}.{1} ; 0(1) ; i32, i64
+test ; llvm.aarch64.neon.rshrn.{0} ; 0(1, i32 3) ; narrow
+test ; llvm.aarch64.neon.sqshrn.{0} ; 0(1, i32 3) ; narrow
+test ; llvm.aarch64.neon.uqshrn.{0} ; 0(1, i32 3) ; narrow
+test ; llvm.aarch64.neon.sqrshrn.{0} ; 0(1, i32 3) ; narrow
+test ; llvm.aarch64.neon.uqrshrn.{0} ; 0(1, i32 3) ; narrow
+test ; llvm.aarch64.neon.sqshrun.{0} ; 0(1, i32 3) ; narrow
+test ; llvm.aarch64.neon.sqrshrun.{0} ; 0(1, i32 3) ; narrow
+test ; llvm.aarch64.neon.smull.{0} ; 0(1, 1) ; widen
+test ; llvm.aarch64.neon.umull.{0} ; 0(1, 1) ; widen
+test ; llvm.aarch64.neon.sqdmull.{0} ; 0(1, 1) ; <4 x i32>, <4 x i16> | <2 x i64>, <2 x i32>
+test ; llvm.aarch64.neon.sqdmulls.scalar ; i64(i32, i32)
+test ; llvm.aarch64.neon.pmull.{0} ; 0(1, 1) ; <8 x i16>, <8 x i8>
+test ; llvm.aarch64.neon.pmull64 ; <16 x i8>(i64, i64)
+test ; llvm.aarch64.neon.saddlp.{0}.{1} ; 0(1) ; <4 x i16>, <8 x i8> | <8 x i16>, <16 x i8> | <2 x i32>, <4 x i16> | <4 x i32>, <8 x i16> | <1 x i64>, <2 x i32> | <2 x i64>, <4 x i32>
+test ; llvm.aarch64.neon.uaddlp.{0}.{1} ; 0(1) ; <4 x i16>, <8 x i8> | <8 x i16>, <16 x i8> | <2 x i32>, <4 x i16> | <4 x i32>, <8 x i16> | <1 x i64>, <2 x i32> | <2 x i64>, <4 x i32>
+skip ; llvm.aarch64.neon.shll ; LLVM's AArch64 back end cannot select it either (C's and Rust's widening shifts are extensions and shifts)
+skip ; llvm.aarch64.neon.sshll ; LLVM's AArch64 back end cannot select it either (C's and Rust's widening shifts are extensions and shifts)
+skip ; llvm.aarch64.neon.ushll ; LLVM's AArch64 back end cannot select it either (C's and Rust's widening shifts are extensions and shifts)
+
+# --- NEON: across lanes
+test ; llvm.aarch64.neon.saddv.{0}.{1} ; 0(1) ; i32, <8 x i8> | i32, <16 x i8> | i32, <4 x i16> | i32, <8 x i16> | i32, <2 x i32> | i32, <4 x i32> | i64, <2 x i64>
+test ; llvm.aarch64.neon.uaddv.{0}.{1} ; 0(1) ; i32, <8 x i8> | i32, <16 x i8> | i32, <4 x i16> | i32, <8 x i16> | i32, <2 x i32> | i32, <4 x i32> | i64, <2 x i64>
+test ; llvm.aarch64.neon.smaxv.{0}.{1} ; 0(1) ; i32, <8 x i8> | i32, <16 x i8> | i32, <4 x i16> | i32, <8 x i16> | i32, <2 x i32> | i32, <4 x i32>
+test ; llvm.aarch64.neon.sminv.{0}.{1} ; 0(1) ; i32, <8 x i8> | i32, <16 x i8> | i32, <4 x i16> | i32, <8 x i16> | i32, <2 x i32> | i32, <4 x i32>
+test ; llvm.aarch64.neon.umaxv.{0}.{1} ; 0(1) ; i32, <8 x i8> | i32, <16 x i8> | i32, <4 x i16> | i32, <8 x i16> | i32, <2 x i32> | i32, <4 x i32>
+test ; llvm.aarch64.neon.uminv.{0}.{1} ; 0(1) ; i32, <8 x i8> | i32, <16 x i8> | i32, <4 x i16> | i32, <8 x i16> | i32, <2 x i32> | i32, <4 x i32>
+test ; llvm.aarch64.neon.saddlv.{0}.{1} ; 0(1) ; i32, <8 x i8> | i32, <16 x i8> | i32, <4 x i16> | i32, <8 x i16> | i64, <2 x i32> | i64, <4 x i32>
+test ; llvm.aarch64.neon.uaddlv.{0}.{1} ; 0(1) ; i32, <8 x i8> | i32, <16 x i8> | i32, <4 x i16> | i32, <8 x i16> | i64, <2 x i32> | i64, <4 x i32>
+test ; llvm.aarch64.neon.faddv.{0}.{1} ; 0(1) ; float, <2 x float> | float, <4 x float> | double, <2 x double>
+test ; llvm.aarch64.neon.fmaxv.{0}.{1} ; 0(1) ; float, <2 x float> | float, <4 x float> | double, <2 x double> | half, <8 x half>
+test ; llvm.aarch64.neon.fminv.{0}.{1} ; 0(1) ; float, <2 x float> | float, <4 x float> | double, <2 x double> | half, <8 x half>
+test ; llvm.aarch64.neon.fmaxnmv.{0}.{1} ; 0(1) ; float, <2 x float> | float, <4 x float> | double, <2 x double> | half, <8 x half>
+test ; llvm.aarch64.neon.fminnmv.{0}.{1} ; 0(1) ; float, <2 x float> | float, <4 x float> | double, <2 x double> | half, <8 x half>
+
+# --- NEON: dot products
+test ; llvm.aarch64.neon.sdot.{0}.{1} ; 0(0, 1, 1) ; <2 x i32>, <8 x i8> | <4 x i32>, <16 x i8>
+test ; llvm.aarch64.neon.udot.{0}.{1} ; 0(0, 1, 1) ; <2 x i32>, <8 x i8> | <4 x i32>, <16 x i8>
+
+# --- NEON: floating point
+test ; llvm.aarch64.neon.fabd.{0} ; 0(0, 0) ; nfp16
+test ; llvm.aarch64.sisd.fabd.{0} ; 0(0, 0) ; float | double
+test ; llvm.aarch64.neon.fmax.{0} ; 0(0, 0) ; nfp16 | float | double
+test ; llvm.aarch64.neon.fmin.{0} ; 0(0, 0) ; nfp16 | float | double
+test ; llvm.aarch64.neon.fmaxnm.{0} ; 0(0, 0) ; nfp16 | float | double
+test ; llvm.aarch64.neon.fminnm.{0} ; 0(0, 0) ; nfp16 | float | double
+test ; llvm.aarch64.neon.fmaxp.{0} ; 0(0, 0) ; nfp16
+test ; llvm.aarch64.neon.fminp.{0} ; 0(0, 0) ; nfp16
+test ; llvm.aarch64.neon.fmaxnmp.{0} ; 0(0, 0) ; nfp16
+test ; llvm.aarch64.neon.fminnmp.{0} ; 0(0, 0) ; nfp16
+test ; llvm.aarch64.neon.faddp.{0} ; 0(0, 0) ; nfp16
+test ; llvm.aarch64.neon.fmulx.{0} ; 0(0, 0) ; nfp16 | float | double
+test ; llvm.aarch64.neon.frecps.{0} ; 0(0, 0) ; nfp | float | double
+test ; llvm.aarch64.neon.frsqrts.{0} ; 0(0, 0) ; nfp | float | double
+test ; llvm.aarch64.neon.frecpe.{0} ; 0(0) ; nfp | float | double
+test ; llvm.aarch64.neon.frsqrte.{0} ; 0(0) ; nfp | float | double
+test ; llvm.aarch64.neon.frecpx.{0} ; 0(0) ; float | double
+test ; llvm.aarch64.neon.urecpe.{0} ; 0(0) ; <2 x i32> | <4 x i32>
+test ; llvm.aarch64.neon.ursqrte.{0} ; 0(0) ; <2 x i32> | <4 x i32>
+test ; llvm.aarch64.neon.facge.{0}.{1} ; 0(1, 1) ; <2 x i32>, <2 x float> | <4 x i32>, <4 x float> | <2 x i64>, <2 x double> | i32, float | i64, double
+test ; llvm.aarch64.neon.facgt.{0}.{1} ; 0(1, 1) ; <2 x i32>, <2 x float> | <4 x i32>, <4 x float> | <2 x i64>, <2 x double> | i32, float | i64, double
+test ; llvm.aarch64.neon.frint32x.{0} ; 0(0) ; nfp
+test ; llvm.aarch64.neon.frint32z.{0} ; 0(0) ; nfp
+test ; llvm.aarch64.neon.frint64x.{0} ; 0(0) ; nfp
+test ; llvm.aarch64.neon.frint64z.{0} ; 0(0) ; nfp
+test ; llvm.aarch64.frint32x.{0} ; 0(0) ; float | double
+test ; llvm.aarch64.frint32z.{0} ; 0(0) ; float | double
+test ; llvm.aarch64.frint64x.{0} ; 0(0) ; float | double
+test ; llvm.aarch64.frint64z.{0} ; 0(0) ; float | double
+test ; llvm.aarch64.neon.fcvtas.{0}.{1} ; 0(1) ; fcvt
+test ; llvm.aarch64.neon.fcvtau.{0}.{1} ; 0(1) ; fcvt
+test ; llvm.aarch64.neon.fcvtms.{0}.{1} ; 0(1) ; fcvt
+test ; llvm.aarch64.neon.fcvtmu.{0}.{1} ; 0(1) ; fcvt
+test ; llvm.aarch64.neon.fcvtns.{0}.{1} ; 0(1) ; fcvt
+test ; llvm.aarch64.neon.fcvtnu.{0}.{1} ; 0(1) ; fcvt
+test ; llvm.aarch64.neon.fcvtps.{0}.{1} ; 0(1) ; fcvt
+test ; llvm.aarch64.neon.fcvtpu.{0}.{1} ; 0(1) ; fcvt
+test ; llvm.aarch64.neon.fcvtzs.{0}.{1} ; 0(1) ; fcvt
+test ; llvm.aarch64.neon.fcvtzu.{0}.{1} ; 0(1) ; fcvt
+test ; llvm.aarch64.neon.fcvtxn.{0}.{1} ; 0(1) ; <2 x float>, <2 x double>
+test ; llvm.aarch64.sisd.fcvtxn ; float(double)
+test ; llvm.aarch64.neon.vcvtfp2fxs.{0}.{1} ; 0(1, i32 5) ; <2 x i32>, <2 x float> | <4 x i32>, <4 x float> | <2 x i64>, <2 x double> | i32, float | i64, double
+test ; llvm.aarch64.neon.vcvtfp2fxu.{0}.{1} ; 0(1, i32 5) ; <2 x i32>, <2 x float> | <4 x i32>, <4 x float> | <2 x i64>, <2 x double> | i32, float | i64, double
+test ; llvm.aarch64.neon.vcvtfxs2fp.{0}.{1} ; 0(1, i32 5) ; <2 x float>, <2 x i32> | <4 x float>, <4 x i32> | <2 x double>, <2 x i64> | float, i32 | double, i64
+test ; llvm.aarch64.neon.vcvtfxu2fp.{0}.{1} ; 0(1, i32 5) ; <2 x float>, <2 x i32> | <4 x float>, <4 x i32> | <2 x double>, <2 x i64> | float, i32 | double, i64
+test ; llvm.aarch64.fjcvtzs ; i32(double)
+test ; llvm.aarch64.neon.fmlal.{0}.{1} ; 0(0, 1, 1) ; <2 x float>, <4 x half> | <4 x float>, <8 x half>
+test ; llvm.aarch64.neon.fmlal2.{0}.{1} ; 0(0, 1, 1) ; <2 x float>, <4 x half> | <4 x float>, <8 x half>
+test ; llvm.aarch64.neon.fmlsl.{0}.{1} ; 0(0, 1, 1) ; <2 x float>, <4 x half> | <4 x float>, <8 x half>
+test ; llvm.aarch64.neon.fmlsl2.{0}.{1} ; 0(0, 1, 1) ; <2 x float>, <4 x half> | <4 x float>, <8 x half>
+test ; llvm.aarch64.neon.vcadd.rot90.{0} ; 0(0, 0) ; <2 x float> | <4 x float> | <2 x double> | <4 x half>
+test ; llvm.aarch64.neon.vcadd.rot270.{0} ; 0(0, 0) ; <2 x float> | <4 x float> | <2 x double> | <4 x half>
+test ; llvm.aarch64.neon.vcmla.rot0.{0} ; 0(0, 0, 0) ; <2 x float> | <4 x float> | <2 x double>
+test ; llvm.aarch64.neon.vcmla.rot90.{0} ; 0(0, 0, 0) ; <2 x float> | <4 x float> | <2 x double>
+test ; llvm.aarch64.neon.vcmla.rot180.{0} ; 0(0, 0, 0) ; <2 x float> | <4 x float> | <2 x double>
+test ; llvm.aarch64.neon.vcmla.rot270.{0} ; 0(0, 0, 0) ; <2 x float> | <4 x float> | <2 x double>
+
+# --- NEON: tables, lanes, structures in memory
+test ; llvm.aarch64.neon.tbl1.{0} ; 0(<16 x i8>, 0) ; <8 x i8> | <16 x i8>
+test ; llvm.aarch64.neon.tbl2.{0} ; 0(<16 x i8>, <16 x i8>, 0) ; <8 x i8> | <16 x i8>
+test ; llvm.aarch64.neon.tbl3.{0} ; 0(<16 x i8>, <16 x i8>, <16 x i8>, 0) ; <8 x i8> | <16 x i8>
+test ; llvm.aarch64.neon.tbl4.{0} ; 0(<16 x i8>, <16 x i8>, <16 x i8>, <16 x i8>, 0) ; <8 x i8> | <16 x i8>
+test ; llvm.aarch64.neon.tbx1.{0} ; 0(0, <16 x i8>, 0) ; <8 x i8> | <16 x i8>
+test ; llvm.aarch64.neon.tbx2.{0} ; 0(0, <16 x i8>, <16 x i8>, 0) ; <8 x i8> | <16 x i8>
+test ; llvm.aarch64.neon.tbx3.{0} ; 0(0, <16 x i8>, <16 x i8>, <16 x i8>, 0) ; <8 x i8> | <16 x i8>
+test ; llvm.aarch64.neon.tbx4.{0} ; 0(0, <16 x i8>, <16 x i8>, <16 x i8>, <16 x i8>, 0) ; <8 x i8> | <16 x i8>
+test ; llvm.aarch64.neon.vcopy.lane.{0}.{0} ; 0(0, i64 1, 0, i64 0) ; <4 x i32> | <16 x i8>
+test ; llvm.aarch64.neon.ld1x2.{0}.p0 ; {0, 0}(mem) ; <4 x i32> | <8 x i8> | <2 x double>
+test ; llvm.aarch64.neon.ld1x3.{0}.p0 ; {0, 0, 0}(mem) ; <4 x i32> | <8 x i8>
+test ; llvm.aarch64.neon.ld1x4.{0}.p0 ; {0, 0, 0, 0}(mem) ; <4 x i32> | <8 x i8>
+test ; llvm.aarch64.neon.ld2.{0}.p0 ; {0, 0}(mem) ; <4 x i32> | <8 x i8> | <16 x i8> | <2 x double> | <4 x i16>
+test ; llvm.aarch64.neon.ld3.{0}.p0 ; {0, 0, 0}(mem) ; <4 x i32> | <8 x i8> | <8 x i16>
+test ; llvm.aarch64.neon.ld4.{0}.p0 ; {0, 0, 0, 0}(mem) ; <4 x i32> | <8 x i8> | <4 x float>
+test ; llvm.aarch64.neon.ld2r.{0}.p0 ; {0, 0}(mem) ; <4 x i32> | <8 x i8>
+test ; llvm.aarch64.neon.ld3r.{0}.p0 ; {0, 0, 0}(mem) ; <4 x i32> | <8 x i8>
+test ; llvm.aarch64.neon.ld4r.{0}.p0 ; {0, 0, 0, 0}(mem) ; <4 x i32> | <8 x i8>
+test ; llvm.aarch64.neon.ld2lane.{0}.p0 ; {0, 0}(0, 0, i64 1, mem) ; <4 x i32> | <8 x i8>
+test ; llvm.aarch64.neon.ld3lane.{0}.p0 ; {0, 0, 0}(0, 0, 0, i64 1, mem) ; <4 x i32> | <8 x i8>
+test ; llvm.aarch64.neon.ld4lane.{0}.p0 ; {0, 0, 0, 0}(0, 0, 0, 0, i64 1, mem) ; <4 x i32> | <8 x i8>
+test ; llvm.aarch64.neon.st1x2.{0}.p0 ; void(0, 0, mem) ; <4 x i32> | <8 x i8>
+test ; llvm.aarch64.neon.st1x3.{0}.p0 ; void(0, 0, 0, mem) ; <4 x i32> | <8 x i8>
+test ; llvm.aarch64.neon.st1x4.{0}.p0 ; void(0, 0, 0, 0, mem) ; <4 x i32> | <8 x i8>
+test ; llvm.aarch64.neon.st2.{0}.p0 ; void(0, 0, mem) ; <4 x i32> | <8 x i8> | <16 x i8> | <2 x double>
+test ; llvm.aarch64.neon.st3.{0}.p0 ; void(0, 0, 0, mem) ; <4 x i32> | <8 x i8>
+test ; llvm.aarch64.neon.st4.{0}.p0 ; void(0, 0, 0, 0, mem) ; <4 x i32> | <8 x i8>
+test ; llvm.aarch64.neon.st2lane.{0}.p0 ; void(0, 0, i64 1, mem) ; <4 x i32> | <8 x i8>
+test ; llvm.aarch64.neon.st3lane.{0}.p0 ; void(0, 0, 0, i64 1, mem) ; <4 x i32> | <8 x i8>
+test ; llvm.aarch64.neon.st4lane.{0}.p0 ; void(0, 0, 0, 0, i64 1, mem) ; <4 x i32> | <8 x i8>
+
+# --- What the M1 does not have
+skip ; llvm.aarch64.sve.* ; SVE, which the M1 does not have
+skip ; llvm.aarch64.sme.* ; SME, which the M1 does not have
+skip ; llvm.aarch64.neon.fp8.* ; FP8, which the M1 does not have
+skip ; llvm.aarch64.neon.bf* ; BF16, which the M1 does not have
+skip ; llvm.aarch64.neon.smmla ; I8MM (matrix multiplies of bytes), which the M1 does not have
+skip ; llvm.aarch64.neon.ummla ; I8MM (matrix multiplies of bytes), which the M1 does not have
+skip ; llvm.aarch64.neon.usmmla ; I8MM (matrix multiplies of bytes), which the M1 does not have
+skip ; llvm.aarch64.neon.usdot ; I8MM (dot products of mixed signs), which the M1 does not have
+skip ; llvm.aarch64.neon.fdot ; FP16 dot products (FEAT_F16F32DOT), which the M1 does not have
+skip ; llvm.aarch64.neon.fmmla ; FP matrix multiplies (FEAT_F16MM), which the M1 does not have
+skip ; llvm.aarch64.neon.famax ; FAMINMAX, which the M1 does not have
+skip ; llvm.aarch64.neon.famin ; FAMINMAX, which the M1 does not have
+skip ; llvm.aarch64.neon.vluti* ; LUT, which the M1 does not have
+skip ; llvm.aarch64.crypto.sm3* ; SM3, which the M1 does not have
+skip ; llvm.aarch64.crypto.sm4* ; SM4, which the M1 does not have
+skip ; llvm.aarch64.rndr ; RNG, which the M1 does not have
+skip ; llvm.aarch64.rndrrs ; RNG, which the M1 does not have
+skip ; llvm.aarch64.irg* ; MTE (memory tagging), which the M1 does not have
+skip ; llvm.aarch64.addg ; MTE (memory tagging), which the M1 does not have
+skip ; llvm.aarch64.gmi ; MTE (memory tagging), which the M1 does not have
+skip ; llvm.aarch64.ldg ; MTE (memory tagging), which the M1 does not have
+skip ; llvm.aarch64.stg ; MTE (memory tagging), which the M1 does not have
+skip ; llvm.aarch64.stgp ; MTE (memory tagging), which the M1 does not have
+skip ; llvm.aarch64.settag* ; MTE (memory tagging), which the M1 does not have
+skip ; llvm.aarch64.subp ; MTE (memory tagging), which the M1 does not have
+skip ; llvm.aarch64.tagp ; MTE (memory tagging), which the M1 does not have
+skip ; llvm.aarch64.mops.memset.tag ; MOPS with MTE, which the M1 does not have
+skip ; llvm.aarch64.ld64b ; LS64, which the M1 does not have
+skip ; llvm.aarch64.st64b* ; LS64, which the M1 does not have
+skip ; llvm.aarch64.gcs* ; GCS (guarded control stacks), which the M1 does not have
+skip ; llvm.aarch64.chkfeat ; for GCS, which the M1 does not have
+skip ; llvm.aarch64.set.fpmr ; FP8's mode register, which the M1 does not have
+skip ; llvm.aarch64.range.prefetch ; RPRFM, which the M1 does not have
+skip ; llvm.aarch64.space ; for LLVM's own tests of branch relaxation (reserves bytes of code)
+
+# --- Crypto, CRC and scalar integers
+test ; llvm.aarch64.crypto.aese ; <16 x i8>(<16 x i8>, <16 x i8>)
+test ; llvm.aarch64.crypto.aesd ; <16 x i8>(<16 x i8>, <16 x i8>)
+test ; llvm.aarch64.crypto.aesmc ; <16 x i8>(<16 x i8>)
+test ; llvm.aarch64.crypto.aesimc ; <16 x i8>(<16 x i8>)
+test ; llvm.aarch64.crypto.sha1c ; <4 x i32>(<4 x i32>, i32, <4 x i32>)
+test ; llvm.aarch64.crypto.sha1m ; <4 x i32>(<4 x i32>, i32, <4 x i32>)
+test ; llvm.aarch64.crypto.sha1p ; <4 x i32>(<4 x i32>, i32, <4 x i32>)
+test ; llvm.aarch64.crypto.sha1h ; i32(i32)
+test ; llvm.aarch64.crypto.sha1su0 ; <4 x i32>(<4 x i32>, <4 x i32>, <4 x i32>)
+test ; llvm.aarch64.crypto.sha1su1 ; <4 x i32>(<4 x i32>, <4 x i32>)
+test ; llvm.aarch64.crypto.sha256h ; <4 x i32>(<4 x i32>, <4 x i32>, <4 x i32>)
+test ; llvm.aarch64.crypto.sha256h2 ; <4 x i32>(<4 x i32>, <4 x i32>, <4 x i32>)
+test ; llvm.aarch64.crypto.sha256su0 ; <4 x i32>(<4 x i32>, <4 x i32>)
+test ; llvm.aarch64.crypto.sha256su1 ; <4 x i32>(<4 x i32>, <4 x i32>, <4 x i32>)
+test ; llvm.aarch64.crypto.sha512h ; <2 x i64>(<2 x i64>, <2 x i64>, <2 x i64>)
+test ; llvm.aarch64.crypto.sha512h2 ; <2 x i64>(<2 x i64>, <2 x i64>, <2 x i64>)
+test ; llvm.aarch64.crypto.sha512su0 ; <2 x i64>(<2 x i64>, <2 x i64>)
+test ; llvm.aarch64.crypto.sha512su1 ; <2 x i64>(<2 x i64>, <2 x i64>, <2 x i64>)
+test ; llvm.aarch64.crypto.eor3s.{0} ; 0(0, 0, 0) ; <16 x i8> | <8 x i16> | <4 x i32> | <2 x i64>
+test ; llvm.aarch64.crypto.eor3u.{0} ; 0(0, 0, 0) ; <16 x i8> | <8 x i16> | <4 x i32> | <2 x i64>
+test ; llvm.aarch64.crypto.bcaxs.{0} ; 0(0, 0, 0) ; <16 x i8> | <8 x i16> | <4 x i32> | <2 x i64>
+test ; llvm.aarch64.crypto.bcaxu.{0} ; 0(0, 0, 0) ; <16 x i8> | <8 x i16> | <4 x i32> | <2 x i64>
+test ; llvm.aarch64.crypto.rax1 ; <2 x i64>(<2 x i64>, <2 x i64>)
+test ; llvm.aarch64.crypto.xar ; <2 x i64>(<2 x i64>, <2 x i64>, i64 7)
+test ; llvm.aarch64.crc32b ; i32(i32, i32)
+test ; llvm.aarch64.crc32h ; i32(i32, i32)
+test ; llvm.aarch64.crc32w ; i32(i32, i32)
+test ; llvm.aarch64.crc32x ; i32(i32, i64)
+test ; llvm.aarch64.crc32cb ; i32(i32, i32)
+test ; llvm.aarch64.crc32ch ; i32(i32, i32)
+test ; llvm.aarch64.crc32cw ; i32(i32, i32)
+test ; llvm.aarch64.crc32cx ; i32(i32, i64)
+test ; llvm.aarch64.cls ; i32(i32)
+test ; llvm.aarch64.cls64 ; i32(i64)
+test ; llvm.aarch64.sdiv.{0} ; 0(0, 0) ; i32 | i64
+test ; llvm.aarch64.udiv.{0} ; 0(0, 0) ; i32 | i64
+
+# --- Exclusive memory, barriers, system: built, not run
+test ; llvm.aarch64.ldxr.p0 ; i64(mem elementtype(i64))
+test ; llvm.aarch64.ldaxr.p0 ; i64(mem elementtype(i64))
+test ; llvm.aarch64.ldxp ; {i64, i64}(mem align 16)
+test ; llvm.aarch64.ldaxp ; {i64, i64}(mem align 16)
+build ; llvm.aarch64.stxr.p0 ; i32(i64, mem elementtype(i64))
+build ; llvm.aarch64.stlxr.p0 ; i32(i64, mem elementtype(i64))
+build ; llvm.aarch64.stxp ; i32(i64, i64, mem align 16)
+build ; llvm.aarch64.stlxp ; i32(i64, i64, mem align 16)
+build ; llvm.aarch64.clrex ; void()
+build ; llvm.aarch64.dmb ; void(i32 11)
+build ; llvm.aarch64.dsb ; void(i32 15)
+build ; llvm.aarch64.isb ; void(i32 15)
+build ; llvm.aarch64.hint ; void(i32 0)
+build ; llvm.aarch64.break ; void(i32 1)
+build ; llvm.aarch64.hlt ; void(i32 1)
+build ; llvm.aarch64.prefetch ; void(mem, i32 0, i32 0, i32 0, i32 1)
+build ; llvm.aarch64.prefetch.ir ; void(mem)
+build ; llvm.aarch64.get.fpcr ; i64()
+build ; llvm.aarch64.set.fpcr ; void(i64 0)
+build ; llvm.aarch64.get.fpsr ; i64()
+build ; llvm.aarch64.set.fpsr ; void(i64 0)
+skip ; llvm.aarch64.sys ; system instructions (SYS), which a user program cannot run

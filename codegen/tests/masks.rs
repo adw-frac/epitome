@@ -8,19 +8,26 @@ use std::process::Command;
 use epitome_codegen::target::Target;
 use epitome_codegen::{Options, compile};
 
+/// This machine's target, and its triple.
+fn host_target() -> Target {
+    if cfg!(target_arch = "x86_64") { Target::x86_64() } else { Target::aarch64() }
+}
+
+const TRIPLE: &str = if cfg!(target_arch = "x86_64") { "x86_64-unknown-linux-gnu" } else { "arm64-apple-macosx14.0.0" };
+
 #[test]
 fn comparison_masks_as_integers() {
-    let ok = cfg!(target_arch = "aarch64")
-        && cfg!(target_os = "macos")
+    let ok = (cfg!(target_arch = "aarch64") && cfg!(target_os = "macos")
+        || cfg!(target_arch = "x86_64") && cfg!(target_os = "linux"))
         && Command::new("clang").arg("--version").output().is_ok_and(|o| o.status.success());
     if !ok {
-        eprintln!("needs clang on an AArch64 Mac; skipping");
+        eprintln!("needs clang on an AArch64 Mac or x86-64 Linux; skipping");
         return;
     }
     let tmp = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("masks");
     std::fs::create_dir_all(&tmp).unwrap();
     // mask_N(a, b): bit k set where a[k] == b[k], for N bytes.
-    let mut ll = String::from("target triple = \"arm64-apple-macosx14.0.0\"\n");
+    let mut ll = format!("target triple = \"{TRIPLE}\"\n");
     for n in [8, 16, 32, 64] {
         // pick_N(bits, a, b, out): out[k] = bit k ? a[k] : b[k].
         ll.push_str(&format!(
@@ -33,7 +40,7 @@ fn comparison_masks_as_integers() {
              %c = icmp eq <{n} x i8> %x, %y\n  %m = bitcast <{n} x i1> %c to i{n}\n  ret i{n} %m\n}}\n"
         ));
     }
-    let t = Target::aarch64();
+    let t = host_target();
     let mut m = epitome_ir::parse_module(&ll).unwrap();
     let compiled = compile(&t, &mut m, &Options::default()).unwrap();
     std::fs::write(tmp.join("masks.o"), compiled.object_file(&t).unwrap()).unwrap();
@@ -94,19 +101,24 @@ int main(void) {
 /// linked with `wide_main.c`: the two must print the same.
 #[test]
 fn wide_masks_as_clangs() {
-    let ok = cfg!(target_arch = "aarch64")
-        && cfg!(target_os = "macos")
+    let ok = (cfg!(target_arch = "aarch64") && cfg!(target_os = "macos")
+        || cfg!(target_arch = "x86_64") && cfg!(target_os = "linux"))
         && Command::new("clang").arg("--version").output().is_ok_and(|o| o.status.success());
     if !ok {
-        eprintln!("needs clang on an AArch64 Mac; skipping");
+        eprintln!("needs clang on an AArch64 Mac or x86-64 Linux; skipping");
         return;
     }
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/masks");
     let tmp = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("masks-wide");
     std::fs::create_dir_all(&tmp).unwrap();
-    let ll = dir.join("wide.ll");
-    let t = Target::aarch64();
-    let mut m = epitome_ir::parse_module(&std::fs::read_to_string(&ll).unwrap()).unwrap();
+    // (For this machine's triple.)
+    let text = std::fs::read_to_string(dir.join("wide.ll"))
+        .unwrap()
+        .replace("target triple = \"arm64-apple-macosx14.0.0\"", &format!("target triple = \"{TRIPLE}\""));
+    let ll = tmp.join("wide.ll");
+    std::fs::write(&ll, &text).unwrap();
+    let t = host_target();
+    let mut m = epitome_ir::parse_module(&text).unwrap();
     let ours = tmp.join("ours.o");
     std::fs::write(&ours, compile(&t, &mut m, &Options::default()).unwrap().object_file(&t).unwrap()).unwrap();
     let theirs = tmp.join("theirs.o");

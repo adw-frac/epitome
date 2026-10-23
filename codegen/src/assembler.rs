@@ -29,14 +29,17 @@
 //! format's rules, so the object file is the one `epitome-llc` writes
 //! directly for the same program.
 //!
-//! The directives are those the code generator writes: `.text`, `.data`,
-//! `.bss`, `.section`, `.globl`, `.p2align`, `.type`, `.size`, `.byte`,
+//! The directives are those the code generator writes, and modules'
+//! own assembly (Rust's `global_asm!`) uses: `.text`, `.data`, `.bss`,
+//! `.section`, `.pushsection` and `.popsection`, `.globl`, `.p2align`,
+//! `.type`, `.size`, `.byte`,
 //! `.short`, `.long`, `.quad` (of numbers, or of `symbol+offset`),
 //! `.ascii`, `.asciz`, `.space`, `.zero` and `.build_version`; the
 //! `.cfi_*` directives of unwind tables, with `.cfi_personality` and
 //! `.cfi_lsda` (the encodings we write); `.long symbol@GOT-label` (Mach-O)
 //! or `.long symbol-label` (ELF), with the label at the field (exception
-//! tables' references to types); and
+//! tables' references to types) or, for ELF, earlier in its section (a
+//! relative lookup table's entries); and
 //! `.subsections_via_symbols`, which is accepted and ignored.
 
 use std::collections::{HashMap, HashSet};
@@ -135,6 +138,14 @@ pub struct Assembler<'t> {
 }
 
 /// What a line's holes said.
+/// A symbol an instruction refers to: where its field is in the
+/// instruction, and the field's value with it at 0.
+struct Sym {
+    name: String,
+    at: usize,
+    addend: i64,
+}
+
 struct Reading {
     env: Env,
     shown: HashMap<usize, Operand>,
@@ -330,7 +341,7 @@ impl<'t> Assembler<'t> {
         pc: u64,
         syntax: Syntax,
         label: &dyn Fn(&str) -> Option<u64>,
-    ) -> Result<(usize, u32, Option<String>), String> {
+    ) -> Result<(usize, Vec<u8>, Option<Sym>), String> {
         let lower = mnemonic(line).to_ascii_lowercase();
         let m = lower.as_str();
         let cands: Vec<&Template> = self
@@ -343,7 +354,7 @@ impl<'t> Assembler<'t> {
         if cands.is_empty() {
             return Err("no instruction has this mnemonic".into());
         }
-        let mut best: Option<(usize, usize, u32, Option<String>)> = None;
+        let mut best: Option<(usize, usize, Vec<u8>, Option<Sym>)> = None;
         let mut no_label = None;
         for tpl in cands {
             let Some(holes) = self.holes(tpl, line) else { continue };
@@ -377,8 +388,8 @@ impl<'t> Assembler<'t> {
                 continue;
             }
             // The values must encode, and decode back as themselves.
-            let Some(word) = ins.enc.encode(&r.env) else { continue };
-            let Some(back) = ins.decode(word) else { continue };
+            let Some((bytes, alt)) = ins.encode_alt(&r.env) else { continue };
+            let Some((back, _)) = ins.decode_alt(&bytes, alt) else { continue };
 
             if r.env.iter().any(|(n, v)| back.get(n).is_some_and(|b| b != v)) {
                 continue;
@@ -386,10 +397,19 @@ impl<'t> Assembler<'t> {
             let sp_classes =
                 ins.operands.iter().filter(|o| matches!(o.kind, Kind::Reg(c) if self.t.machine.def(c).sp)).count();
             if best.as_ref().is_none_or(|b| sp_classes < b.0) {
-                best = Some((sp_classes, tpl.instr, word, r.sym.map(|s| s.1)));
+                let mut bytes = bytes;
+                let sym = r.sym.map(|(k, name)| {
+                    let (at, addend) = ins.field_of(alt, &ins.operands[k].name, &r.env);
+                    // (The relocation's addend fills the field in.)
+                    if addend != 0 {
+                        ins.enc.alts[alt].clear(&mut bytes, &ins.operands[k].name);
+                    }
+                    Sym { name, at, addend }
+                });
+                best = Some((sp_classes, tpl.instr, bytes, sym));
             }
         }
-        best.map(|(_, i, w, s)| (i, w, s)).ok_or_else(|| {
+        best.map(|(_, i, b, s)| (i, b, s)).ok_or_else(|| {
             no_label.unwrap_or_else(|| "no instruction is written this way, or its values do not fit".into())
         })
     }
@@ -397,6 +417,28 @@ impl<'t> Assembler<'t> {
     /// Assembles `text`: Mach-O assembly if it says so (`.build_version`,
     /// or `__TEXT` and `__DATA` sections), or `syntax` says so; else ELF.
     pub fn assemble(&self, text: &str, syntax: Option<Syntax>) -> Result<Assembled, String> {
+        // Each instruction's length, by its line: the shortest a target's
+        // instructions are, until assembling it says otherwise. Lengths
+        // only grow, so distances do, so this ends.
+        let mut lens: HashMap<usize, usize> = HashMap::new();
+        loop {
+            match self.assemble_sized(text, syntax, &lens)? {
+                Ok(a) => return Ok(a),
+                Err(longer) => lens.extend(longer),
+            }
+        }
+    }
+
+    /// Assembles `text` with instructions of the lengths `lens` gives, or
+    /// gives the lengths of those that turned out longer.
+    fn assemble_sized(
+        &self,
+        text: &str,
+        syntax: Option<Syntax>,
+        lens: &HashMap<usize, usize>,
+    ) -> Result<Result<Assembled, HashMap<usize, usize>>, String> {
+        let unit = self.t.unit();
+        let mut longer: HashMap<usize, usize> = HashMap::new();
         let syntax = syntax.unwrap_or_else(|| {
             let macho = text.lines().any(|l| {
                 let l = l.trim();
@@ -412,6 +454,8 @@ impl<'t> Assembler<'t> {
         let mut obj = Object::default();
         let mut by_kind: HashMap<(SectionKind, Option<String>), usize> = HashMap::new();
         let mut cur: Option<usize> = None;
+        // Sections `.pushsection` left, for `.popsection`.
+        let mut pushed: Vec<(Option<usize>, bool)> = Vec::new();
         let mut discard = false;
         let mut held: Option<String> = None;
         let mut labels: HashMap<String, (usize, u64)> = HashMap::new();
@@ -479,6 +523,18 @@ impl<'t> Assembler<'t> {
                 let (name, args) = d.split_once(char::is_whitespace).unwrap_or((d, ""));
                 let args = args.trim();
                 let list = || split_args(args);
+                // (The section to go back to, kept before the switch.)
+                match name {
+                    "pushsection" => pushed.push((cur, discard)),
+                    "popsection" => {
+                        let (c, d) =
+                            pushed.pop().ok_or_else(|| err(n, "a .popsection without a .pushsection".into()))?;
+                        cur = c;
+                        discard = d;
+                        continue;
+                    }
+                    _ => {}
+                }
                 let mut switch = |kind: Option<(SectionKind, Option<String>)>| {
                     discard = kind.is_none();
                     if let Some((k, name)) = kind {
@@ -489,7 +545,7 @@ impl<'t> Assembler<'t> {
                     "text" => switch(Some((SectionKind::Text, None))),
                     "data" => switch(Some((SectionKind::Data, None))),
                     "bss" => switch(Some((SectionKind::Bss, None))),
-                    "section" => {
+                    "section" | "pushsection" => {
                         let kind =
                             section_kind(args, syntax).ok_or_else(|| err(n, "a section not supported".into()))?;
                         switch(kind);
@@ -517,6 +573,9 @@ impl<'t> Assembler<'t> {
                         let at = sec.size().next_multiple_of(align);
                         if sec.kind == SectionKind::Bss {
                             sec.bss_size = at;
+                        } else if sec.kind == SectionKind::Text {
+                            let fill = self.t.machine.code_fill(at as usize - sec.data.len());
+                            sec.data.extend(fill);
                         } else {
                             sec.data.resize(at as usize, 0);
                         }
@@ -698,7 +757,7 @@ impl<'t> Assembler<'t> {
                 None => normalise(line),
             };
             later.push(Later::Instr { section: s, offset: sec.data.len() as u64, line: n, text });
-            sec.data.extend_from_slice(&[0; 4]);
+            sec.data.resize(sec.data.len() + lens.get(&n).copied().unwrap_or(unit), 0);
         }
 
         // The second pass: instructions, and references to symbols in order.
@@ -727,20 +786,36 @@ impl<'t> Assembler<'t> {
                         let lower = self.lower_names(&text);
                         if lower == text { Err(e) } else { self.encode(&lower, offset, syntax, &find) }
                     });
-                    let (i, word, sym) = match read {
+                    let (i, bytes, sym) = match read {
                         Ok(x) => x,
                         Err(e) => {
                             errors.push(err(line, e));
                             continue;
                         }
                     };
-                    obj.sections[section].data[offset as usize..offset as usize + 4]
-                        .copy_from_slice(&word.to_le_bytes());
-                    if let Some(symbol) = sym {
+                    let room = lens.get(&line).copied().unwrap_or(unit);
+                    if bytes.len() > room {
+                        longer.insert(line, bytes.len());
+                        continue;
+                    }
+                    if bytes.len() < room {
+                        errors.push(err(line, format!("{} bytes where {room} were kept", bytes.len())));
+                        continue;
+                    }
+                    obj.sections[section].data[offset as usize..offset as usize + room].copy_from_slice(&bytes);
+                    if let Some(sym) = sym {
                         let kind = self.t.instrs[i]
                             .reloc
                             .ok_or_else(|| err(line, "a symbol in an instruction without a \"reloc\"".into()))?;
-                        pending.push(Pending { section, offset, kind, symbol, addend: 0, instr: Some(i) });
+                        let pc_rel = self.t.machine.relocs[kind.0 as usize].pc_relative();
+                        pending.push(Pending {
+                            section,
+                            offset: offset + sym.at as u64,
+                            kind,
+                            symbol: sym.name,
+                            addend: sym.addend + if pc_rel { sym.at as i64 } else { 0 },
+                            instr: Some(i),
+                        });
                     }
                 }
                 Later::Data { section, offset, symbol, addend } => {
@@ -756,10 +831,15 @@ impl<'t> Assembler<'t> {
                     });
                 }
                 Later::Got { section, offset, symbol, label, line } => {
-                    if labels.get(&label) != Some(&(section, offset)) {
-                        errors.push(err(line, format!("{label} is not where the reference is")));
-                        continue;
-                    }
+                    // (ELF's label may be earlier in the section: a
+                    // relative lookup table's start.)
+                    let at = match labels.get(&label) {
+                        Some(&(s, at)) if s == section && (at == offset || syntax == Syntax::Elf && at <= offset) => at,
+                        _ => {
+                            errors.push(err(line, format!("{label} is not where the reference is")));
+                            continue;
+                        }
+                    };
                     let usage = if syntax == Syntax::MachO { RelocUse::GotPcRel32 } else { RelocUse::EhPcRel };
                     let kind = self
                         .t
@@ -775,11 +855,14 @@ impl<'t> Assembler<'t> {
                         offset,
                         kind: RelocKind(kind as u16),
                         symbol,
-                        addend: 0,
+                        addend: (offset - at) as i64,
                         instr: None,
                     });
                 }
             }
+        }
+        if !longer.is_empty() {
+            return Ok(Err(longer));
         }
         if !errors.is_empty() {
             let n = errors.len();
@@ -840,7 +923,7 @@ impl<'t> Assembler<'t> {
             let p = crate::unwind::Params { syntax, data_align: self.t.machine.data_align(syntax), ra: abi.lr };
             crate::unwind::add_eh_frame(&mut obj, &self.t.machine, &p, &list)?;
         }
-        Ok(Assembled { object: obj, syntax, min_os })
+        Ok(Ok(Assembled { object: obj, syntax, min_os }))
     }
 }
 
