@@ -63,7 +63,7 @@ fn split_count(cx: &Ctx, ty: TypeId) -> Option<usize> {
     }
     let bits = len * eb;
     let vb = cx.vector_bits();
-    if vb == 0 || !len.is_power_of_two() || bits < vb / 2 {
+    if vb == 0 || !len.is_power_of_two() || bits < cx.min_vector_bits() {
         return Some(len as usize);
     }
     (bits > vb).then_some((bits / vb) as usize)
@@ -75,7 +75,7 @@ fn split_count(cx: &Ctx, ty: TypeId) -> Option<usize> {
 /// lanes compared.
 fn part(cx: &mut Ctx, len: u32, elem: TypeId, eb: u32) -> TypeId {
     let vb = cx.vector_bits();
-    if vb > 0 && len.is_power_of_two() && len * eb >= vb / 2 { vec_ty(cx, vb / eb, elem) } else { elem }
+    if vb > 0 && len.is_power_of_two() && len * eb >= cx.min_vector_bits() { vec_ty(cx, vb / eb, elem) } else { elem }
 }
 
 fn is_vec(cx: &Ctx, ty: TypeId) -> bool {
@@ -728,7 +728,9 @@ fn scalar_selects(cx: &mut Ctx, f: &mut Function) {
             }
             let mt = vec_ty(cx, len, i1);
             let poison = Value::Const(cx.m.consts.intern(Constant { ty: mt, kind: ConstKind::Poison }));
-            let zero = cx.int(i32t, 0);
+            // (Lane 0 as an i64, as splats' patterns have it.)
+            let i64t = cx.m.types.int(64);
+            let zero = cx.int(i64t, 0);
             let mut bld = Builder { f, new: Vec::new() };
             let one = bld.op(Op::InsertElement { vector: poison, element: cond, index: zero }, Some(mt));
             let lanes = vec_ty(cx, len, i32t);
@@ -1028,7 +1030,12 @@ fn expand_lanewise(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                     fmf,
                     lhs,
                     rhs,
-                } if vec_info(cx, rt).is_some_and(|(_, _, eb)| eb == 64 || op != BinOp::Mul) => {
+                } if vec_info(cx, rt).is_some_and(|(_, _, eb)| eb == 64 || op != BinOp::Mul)
+                    // (Unless the description has it: x86's multiplication of
+                    // 64-bit lanes is a recipe.)
+                    && !(op == BinOp::Mul
+                        && cx.selects_head(|h| *h == crate::target::Head::Bin(BinOp::Mul, crate::target::head_bits(cx.m, rt)))) =>
+                {
                     let (len, elem, _) = vec_info(cx, rt).unwrap();
                     let a = lanes(&mut bld, cx, lhs, len, elem);
                     let b = lanes(&mut bld, cx, rhs, len, elem);
@@ -1047,11 +1054,13 @@ fn expand_lanewise(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         && let Some((len, elem, eb)) = vec_info(cx, cx.value_ty(bld.f, arg))
                     {
                         let opname = rest.split('.').next().unwrap_or("");
+                        // (And the description must have it: x86's SSE2 has no
+                        // across-lanes instructions.)
                         let native = match opname {
                             "add" => true,
                             "smax" | "smin" | "umax" | "umin" => eb < 64 && len * eb == cx.vector_bits() || eb < 32,
                             _ => false,
-                        };
+                        } && cx.selects_intrinsic(&name);
                         if !native
                             && matches!(
                                 opname,
@@ -1369,7 +1378,19 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                 Value::Const(c) => uses_split |= split_count(cx, cx.m.constant(*c).ty).is_some(),
                 Value::Metadata(_) => {}
             });
-            let res_split = res_ty.and_then(|t| split_count(cx, t));
+            let mut res_split = res_ty.and_then(|t| split_count(cx, t));
+            // A phi of masks: split as the comparisons making them are
+            // (which may come later, round a loop), its lanes as wide.
+            let mut mask_eb = None;
+            if let (Op::Phi { .. }, Some(t), Some(r), None) = (&f.insts[i.index()].op, res_ty, res, res_split)
+                && let Some((len, _, 1)) = vec_info(cx, t)
+                && let Some(w) = mask_width(cx, f, Value::Local(r), &mut Vec::new())
+            {
+                let it = cx.m.types.int(w);
+                let wide = vec_ty(cx, len, it);
+                res_split = split_count(cx, wide);
+                mask_eb = Some(w);
+            }
             let odd_shuffle = match &f.insts[i.index()].op {
                 Op::ShuffleVector { .. } => !native_shuffle(cx, f, i),
                 _ => false,
@@ -1548,7 +1569,7 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                 Op::Phi { fmf, .. } => {
                     let n = res_split.ok_or("a phi of split masks")?;
                     let (vlen, elem, eb) = vec_info(cx, res_ty.unwrap()).unwrap();
-                    let pt = part(cx, vlen, elem, eb);
+                    let pt = part(cx, vlen, elem, mask_eb.unwrap_or(eb));
                     let mut phis = Vec::new();
                     for _ in 0..n {
                         let p = bld.f.add_inst(Op::Phi { fmf, incoming: vec![] }, Some((None, pt)));
@@ -1775,7 +1796,7 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         // A legal vector cast to a scalarised one: its lanes.
                         v if res_split.is_some()
                             && fe > 1
-                            && (!len.is_power_of_two() || len * te < cx.vector_bits() / 2) =>
+                            && (!len.is_power_of_two() || len * te < cx.min_vector_bits()) =>
                         {
                             let i64t = cx.m.types.int(64);
                             (0..len)

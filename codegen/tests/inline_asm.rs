@@ -1,11 +1,13 @@
-//! Inline assembly on AArch64 (`asm/aarch64.c`): built by clang into IR at
+//! Inline assembly on AArch64 (`asm/aarch64.c`), and on x86-64 (`asm/x86.c`,
+//! AT&T): built by clang into IR at
 //! `-O0` and `-O2`, compiled by us, linked with a main built by clang, and
 //! run, here, on this machine. Each build must print what clang's own build
 //! of the same C prints. Our assembly is also assembled by clang, and its
 //! code must be ours word for word: that checks the inline assembly we
 //! write in, and how our assembler reads it, against another assembler.
 //!
-//! Skipped unless clang is installed and this is an AArch64 Mac.
+//! Each is skipped unless clang is installed and this is an AArch64 Mac, or
+//! for x86, an x86-64 Linux machine.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -28,28 +30,28 @@ fn code(bytes: &[u8], t: &Target) -> Vec<u8> {
     img.sections.iter().filter(|s| s.code).flat_map(|s| s.data.clone()).collect()
 }
 
-fn check(t: &Target, dir: &Path, tmp: &Path, opt: &str, want: &str) -> Result<(), String> {
-    let ll = tmp.join(format!("aarch64{opt}.ll"));
-    run(Command::new("clang").args(["-S", "-emit-llvm", opt]).arg(dir.join("aarch64.c")).arg("-o").arg(&ll))?;
+fn check(t: &Target, name: &str, dir: &Path, tmp: &Path, opt: &str, want: &str) -> Result<(), String> {
+    let ll = tmp.join(format!("{name}{opt}.ll"));
+    run(Command::new("clang").args(["-S", "-emit-llvm", opt]).arg(dir.join(format!("{name}.c"))).arg("-o").arg(&ll))?;
     let mut m = epitome_ir::parse_module(&std::fs::read_to_string(&ll).unwrap()).map_err(|e| format!("{e:?}"))?;
     let compiled = compile(t, &mut m, &Options::default())?;
-    let s = tmp.join(format!("aarch64{opt}.s"));
+    let s = tmp.join(format!("{name}{opt}.s"));
     std::fs::write(&s, &compiled.asm).unwrap();
     let ours = compiled.object_file(t)?;
-    let o = tmp.join(format!("aarch64{opt}.o"));
+    let o = tmp.join(format!("{name}{opt}.o"));
     std::fs::write(&o, &ours).unwrap();
     // Ours, and our assembly assembled by clang.
-    let theirs_o = tmp.join(format!("aarch64{opt}.clang.o"));
+    let theirs_o = tmp.join(format!("{name}{opt}.clang.o"));
     run(Command::new("clang").arg("-c").arg(&s).arg("-o").arg(&theirs_o))?;
     if code(&ours, t) != code(&std::fs::read(&theirs_o).unwrap(), t) {
         return Err(format!("{opt}: clang assembles our assembly ({}) to other code", s.display()));
     }
-    for (name, obj) in [("ours", &o), ("clang-assembled", &theirs_o)] {
-        let exe = tmp.join(format!("aarch64{opt}.{name}"));
-        run(Command::new("clang").arg(obj).arg(dir.join("aarch64.main.c")).arg("-o").arg(&exe))?;
+    for (which, obj) in [("ours", &o), ("clang-assembled", &theirs_o)] {
+        let exe = tmp.join(format!("{name}{opt}.{which}"));
+        run(Command::new("clang").arg(obj).arg(dir.join(format!("{name}.main.c"))).arg("-o").arg(&exe))?;
         let got = run(&mut Command::new(&exe))?;
         if got != want {
-            return Err(format!("{opt} ({name}): printed\n{got}\ninstead of\n{want}"));
+            return Err(format!("{opt} ({which}): printed\n{got}\ninstead of\n{want}"));
         }
     }
     Ok(())
@@ -76,6 +78,26 @@ fn inline_asm_runs_on_aarch64() {
     .unwrap();
     let want = run(&mut Command::new(&reference)).unwrap();
     let failures: Vec<String> =
-        ["-O0", "-O2"].iter().filter_map(|opt| check(&t, &dir, &tmp, opt, &want).err()).collect();
+        ["-O0", "-O2"].iter().filter_map(|opt| check(&t, "aarch64", &dir, &tmp, opt, &want).err()).collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn inline_asm_runs_on_x86() {
+    let ok = Command::new("clang").arg("--version").output().is_ok_and(|o| o.status.success());
+    if !(ok && cfg!(target_arch = "x86_64") && cfg!(target_os = "linux")) {
+        eprintln!("needs clang on an x86-64 Linux machine; skipping");
+        return;
+    }
+    let t = Target::x86_64();
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/asm");
+    let tmp = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("inline-asm-x86");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let reference = tmp.join("ref");
+    run(Command::new("clang").arg("-O2").arg(dir.join("x86.c")).arg(dir.join("x86.main.c")).arg("-o").arg(&reference))
+        .unwrap();
+    let want = run(&mut Command::new(&reference)).unwrap();
+    let failures: Vec<String> =
+        ["-O0", "-O2"].iter().filter_map(|opt| check(&t, "x86", &dir, &tmp, opt, &want).err()).collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

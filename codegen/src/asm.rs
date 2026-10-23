@@ -342,6 +342,9 @@ pub fn print_globals(abi: &Abi, globals: &[GlobalData], out: &mut String) {
                 Item::Addr { symbol, offset } => {
                     let _ = writeln!(out, "\t.quad {symbol}{offset:+}");
                 }
+                Item::Rel32 { symbol, base } => {
+                    let _ = writeln!(out, "\t.long {symbol}-{base}");
+                }
             }
         }
         if abi.syntax == Syntax::Elf {
@@ -429,6 +432,20 @@ fn data(cx: &Ctx, abi: &Abi, ty: TypeId, c: ConstId, out: &mut Vec<Item>) -> Res
         {
             let ConstKind::Int(a) = &m.constant(*value).kind else { unreachable!() };
             out.push(Item::Int { size: 8, value: a.low_u64(), hex: false });
+        }
+        // The distance from a global to another place, in 32 bits: a
+        // relative lookup table's entry (`base` must be the global being
+        // written).
+        (ConstKind::Expr(ConstExpr::Cast { op: CastOp::Trunc, value }), _)
+            if size == 4
+                && let ConstKind::Expr(ConstExpr::Binary { op: BinOp::Sub, lhs, rhs, .. }) =
+                    &m.constant(*value).kind
+                && let (Some((a, 0)), Some((b, 0))) =
+                    (prepare::const_address(cx, *lhs), prepare::const_address(cx, *rhs))
+                && a != b =>
+        {
+            let name = |g: GlobalId| abi.symbol(&m.global(g).name.clone().unwrap_or_default());
+            out.push(Item::Rel32 { symbol: name(a), base: name(b) });
         }
         // The distance between two places in one global: a number.
         (ConstKind::Expr(ConstExpr::Binary { op: BinOp::Sub, lhs, rhs, .. }), _)

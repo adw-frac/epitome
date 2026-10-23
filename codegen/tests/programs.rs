@@ -136,9 +136,10 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         let theirs = words_of(&dump);
         let mut ours: Vec<(u32, bool)> = Vec::new();
         for f in &compiled.funcs {
-            let (words, fixups) = mir::encode_function(t, f)?;
-            for (k, w) in words.into_iter().enumerate() {
-                ours.push((w, fixups.iter().any(|x| x.offset == 4 * k)));
+            let code = mir::encode_function(t, f)?;
+            for (k, w) in code.bytes.chunks(4).enumerate() {
+                let w = u32::from_le_bytes(w.try_into().unwrap());
+                ours.push((w, code.fixups.iter().any(|x| x.offset == 4 * k)));
             }
         }
         if ours.len() != theirs.len() {
@@ -149,11 +150,11 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
                 return Err(format!("{stem}: word {k} is {w:08x}, the assembler's is {tw:08x} ({mnemonic})"));
             }
             // 3. The disassembler reads it back.
-            let Some((i, env)) = mir::decode(t, *w) else {
+            let Some((i, env, _)) = mir::decode(t, &w.to_le_bytes()) else {
                 return Err(format!("{stem}: cannot disassemble {w:08x} ({mnemonic})"));
             };
             let ins = &t.instrs[i];
-            if ins.enc.encode(&env) != Some(*w) {
+            if ins.encode(&env) != Some(w.to_le_bytes().to_vec()) {
                 return Err(format!("{stem}: {w:08x} disassembles as {} but does not encode back", ins.name));
             }
             let ours_mn = ins.asm.split_whitespace().next().unwrap_or("");
@@ -221,9 +222,10 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<Vec<S
         let theirs = words_of(&dump);
         let mut ours: Vec<(u32, bool)> = Vec::new();
         for f in &compiled.funcs {
-            let (words, fixups) = mir::encode_function(t, f)?;
-            for (k, w) in words.into_iter().enumerate() {
-                ours.push((w, fixups.iter().any(|x| x.offset == 4 * k)));
+            let code = mir::encode_function(t, f)?;
+            for (k, w) in code.bytes.chunks(4).enumerate() {
+                let w = u32::from_le_bytes(w.try_into().unwrap());
+                ours.push((w, code.fixups.iter().any(|x| x.offset == 4 * k)));
             }
         }
         if ours.len() != theirs.len() {

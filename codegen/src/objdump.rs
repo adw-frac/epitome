@@ -20,7 +20,7 @@
 use std::fmt::Write;
 
 use crate::abi::Syntax;
-use crate::enc::Env;
+use crate::enc::{self, Env};
 use crate::machine::Machine;
 use crate::mir::{self, Operand, Reg};
 use crate::object::RelocKind;
@@ -339,8 +339,9 @@ fn reloc_operand(m: &Machine, r: &ImageReloc, macho: bool) -> String {
     }
 }
 
-/// The instruction `word` is, when a relocation of `kind` fills it in.
-fn decode_reloc(t: &Target, word: u32, kind: RelocKind) -> Option<(usize, Env)> {
+/// The instruction at the start of `bytes`, when a relocation of `kind`
+/// fills it in.
+fn decode_reloc(t: &Target, bytes: &[u8], kind: RelocKind) -> Option<(usize, Env, usize)> {
     // Relocations an object file numbers alike are one to it (Mach-O's
     // BRANCH26 is both a call's and a tail call's).
     let defs = &t.machine.relocs;
@@ -349,14 +350,16 @@ fn decode_reloc(t: &Target, word: u32, kind: RelocKind) -> Option<(usize, Env)> 
         let d = &defs[r.0 as usize];
         r == kind || (d.macho.is_some() && d.macho == k.macho) || (d.elf.is_some() && d.elf == k.elf)
     };
-    (0..t.instrs.len())
-        .filter(|&i| t.instrs[i].reloc.is_some_and(alike) && word & t.instrs[i].enc.mask == t.instrs[i].enc.value)
-        .find_map(|i| t.instrs[i].decode(word).map(|env| (i, env)))
+    t.decode_candidates(bytes)
+        .into_iter()
+        .filter(|&(i, _)| t.instrs[i].reloc.is_some_and(alike))
+        .find_map(|(i, alt)| t.instrs[i].decode_alt(bytes, alt).map(|(env, len)| (i, env, len)))
 }
 
 /// `-d`: the code sections disassembled.
 pub fn disassemble(t: &Target, img: &Image, show_relocs: bool) -> String {
     let mut out = String::new();
+    let unit = t.unit();
     // Symbols to name addresses by: functions, objects and others, not
     // section or mapping symbols.
     let mut named: Vec<(u64, usize, String)> = img
@@ -370,6 +373,11 @@ pub fn disassemble(t: &Target, img: &Image, show_relocs: bool) -> String {
         .collect();
     named.sort();
     named.dedup();
+    // The first named at each place, by section and address.
+    let mut at_addr: std::collections::HashMap<(usize, u64), &String> = std::collections::HashMap::new();
+    for (a, k, n) in &named {
+        at_addr.entry((*k, *a)).or_insert(n);
+    }
     for (k, s) in img.sections.iter().enumerate() {
         if !s.code || s.data.is_empty() {
             continue;
@@ -384,10 +392,15 @@ pub fn disassemble(t: &Target, img: &Image, show_relocs: bool) -> String {
             .map(|m| (m.value_in(img, k), m.name.starts_with("$d")))
             .collect();
         mapping.sort();
-        let is_data = |off: u64| mapping.iter().rev().find(|m| m.0 <= off).is_some_and(|m| m.1);
-        // A target address, with the symbol it is in.
+        let is_data = |off: u64| {
+            let k = mapping.partition_point(|m| m.0 <= off);
+            k > 0 && mapping[k - 1].1
+        };
+        // A target address, with the symbol it is in (`here` is in address
+        // order: found by halving).
         let label = |addr: u64| -> String {
-            let sym = here.iter().rev().find(|x| x.0 <= addr).or_else(|| here.first().filter(|x| x.0 == addr));
+            let k = here.partition_point(|x| x.0 <= addr);
+            let sym = if k > 0 { Some(here[k - 1]) } else { here.first().copied().filter(|x| x.0 == addr) };
             match sym {
                 Some((a, _, n)) if *a == addr => format!("{addr:#x} <{n}>"),
                 Some((a, _, n)) => format!("{addr:#x} <{n}+{:#x}>", addr - a),
@@ -397,46 +410,65 @@ pub fn disassemble(t: &Target, img: &Image, show_relocs: bool) -> String {
         if here.first().is_none_or(|x| x.0 > s.addr) {
             let _ = writeln!(out, "\n{:016x} <{}>:", s.addr, s.name);
         }
+        // The relocations by where they are.
+        let mut by_offset: Vec<&ImageReloc> = s.relocs.iter().collect();
+        by_offset.sort_by_key(|r| r.offset);
         let mut off = 0u64;
+        // The next symbol to write, as the code reaches it.
+        let mut next = 0;
         while off < s.data.len() as u64 {
             let addr = s.addr + off;
-            for (a, _, n) in &here {
-                if *a == addr {
-                    let _ = writeln!(out, "\n{addr:016x} <{n}>:");
-                }
+            while next < here.len() && here[next].0 < addr {
+                next += 1;
+            }
+            while next < here.len() && here[next].0 == addr {
+                let _ = writeln!(out, "\n{addr:016x} <{}>:", here[next].2);
+                next += 1;
             }
             let rest = &s.data[off as usize..];
-            if rest.len() < 4 {
+            if rest.len() < unit {
                 let bytes: Vec<String> = rest.iter().map(|b| format!("{b:02x}")).collect();
                 let _ = writeln!(out, "{addr:>8x}: {:<8}     \t.byte {}", bytes.join(""), bytes.join(", "));
                 break;
             }
-            let word = u32::from_le_bytes(rest[..4].try_into().unwrap());
-            let relocs: Vec<&ImageReloc> = s.relocs.iter().filter(|r| r.offset == off).collect();
-            let text = if is_data(off) {
-                format!(".word {word:#010x}")
+            // Its length, then the relocations in it.
+            let len = match mir::decode(t, rest) {
+                _ if is_data(off) => 4,
+                Some((_, _, n)) => n,
+                None => unit,
+            };
+            let from = by_offset.partition_point(|r| r.offset < off);
+            let relocs: Vec<&ImageReloc> =
+                by_offset[from..].iter().copied().take_while(|r| r.offset < off + len as u64).collect();
+            let (text, len) = if is_data(off) {
+                (format!(".word {:#010x}", enc::word(&rest[..4])), 4)
             } else {
                 // Against a section: the symbol there, if one is.
-                let named_reloc = relocs.first().map(|r| {
-                    let mut r = (*r).clone();
+                // (Its addend, less what the instruction adds itself.)
+                let named = |r: &mut ImageReloc| {
                     if let Some(sk) = img.sections.iter().position(|x| x.name == r.target)
-                        && let Some(n) =
-                            named.iter().find(|x| x.1 == sk && x.0 == img.sections[sk].addr + r.addend as u64)
+                        && let Some(n) = at_addr.get(&(sk, img.sections[sk].addr + r.addend as u64))
                     {
-                        r.target = n.2.clone();
+                        r.target = (*n).clone();
                         r.addend = 0;
                     }
-                    r
-                });
-                instruction(t, word, addr, named_reloc.as_ref(), img.macho, &label)
+                };
+                instruction(t, rest, addr, relocs.first().copied(), img.macho, &label, &named)
             };
-            let _ = writeln!(out, "{addr:>8x}: {word:08x}     \t{text}");
+            // A word as a word, as other disassemblers show one; other
+            // lengths as their bytes.
+            let hex = if unit == 4 && len == 4 {
+                format!("{:08x}", enc::word(&rest[..4]))
+            } else {
+                rest[..len].iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ")
+            };
+            let _ = writeln!(out, "{addr:>8x}: {hex}     \t{text}");
             if show_relocs {
                 for r in relocs {
-                    let _ = writeln!(out, "\t\t{:016x}:  {}\t{}", addr, r.type_name, target_text(r));
+                    let _ = writeln!(out, "\t\t{:016x}:  {}\t{}", s.addr + r.offset, r.type_name, target_text(r));
                 }
             }
-            off += 4;
+            off += len as u64;
         }
     }
     out
@@ -451,30 +483,49 @@ impl ImageSymbol {
     }
 }
 
-/// One instruction, as assembly; `reloc` is the relocation that fills it
-/// in, if there is one.
+/// The instruction at the start of `bytes`, as assembly, and its length;
+/// `reloc` is the relocation that fills it in, if there is one, and `named`
+/// names a section-relative one's place by a symbol there.
 pub fn instruction(
     t: &Target,
-    word: u32,
+    bytes: &[u8],
     pc: u64,
     reloc: Option<&ImageReloc>,
     macho: bool,
     label: &dyn Fn(u64) -> String,
-) -> String {
+    named: &dyn Fn(&mut ImageReloc),
+) -> (String, usize) {
     let decoded = match reloc.and_then(|r| r.kind) {
-        Some(k) => decode_reloc(t, word, k).or_else(|| mir::decode(t, word)),
-        None => mir::decode(t, word),
+        Some(k) => decode_reloc(t, bytes, k).or_else(|| mir::decode(t, bytes)),
+        None => mir::decode(t, bytes),
     };
-    let Some((i, env)) = decoded else { return format!(".word {word:#010x}") };
+    let Some((i, env, len)) = decoded else {
+        return match t.unit() {
+            4 if bytes.len() >= 4 => (format!(".word {:#010x}", enc::word(&bytes[..4])), 4),
+            _ => (format!(".byte {:#04x}", bytes[0]), 1),
+        };
+    };
     let ins = &t.instrs[i];
-    mir::fill_template(t, None, i, |k| {
+    let text = mir::fill_template(t, None, i, |k| {
         let o = &ins.operands[k];
         let v = env[&o.name];
         match o.kind {
             Kind::Reg(c) => Operand::Reg(Reg::P(t.machine.phys(c, v))),
             Kind::Label => Operand::Text(label(pc.wrapping_add(v as u64))),
             Kind::Sym => match reloc {
-                Some(r) => Operand::Text(reloc_operand(&t.machine, r, macho)),
+                // Less what the instruction's field adds itself (x86's
+                // PC32 addend of -4 is the field's end, not the symbol's).
+                Some(r) => {
+                    let bias = ins.encode_alt(&env).map_or(0, |(_, alt)| {
+                        let (at, a) = ins.field_of(alt, &o.name, &env);
+                        let pc_rel = r.kind.is_some_and(|k| t.machine.relocs[k.0 as usize].pc_relative());
+                        a + if pc_rel { at as i64 } else { 0 }
+                    });
+                    let mut r = r.clone();
+                    r.addend -= bias;
+                    named(&mut r);
+                    Operand::Text(reloc_operand(&t.machine, &r, macho))
+                }
                 None => match ins.reloc.and_then(|kind| t.machine.relocs[kind.0 as usize].reaches(pc, v)) {
                     Some(a) => Operand::Text(label(a)),
                     None => Operand::Imm(v),
@@ -482,7 +533,8 @@ pub fn instruction(
             },
             Kind::Imm | Kind::Cond => Operand::Imm(v),
         }
-    })
+    });
+    (text, len)
 }
 
 /// Checks that `img`'s code disassembles as `asm` (the assembly it was
@@ -492,9 +544,28 @@ pub fn instruction(
 /// many instructions there are.
 pub fn reads_back(t: &Target, img: &Image, asm: &str, aliases: &[(&str, &str)]) -> Result<usize, String> {
     let dump = disassemble(t, img, true);
+    // Where functions are, by their symbols' sizes: what lies between them
+    // is padding (x86's no-ops), not written as instructions.
+    let funcs: Vec<(u64, u64)> = img
+        .symbols
+        .iter()
+        .filter(|x| x.class == SymbolClass::Func && x.size > 0)
+        .filter_map(|x| x.section.map(|k| (img.sections[k].addr + x.value_in(img, k), x.size)))
+        .collect();
+    let padding = |addr: u64| !funcs.is_empty() && !funcs.iter().any(|&(a, n)| addr >= a && addr < a + n);
     // Each instruction: its text, and whether a relocation fills it in.
     let mut lines: Vec<(String, bool)> = Vec::new();
+    let mut skipping = false;
     for l in dump.lines() {
+        if let Some((addr, _)) = l.split_once(": ")
+            && let Ok(a) = u64::from_str_radix(addr.trim(), 16)
+            && !l.starts_with('\t')
+        {
+            skipping = padding(a);
+        }
+        if skipping {
+            continue;
+        }
         if l.starts_with("\t\t") {
             if let Some(last) = lines.last_mut() {
                 last.1 = true;

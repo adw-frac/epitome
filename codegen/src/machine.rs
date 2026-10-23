@@ -153,6 +153,15 @@ pub struct RelocDef {
 }
 
 impl RelocDef {
+    /// Whether it measures from where it is: its target reads `pc`.
+    pub fn pc_relative(&self) -> bool {
+        self.target.as_ref().is_some_and(|e| {
+            let mut names = Vec::new();
+            enc::names_in(e, &mut names);
+            names.iter().any(|n| n == "pc")
+        })
+    }
+
     /// How assembly in `syntax` writes an operand this fills in.
     pub fn spell(&self, syntax: Syntax, sym: &str) -> String {
         let tpl = match syntax {
@@ -228,6 +237,10 @@ pub struct ClassDef {
     pub sp: bool,
     /// Its registers' names, in number order within the file.
     pub names: Vec<String>,
+    /// The one register an operand of this class is in (`"fixed"`: x86's
+    /// `rax` of a division, `cl` of a shift), by its number in the file.
+    /// Selection copies values there and back; no value is kept in it.
+    pub fixed: Option<u8>,
 }
 
 /// A register file: its registers are numbers `base` to `base + size - 1`.
@@ -252,9 +265,27 @@ pub struct Machine {
     /// How objdump names the ELF format (`elf64-littleaarch64`).
     pub elf_format: String,
     pub macho_cpu: Option<u32>,
+    /// The shortest instruction's length in bytes ("instruction-unit"; 4
+    /// unless the description says).
+    pub unit: u32,
+    /// Encodings are parsed when first used, not as the description is read
+    /// ("lazy-encodings"): for a description of tens of thousands.
+    pub lazy_encodings: bool,
     pub relocs: Vec<RelocDef>,
     /// The feature the vector registers come with, if they are optional.
     pub vector_feature: Option<String>,
+    /// Every width of vector registers, with the feature each needs (x86's
+    /// 128 bits, 256 with `avx2`): a function's vectors are the widest its
+    /// features allow.
+    pub vector_widths: Vec<(u32, Option<String>)>,
+    /// The class masks (vectors of `i1`) are held in, by the width of the
+    /// vectors in use (`mask-class`), where it is not the smallest that
+    /// holds vectors (x86's 256-bit masks are in ymm registers).
+    pub mask_classes: Vec<(u32, Class)>,
+    /// The narrowest vector kept in a register (`min-vector-bits`; half the
+    /// vector registers' width unless the description says: x86's 64-bit
+    /// vectors are in xmm registers whatever the width in use).
+    pub min_vector_bits: Option<u32>,
     /// CPUs, with the features each has.
     pub cpus: Vec<(String, Vec<String>)>,
     /// The CPU to assume when none is named.
@@ -262,6 +293,14 @@ pub struct Machine {
     /// Branches on a boolean in a register must compare the whole register
     /// (RISC-V), rather than test its lowest bit (AArch64's `tbnz`).
     pub compare_booleans: bool,
+    /// The floating-point comparisons no one condition tests, which are
+    /// made of two (`"fcmp-split"`: AArch64's one and ueq, the default;
+    /// x86's oeq and une).
+    pub fcmp_split: Vec<String>,
+    /// A sequentially consistent store is a swap whose old value goes
+    /// unused (`"seq-cst-stores"="swap"`: x86's `xchg`, as its loads of
+    /// any ordering are plain ones).
+    pub seq_cst_swap: bool,
     /// Loads and stores need no alignment and cost no more without it
     /// (`unaligned-access` = `fast`), so small copies may use wide ones.
     pub unaligned_fast: bool,
@@ -276,8 +315,24 @@ pub struct Machine {
     pub asm_modifiers: HashMap<char, AsmModifier>,
     /// How assembly starts a comment.
     pub asm_comment: String,
+    /// How inline assembly writes an immediate operand (`asm-imm`, with
+    /// `{i}` the number: x86's AT&T `${i}`); modifier `c` writes it bare.
+    pub asm_imm: String,
     /// DWARF's number for each file's first register (`!target.dwarf`).
     pub dwarf: HashMap<usize, u32>,
+    /// Or for each of its registers, where they are not in order (x86's).
+    pub dwarf_each: HashMap<usize, Vec<u32>>,
+    /// Unwind tables' CFA at a function's entry, from the stack pointer
+    /// (`"cfi-cfa-offset"`: x86's 8, past the return address the call
+    /// pushed, which is then at the CFA less 8), and DWARF's number for the
+    /// return address (`"cfi-return-column"`: x86's 16, rip), where it is
+    /// not the link register.
+    pub cfi_cfa_offset: i64,
+    pub cfi_return_column: Option<u32>,
+    /// No-ops to pad code with, by length from 1 (`!target.nops`, hex):
+    /// the longest are used as often as they fit, as the assemblers do.
+    /// Without them, code is padded with zeros.
+    pub nops: Vec<Vec<u8>>,
     /// The data alignment factor of unwind tables, in ELF and in Mach-O
     /// (`cfi-data-align`: one value, or ELF's then Mach-O's).
     pub cfi_data_align: (i64, i64),
@@ -365,7 +420,17 @@ impl Machine {
                 return Err(format!("register class {class} holds values, but has no bits"));
             }
             let sp = p.get("sp").is_some_and(|v| v == "yes");
-            classes.push(ClassDef { name: class.clone(), file, bits, holds, sp, names });
+            let fixed = match p.get("fixed") {
+                Some(r) => Some(
+                    names.iter().position(|n| n == r).ok_or_else(|| format!("register class {class}: fixed {r}"))?
+                        as u8,
+                ),
+                None => None,
+            };
+            if fixed.is_some() && holds.is_some() {
+                return Err(format!("register class {class} is fixed, so holds no values"));
+            }
+            classes.push(ClassDef { name: class.clone(), file, bits, holds, sp, names, fixed });
         }
         if classes.is_empty() {
             return Err("the description names no registers (!target.registers)".into());
@@ -398,8 +463,13 @@ impl Machine {
             elf_flags: 0,
             elf_format: String::new(),
             macho_cpu: None,
+            unit: 4,
+            lazy_encodings: false,
             relocs: Vec::new(),
             vector_feature: None,
+            vector_widths: Vec::new(),
+            mask_classes: Vec::new(),
+            min_vector_bits: None,
             cpus: Vec::new(),
             default_cpu: None,
             compare_booleans: false,
@@ -409,7 +479,14 @@ impl Machine {
             asm_constraints: HashMap::new(),
             asm_modifiers: HashMap::new(),
             asm_comment: String::new(),
+            asm_imm: "{i}".into(),
             dwarf: HashMap::new(),
+            dwarf_each: HashMap::new(),
+            cfi_cfa_offset: 0,
+            cfi_return_column: None,
+            nops: Vec::new(),
+            fcmp_split: vec!["one".into(), "ueq".into()],
+            seq_cst_swap: false,
             cfi_data_align: (-8, -8),
             asm_aliases: Vec::new(),
         };
@@ -430,6 +507,16 @@ impl Machine {
         mc.zero = params.get("zero").map(|z| mc.reg(z)).transpose()?;
         mc.vector_bits = num("vector-bits")?.unwrap_or(0) as u32;
         mc.vector_feature = all_params.iter().find(|t| t[0] == "vector-bits").and_then(|t| t.get(2).cloned());
+        for t in all_params.iter().filter(|t| t[0] == "vector-bits") {
+            let bits = t.get(1).and_then(|b| b.parse().ok()).ok_or("target parameter vector-bits: a width")?;
+            mc.vector_widths.push((bits, t.get(2).cloned()));
+        }
+        mc.min_vector_bits = num("min-vector-bits")?.map(|b| b as u32);
+        for t in all_params.iter().filter(|t| t[0] == "mask-class") {
+            let bits = t.get(1).and_then(|b| b.parse().ok()).ok_or("target parameter mask-class: a width")?;
+            let class = t.get(2).and_then(|c| mc.class(c)).ok_or("target parameter mask-class: a class")?;
+            mc.mask_classes.push((bits, class));
+        }
         mc.default_cpu = params.get("cpu").cloned();
         mc.compare_booleans = match params.get("boolean-branches").map(String::as_str) {
             None | Some("bit") => false,
@@ -453,11 +540,16 @@ impl Machine {
             Some("sign") => Narrow::Sign,
             Some(o) => return Err(format!("target parameter narrow-results: {o}")),
         };
+        mc.seq_cst_swap = params.get("seq-cst-stores").is_some_and(|v| v == "swap");
         mc.external_via_got = params.get("external-via-got").is_some_and(|v| v == "yes");
+        if let Some(t) = all_params.iter().find(|t| t[0] == "fcmp-split") {
+            mc.fcmp_split = t[1..].to_vec();
+        }
         mc.elf_machine = num("elf-machine")?.unwrap_or(0) as u16;
         mc.elf_flags = num("elf-flags")?.unwrap_or(0) as u32;
         mc.elf_format = params.get("elf-format").cloned().unwrap_or_else(|| "elf64-little".into());
         mc.asm_comment = params.get("asm-comment").cloned().unwrap_or_else(|| "//".into());
+        mc.asm_imm = params.get("asm-imm").cloned().unwrap_or_else(|| "{i}".into());
         if let Some(t) = all_params.iter().find(|t| t[0] == "cfi-data-align") {
             let v = |k: usize| t.get(k).and_then(|x| x.parse::<i64>().ok());
             let elf = v(1).ok_or("target parameter cfi-data-align: a number")?;
@@ -498,15 +590,34 @@ impl Machine {
             mc.asm_constraints.insert(one_char(code)?, def);
         }
         for t in tuples(m, "target.dwarf") {
-            if let [file, base] = &t[..] {
-                let k = mc
-                    .files
-                    .iter()
-                    .position(|f| f.name == *file)
-                    .ok_or_else(|| format!("!target.dwarf: no file {file}"))?;
-                mc.dwarf.insert(k, base.parse().map_err(|_| format!("!target.dwarf: {base}"))?);
+            let Some((file, nums)) = t.split_first() else { continue };
+            let k = mc
+                .files
+                .iter()
+                .position(|f| f.name == *file)
+                .ok_or_else(|| format!("!target.dwarf: no file {file}"))?;
+            let nums: Vec<u32> =
+                nums.iter().map(|n| n.parse().map_err(|_| format!("!target.dwarf: {n}"))).collect::<Result<_, _>>()?;
+            match nums[..] {
+                [base] => {
+                    mc.dwarf.insert(k, base);
+                }
+                _ => {
+                    mc.dwarf_each.insert(k, nums);
+                }
             }
         }
+        for t in tuples(m, "target.nops") {
+            for hex in t {
+                let bytes = (0..hex.len() / 2)
+                    .map(|k| u8::from_str_radix(&hex[2 * k..2 * k + 2], 16))
+                    .collect::<Result<Vec<u8>, _>>()
+                    .map_err(|_| format!("!target.nops: {hex}"))?;
+                mc.nops.push(bytes);
+            }
+        }
+        mc.cfi_cfa_offset = num("cfi-cfa-offset")?.unwrap_or(0) as i64;
+        mc.cfi_return_column = num("cfi-return-column")?.map(|v| v as u32);
         for t in tuples(m, "target.asm-aliases") {
             if let [from, to] = &t[..] {
                 mc.asm_aliases.push((from.clone(), to.clone()));
@@ -524,6 +635,8 @@ impl Machine {
             mc.asm_modifiers.insert(one_char(code)?, def);
         }
         mc.macho_cpu = num("macho-cpu")?.map(|v| v as u32);
+        mc.unit = num("instruction-unit")?.unwrap_or(4) as u32;
+        mc.lazy_encodings = num("lazy-encodings")?.unwrap_or(0) != 0;
         for t in tuples(m, "target.relocs") {
             let p: HashMap<&str, &str> =
                 t.chunks(2).filter_map(|c| Some((c[0].as_str(), c.get(1)?.as_str()))).collect();
@@ -562,6 +675,32 @@ impl Machine {
             });
         }
         Ok(mc)
+    }
+
+    /// `n` bytes of padding for code: no-ops, if the description gives them.
+    pub fn code_fill(&self, mut n: usize) -> Vec<u8> {
+        if self.nops.is_empty() {
+            return vec![0; n];
+        }
+        let mut out = Vec::with_capacity(n);
+        while n > 0 {
+            let k = n.min(self.nops.len());
+            out.extend_from_slice(&self.nops[k - 1]);
+            n -= k;
+        }
+        out
+    }
+
+    /// What a class holds: for a fixed class (one register), what its
+    /// file's classes do.
+    pub fn holds_of(&self, c: Class) -> Option<Holds> {
+        let d = self.def(c);
+        match (d.holds, d.fixed) {
+            (None, Some(_)) => {
+                self.classes.iter().find(|x| x.file == d.file && x.holds.is_some()).and_then(|x| x.holds)
+            }
+            (h, _) => h,
+        }
     }
 
     /// The class called `name`.
@@ -610,6 +749,9 @@ impl Machine {
     /// DWARF's number for register `r`, for unwind tables.
     pub fn dwarf_number(&self, r: u8) -> Option<u32> {
         let f = self.file_of(r);
+        if let Some(each) = self.dwarf_each.get(&f) {
+            return each.get(self.index(r) as usize).copied();
+        }
         self.dwarf.get(&f).map(|b| b + self.index(r) as u32)
     }
 

@@ -1,20 +1,39 @@
 //! Encodings: the `"enc"` attribute of an instruction.
 //!
-//! An encoding is a list of tokens, most significant bit first, adding up
-//! to 32 bits. A token is literal bits (`01011`) or a field
-//! `name:width[=expr]`, where a width written `s19` is signed. Expressions
-//! have integers, operand names, `+ - * / % & | ^ << >>`, and the
+//! An encoding is a list of *pieces* separated by `|`. A piece is written
+//! most significant bit first, as a list of tokens, and is a whole number
+//! of bytes (up to 8); a piece of several bytes is stored little-endian.
+//! AArch64's and RISC-V's encodings are one 32-bit piece. A token is
+//! literal bits (`01011`) or a field `name:width[=expr]`, where a width
+//! written `s19` is signed and a width of 0 holds nothing (its expression
+//! must be 0: a constraint, and on decoding, a value). Expressions have
+//! integers, operand names (which may contain dots: `m.base`), `+ - * / %
+//! & | ^ << >>`, the comparisons `== != < <= > >=` (1 or 0), and the
 //! functions `bitmask32`, `bitmask64` (logical immediates), `log2`
 //! (defined only for powers of two), and `fp8s`, `fp8d` (a `float`'s or
 //! `double`'s bits as an 8-bit floating-point immediate, defined only for
-//! the values one can hold). Without an
-//! expression the field holds the operand called `name`.
+//! the values one can hold). Without an expression the field holds the
+//! operand called `name`. `end` is the encoding's length in bytes, so a
+//! field `rel:s8=dest-end` holds a target measured from the instruction's
+//! end (operands are measured from its start).
+//!
+//! `{ a ; b ; c }` gives alternatives, and `{ a ; }` makes `a` optional. An
+//! alternative may start with guards, `if(expr)`, which must be non-zero
+//! for it to be used, encoding or decoding. The first alternative, in the
+//! order written, whose guards hold and whose fields hold the operands is
+//! the one used; when there are several, its encoding must also decode
+//! back to the same operands, so the shortest form that can hold them
+//! wins.
+//!
+//! A *fragment* is a named encoding defined in the description, in
+//! `!target.encodings` as `!{!"name", !"params", !"encoding"}`, and used
+//! as `name(arg, ...)`: its parameters are replaced by the arguments.
 //!
 //! Encoding evaluates each field's expression on the operands. Decoding
 //! inverts fields to recover operands (`off = imm12 * 8` from
 //! `imm12:12=off/8`) and keeps the result only if encoding it again gives
-//! the same word. The same round trip decides which immediates fit: a value
-//! fits if it survives being encoded and decoded.
+//! the same bytes. The same round trip decides which immediates fit: a
+//! value fits if it survives being encoded and decoded.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -24,6 +43,9 @@ pub enum Expr {
     Int(i64),
     Var(String),
     Neg(Box<Expr>),
+    /// An operator: `+ - * / % & | ^`, `<` for `<<`, `>` for `>>`, and the
+    /// comparisons `=` (`==`), `!` (`!=`), `l` (`<`), `L` (`<=`), `g`
+    /// (`>`), `G` (`>=`).
     Bin(char, Box<Expr>, Box<Expr>),
     /// `bitmask32(x)` or `bitmask64(x)`: a logical immediate's N:immr:imms.
     Bitmask(u32, Box<Expr>),
@@ -40,11 +62,27 @@ impl fmt::Display for Expr {
             Expr::Int(k) => write!(f, "{k}"),
             Expr::Var(v) => f.write_str(v),
             Expr::Neg(e) => write!(f, "-{e}"),
-            Expr::Bin(op, a, b) => match op {
-                '<' => write!(f, "({a}<<{b})"),
-                '>' => write!(f, "({a}>>{b})"),
-                op => write!(f, "({a}{op}{b})"),
-            },
+            Expr::Bin(op, a, b) => {
+                let text = match op {
+                    '<' => "<<",
+                    '>' => ">>",
+                    '=' => "==",
+                    '!' => "!=",
+                    'l' => "<",
+                    'L' => "<=",
+                    'g' => ">",
+                    'G' => ">=",
+                    '+' => "+",
+                    '-' => "-",
+                    '*' => "*",
+                    '/' => "/",
+                    '%' => "%",
+                    '&' => "&",
+                    '|' => "|",
+                    _ => "^",
+                };
+                write!(f, "({a}{text}{b})")
+            }
             Expr::Bitmask(w, e) => write!(f, "bitmask{w}({e})"),
             Expr::Log2(e) => write!(f, "log2({e})"),
             Expr::Fp8(w, e) => write!(f, "fp8{}({e})", if *w == 32 { "s" } else { "d" }),
@@ -55,7 +93,8 @@ impl fmt::Display for Expr {
 #[derive(Clone, Debug)]
 pub struct Field {
     pub name: String,
-    /// The lowest bit's position in the word.
+    /// The piece it is in, and its lowest bit's position there.
+    pub piece: usize,
     pub lo: u32,
     pub width: u32,
     pub signed: bool,
@@ -67,76 +106,456 @@ pub struct Field {
     pub plain: bool,
 }
 
+/// A piece: a whole number of bytes, little-endian.
 #[derive(Clone, Debug)]
-pub struct Encoding {
+pub struct Piece {
+    /// Its first byte's offset in the encoding.
+    pub offset: u32,
+    pub bytes: u32,
     /// Bits fixed by literals.
-    pub mask: u32,
-    pub value: u32,
+    pub mask: u64,
+    pub value: u64,
+}
+
+/// One alternative: its guards, pieces and fields.
+#[derive(Clone, Debug)]
+pub struct Alt {
+    pub guards: Vec<Expr>,
+    pub pieces: Vec<Piece>,
     pub fields: Vec<Field>,
+    /// Its length in bytes.
+    pub len: u32,
+    /// The operand names its fields and guards read.
+    pub names: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Encoding {
+    pub alts: Vec<Alt>,
 }
 
 pub type Env = HashMap<String, i64>;
+
+/// Fragments by name: their parameters and their encoding's text.
+pub type Fragments = HashMap<String, (Vec<String>, String)>;
+
+/// A little-endian word of up to 8 bytes.
+pub fn word(bytes: &[u8]) -> u64 {
+    bytes.iter().rev().fold(0u64, |acc, &b| (acc << 8) | b as u64)
+}
 
 // ---------------------------------------------------------------------------
 // Parsing
 
 pub fn parse(text: &str) -> Result<Encoding, String> {
-    let mut tokens: Vec<(Option<Field>, String)> = Vec::new();
-    let mut total = 0u32;
-    for tok in text.split_whitespace() {
-        if tok.bytes().all(|c| c == b'0' || c == b'1') {
-            total += tok.len() as u32;
-            tokens.push((None, tok.to_string()));
-            continue;
-        }
-        let (head, expr) = match tok.split_once('=') {
-            Some((h, e)) => (h, Some(e)),
-            None => (tok, None),
-        };
-        let (name, width) = head.split_once(':').ok_or_else(|| format!("bad encoding token `{tok}`"))?;
-        let (signed, digits) = match width.strip_prefix('s') {
-            Some(d) => (true, d),
-            None => (false, width),
-        };
-        let width: u32 = digits.parse().map_err(|_| format!("bad field width in `{tok}`"))?;
-        let expr = match expr {
-            Some(e) => parse_expr(e)?,
-            None => Expr::Var(name.to_string()),
-        };
-        total += width;
-        let mut names = Vec::new();
-        names_in(&expr, &mut names);
-        let plain = !format!("{expr}").contains(['%', '&']);
-        tokens.push((Some(Field { name: name.to_string(), lo: 0, width, signed, expr, names, plain }), String::new()));
-    }
-    if total != 32 {
-        return Err(format!("encoding has {total} bits, not 32: `{text}`"));
-    }
-    let mut enc = Encoding { mask: 0, value: 0, fields: Vec::new() };
-    let mut pos = 32u32;
-    for (field, bits) in tokens {
-        match field {
-            None => {
-                for c in bits.bytes() {
-                    pos -= 1;
-                    enc.mask |= 1 << pos;
-                    if c == b'1' {
-                        enc.value |= 1 << pos;
-                    }
-                }
-            }
-            Some(mut f) => {
-                pos -= f.width;
-                f.lo = pos;
-                enc.fields.push(f);
-            }
-        }
-    }
-    Ok(enc)
+    parse_with(text, &Fragments::new())
 }
 
-/// Parses an expression: integers, names, `+ - * / % & | ^ << >>`,
-/// parentheses, unary minus and `bitmask32(..)`/`bitmask64(..)`.
+/// Parses an encoding, with `fragments` to expand.
+pub fn parse_with(text: &str, fragments: &Fragments) -> Result<Encoding, String> {
+    let expanded = expand(text, fragments, 0)?;
+    let toks = tokens(&expanded)?;
+    let mut pos = 0;
+    let seq = parse_seq(&toks, &mut pos)?;
+    if pos != toks.len() {
+        return Err(format!("unexpected `{}` in encoding `{text}`", toks[pos]));
+    }
+    let mut alts = Vec::new();
+    let mut ways = 0;
+    for (guards, flat) in flatten(&seq) {
+        ways += 1;
+        if let Some(alt) = build_alt(guards, &flat).map_err(|e| format!("{e}: `{text}`"))? {
+            alts.push(alt);
+        }
+    }
+    if alts.is_empty() && ways > 0 {
+        return Err(format!("no alternative can be encoded: `{text}`"));
+    }
+    Ok(Encoding { alts })
+}
+
+/// An encoding's text with its fragments' uses replaced by their
+/// definitions.
+fn expand(text: &str, fragments: &Fragments, depth: u32) -> Result<String, String> {
+    if fragments.is_empty() {
+        return Ok(text.to_string());
+    }
+    if depth > 16 {
+        return Err(format!("fragments nested too deeply in `{text}`"));
+    }
+    let b = text.as_bytes();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c.is_ascii_alphabetic() || c == b'_' {
+            let s = i;
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || b[i] == b'.') {
+                i += 1;
+            }
+            let name = &text[s..i];
+            // Not a field's name, `name:width`.
+            let use_of = b.get(i) == Some(&b'(') && (s == 0 || b[s - 1] != b':');
+            match fragments.get(name) {
+                Some((params, body)) if use_of => {
+                    let (args, after) = call_args(text, i)?;
+                    if args.len() != params.len() {
+                        return Err(format!("{name} takes {} arguments, not {}", params.len(), args.len()));
+                    }
+                    let body = substitute_text(body, params, &args);
+                    out.push(' ');
+                    out.push_str(&expand(&body, fragments, depth + 1)?);
+                    out.push(' ');
+                    i = after;
+                }
+                _ => out.push_str(name),
+            }
+        } else {
+            out.push(c as char);
+            i += 1;
+        }
+    }
+    Ok(out)
+}
+
+/// The arguments of a use at `open` (a `(`), and where it ends.
+fn call_args(text: &str, open: usize) -> Result<(Vec<String>, usize), String> {
+    let b = text.as_bytes();
+    let (mut depth, mut i, mut s) = (0, open, open + 1);
+    let mut args = Vec::new();
+    while i < b.len() {
+        match b[i] {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    let a = text[s..i].trim();
+                    if !a.is_empty() || !args.is_empty() {
+                        args.push(a.to_string());
+                    }
+                    return Ok((args, i + 1));
+                }
+            }
+            b',' if depth == 1 => {
+                args.push(text[s..i].trim().to_string());
+                s = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    Err(format!("unclosed `(` in `{text}`"))
+}
+
+/// `body` with each name in `params` replaced by its argument (in
+/// parentheses unless it is a name or a number), and `param.x` by
+/// `arg.x`. Fields' names (before a `:`) are left alone.
+fn substitute_text(body: &str, params: &[String], args: &[String]) -> String {
+    let b = body.as_bytes();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c.is_ascii_alphabetic() || c == b'_' {
+            let s = i;
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || b[i] == b'.') {
+                i += 1;
+            }
+            let word = &body[s..i];
+            let (head, tail) = match word.split_once('.') {
+                Some((h, t)) => (h, Some(t)),
+                None => (word, None),
+            };
+            let field_name = b.get(i) == Some(&b':');
+            match params.iter().position(|p| p == head) {
+                Some(k) if !field_name => {
+                    let a = &args[k];
+                    let simple = a.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'.');
+                    match tail {
+                        Some(t) => {
+                            out.push_str(a);
+                            out.push('.');
+                            out.push_str(t);
+                        }
+                        None if simple => out.push_str(a),
+                        None => {
+                            out.push('(');
+                            out.push_str(a);
+                            out.push(')');
+                        }
+                    }
+                }
+                _ => out.push_str(word),
+            }
+        } else {
+            out.push(c as char);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Tokens: `|`, `{`, `;`, `}`, guards `if(...)`, and the bits and fields
+/// between them (which may hold parentheses, but no spaces outside them).
+fn tokens(text: &str) -> Result<Vec<String>, String> {
+    let b = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        if b"|{};".contains(&c) {
+            out.push((c as char).to_string());
+            i += 1;
+            continue;
+        }
+        let s = i;
+        let mut depth = 0;
+        while i < b.len() {
+            match b[i] {
+                b'(' => depth += 1,
+                b')' => depth -= 1,
+                c if depth == 0 && (c.is_ascii_whitespace() || b"|{};".contains(&c)) => break,
+                _ => {}
+            }
+            i += 1;
+        }
+        if depth != 0 {
+            return Err(format!("unbalanced parentheses in `{text}`"));
+        }
+        out.push(text[s..i].to_string());
+    }
+    Ok(out)
+}
+
+#[derive(Clone, Debug)]
+enum Item {
+    Tok(String),
+    Sep,
+    Choice(Vec<(Vec<Expr>, Vec<Item>)>),
+}
+
+fn parse_seq(toks: &[String], pos: &mut usize) -> Result<Vec<Item>, String> {
+    let mut seq = Vec::new();
+    while *pos < toks.len() {
+        let t = &toks[*pos];
+        match t.as_str() {
+            "}" | ";" => break,
+            "|" => {
+                seq.push(Item::Sep);
+                *pos += 1;
+            }
+            "{" => {
+                *pos += 1;
+                let mut alts = Vec::new();
+                loop {
+                    let mut guards = Vec::new();
+                    while let Some(g) =
+                        toks.get(*pos).and_then(|t| t.strip_prefix("if(")).and_then(|g| g.strip_suffix(')'))
+                    {
+                        guards.push(parse_expr(g)?);
+                        *pos += 1;
+                    }
+                    let body = parse_seq(toks, pos)?;
+                    alts.push((guards, body));
+                    match toks.get(*pos).map(String::as_str) {
+                        Some(";") => *pos += 1,
+                        Some("}") => {
+                            *pos += 1;
+                            break;
+                        }
+                        _ => return Err("an alternative not closed with `}`".into()),
+                    }
+                }
+                seq.push(Item::Choice(alts));
+            }
+            _ => {
+                seq.push(Item::Tok(t.clone()));
+                *pos += 1;
+            }
+        }
+    }
+    Ok(seq)
+}
+
+/// Every way through `seq`'s choices, in order (earlier choices varying
+/// slowest): each a list of guards and of tokens and separators.
+fn flatten(seq: &[Item]) -> Vec<(Vec<Expr>, Vec<Item>)> {
+    let mut ways: Vec<(Vec<Expr>, Vec<Item>)> = vec![(Vec::new(), Vec::new())];
+    for item in seq {
+        match item {
+            Item::Choice(alts) => {
+                let mut next = Vec::new();
+                for (g0, w0) in &ways {
+                    for (g, body) in alts {
+                        for (g1, w1) in flatten(body) {
+                            let mut g2 = g0.clone();
+                            g2.extend(g.iter().cloned());
+                            g2.extend(g1);
+                            let mut w2 = w0.clone();
+                            w2.extend(w1);
+                            next.push((g2, w2));
+                        }
+                    }
+                }
+                ways = next;
+            }
+            other => {
+                for (_, w) in &mut ways {
+                    w.push(other.clone());
+                }
+            }
+        }
+    }
+    ways
+}
+
+type Tokens = Vec<(Option<Field>, String)>;
+
+/// An alternative from its guards and its tokens, split into pieces at
+/// `|`. `end` (its length) is put into every expression.
+/// Fields and guards that read no operand are settled here: a field of a
+/// constant is literal bits, a guard of one holds or the alternative is
+/// dropped (`None`), as is one with a constant its field cannot hold.
+fn build_alt(guards: Vec<Expr>, items: &[Item]) -> Result<Option<Alt>, String> {
+    // Pieces: runs of tokens between separators; empty runs (around an
+    // optional part left out) disappear.
+    let mut runs: Vec<Vec<String>> = vec![Vec::new()];
+    for it in items {
+        match it {
+            Item::Sep => runs.push(Vec::new()),
+            Item::Tok(t) => runs.last_mut().unwrap().push(t.clone()),
+            Item::Choice(_) => unreachable!("flattened"),
+        }
+    }
+    runs.retain(|r| !r.is_empty());
+    // A run of zero-width fields only (a constraint before an optional
+    // prefix left out) holds no bits: it joins the next piece, or the last.
+    let zero = |t: &String| t.split('=').next().is_some_and(|h| h.ends_with(":0"));
+    let mut k = 0;
+    while k < runs.len() {
+        if runs.len() > 1 && runs[k].iter().all(zero) {
+            let r = runs.remove(k);
+            let at = if k < runs.len() { k } else { k - 1 };
+            if at == k {
+                runs[at].splice(0..0, r);
+            } else {
+                runs[at].extend(r);
+            }
+        } else {
+            k += 1;
+        }
+    }
+    // Each piece: its bits, and its tokens (fields, or literal bits).
+    let mut parsed: Vec<(u32, Tokens)> = Vec::new();
+    for run in &runs {
+        let mut total = 0u32;
+        let mut toks = Vec::new();
+        for tok in run {
+            if tok.bytes().all(|c| c == b'0' || c == b'1') {
+                total += tok.len() as u32;
+                toks.push((None, tok.clone()));
+                continue;
+            }
+            let (head, expr) = match tok.split_once('=') {
+                Some((h, e)) => (h, Some(e)),
+                None => (tok.as_str(), None),
+            };
+            let (name, width) = head.split_once(':').ok_or_else(|| format!("bad encoding token `{tok}`"))?;
+            let (signed, digits) = match width.strip_prefix('s') {
+                Some(d) => (true, d),
+                None => (false, width),
+            };
+            let width: u32 = digits.parse().map_err(|_| format!("bad field width in `{tok}`"))?;
+            let expr = match expr {
+                Some(e) => parse_expr(e)?,
+                None => Expr::Var(name.to_string()),
+            };
+            total += width;
+            let f =
+                Field { name: name.to_string(), piece: 0, lo: 0, width, signed, expr, names: Vec::new(), plain: true };
+            toks.push((Some(f), String::new()));
+        }
+        if !total.is_multiple_of(8) || total > 64 || total == 0 {
+            return Err(format!("a piece of {total} bits, not a whole number of bytes up to 8"));
+        }
+        parsed.push((total, toks));
+    }
+    let len: u32 = parsed.iter().map(|(t, _)| t / 8).sum();
+    let mut known = Env::new();
+    known.insert("end".into(), len as i64);
+    let mut kept = Vec::new();
+    for g in guards.iter().map(|g| substitute(g, &known)) {
+        let mut names = Vec::new();
+        names_in(&g, &mut names);
+        match (names.is_empty(), eval(&g, &Env::new())) {
+            (true, Some(0)) => return Ok(None),
+            (true, Some(_)) => {}
+            _ => kept.push(g),
+        }
+    }
+    let mut alt = Alt { guards: kept, pieces: Vec::new(), fields: Vec::new(), len, names: Vec::new() };
+    let mut offset = 0;
+    for (k, (total, toks)) in parsed.into_iter().enumerate() {
+        let mut piece = Piece { offset, bytes: total / 8, mask: 0, value: 0 };
+        let mut pos = total;
+        for (field, bits) in toks {
+            match field {
+                None => {
+                    for c in bits.bytes() {
+                        pos -= 1;
+                        piece.mask |= 1 << pos;
+                        if c == b'1' {
+                            piece.value |= 1 << pos;
+                        }
+                    }
+                }
+                Some(mut f) => {
+                    pos -= f.width;
+                    f.lo = pos;
+                    f.piece = k;
+                    f.expr = substitute(&f.expr, &known);
+                    names_in(&f.expr, &mut f.names);
+                    f.plain = !format!("{}", f.expr).contains(['%', '&']);
+                    if f.names.is_empty()
+                        && let Some(v) = eval(&f.expr, &Env::new())
+                    {
+                        if !holds(v, &f) {
+                            return Ok(None);
+                        }
+                        if f.width > 0 {
+                            let m = if f.width >= 64 { u64::MAX } else { (1u64 << f.width) - 1 };
+                            piece.mask |= m << f.lo;
+                            piece.value |= ((v as u64) & m) << f.lo;
+                        }
+                        continue;
+                    }
+                    alt.fields.push(f);
+                }
+            }
+        }
+        offset += piece.bytes;
+        alt.pieces.push(piece);
+    }
+    for f in &alt.fields {
+        for n in &f.names {
+            if !alt.names.contains(n) {
+                alt.names.push(n.clone());
+            }
+        }
+    }
+    for g in &alt.guards {
+        names_in(g, &mut alt.names);
+    }
+    Ok(Some(alt))
+}
+
+/// Parses an expression: integers, names, `+ - * / % & | ^ << >>`, the
+/// comparisons `== != < <= > >=`, parentheses, unary minus and the
+/// functions.
 pub fn parse_expr(text: &str) -> Result<Expr, String> {
     let toks = lex(text)?;
     let mut p = ExprParser { toks, pos: 0 };
@@ -161,10 +580,12 @@ fn lex(text: &str) -> Result<Vec<String>, String> {
                 i += 1;
             }
             out.push(text[s..i].to_string());
-        } else if (c == b'<' || c == b'>') && b.get(i + 1) == Some(&c) {
+        } else if ((c == b'<' || c == b'>') && b.get(i + 1) == Some(&c))
+            || (b"=!<>".contains(&c) && b.get(i + 1) == Some(&b'='))
+        {
             out.push(text[i..i + 2].to_string());
             i += 2;
-        } else if b"+-*/%&|^()".contains(&c) {
+        } else if b"+-*/%&|^()<>".contains(&c) {
             out.push((c as char).to_string());
             i += 1;
         } else {
@@ -184,13 +605,19 @@ fn precedence(op: &str) -> Option<(u8, char)> {
         "|" => (1, '|'),
         "^" => (2, '^'),
         "&" => (3, '&'),
-        "<<" => (4, '<'),
-        ">>" => (4, '>'),
-        "+" => (5, '+'),
-        "-" => (5, '-'),
-        "*" => (6, '*'),
-        "/" => (6, '/'),
-        "%" => (6, '%'),
+        "==" => (4, '='),
+        "!=" => (4, '!'),
+        "<" => (5, 'l'),
+        "<=" => (5, 'L'),
+        ">" => (5, 'g'),
+        ">=" => (5, 'G'),
+        "<<" => (6, '<'),
+        ">>" => (6, '>'),
+        "+" => (7, '+'),
+        "-" => (7, '-'),
+        "*" => (8, '*'),
+        "/" => (8, '/'),
+        "%" => (8, '%'),
         _ => return None,
     })
 }
@@ -285,6 +712,12 @@ pub fn eval(e: &Expr, env: &Env) -> Option<i64> {
                 '^' => a ^ b,
                 '<' => a.checked_shl(b as u32)?,
                 '>' => a.checked_shr(b as u32)?,
+                '=' => (a == b) as i64,
+                '!' => (a != b) as i64,
+                'l' => (a < b) as i64,
+                'L' => (a <= b) as i64,
+                'g' => (a > b) as i64,
+                'G' => (a >= b) as i64,
                 _ => return None,
             }
         }
@@ -302,7 +735,7 @@ pub fn eval(e: &Expr, env: &Env) -> Option<i64> {
 
 /// If `e` is a slice of `name`'s bits (`name`, `name>>k`, `(name>>k)&m`
 /// or `name&m`), where its lowest bit is: `k`.
-fn slice_of(e: &Expr, name: &str) -> Option<i64> {
+fn slice_of(e: &Expr, name: &str) -> Option<(i64, i64)> {
     let shifted = |e: &Expr| match e {
         Expr::Var(v) if v == name => Some(0),
         Expr::Bin('>', a, k) if matches!(&**a, Expr::Var(v) if v == name) => match **k {
@@ -311,9 +744,18 @@ fn slice_of(e: &Expr, name: &str) -> Option<i64> {
         },
         _ => None,
     };
-    match e {
+    let masked = |e: &Expr| match e {
         Expr::Bin('&', a, m) if matches!(**m, Expr::Int(m) if (m + 1).count_ones() == 1) => shifted(a),
         _ => shifted(e),
+    };
+    // A slice with its bits flipped, `(x>>3)^1` (VEX's inverted register
+    // bits).
+    match e {
+        Expr::Bin('^', a, k) => match **k {
+            Expr::Int(k) => Some((masked(a)?, k)),
+            _ => None,
+        },
+        _ => Some((masked(e)?, 0)),
     }
 }
 
@@ -363,7 +805,7 @@ fn substitute(e: &Expr, env: &Env) -> Expr {
     }
 }
 
-fn names_in(e: &Expr, out: &mut Vec<String>) {
+pub fn names_in(e: &Expr, out: &mut Vec<String>) {
     match e {
         Expr::Var(v) => {
             if !out.contains(v) {
@@ -379,111 +821,195 @@ fn names_in(e: &Expr, out: &mut Vec<String>) {
     }
 }
 
-impl Encoding {
-    /// The word for these operand values, or `None` if a field cannot hold
-    /// its value.
-    pub fn encode(&self, env: &Env) -> Option<u32> {
-        let mut word = self.value;
-        for f in &self.fields {
-            let v = eval(&f.expr, env)?;
-            let fits = if f.signed {
-                let half = 1i64 << (f.width - 1);
-                (-half..half).contains(&v)
-            } else {
-                v >= 0 && (f.width >= 63 || v < (1i64 << f.width))
-            };
-            if !fits {
+fn holds(v: i64, f: &Field) -> bool {
+    if f.width >= 64 {
+        true
+    } else if f.signed {
+        let half = 1i64 << (f.width.max(1) - 1);
+        (-half..half).contains(&v)
+    } else {
+        v >= 0 && (f.width >= 63 || v < (1i64 << f.width))
+    }
+}
+
+impl Alt {
+    /// The bytes for these operand values, or `None` if a guard fails or a
+    /// field cannot hold its value.
+    pub fn encode(&self, env: &Env) -> Option<Vec<u8>> {
+        for g in &self.guards {
+            if eval(g, env)? == 0 {
                 return None;
             }
-            let m = if f.width == 32 { u32::MAX } else { (1u32 << f.width) - 1 };
-            word |= ((v as u32) & m) << f.lo;
         }
-        Some(word)
+        let mut words: Vec<u64> = self.pieces.iter().map(|p| p.value).collect();
+        for f in &self.fields {
+            let v = eval(&f.expr, env)?;
+            if !holds(v, f) {
+                return None;
+            }
+            if f.width > 0 {
+                let m = if f.width >= 64 { u64::MAX } else { (1u64 << f.width) - 1 };
+                words[f.piece] |= ((v as u64) & m) << f.lo;
+            }
+        }
+        let mut out = Vec::with_capacity(self.len as usize);
+        for (p, w) in self.pieces.iter().zip(words) {
+            out.extend_from_slice(&w.to_le_bytes()[..p.bytes as usize]);
+        }
+        Some(out)
     }
 
-    /// The raw value of field `f` in `word`, sign-extended if signed.
-    pub fn field_value(&self, f: &Field, word: u32) -> i64 {
-        let m = if f.width == 32 { u32::MAX } else { (1u32 << f.width) - 1 };
-        let raw = ((word >> f.lo) & m) as i64;
-        if f.signed && raw >= 1 << (f.width - 1) { raw - (1 << f.width) } else { raw }
+    /// The pieces' words in `bytes`, if they hold this alternative's
+    /// literal bits.
+    fn words(&self, bytes: &[u8]) -> Option<Vec<u64>> {
+        if bytes.len() < self.len as usize {
+            return None;
+        }
+        let mut out = Vec::with_capacity(self.pieces.len());
+        for p in &self.pieces {
+            let w = word(&bytes[p.offset as usize..(p.offset + p.bytes) as usize]);
+            if w & p.mask != p.value {
+                return None;
+            }
+            out.push(w);
+        }
+        Some(out)
     }
 
-    /// Recovers the values of `operands` from `word`, or `None` if `word`
-    /// is not this encoding. Operands in `free` (such as symbols, whose
-    /// fields hold zero until linking) may be left out.
+    /// The raw value of field `f`, sign-extended if signed.
+    fn field_value(f: &Field, words: &[u64]) -> i64 {
+        if f.width == 0 {
+            return 0;
+        }
+        let m = if f.width >= 64 { u64::MAX } else { (1u64 << f.width) - 1 };
+        let raw = ((words[f.piece] >> f.lo) & m) as i64;
+        if f.signed && f.width < 64 && raw >= 1 << (f.width - 1) { raw - (1 << f.width) } else { raw }
+    }
+
     /// Whether some field holds operand `name`.
     pub fn mentions(&self, name: &str) -> bool {
         self.fields.iter().any(|f| f.names.iter().any(|n| n == name))
     }
 
-    pub fn decode(&self, word: u32, operands: &[String]) -> Option<Env> {
-        if word & self.mask != self.value {
-            return None;
+    /// Zeroes the fields that hold operand `name` in `bytes` (this
+    /// alternative's encoding): a relocation's field, which the
+    /// relocation's addend fills in.
+    pub fn clear(&self, bytes: &mut [u8], name: &str) {
+        for f in self.fields.iter().filter(|f| f.names.iter().any(|n| n == name) && f.width > 0) {
+            let p = &self.pieces[f.piece];
+            let at = p.offset as usize..(p.offset + p.bytes) as usize;
+            let m = if f.width >= 64 { u64::MAX } else { ((1u64 << f.width) - 1) << f.lo };
+            let w = word(&bytes[at.clone()]) & !m;
+            bytes[at].copy_from_slice(&w.to_le_bytes()[..p.bytes as usize]);
         }
+    }
+
+    /// Recovers `operands` from `bytes`, or `None` if they are not this
+    /// alternative. Operands in `free` (symbols, whose fields hold zero
+    /// until linking) are taken to be zero.
+    pub fn decode(&self, bytes: &[u8], operands: &[String], free: &[String]) -> Option<Env> {
+        let words = self.words(bytes)?;
         let mut env = Env::new();
+        for n in free {
+            env.insert(n.clone(), 0);
+        }
+        // Fields reading a free operand, with it put in as zero (borrowed
+        // when none do).
+        let fields: std::borrow::Cow<[Field]> = if free.iter().any(|n| self.mentions(n)) {
+            self.fields
+                .iter()
+                .map(|f| {
+                    let mut f = f.clone();
+                    if f.names.iter().any(|n| free.contains(n)) {
+                        f.expr = substitute(&f.expr, &env);
+                        f.names.retain(|n| !free.contains(n));
+                        f.plain = !format!("{}", f.expr).contains(['%', '&']);
+                    }
+                    f
+                })
+                .collect::<Vec<_>>()
+                .into()
+        } else {
+            std::borrow::Cow::Borrowed(&self.fields)
+        };
+        let fields: &[Field] = &fields;
         let mut unsolved: Vec<&String> = Vec::new();
         for name in operands {
+            if free.contains(name) {
+                continue;
+            }
             // An operand in several fields that are each a slice of its
             // bits (`x>>12`, `(x>>5)&63`, `x&31`): the slices put back. A
             // signed slice (the top one) gives the sign.
             let holding: Vec<&Field> =
-                self.fields.iter().filter(|f| f.names.as_slice() == std::slice::from_ref(name)).collect();
+                fields.iter().filter(|f| f.names.as_slice() == std::slice::from_ref(name)).collect();
             // (Fields holding the same bits, as `rs1` and `rs2` both `n` do
             // in `fmv.d`, are copies, not slices.)
-            let disjoint = |slices: &[i64]| {
+            let disjoint = |slices: &[(i64, i64)]| {
                 let mut ranges: Vec<(i64, i64)> =
-                    holding.iter().zip(slices).map(|(f, &k)| (k, k + f.width as i64)).collect();
+                    holding.iter().zip(slices).map(|(f, &(k, _))| (k, k + f.width as i64)).collect();
                 ranges.sort();
                 ranges.windows(2).all(|w| w[0].1 <= w[1].0)
             };
             if holding.len() > 1
-                && let Some(slices) = holding.iter().map(|f| slice_of(&f.expr, name)).collect::<Option<Vec<i64>>>()
+                && let Some(slices) =
+                    holding.iter().map(|f| slice_of(&f.expr, name)).collect::<Option<Vec<(i64, i64)>>>()
                 && disjoint(&slices)
             {
-                let v = holding
-                    .iter()
-                    .zip(&slices)
-                    .fold(0i64, |acc, (f, &k)| acc.wrapping_add(self.field_value(f, word).wrapping_shl(k as u32)));
+                let v = holding.iter().zip(&slices).fold(0i64, |acc, (f, &(k, flip))| {
+                    acc.wrapping_add((Self::field_value(f, &words) ^ flip).wrapping_shl(k as u32))
+                });
                 env.insert(name.clone(), v);
                 continue;
             }
-            // Prefer a field that is just the operand, then any other.
-            let mut best: Option<i64> = None;
-            for pass in 0..2 {
-                for f in &self.fields {
-                    if f.names.as_slice() != std::slice::from_ref(name) {
+            // Each field that is just the operand gives a value (those
+            // that are the operand itself first); the first that every
+            // such field agrees with is it. (A register's number is split
+            // over `r>>3` and `r&7`; a memory operand's index of 4, none,
+            // is in `x>>3` and a zero-width `x-4`.)
+            let low_bits = |mut v: i64| {
+                // A value split over fields, `name>>k` and `name&m`
+                // (adrp's immhi and immlo), or `name/k` and `name%k`: the
+                // low bits go back on.
+                for f in fields {
+                    let Expr::Bin(op @ ('%' | '&'), a, k) = &f.expr else { continue };
+                    if **a != Expr::Var(name.clone()) {
                         continue;
                     }
-                    if (pass == 0) != f.plain {
-                        continue;
-                    }
-                    if let Some((_, v)) = invert(&f.expr, self.field_value(f, word)) {
-                        best = Some(v);
-                        break;
+                    match (op, &**k) {
+                        ('%', Expr::Int(k)) if *k > 0 => v = v - v.rem_euclid(*k) + Self::field_value(f, &words),
+                        ('&', Expr::Int(m)) if (*m + 1).count_ones() == 1 => {
+                            v = (v & !*m) | Self::field_value(f, &words)
+                        }
+                        _ => {}
                     }
                 }
-                if best.is_some() {
+                v
+            };
+            let agrees = |v: i64| {
+                let one: Env = [(name.clone(), v)].into_iter().collect();
+                holding.iter().all(|f| {
+                    eval(&f.expr, &one).is_some_and(|x| {
+                        let m = if f.width >= 64 { -1 } else { (1i64 << f.width) - 1 };
+                        holds(x, f) && x & m == Self::field_value(f, &words) & m
+                    })
+                })
+            };
+            let mut first = None;
+            let mut best = None;
+            for f in holding.iter().filter(|f| f.plain).chain(holding.iter().filter(|f| !f.plain)) {
+                let Some((_, v)) = invert(&f.expr, Self::field_value(f, &words)) else { continue };
+                let v = low_bits(v);
+                first.get_or_insert(v);
+                if agrees(v) {
+                    best = Some(v);
                     break;
                 }
             }
-            let Some(mut v) = best else {
+            let Some(v) = best.or(first) else {
                 unsolved.push(name);
                 continue;
             };
-            // A value split over fields, `name>>k` and `name&m` (adrp's
-            // immhi and immlo), or `name/k` and `name%k`: the low bits go
-            // back on.
-            for f in &self.fields {
-                let Expr::Bin(op @ ('%' | '&'), a, k) = &f.expr else { continue };
-                if **a != Expr::Var(name.clone()) {
-                    continue;
-                }
-                match (op, &**k) {
-                    ('%', Expr::Int(k)) if *k > 0 => v = v - v.rem_euclid(*k) + self.field_value(f, word),
-                    ('&', Expr::Int(m)) if (*m + 1).count_ones() == 1 => v = (v & !*m) | self.field_value(f, word),
-                    _ => {}
-                }
-            }
             env.insert(name.clone(), v);
         }
         // Operands only in fields with others (sbfx's width, in `imms =
@@ -491,11 +1017,11 @@ impl Encoding {
         while !unsolved.is_empty() {
             let before = unsolved.len();
             unsolved.retain(|name| {
-                let solved = self.fields.iter().find_map(|f| {
+                let solved = fields.iter().find_map(|f| {
                     if !f.names.contains(name) || !f.names.iter().all(|n| n == *name || env.contains_key(n)) {
                         return None;
                     }
-                    let (n, v) = invert(&substitute(&f.expr, &env), self.field_value(f, word))?;
+                    let (n, v) = invert(&substitute(&f.expr, &env), Self::field_value(f, &words))?;
                     (n == **name).then_some(v)
                 });
                 match solved {
@@ -510,16 +1036,70 @@ impl Encoding {
                 return None;
             }
         }
-        (self.encode(&env)? == word).then_some(env)
+        (self.encode(&env)?.as_slice() == &bytes[..self.len as usize]).then_some(env)
+    }
+}
+
+impl Encoding {
+    /// Whether it has no encoding at all (a recipe or a description-only
+    /// entry).
+    pub fn is_empty(&self) -> bool {
+        self.alts.iter().all(|a| a.pieces.iter().all(|p| p.mask == 0))
+    }
+
+    /// The most literal bits any alternative fixes: how specific it is.
+    pub fn fixed_bits(&self) -> u32 {
+        self.alts.iter().map(|a| a.pieces.iter().map(|p| p.mask.count_ones()).sum()).max().unwrap_or(0)
+    }
+
+    /// The fields of every alternative.
+    pub fn fields(&self) -> impl Iterator<Item = &Field> {
+        self.alts.iter().flat_map(|a| a.fields.iter())
+    }
+
+    /// Whether some field holds operand `name`.
+    pub fn mentions(&self, name: &str) -> bool {
+        self.alts.iter().any(|a| a.mentions(name))
+    }
+
+    /// The bytes for these operand values, and which alternative they are,
+    /// or `None` if no alternative holds them. With several alternatives,
+    /// the one chosen must also decode back to the same operands (other
+    /// than `free` ones).
+    pub fn encode_alt(&self, env: &Env, free: &[String]) -> Option<(Vec<u8>, usize)> {
+        if let [only] = &self.alts[..] {
+            return only.encode(env).map(|b| (b, 0));
+        }
+        for (k, a) in self.alts.iter().enumerate() {
+            let Some(bytes) = a.encode(env) else { continue };
+            let names: Vec<String> = a.names.iter().filter(|n| env.contains_key(*n)).cloned().collect();
+            let Some(back) = a.decode(&bytes, &names, free) else { continue };
+            if names.iter().all(|n| free.contains(n) || back.get(n) == env.get(n)) {
+                return Some((bytes, k));
+            }
+        }
+        None
+    }
+
+    /// The bytes for these operand values, or `None` if no alternative
+    /// holds them.
+    pub fn encode(&self, env: &Env) -> Option<Vec<u8>> {
+        self.encode_alt(env, &[]).map(|(b, _)| b)
+    }
+
+    /// Recovers `operands` from the start of `bytes`, and how many bytes
+    /// the instruction takes, or `None` if they are not this encoding.
+    pub fn decode(&self, bytes: &[u8], operands: &[String], free: &[String]) -> Option<(Env, usize)> {
+        self.alts.iter().find_map(|a| a.decode(bytes, operands, free).map(|e| (e, a.len as usize)))
     }
 
     /// Does this value of operand `name` fit, with the other operands as
     /// in `env`? Fits means it survives an encode and decode unchanged.
     pub fn fits(&self, env: &Env, operands: &[String]) -> bool {
         match self.encode(env) {
-            Some(word) => {
-                self.decode(word, operands).is_some_and(|back| operands.iter().all(|o| back.get(o) == env.get(o)))
-            }
+            Some(bytes) => self
+                .decode(&bytes, operands, &[])
+                .is_some_and(|(back, _)| operands.iter().all(|o| back.get(o) == env.get(o))),
             None => false,
         }
     }
@@ -649,14 +1229,22 @@ mod tests {
         pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect()
     }
 
+    fn w32(b: Option<Vec<u8>>) -> Option<u32> {
+        b.map(|b| word(&b) as u32)
+    }
+
+    fn le(w: u32) -> Vec<u8> {
+        w.to_le_bytes().to_vec()
+    }
+
     #[test]
     fn add_immediate() {
         // add w0, w1, #5
         let e = parse("0 0 0 100010 0 imm:12 n:5 d:5").unwrap();
-        let w = e.encode(&env(&[("imm", 5), ("n", 1), ("d", 0)])).unwrap();
+        let w = w32(e.encode(&env(&[("imm", 5), ("n", 1), ("d", 0)]))).unwrap();
         assert_eq!(w, 0x11001420);
         let ops: Vec<String> = ["d", "n", "imm"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(e.decode(w, &ops).unwrap()["imm"], 5);
+        assert_eq!(e.decode(&le(w), &ops, &[]).unwrap().0["imm"], 5);
         assert!(!e.fits(&env(&[("imm", 4096), ("n", 1), ("d", 0)]), &ops));
     }
 
@@ -667,11 +1255,11 @@ mod tests {
         assert!(e.fits(&env(&[("off", 16), ("n", 4), ("d", 3)]), &ops));
         assert!(!e.fits(&env(&[("off", 12), ("n", 4), ("d", 3)]), &ops));
         // ldr x3, [x4, #16]
-        assert_eq!(e.encode(&env(&[("off", 16), ("n", 4), ("d", 3)])), Some(0xf9400883));
+        assert_eq!(w32(e.encode(&env(&[("off", 16), ("n", 4), ("d", 3)]))), Some(0xf9400883));
         let b = parse("01010100 imm19:s19=dest/4 0 c:4").unwrap();
         let ops: Vec<String> = ["dest", "c"].iter().map(|s| s.to_string()).collect();
         let w = b.encode(&env(&[("dest", -8), ("c", 11)])).unwrap();
-        assert_eq!(b.decode(w, &ops).unwrap()["dest"], -8);
+        assert_eq!(b.decode(&w, &ops, &[]).unwrap().0["dest"], -8);
     }
 
     #[test]
@@ -691,11 +1279,6 @@ mod tests {
         assert_eq!(encode_bitmask(0, 32), None);
         assert_eq!(encode_bitmask(5, 32), None);
     }
-}
-
-#[cfg(test)]
-mod slice_tests {
-    use super::*;
 
     /// An operand split over four fields, as RISC-V's branch offsets are.
     #[test]
@@ -706,10 +1289,102 @@ mod slice_tests {
         for dest in [0i64, 2, 8, 2046, 2048, 4094, -2, -4096, -1234] {
             let env: Env = [("dest".into(), dest), ("m".into(), 11), ("n".into(), 10)].into_iter().collect();
             let w = e.encode(&env).unwrap();
-            assert_eq!(e.decode(w, &names).unwrap()["dest"], dest, "{dest}");
+            assert_eq!(e.decode(&w, &names, &[]).unwrap().0["dest"], dest, "{dest}");
         }
         // blt a0, a1, +8 is 0x00b54463.
         let env: Env = [("dest".into(), 8), ("m".into(), 11), ("n".into(), 10)].into_iter().collect();
-        assert_eq!(e.encode(&env), Some(0x00b54463));
+        assert_eq!(w32(e.encode(&env)), Some(0x00b54463));
+    }
+
+    fn hex(b: &[u8]) -> String {
+        b.iter().map(|x| format!("{x:02x}")).collect::<Vec<_>>().join(" ")
+    }
+
+    /// x86's REX, ModRM, SIB and displacements, as fragments: what
+    /// `llvm-mc` gives for each.
+    fn x86() -> Fragments {
+        let mut f = Fragments::new();
+        let mut def = |name: &str, params: &str, body: &str| {
+            f.insert(name.into(), (params.split_whitespace().map(String::from).collect(), body.into()));
+        };
+        def("rex", "w r x b", "{ if(w==0) ; 0100 W:1=w R:1=r>>3 X:1=x>>3 B:1=b>>3 }");
+        // A memory operand's: RIP-relative has no base or index bits.
+        def("rexm", "w r m", "{ if(m.base==16) rex(w, r, 0, 0) ; rex(w, r, m.index, m.base) }");
+        def("rr", "r b", "11 reg:3=r&7 rm:3=b&7");
+        def(
+            "rm",
+            "r m",
+            "{ rip:0=m.base-16 i:0=m.index-4 s:0=m.scale-1 00 reg:3=r&7 101 | disp:s32=m.sym+m.disp-end ;
+               if((m.base&7)!=4) if((m.base&7)!=5) i:0=m.index-4 s:0=m.scale-1 z:0=m.disp 00 reg:3=r&7 rm:3=m.base&7 ;
+               if((m.base&7)!=4) i:0=m.index-4 s:0=m.scale-1 01 reg:3=r&7 rm:3=m.base&7 | disp:s8=m.disp ;
+               if((m.base&7)!=4) i:0=m.index-4 s:0=m.scale-1 10 reg:3=r&7 rm:3=m.base&7 | disp:s32=m.disp ;
+               if((m.base&7)!=5) z:0=m.disp 00 reg:3=r&7 100 | ss:2=log2(m.scale) idx:3=m.index&7 base:3=m.base&7 ;
+               01 reg:3=r&7 100 | ss:2=log2(m.scale) idx:3=m.index&7 base:3=m.base&7 | disp:s8=m.disp ;
+               10 reg:3=r&7 100 | ss:2=log2(m.scale) idx:3=m.index&7 base:3=m.base&7 | disp:s32=m.disp }",
+        );
+        f
+    }
+
+    #[test]
+    fn x86_register_forms() {
+        let f = x86();
+        // addq %b, %d: REX.W + 01 /r
+        let add = parse_with("rex(1, b, 0, d) | 00000001 | rr(b, d)", &f).unwrap();
+        assert_eq!(hex(&add.encode(&env(&[("b", 6), ("d", 7)])).unwrap()), "48 01 f7");
+        assert_eq!(hex(&add.encode(&env(&[("b", 9), ("d", 8)])).unwrap()), "4d 01 c8");
+        let ops: Vec<String> = ["d", "b"].iter().map(|s| s.to_string()).collect();
+        let (back, len) = add.decode(&[0x4d, 0x01, 0xc8, 0x90], &ops, &[]).unwrap();
+        assert_eq!((back["b"], back["d"], len), (9, 8, 3));
+        // addl %b, %d: no REX unless a register needs it.
+        let addl = parse_with("rex(0, b, 0, d) | 00000001 | rr(b, d)", &f).unwrap();
+        assert_eq!(hex(&addl.encode(&env(&[("b", 6), ("d", 7)])).unwrap()), "01 f7");
+        assert_eq!(hex(&addl.encode(&env(&[("b", 9), ("d", 7)])).unwrap()), "44 01 cf");
+        // addq $c, %d: 83 /0 ib, or 81 /0 id.
+        let addi =
+            parse_with("rex(1, 0, 0, d) | { 10000011 | rr(0, d) | ib:s8=c ; 10000001 | rr(0, d) | id:s32=c }", &f)
+                .unwrap();
+        assert_eq!(hex(&addi.encode(&env(&[("c", 5), ("d", 0)])).unwrap()), "48 83 c0 05");
+        assert_eq!(hex(&addi.encode(&env(&[("c", 1000), ("d", 3)])).unwrap()), "48 81 c3 e8 03 00 00");
+        // movabsq: REX.W + B8 +ro io.
+        let movabs = parse_with("rex(1, 0, 0, d) | 10111 o:3=d&7 | io:64=c", &f).unwrap();
+        assert_eq!(
+            hex(&movabs.encode(&env(&[("c", 0x1122334455667788), ("d", 0)])).unwrap()),
+            "48 b8 88 77 66 55 44 33 22 11"
+        );
+    }
+
+    #[test]
+    fn x86_memory_forms() {
+        let f = x86();
+        // addq m, %d: REX.W + 03 /r
+        let add = parse_with("rexm(1, d, m) | 00000011 | rm(d, m)", &f).unwrap();
+        let mem = |d: i64, base: i64, index: i64, scale: i64, disp: i64| {
+            env(&[("d", d), ("m.base", base), ("m.index", index), ("m.scale", scale), ("m.disp", disp), ("m.sym", 0)])
+        };
+        let free = vec!["m.sym".to_string()];
+        let enc = |e: &Env| hex(&add.encode_alt(e, &free).unwrap().0);
+        assert_eq!(enc(&mem(0, 7, 6, 8, 0)), "48 03 04 f7"); // (%rdi,%rsi,8)
+        assert_eq!(enc(&mem(0, 7, 4, 1, 16)), "48 03 47 10"); // 16(%rdi)
+        assert_eq!(enc(&mem(0, 7, 4, 1, 0)), "48 03 07"); // (%rdi)
+        assert_eq!(enc(&mem(0, 5, 4, 1, 0)), "48 03 45 00"); // (%rbp): a displacement
+        assert_eq!(enc(&mem(0, 4, 4, 1, 0)), "48 03 04 24"); // (%rsp): a SIB byte
+        assert_eq!(enc(&mem(0, 12, 4, 1, 0)), "49 03 04 24"); // (%r12)
+        assert_eq!(enc(&mem(0, 13, 4, 1, 0)), "49 03 45 00"); // (%r13)
+        assert_eq!(enc(&mem(9, 7, 4, 1, 1000)), "4c 03 8f e8 03 00 00"); // 1000(%rdi), %r9
+        assert_eq!(enc(&mem(0, 7, 12, 2, -8)), "4a 03 44 67 f8"); // -8(%rdi,%r12,2)
+        assert_eq!(enc(&mem(0, 16, 4, 1, 0)), "48 03 05 f9 ff ff ff"); // 0(%rip): -7 from the end
+        // Decoding gives the operands back, the index 4 (none) included.
+        let ops: Vec<String> =
+            ["d", "m.base", "m.index", "m.scale", "m.disp", "m.sym"].iter().map(|s| s.to_string()).collect();
+        for e in
+            [mem(0, 7, 6, 8, 0), mem(0, 5, 4, 1, 0), mem(0, 4, 4, 1, 0), mem(9, 13, 12, 4, -300), mem(3, 16, 4, 1, 64)]
+        {
+            let bytes = add.encode_alt(&e, &free).unwrap().0;
+            let (back, len) = add.decode(&bytes, &ops, &free).unwrap();
+            assert_eq!(len, bytes.len());
+            for n in ["d", "m.base", "m.index", "m.scale", "m.disp"] {
+                assert_eq!(back[n], e[n], "{n} of {}", hex(&bytes));
+            }
+        }
     }
 }

@@ -27,7 +27,7 @@ pub fn known(t: &Target) -> Features {
     for (_, f) in &t.machine.cpus {
         all.extend(f.iter().cloned());
     }
-    all.extend(t.machine.vector_feature.iter().cloned());
+    all.extend(t.machine.vector_widths.iter().filter_map(|(_, f)| f.clone()));
     all
 }
 

@@ -4,7 +4,8 @@
 //! what rustc's own build of it does. At `-C opt-level=0` and `2`; the
 //! programs need panics to unwind through and be caught in our code
 //! (landing pads, exception tables), and arithmetic with overflow checks.
-//! On an AArch64 Mac only (the binaries are run).
+//! On an AArch64 Mac or an x86-64 Linux machine (the binaries are run), for
+//! its own target.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -44,7 +45,7 @@ fn outputs(name: &str, opt: u32) -> Result<(String, String), String> {
 
     let ll = std::fs::read_to_string(tmp.join("theirs.ll")).unwrap();
     let mut m = epitome_ir::parse_module(&ll).map_err(|e| format!("{e:?}"))?;
-    let t = Target::aarch64();
+    let t = if cfg!(target_arch = "x86_64") { Target::x86_64() } else { Target::aarch64() };
     let compiled = compile(&t, &mut m, &Options::default())?;
     let bytes = compiled.object_file(&t)?;
     let assembled = Assembler::new(&t).assemble(&compiled.asm, None)?.file(&t)?;
@@ -76,11 +77,11 @@ fn outputs(name: &str, opt: u32) -> Result<(String, String), String> {
 }
 
 fn check(name: &str) {
-    let ok = cfg!(target_arch = "aarch64")
-        && cfg!(target_os = "macos")
+    let ok = (cfg!(target_arch = "aarch64") && cfg!(target_os = "macos")
+        || cfg!(target_arch = "x86_64") && cfg!(target_os = "linux"))
         && Command::new("rustc").arg("--version").output().is_ok_and(|o| o.status.success());
     if !ok {
-        eprintln!("needs rustc on an AArch64 Mac; skipping");
+        eprintln!("needs rustc on an AArch64 Mac or x86-64 Linux; skipping");
         return;
     }
     for opt in [0, 2] {

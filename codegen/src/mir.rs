@@ -114,9 +114,24 @@ pub struct MInst {
     /// barrier. No pass moves, merges or removes it, or moves another
     /// access across it.
     pub barrier: bool,
+    /// Its encoding's length in bytes, once known (see `set_sizes`); 0
+    /// until then.
+    pub size: u8,
 }
 
 impl MInst {
+    /// Whether it is a call, for frames and register preferences: it
+    /// clobbers registers (a call's are the convention's), and not only
+    /// those its description says it writes (x86's division's rdx).
+    pub fn is_call(&self, t: &crate::target::Target) -> bool {
+        !self.imp_defs.is_empty()
+            && match self.op {
+                Opcode::Instr(i) => self.imp_defs != t.instrs[i].clobbers,
+                Opcode::Asm { .. } => false,
+                _ => true,
+            }
+    }
+
     pub fn new(op: usize, ops: Vec<MOp>) -> MInst {
         MInst {
             op: Opcode::Instr(op),
@@ -126,6 +141,7 @@ impl MInst {
             class: None,
             noreturn: false,
             barrier: false,
+            size: 0,
         }
     }
 
@@ -138,6 +154,7 @@ impl MInst {
             class: None,
             noreturn: false,
             barrier: false,
+            size: 0,
         }
     }
 
@@ -224,12 +241,13 @@ impl MFunc {
         (self.vclass.len() - 1) as VReg
     }
 
-    /// How many bytes an instruction is: 4, or for inline assembly, 4 for
-    /// each of its statements.
+    /// How many bytes an instruction is: its size once known, else 4; for
+    /// inline assembly, 4 for each of its statements.
     pub fn bytes(&self, inst: &MInst) -> i64 {
         match inst.op {
             Opcode::Asm { id, .. } => 4 * self.asms[id as usize].statements as i64,
             Opcode::Cfi(_) => 0,
+            _ if inst.size > 0 => inst.size as i64,
             _ => 4,
         }
     }
@@ -247,7 +265,8 @@ pub fn render_asm(t: &Target, f: &MFunc, inst: &MInst, block: &AsmBlock) -> Stri
                 Some(('n', None)) => format!("{}", -v),
                 Some(('z', None)) if *v == 0 => m.zero.map_or("0".into(), |z| m.lookup_name(z)),
                 Some((_, Some(crate::machine::AsmModifier::IfImm(text)))) => text.clone(),
-                _ => format!("{v}"),
+                Some(('c', None)) => format!("{v}"),
+                _ => m.asm_imm.replace("{i}", &v.to_string()),
             },
             (MOp::Reg(r), AsmPrint::Mem(tpl, c)) => tpl.replace("{r}", &reg(*r, *c)),
             (MOp::Reg(r), AsmPrint::Reg(c)) => match modifier {
@@ -490,25 +509,136 @@ pub fn fill_template(t: &Target, abi: Option<&crate::abi::Abi>, i: usize, value:
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fixup {
+    /// Where the field holding the symbol starts (its piece), from the
+    /// function's start.
     pub offset: usize,
+    /// How far into its instruction that is.
+    pub at: usize,
     pub symbol: String,
     pub instr: String,
+    /// The field's value with the symbol at 0 (a displacement added, or
+    /// the instruction's end subtracted).
+    pub addend: i64,
+}
+
+/// A function's machine code: its bytes, where each instruction starts,
+/// and a fixup for each symbol reference.
+#[derive(Clone, Debug, Default)]
+pub struct Code {
+    pub bytes: Vec<u8>,
+    pub starts: Vec<usize>,
+    pub fixups: Vec<Fixup>,
+}
+
+/// The operands of `inst` at `pc`, with blocks at `starts`: labels are
+/// measured from the instruction's start and symbols are 0.
+fn inst_env(t: &Target, f: &MFunc, inst: &MInst, pc: usize, starts: &[usize]) -> Result<Env, String> {
+    let Opcode::Instr(i) = inst.op else { unreachable!() };
+    let mut env = Env::new();
+    for (o, op) in t.instrs[i].operands.iter().zip(&inst.ops) {
+        let v = match op {
+            MOp::Reg(Reg::P(r)) => t.machine.index(*r),
+            MOp::Reg(Reg::V(_)) => return Err(format!("{}: a virtual register left after allocation", f.name)),
+            MOp::Imm(v) => *v,
+            MOp::Label(target) => starts[*target] as i64 - pc as i64,
+            MOp::Sym(_) => 0,
+            MOp::Frame(..) | MOp::Incoming(_) | MOp::OutArea => {
+                return Err(format!("{}: a frame offset left after layout", f.name));
+            }
+        };
+        env.insert(o.name.clone(), v);
+    }
+    Ok(env)
+}
+
+/// How many bytes each instruction of each block takes once encoded.
+/// Where an instruction has encodings of several lengths (a short branch
+/// and a long one), the lengths are found together: each starts as short
+/// as it can be and grows until all fit, which ends, as growing only
+/// moves targets further.
+pub fn sizes(t: &Target, f: &MFunc) -> Result<Vec<Vec<usize>>, String> {
+    let mut size: Vec<Vec<usize>> = f
+        .blocks
+        .iter()
+        .map(|b| {
+            b.insts
+                .iter()
+                .map(|i| match i.op {
+                    Opcode::Instr(k) => t.instrs[k].enc.alts.iter().map(|a| a.len as usize).min().unwrap_or(0),
+                    _ => f.bytes(i) as usize,
+                })
+                .collect()
+        })
+        .collect();
+    let fixed = f.blocks.iter().flat_map(|b| &b.insts).all(|i| match i.op {
+        Opcode::Instr(k) => t.instrs[k].enc.alts.len() <= 1,
+        _ => true,
+    });
+    if fixed {
+        return Ok(size);
+    }
+    loop {
+        let starts = block_starts(&size);
+        let mut changed = false;
+        for (bi, b) in f.blocks.iter().enumerate() {
+            let mut pc = starts[bi];
+            for (k, inst) in b.insts.iter().enumerate() {
+                if let Opcode::Instr(i) = inst.op
+                    && t.instrs[i].enc.alts.len() > 1
+                {
+                    let env = inst_env(t, f, inst, pc, &starts)?;
+                    let n = t.instrs[i]
+                        .encode(&env)
+                        .ok_or_else(|| format!("{}: cannot encode `{}`", f.name, format_inst(t, f, inst)))?
+                        .len();
+                    if n > size[bi][k] {
+                        size[bi][k] = n;
+                        changed = true;
+                    }
+                }
+                pc += size[bi][k];
+            }
+        }
+        if !changed {
+            return Ok(size);
+        }
+    }
+}
+
+fn block_starts(size: &[Vec<usize>]) -> Vec<usize> {
+    let mut at = 0;
+    size.iter()
+        .map(|b| {
+            let s = at;
+            at += b.iter().sum::<usize>();
+            s
+        })
+        .collect()
+}
+
+/// Records each instruction's size (see `sizes`) in it, for what measures
+/// the code without encoding it (unwind and exception tables).
+pub fn set_sizes(t: &Target, f: &mut MFunc) {
+    if let Ok(size) = sizes(t, f) {
+        for (b, s) in f.blocks.iter_mut().zip(size) {
+            for (inst, n) in b.insts.iter_mut().zip(s) {
+                if matches!(inst.op, Opcode::Instr(_)) {
+                    inst.size = n as u8;
+                }
+            }
+        }
+    }
 }
 
 /// The machine code for a function laid out and allocated, with a fixup
 /// for each symbol reference. Branches within the function are resolved.
-pub fn encode_function(t: &Target, f: &MFunc) -> Result<(Vec<u32>, Vec<Fixup>), String> {
-    let mut starts = Vec::new();
-    let mut n = 0usize;
-    for b in &f.blocks {
-        starts.push(n * 4);
-        n += b.insts.iter().filter(|i| !matches!(i.op, Opcode::Cfi(_))).count();
-    }
-    let mut words = Vec::new();
-    let mut fixups = Vec::new();
+pub fn encode_function(t: &Target, f: &MFunc) -> Result<Code, String> {
+    let size = sizes(t, f)?;
+    let starts = block_starts(&size);
+    let mut code = Code::default();
     for (bi, b) in f.blocks.iter().enumerate() {
         let mut pc = starts[bi];
-        for inst in &b.insts {
+        for (k, inst) in b.insts.iter().enumerate() {
             let i = match inst.op {
                 Opcode::Cfi(_) => continue,
                 Opcode::Instr(i) => i,
@@ -518,32 +648,27 @@ pub fn encode_function(t: &Target, f: &MFunc) -> Result<(Vec<u32>, Vec<Fixup>), 
                 }
             };
             let ins = &t.instrs[i];
-            let mut env = Env::new();
-            for (o, op) in ins.operands.iter().zip(&inst.ops) {
-                let v = match op {
-                    MOp::Reg(Reg::P(r)) => t.machine.index(*r),
-                    MOp::Reg(Reg::V(_)) => return Err(format!("{}: a virtual register left after allocation", f.name)),
-                    MOp::Imm(v) => *v,
-                    MOp::Label(target) => starts[*target] as i64 - pc as i64,
-                    MOp::Sym(s) => {
-                        fixups.push(Fixup { offset: pc, symbol: s.clone(), instr: ins.name.clone() });
-                        0
-                    }
-                    MOp::Frame(..) | MOp::Incoming(_) | MOp::OutArea => {
-                        return Err(format!("{}: a frame offset left after layout", f.name));
-                    }
-                };
-                env.insert(o.name.clone(), v);
+            let env = inst_env(t, f, inst, pc, &starts)?;
+            let cannot = || format!("{}: cannot encode `{}`", f.name, format_inst(t, f, inst));
+            let (mut bytes, alt) = ins.encode_alt(&env).ok_or_else(cannot)?;
+            if bytes.len() != size[bi][k] {
+                return Err(format!("{}: `{}` changed size", f.name, format_inst(t, f, inst)));
             }
-            let word = ins
-                .enc
-                .encode(&env)
-                .ok_or_else(|| format!("{}: cannot encode `{}`", f.name, format_inst(t, f, inst)))?;
-            words.push(word);
-            pc += 4;
+            for (o, op) in ins.operands.iter().zip(&inst.ops) {
+                let MOp::Sym(s) = op else { continue };
+                let (at, addend) = ins.field_of(alt, &o.name, &env);
+                // (The relocation's addend fills the field in.)
+                if addend != 0 {
+                    ins.enc.alts[alt].clear(&mut bytes, &o.name);
+                }
+                code.fixups.push(Fixup { offset: pc + at, at, symbol: s.clone(), instr: ins.name.clone(), addend });
+            }
+            code.starts.push(pc);
+            code.bytes.extend_from_slice(&bytes);
+            pc += bytes.len();
         }
     }
-    Ok((words, fixups))
+    Ok(code)
 }
 
 /// The function's unwind rules, each at its offset from the function's
@@ -565,33 +690,37 @@ pub fn cfi_rules(f: &MFunc) -> Vec<(u64, crate::unwind::Cfi)> {
 // ---------------------------------------------------------------------------
 // Disassembly
 
-/// The instruction a word encodes, and its operands, if the description
-/// has it: the candidates whose literal bits match, most literal bits first.
-pub fn decode(t: &Target, word: u32) -> Option<(usize, Env)> {
-    let mut cands: Vec<usize> = (0..t.instrs.len())
-        .filter(|&i| t.instrs[i].decode && word & t.instrs[i].enc.mask == t.instrs[i].enc.value)
-        .collect();
-    cands.sort_by_key(|&i| std::cmp::Reverse(t.instrs[i].enc.mask.count_ones()));
-    for i in cands {
+/// The instruction at the start of `bytes`, its operands and its length,
+/// if the description has it: the candidates whose literal bits match,
+/// most literal bits first.
+pub fn decode(t: &Target, bytes: &[u8]) -> Option<(usize, Env, usize)> {
+    let cands = t.decode_candidates(bytes);
+    for (i, alt) in cands {
         let ins = &t.instrs[i];
-        let Some(env) = ins.decode(word) else { continue };
+        if !ins.decode {
+            continue;
+        }
+        let Some((env, len)) = ins.decode_alt(bytes, alt) else { continue };
         // A condition must be one the description names.
         let conds_ok =
             ins.operands.iter().all(|o| o.kind != Kind::Cond || t.conds.iter().any(|c| c.value == env[&o.name]));
         if conds_ok {
-            return Some((i, env));
+            return Some((i, env, len));
         }
     }
     None
 }
 
-/// Disassembles one word at address `pc`.
-pub fn disassemble(t: &Target, word: u32, pc: u64) -> String {
-    match decode(t, word) {
-        None => format!(".word 0x{word:08x}"),
-        Some((i, env)) => {
+/// Disassembles the instruction at the start of `bytes`, at address `pc`,
+/// and gives its length. What does not decode is a `.word` (or on a target
+/// with instructions shorter than 4 bytes, a `.byte`).
+pub fn disassemble(t: &Target, bytes: &[u8], pc: u64) -> (String, usize) {
+    match decode(t, bytes) {
+        None if t.unit() == 4 && bytes.len() >= 4 => (format!(".word 0x{:08x}", crate::enc::word(&bytes[..4])), 4),
+        None => (format!(".byte 0x{:02x}", bytes.first().copied().unwrap_or(0)), 1),
+        Some((i, env, len)) => {
             let ins = &t.instrs[i];
-            fill_template(t, None, i, |k| {
+            let text = fill_template(t, None, i, |k| {
                 let o = &ins.operands[k];
                 let v = env[&o.name];
                 match o.kind {
@@ -600,7 +729,8 @@ pub fn disassemble(t: &Target, word: u32, pc: u64) -> String {
                     Kind::Sym => Operand::Text("<symbol>".into()),
                     Kind::Imm | Kind::Cond => Operand::Imm(v),
                 }
-            })
+            });
+            (text, len)
         }
     }
 }

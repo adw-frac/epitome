@@ -212,7 +212,11 @@ pub fn add_eh_frame(obj: &mut Object, m: &Machine, p: &Params, frames: &[Frame])
             cie.extend(if pers.is_some() { &b"zPLR\0"[..] } else { &b"zR\0"[..] });
             uleb(&mut cie, 1);
             sleb(&mut cie, p.data_align);
-            cie.push(m.dwarf_number(p.ra).ok_or("the link register has no DWARF number")? as u8);
+            let ra = match m.cfi_return_column {
+                Some(c) => c,
+                None => m.dwarf_number(p.ra).ok_or("the link register has no DWARF number")?,
+            };
+            cie.push(ra as u8);
             let fde_enc = if macho { 0x10 } else { 0x1b };
             match &pers {
                 Some(name) => {
@@ -253,7 +257,12 @@ pub fn add_eh_frame(obj: &mut Object, m: &Machine, p: &Params, frames: &[Frame])
             }
             cie.push(0x0c);
             uleb(&mut cie, m.dwarf_number(m.sp).ok_or("the stack pointer has no DWARF number")? as u64);
-            uleb(&mut cie, 0);
+            uleb(&mut cie, m.cfi_cfa_offset as u64);
+            // The return address the call pushed, at the CFA less its size.
+            if m.cfi_cfa_offset > 0 {
+                cie.push(0x80 | ra as u8);
+                uleb(&mut cie, (m.cfi_cfa_offset / -p.data_align) as u64);
+            }
             finish(&mut cie);
             data.extend(&cie);
             cies.push((pers, at));

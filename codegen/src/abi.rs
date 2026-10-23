@@ -58,10 +58,18 @@ pub struct Abi {
     /// An integer wider than a register starts in an even-numbered
     /// register, and at a 16-aligned stack slot (AAPCS64's `i128`).
     pub wide_pairs_even: bool,
+    /// An integer wider than a register goes at a 16-aligned stack slot,
+    /// in registers as any other (`"wide-pairs"="stack16"`: System V's
+    /// `__int128`).
+    pub wide_stack16: bool,
     /// The `va_list` a variadic function makes: a pointer to the next
     /// argument (false), or AAPCS64's record of register save areas and
     /// the stack (`va-list` = `aapcs64`).
     pub va_list_aapcs64: bool,
+    /// Or System V's (`va-list` = `sysv`): `{ gp_offset, fp_offset,
+    /// overflow_arg_area, reg_save_area }`, the registers saved in one
+    /// area, the integer ones then the vector ones 16 bytes apart.
+    pub va_list_sysv: bool,
     /// Homogeneous floating-point aggregates are passed and returned in
     /// floating-point registers (`hfa`; see `prepare::hfa_of`).
     pub hfa: bool,
@@ -77,6 +85,16 @@ pub struct Abi {
     pub fp_scratch: Vec<u8>,
     pub fp: u8,
     pub lr: u8,
+    /// The return address is on the stack, pushed by the call (x86's
+    /// `"return-address"="stack"`), not in a link register: there is no
+    /// frame record, and the frame starts 8 bytes below the CFA.
+    pub ra_on_stack: bool,
+    /// The registers results come back in (`"results"`), where they are
+    /// not the result register and the argument registers after it.
+    pub result_list: Option<Vec<u8>>,
+    /// A register that tells a variadic callee how many vector registers
+    /// its arguments take (`"variadic-fp-count"`: System V's al).
+    pub variadic_fp_count: Option<u8>,
     pub stack_args: StackArgs,
     /// The stack pointer's alignment at calls, in bytes (`stack-align`).
     pub stack_align: i64,
@@ -100,6 +118,9 @@ pub struct Part {
     /// A member of a homogeneous floating-point aggregate (`[3 x float]`,
     /// see `prepare::hfa_of`): on the stack, the members are side by side.
     pub hfa: bool,
+    /// A piece of a struct passed by value in memory (`byval`): its
+    /// pieces side by side on the stack, 8 bytes each but the last.
+    pub byval: bool,
 }
 
 /// Where one argument goes.
@@ -134,8 +155,12 @@ impl Abi {
     }
 
     /// The registers a result of `n` integer parts comes back in: the
-    /// result register and the argument registers after it (x0 and x1).
+    /// result register and the argument registers after it (x0 and x1), or
+    /// the convention's list (SysV's rax, rdx).
     pub fn results(&self, n: usize) -> Vec<u8> {
+        if let Some(list) = &self.result_list {
+            return list.iter().take(n.max(1)).copied().collect();
+        }
         let at = self.args.iter().position(|&r| r == self.result).unwrap_or(0);
         let mut out = vec![self.result];
         out.extend(self.args.iter().skip(at + 1).take(n.saturating_sub(1)).copied());
@@ -160,8 +185,10 @@ impl Abi {
     /// many are named (the rest are variable arguments), and the bytes of
     /// stack the call needs.
     pub fn assign(&self, sizes: &[u64], named: usize) -> (Vec<ArgLoc>, i64) {
-        let parts: Vec<Vec<Part>> =
-            sizes.iter().map(|&s| vec![Part { size: s, fp: false, sret: false, wide: false, hfa: false }]).collect();
+        let parts: Vec<Vec<Part>> = sizes
+            .iter()
+            .map(|&s| vec![Part { size: s, fp: false, sret: false, wide: false, hfa: false, byval: false }])
+            .collect();
         let (locs, stack) = self.assign_parts(&parts, named);
         (locs.into_iter().map(|l| l[0]).collect(), stack)
     }
@@ -183,6 +210,12 @@ impl Abi {
                 continue;
             }
             let variadic = k >= named;
+            if parts.first().is_some_and(|p| p.byval) {
+                stack = (stack + 7) / 8 * 8;
+                locs.push((0..parts.len() as i64).map(|q| ArgLoc::Stack(stack + 8 * q)).collect());
+                stack += parts.iter().map(|p| p.size as i64).sum::<i64>();
+                continue;
+            }
             let fp = parts.iter().all(|p| p.fp) && !(variadic && self.variadic == Variadic::Integer);
             let n = parts.len();
             if variadic && self.variadic == Variadic::Stack {
@@ -211,7 +244,7 @@ impl Abi {
                 *next = regs.len();
             }
             let mut here = Vec::new();
-            if even {
+            if even || (self.wide_stack16 && parts.first().is_some_and(|p| p.wide)) {
                 stack = (stack + 15) / 16 * 16;
             }
             // A homogeneous aggregate: its members side by side, aligned as
@@ -369,7 +402,9 @@ pub fn read(m: &Module, prefix: &str, machine: &crate::machine::Machine) -> Resu
             sret: props.get("sret").map(|v| regs(v)).transpose()?.and_then(|v| v.first().copied()),
             base: props.get("base").map(|v| regs(v)).transpose()?.and_then(|v| v.first().copied()),
             wide_pairs_even: props.get("wide-pairs").is_some_and(|v| v.first().is_some_and(|x| x == "even")),
+            wide_stack16: props.get("wide-pairs").is_some_and(|v| v.first().is_some_and(|x| x == "stack16")),
             va_list_aapcs64: props.get("va-list").is_some_and(|v| v.first().is_some_and(|x| x == "aapcs64")),
+            va_list_sysv: props.get("va-list").is_some_and(|v| v.first().is_some_and(|x| x == "sysv")),
             hfa: props.get("hfa").is_some_and(|v| v.first().is_some_and(|x| x == "yes")),
             eh_regs: match props.get("eh-regs") {
                 Some(v) => regs(v)?,
@@ -382,7 +417,14 @@ pub fn read(m: &Module, prefix: &str, machine: &crate::machine::Machine) -> Resu
             fp_saved: regs(&get("fp-saved")?)?,
             fp_scratch: regs(&get("fp-scratch")?)?,
             fp: frame[0],
-            lr: frame[1],
+            lr: *frame.get(1).unwrap_or(&frame[0]),
+            ra_on_stack: props.get("return-address").is_some_and(|v| v.first().is_some_and(|x| x == "stack")),
+            result_list: props.get("results").map(|v| regs(v)).transpose()?,
+            variadic_fp_count: props
+                .get("variadic-fp-count")
+                .map(|v| regs(v))
+                .transpose()?
+                .and_then(|v| v.first().copied()),
             stack_align: {
                 let a: i64 = one("stack-align")?.parse().map_err(|_| format!("{name}: stack-align"))?;
                 if a <= 0 || a & (a - 1) != 0 {
