@@ -1315,6 +1315,34 @@ def avx2():
                    f'  ret {ty} %r\n}}\n')
 
 
+def reductions():
+    """Sums across lanes: halves added until one lane is left (pshufd's
+    high lanes brought down), as SSE2 and AVX2 have no across-lanes add."""
+    def recipe(name, ret, vty, cls, body, feature=''):
+        n, el = vty[1:].split(' x ')
+        el = el[:-1]
+        out.append(f'declare {ret} @llvm.vector.reduce.add.v{n}{el}({vty})\n')
+        out.append(f'define {ret} @{name}({vty} "reg"="{cls}" %v) "recipe"="{name}.expand"{feature} {{\n'
+                   f'  %r = call {ret} @llvm.vector.reduce.add.v{n}{el}({vty} %v)\n  ret {ret} %r\n}}\n')
+        out.append(f'define {ret} @{name}.expand({vty} %v) {{\n' + ''.join(f'  {l}\n' for l in body) + '}\n')
+    four = lambda v: ['%s1 = call <4 x i32> @PSHUFD(<4 x i32> ' + v + ', i64 14)',
+                      '%a1 = call <4 x i32> @PADDD.4xi32(<4 x i32> ' + v + ', <4 x i32> %s1)',
+                      '%s2 = call <4 x i32> @PSHUFD(<4 x i32> %a1, i64 1)',
+                      '%a2 = call <4 x i32> @PADDD.4xi32(<4 x i32> %a1, <4 x i32> %s2)',
+                      '%r = call i32 @MOVDlane0.4xi32(<4 x i32> %a2)', 'ret i32 %r']
+    two = lambda v: ['%s1 = call <2 x i64> @PUNPCKHQDQself(<2 x i64> ' + v + ')',
+                     '%a1 = call <2 x i64> @PADDQ.2xi64(<2 x i64> ' + v + ', <2 x i64> %s1)',
+                     '%r = call i64 @MOVQlane0(<2 x i64> %a1)', 'ret i64 %r']
+    recipe('reduce.add.4xi32', 'i32', '<4 x i32>', 'xv', four('%v'))
+    recipe('reduce.add.2xi64', 'i64', '<2 x i64>', 'xv', two('%v'))
+    recipe('reduce.add.8xi32', 'i32', '<8 x i32>', 'yv',
+           ['%l = call <4 x i32> @VLOW.8xi32(<8 x i32> %v)', '%h = call <4 x i32> @VHIGH.8xi32(<8 x i32> %v)',
+            '%s = call <4 x i32> @PADDD.4xi32(<4 x i32> %l, <4 x i32> %h)'] + four('%s'), ' "feature"="avx2"')
+    recipe('reduce.add.4xi64', 'i64', '<4 x i64>', 'yv',
+           ['%l = call <2 x i64> @VLOW.4xi64(<4 x i64> %v)', '%h = call <2 x i64> @VHIGH.4xi64(<4 x i64> %v)',
+            '%s = call <2 x i64> @PADDQ.2xi64(<2 x i64> %l, <2 x i64> %h)'] + two('%s'), ' "feature"="avx2"')
+
+
 def vector_copies():
     """Copies of the vector and mask registers (the register allocator's)."""
     entry('<2 x i64>', 'MOVAPSrr', ['<2 x i64> "reg"="x" %n'], 'rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)',
@@ -1355,6 +1383,7 @@ def main():
     sse_vectors()
     sse_recipes()
     avx2()
+    reductions()
     vector_copies()
     sys.stdout.write('\n'.join(out))
 
