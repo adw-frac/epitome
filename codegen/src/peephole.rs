@@ -24,7 +24,9 @@ pub fn redundant_compares(t: &Target, mf: &mut MFunc) -> usize {
         for inst in std::mem::take(&mut b.insts) {
             let sets = matches!(inst.op, Opcode::Instr(i) if t.instrs[i].sets.is_some());
             if sets {
-                if last.as_ref().is_some_and(|l| l.op == inst.op && l.ops == inst.ops)
+                // (Never a barrier: x86's fucompi also pops the x87 stack.)
+                if !inst.barrier
+                    && last.as_ref().is_some_and(|l| l.op == inst.op && l.ops == inst.ops)
                     && epitome_ir::chop::allow(|| format!("{name}: remove a compare the same as the last"))
                 {
                     removed += 1;

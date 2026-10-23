@@ -149,6 +149,7 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     const_exprs(cx, &mut f);
     addresses_as_ints(&mut f);
     half_as_int(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
+    crate::x87::lower(cx, &mut f).map_err(|e| format!("@{fname}: {e}"))?;
     identity_bitcasts(&mut f);
     one_lane_vectors(cx, &mut f);
     odd_lane_vectors(cx, &mut f);
@@ -192,6 +193,7 @@ pub fn prepare(cx: &mut Ctx, f: &Function, fname: &str) -> Result<Function, Stri
     mask_lanes(cx, &mut f);
     // Element-wise intrinsics split into scalars expand as scalars do.
     expand_intrinsics(cx, &mut f);
+    constant_branches(cx, &mut f);
     sink_addresses(&mut f);
     lower_geps(cx, &mut f)?;
     promote_odd(cx, &mut f)?;
@@ -2279,6 +2281,27 @@ fn const_exprs(cx: &mut Ctx, f: &mut Function) {
     }
 }
 
+/// A conditional branch on a constant (`llvm.is.constant`'s answer, at
+/// `-O0`) is a branch to the side it picks; the other side's phis lose
+/// this block.
+fn constant_branches(cx: &Ctx, f: &mut Function) {
+    for b in f.layout.clone() {
+        let Some(&t) = f.blocks[b.index()].insts.last() else { continue };
+        let Op::CondBr { cond, then_dest, else_dest } = f.insts[t.index()].op else { continue };
+        let Some(c) = cx.const_int(cond) else { continue };
+        let (to, other) = if c & 1 != 0 { (then_dest, else_dest) } else { (else_dest, then_dest) };
+        f.insts[t.index()].op = Op::Br(to);
+        if other == to {
+            continue;
+        }
+        for &i in &f.blocks[other.index()].insts {
+            if let Op::Phi { incoming, .. } = &mut f.insts[i.index()].op {
+                incoming.retain(|&(_, from)| from != b);
+            }
+        }
+    }
+}
+
 /// A bitcast to its operand's own type is the operand.
 fn identity_bitcasts(f: &mut Function) {
     for i in f.insts_in_order().collect::<Vec<_>>() {
@@ -4089,6 +4112,23 @@ fn libm_base(base: &str) -> Option<&'static str> {
         "fma" => "fma",
         "powi" => "powi",
         "ldexp" => "ldexp",
+        // Rounding, where the machine has no instruction for it (x86-64
+        // before SSE4.1's roundsd).
+        "floor" => "floor",
+        "ceil" => "ceil",
+        "trunc" => "trunc",
+        "rint" => "rint",
+        "nearbyint" => "nearbyint",
+        "round" => "round",
+        "roundeven" => "roundeven",
+        // And the least and greatest: C's fmin and fmax ignore a NaN as
+        // minnum does; fminimum and fmaximum are IEEE 754-2019's.
+        "minnum" => "fmin",
+        "maxnum" => "fmax",
+        "minimum" => "fminimum",
+        "maximum" => "fmaximum",
+        "minimumnum" => "fminimum_num",
+        "maximumnum" => "fmaximum_num",
         _ => return None,
     })
 }
@@ -4402,6 +4442,27 @@ fn expand_intrinsics(cx: &mut Ctx, f: &mut Function) {
                 }
                 let new = std::mem::take(&mut s.new);
                 f.replace_uses(Value::Local(r), acc);
+                let n = new.len();
+                f.blocks[b.index()].insts.splice(k..=k, new);
+                k += n;
+                continue;
+            }
+            // A relative lookup table's entry (as clang makes them for x86):
+            // the table's address plus the 32-bit offset at `offset` in it.
+            if name.starts_with("llvm.load.relative.") {
+                let (i8t, i32t, i64t) = (cx.m.types.int(8), cx.m.types.int(32), cx.m.types.int(64));
+                let gep = |s: &mut Seq, p: Value, k: Value| {
+                    s.op(
+                        Op::Gep { flags: Default::default(), inrange: None, source_ty: i8t, ptr: p, indices: vec![k] },
+                        ty,
+                    )
+                };
+                let at = gep(&mut s, args[0], args[1]);
+                let rel = s.op(Op::Load { volatile: false, atomic: None, ptr: at, align: Some(4) }, i32t);
+                let rel = s.cast(CastOp::SExt, rel, i64t);
+                let v = gep(&mut s, args[0], rel);
+                let new = std::mem::take(&mut s.new);
+                f.replace_uses(Value::Local(r), v);
                 let n = new.len();
                 f.blocks[b.index()].insts.splice(k..=k, new);
                 k += n;

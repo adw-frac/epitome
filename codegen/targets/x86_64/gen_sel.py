@@ -237,6 +237,9 @@ def control():
           ' "role"="callr" "nomatch"')
     entry('void', 'RET', [], '11000011', 'retq', ['ret void'], ' "role"="ret"')
     entry('void', 'UD2', [], '00001111 | 00001011', 'ud2', ['unreachable'], ' "role"="trap"')
+    # A spin loop's hint (core::hint::spin_loop).
+    entry('void', 'PAUSE', [], '11110011 | 10010000', 'pause', ['call void @llvm.x86.sse2.pause()', 'ret void'])
+    out.append('declare void @llvm.x86.sse2.pause()\n')
     # setcc writes a byte: 0 or 1.
     entry('i1', 'SETCC', ['i1 "cond" %c'],
           '{ if(d<4) 00001111 | 1001 cc:4=c | 11 000 rm:3=d&7 ; '
@@ -550,6 +553,45 @@ def atomics():
     entry('void', 'MFENCEA', [], '00001111 | 10101110 | 11110000', 'mfence', ['fence acquire', 'ret void'], ' "nodecode"')
 
 
+def x87():
+    """x86_fp80 (C's long double) on the x87 unit. Its values are kept in
+    memory (prepare's x87.rs): each x87 instruction is an intrinsic of its
+    own, called in order, with the stack empty between operations; a
+    comparison is a recipe that loads both values, compares and pops."""
+    for name, op, r, asm in [('FLDT', '11011011', 5, 'fldt'), ('FSTPT', '11011011', 7, 'fstpt'),
+                             ('FLDL', '11011101', 0, 'fldl'), ('FSTPL', '11011101', 3, 'fstpl'),
+                             ('FLDS', '11011001', 0, 'flds'), ('FSTPS', '11011001', 3, 'fstps'),
+                             ('FILDLL', '11011111', 5, 'fildll'), ('FISTPLL', '11011111', 7, 'fistpll'),
+                             ('FNSTCW', '11011001', 7, 'fnstcw'), ('FLDCW', '11011001', 5, 'fldcw')]:
+        entry('void', name, ['ptr "reg"="r64" %n'], f'rex(0, 0, 4, n) | {op} | rm({r}, n, 4, 1, 0, 0, 1)',
+              f'{asm} 0({{n}})', [f'call void @llvm.epitome.x87.{asm}(ptr %n)', 'ret void'])
+        out.append(f'declare void @llvm.epitome.x87.{asm}(ptr)\n')
+    # On the top two: the one pushed first (st(1)) op the other (st(0)),
+    # popped into st(0). (AT&T's fsubrp is Intel's fsubp: st(1) - st(0).)
+    for name, enc, asm, op in [('FADDP', '11011110 | 11000001', 'faddp %st, %st(1)', 'fadd'),
+                               ('FSUBP', '11011110 | 11101001', 'fsubrp %st, %st(1)', 'fsub'),
+                               ('FMULP', '11011110 | 11001001', 'fmulp %st, %st(1)', 'fmul'),
+                               ('FDIVP', '11011110 | 11111001', 'fdivrp %st, %st(1)', 'fdiv'),
+                               ('FCHS', '11011001 | 11100000', 'fchs', 'fchs'),
+                               ('FABS', '11011001 | 11100001', 'fabs', 'fabs'),
+                               ('FPOP', '11011101 | 11011000', 'fstp %st(0)', 'pop')]:
+        entry('void', name, [], enc, asm, [f'call void @llvm.epitome.x87.{op}()', 'ret void'])
+        out.append(f'declare void @llvm.epitome.x87.{op}()\n')
+    # Compares st(0) with st(1) as ucomisd does, and pops one.
+    entry('%fflags', 'FUCOMPI', [], '11011111 | 11101001', 'fucompi %st(1), %st',
+          ['ret %fflags poison'], ' "sets"="zcp" "nomatch"')
+    # pred(*a, *b), for the predicates one condition tests (prepare swaps
+    # the others' operands, and splits oeq and une).
+    for p in ['ogt', 'oge', 'ult', 'ule', 'ueq', 'one', 'uno', 'ord']:
+        out.append(f'declare i1 @llvm.epitome.x87.cmp.{p}(ptr, ptr)\n')
+        out.append(f'define i1 @x87.cmp.{p}(ptr "reg"="r64" %a, ptr "reg"="r64" %b) "recipe"="x87.cmp.{p}.expand" {{\n'
+                   f'  %r = call i1 @llvm.epitome.x87.cmp.{p}(ptr %a, ptr %b)\n  ret i1 %r\n}}\n')
+        out.append(f'define i1 @x87.cmp.{p}.expand(ptr %a, ptr %b) {{\n'
+                   f'  call void @FLDT(ptr %b)\n  call void @FLDT(ptr %a)\n  %f = call %fflags @FUCOMPI()\n'
+                   f'  call void @FPOP()\n  %c = call i1 @cc.f.{p}(%fflags %f)\n  %r = call i1 @SETCC(i1 %c)\n'
+                   f'  ret i1 %r\n}}\n')
+
+
 def vector_copies():
     """Copies of the vector and mask registers (the register allocator's)."""
     entry('<2 x i64>', 'MOVAPSrr', ['<2 x i64> "reg"="x" %n'], 'rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)',
@@ -583,6 +625,7 @@ def main():
     recipes()
     floats()
     atomics()
+    x87()
     vector_copies()
     sys.stdout.write('\n'.join(out))
 

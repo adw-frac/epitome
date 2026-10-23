@@ -83,7 +83,7 @@
 ; ===========================================================================
 ; Parameters.
 
-!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110, !1111, !1112, !1113, !1114, !1115, !1116}
+!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110, !1111, !1112, !1113, !1114, !1115, !1116, !1117}
 !1100 = !{!"sp", !"%rsp"}
 !1101 = !{!"vector-bits", !"0"}
 !1102 = !{!"elf-machine", !"62"}
@@ -109,6 +109,44 @@
 ; Loads of any ordering are plain moves; a sequentially consistent store is
 ; an xchg.
 !1116 = !{!"seq-cst-stores", !"swap"}
+; Inline assembly's immediates, as AT&T writes them.
+!1117 = !{!"asm-imm", !"${i}"}
+
+; ===========================================================================
+; Inline assembly: what its constraint codes and template modifiers mean,
+; from the LLVM Language Reference and GCC's x86 constraints. A register
+; operand without a modifier is written as its value's register: %eax for
+; an i32, %rax for an i64.
+
+!target.asm-constraints = !{!1170, !1171, !1172, !1173, !1174, !1175, !1176, !1177, !1178, !1179, !1180, !1181, !1182, !1183}
+!1170 = !{!"r", !"file", !"r"}
+!1171 = !{!"q", !"file", !"r"}
+!1172 = !{!"R", !"file", !"r"}
+!1173 = !{!"l", !"file", !"r"}
+!1174 = !{!"x", !"file", !"v"}
+!1175 = !{!"v", !"file", !"v"}
+!1176 = !{!"m", !"mem", !"({r})"}
+!1177 = !{!"e", !"imm", !"-2147483648", !"2147483647"}
+!1178 = !{!"Z", !"imm", !"0", !"4294967295"}
+!1179 = !{!"I", !"imm", !"0", !"31"}
+!1180 = !{!"J", !"imm", !"0", !"63"}
+!1181 = !{!"K", !"imm", !"-128", !"127"}
+!1182 = !{!"N", !"imm", !"0", !"255"}
+!1183 = !{!"M", !"imm", !"0", !"3"}
+
+; Operands as people write them, and as the templates do: memory without a
+; displacement.
+!target.asm-aliases = !{!1190}
+!1190 = !{!"({r})", !"0({r})"}
+
+!target.asm-modifiers = !{!1185, !1186, !1187, !1188, !1189, !1191, !1192}
+!1185 = !{!"k", !"class", !"r32"}
+!1186 = !{!"q", !"class", !"r64"}
+!1187 = !{!"w", !"class", !"r16"}
+!1188 = !{!"b", !"class", !"r8"}
+!1189 = !{!"x", !"class", !"x"}
+!1191 = !{!"t", !"class", !"y"}
+!1192 = !{!"g", !"class", !"z"}
 
 !target.cpus = !{!1150}
 !1150 = !{!"x86-64"}

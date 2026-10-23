@@ -265,7 +265,8 @@ pub fn render_asm(t: &Target, f: &MFunc, inst: &MInst, block: &AsmBlock) -> Stri
                 Some(('n', None)) => format!("{}", -v),
                 Some(('z', None)) if *v == 0 => m.zero.map_or("0".into(), |z| m.lookup_name(z)),
                 Some((_, Some(crate::machine::AsmModifier::IfImm(text)))) => text.clone(),
-                _ => format!("{v}"),
+                Some(('c', None)) => format!("{v}"),
+                _ => m.asm_imm.replace("{i}", &v.to_string()),
             },
             (MOp::Reg(r), AsmPrint::Mem(tpl, c)) => tpl.replace("{r}", &reg(*r, *c)),
             (MOp::Reg(r), AsmPrint::Reg(c)) => match modifier {

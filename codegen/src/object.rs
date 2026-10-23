@@ -140,6 +140,13 @@ pub enum Item {
         symbol: String,
         offset: i64,
     },
+    /// The 32-bit distance from the start of the global holding it
+    /// (`base`, as the platform names it) to `symbol` (a relative lookup
+    /// table's entry: `.long symbol-base`).
+    Rel32 {
+        symbol: String,
+        base: String,
+    },
 }
 
 impl Item {
@@ -149,6 +156,7 @@ impl Item {
             Item::Bytes(b) => b.len() as u64,
             Item::Zero(n) => *n,
             Item::Addr { .. } => 8,
+            Item::Rel32 { .. } => 4,
         }
     }
 }
@@ -363,6 +371,23 @@ pub fn build(
                     });
                     sec.data.extend_from_slice(&[0; 8]);
                 }
+                // PC-relative, from the field: plus its distance from the
+                // global's start.
+                Item::Rel32 { symbol, base } => {
+                    if *base != g.symbol || abi.syntax == Syntax::MachO {
+                        return Err(format!("{}: a distance from another global in data", g.symbol));
+                    }
+                    let kind = t.machine.reloc_used(RelocUse::EhPcRel).ok_or("no relocation with use eh-pcrel")?;
+                    pending.push(Pending {
+                        section: s,
+                        offset: sec.data.len() as u64,
+                        kind: RelocKind(kind as u16),
+                        symbol: symbol.clone(),
+                        addend: (sec.data.len() as u64 - at) as i64,
+                        instr: None,
+                    });
+                    sec.data.extend_from_slice(&[0; 4]);
+                }
             }
         }
         obj.symbols.push(Symbol {
@@ -406,7 +431,36 @@ pub fn resolve(t: &Target, obj: &mut Object, pending: Vec<Pending>, macho: bool)
         };
         let def = obj.symbols[sym].clone();
         // A call within the section: the distance is known.
-        let usage = t.machine.relocs[p.kind.0 as usize].usage;
+        let rd = &t.machine.relocs[p.kind.0 as usize];
+        let usage = rd.usage;
+        // So is any other plain PC-relative reference to a local symbol
+        // there (x86's `leaq sym(%rip)`), for ELF: in a 32-bit field of its
+        // own, it is what a linker would write, S + A - P.
+        let plain = !macho
+            && usage != RelocUse::Call
+            && !def.global
+            && def.section == Some(p.section)
+            && rd.target.as_ref().is_some_and(|e| {
+                use crate::enc::Expr;
+                matches!(e, Expr::Bin('+', a, b) if **a == Expr::Var("pc".into()) && **b == Expr::Var("v".into()))
+            });
+        if plain && let Some(i) = p.instr {
+            let ins = &t.instrs[i];
+            let op = ins.operands.iter().find(|o| o.kind == Kind::Sym).ok_or("a reference without a symbol operand")?;
+            let whole = ins.enc.alts.iter().all(|a| {
+                a.fields
+                    .iter()
+                    .filter(|x| x.names.contains(&op.name))
+                    .all(|x| x.width == 32 && x.lo == 0 && a.pieces[x.piece].bytes == 4)
+            });
+            if whole {
+                let v = def.value as i64 + p.addend - p.offset as i64;
+                let v = i32::try_from(v).map_err(|_| format!("{}: {} is out of range", ins.name, def.name))?;
+                let at = p.offset as usize;
+                obj.sections[p.section].data[at..at + 4].copy_from_slice(&v.to_le_bytes());
+                continue;
+            }
+        }
         if usage == RelocUse::Call
             && (macho || !def.global)
             && def.section == Some(p.section)

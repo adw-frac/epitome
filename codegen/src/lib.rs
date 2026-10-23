@@ -29,6 +29,7 @@ pub mod target;
 pub mod unwind;
 pub mod wide;
 pub mod wide_vectors;
+pub mod x87;
 
 use epitome_ir::Module;
 use epitome_ir::layout::DataLayout;

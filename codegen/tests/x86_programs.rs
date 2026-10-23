@@ -2,7 +2,8 @@
 //! x86-64 Linux machine (elsewhere the test is skipped, as it is without
 //! clang).
 //!
-//! For each `tests/programs/NAME.c` of `PROGRAMS` and its `NAME.main.c`, in
+//! For each `tests/programs/NAME.c` of `PROGRAMS` (and `tests/x86/NAME.c` of
+//! `X86_PROGRAMS`) and its `NAME.main.c`, in
 //! the configurations of `tests/programs.rs` (clang -O0, that through
 //! epitome-opt, -O2 without vectorising, and -O2), the test:
 //!
@@ -43,6 +44,9 @@ const PROGRAMS: &[&str] = &[
     "vla",
     "wide",
 ];
+
+/// And those of `tests/x86`, for x86 alone (`long double` is x87's).
+const X86_PROGRAMS: &[&str] = &["ldouble"];
 
 fn run(cmd: &mut Command) -> Result<String, String> {
     let out = cmd.output().map_err(|e| format!("{cmd:?}: {e}"))?;
@@ -165,9 +169,11 @@ fn x86_programs_behave_the_same() {
         return;
     }
     let t = Target::x86_64();
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs");
+    let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let tmp = Path::new(env!("CARGO_TARGET_TMPDIR")).join("x86_programs");
     std::fs::create_dir_all(&tmp).unwrap();
-    let failed: Vec<String> = PROGRAMS.iter().filter_map(|name| check_program(&t, &dir, &tmp, name).err()).collect();
+    let all = PROGRAMS.iter().map(|n| ("programs", n)).chain(X86_PROGRAMS.iter().map(|n| ("x86", n)));
+    let failed: Vec<String> =
+        all.filter_map(|(dir, name)| check_program(&t, &here.join(dir), &tmp, name).err()).collect();
     assert!(failed.is_empty(), "{}", failed.join("\n"));
 }

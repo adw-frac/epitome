@@ -303,6 +303,9 @@ pub struct Machine {
     pub asm_modifiers: HashMap<char, AsmModifier>,
     /// How assembly starts a comment.
     pub asm_comment: String,
+    /// How inline assembly writes an immediate operand (`asm-imm`, with
+    /// `{i}` the number: x86's AT&T `${i}`); modifier `c` writes it bare.
+    pub asm_imm: String,
     /// DWARF's number for each file's first register (`!target.dwarf`).
     pub dwarf: HashMap<usize, u32>,
     /// Or for each of its registers, where they are not in order (x86's).
@@ -461,6 +464,7 @@ impl Machine {
             asm_constraints: HashMap::new(),
             asm_modifiers: HashMap::new(),
             asm_comment: String::new(),
+            asm_imm: "{i}".into(),
             dwarf: HashMap::new(),
             dwarf_each: HashMap::new(),
             cfi_cfa_offset: 0,
@@ -520,6 +524,7 @@ impl Machine {
         mc.elf_flags = num("elf-flags")?.unwrap_or(0) as u32;
         mc.elf_format = params.get("elf-format").cloned().unwrap_or_else(|| "elf64-little".into());
         mc.asm_comment = params.get("asm-comment").cloned().unwrap_or_else(|| "//".into());
+        mc.asm_imm = params.get("asm-imm").cloned().unwrap_or_else(|| "{i}".into());
         if let Some(t) = all_params.iter().find(|t| t[0] == "cfi-data-align") {
             let v = |k: usize| t.get(k).and_then(|x| x.parse::<i64>().ok());
             let elf = v(1).ok_or("target parameter cfi-data-align: a number")?;

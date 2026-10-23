@@ -1452,7 +1452,9 @@ impl Target {
 
     fn build_patterns(&mut self) -> Result<(), String> {
         let mut out: Vec<Pattern> = Vec::new();
-        let producers: Vec<usize> = (0..self.instrs.len()).filter(|&i| self.instrs[i].sets.is_some()).collect();
+        // (Those not to be matched are only for recipes: x86's fucompi.)
+        let producers: Vec<usize> =
+            (0..self.instrs.len()).filter(|&i| self.instrs[i].sets.is_some() && self.instrs[i].matchable).collect();
         for idx in 0..self.instrs.len() {
             let ins = &self.instrs[idx];
             if !ins.matchable || ins.copy.is_some() || ins.sets.is_some() {
@@ -1848,13 +1850,16 @@ impl Target {
                         e.locals.iter().any(|l| matches!(m.types.get(l.ty), Type::Vector { .. }))
                     },
                 );
-            // Nor those that touch memory (atomic read-modify-writes):
-            // there is no memory to evaluate them on.
-            let touches_memory = f.blocks.iter().flat_map(|b| &b.insts).any(|i| {
-                matches!(
-                    f.insts[i.index()].op,
-                    Op::AtomicRmw { .. } | Op::CmpXchg { .. } | Op::Load { .. } | Op::Store { .. }
-                )
+            // Nor those that touch memory (atomic read-modify-writes, and
+            // intrinsics given pointers: x86's x87 comparisons): there is
+            // no memory to evaluate them on.
+            let touches_memory = f.blocks.iter().flat_map(|b| &b.insts).any(|i| match &f.insts[i.index()].op {
+                Op::AtomicRmw { .. } | Op::CmpXchg { .. } | Op::Load { .. } | Op::Store { .. } => true,
+                Op::Call(c) => c.args.iter().any(|a| match a.value {
+                    Value::Local(x) => matches!(m.types.get(f.locals[x.index()].ty), Type::Ptr(_)),
+                    _ => false,
+                }),
+                _ => false,
             });
             if through_vectors || touches_memory {
                 continue;

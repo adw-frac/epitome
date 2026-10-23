@@ -490,6 +490,13 @@ define void @UD2() "enc"="00001111 | 00001011" "asm"="ud2" "role"="trap" "nodeco
   unreachable
 }
 
+define void @PAUSE() "enc"="11110011 | 10010000" "asm"="pause" "nodecode" {
+  call void @llvm.x86.sse2.pause()
+  ret void
+}
+
+declare void @llvm.x86.sse2.pause()
+
 define i1 @SETCC(i1 "cond" %c) "enc"="{ if(d<4) 00001111 | 1001 cc:4=c | 11 000 rm:3=d&7 ; 0100 0 0 0 B:1=d>>3 | 00001111 | 1001 cc:4=c | 11 000 rm:3=d&7 }" "asm"="set{c} {d:r8}" "dclass"="r32" "nodecode" {
   ret i1 %c
 }
@@ -1714,6 +1721,265 @@ define void @MFENCE() "enc"="00001111 | 10101110 | 11110000" "asm"="mfence" "nod
 define void @MFENCEA() "enc"="00001111 | 10101110 | 11110000" "asm"="mfence" "nodecode" {
   fence acquire
   ret void
+}
+
+define void @FLDT(ptr "reg"="r64" %n) "enc"="rex(0, 0, 4, n) | 11011011 | rm(5, n, 4, 1, 0, 0, 1)" "asm"="fldt 0({n})" "nodecode" {
+  call void @llvm.epitome.x87.fldt(ptr %n)
+  ret void
+}
+
+declare void @llvm.epitome.x87.fldt(ptr)
+
+define void @FSTPT(ptr "reg"="r64" %n) "enc"="rex(0, 0, 4, n) | 11011011 | rm(7, n, 4, 1, 0, 0, 1)" "asm"="fstpt 0({n})" "nodecode" {
+  call void @llvm.epitome.x87.fstpt(ptr %n)
+  ret void
+}
+
+declare void @llvm.epitome.x87.fstpt(ptr)
+
+define void @FLDL(ptr "reg"="r64" %n) "enc"="rex(0, 0, 4, n) | 11011101 | rm(0, n, 4, 1, 0, 0, 1)" "asm"="fldl 0({n})" "nodecode" {
+  call void @llvm.epitome.x87.fldl(ptr %n)
+  ret void
+}
+
+declare void @llvm.epitome.x87.fldl(ptr)
+
+define void @FSTPL(ptr "reg"="r64" %n) "enc"="rex(0, 0, 4, n) | 11011101 | rm(3, n, 4, 1, 0, 0, 1)" "asm"="fstpl 0({n})" "nodecode" {
+  call void @llvm.epitome.x87.fstpl(ptr %n)
+  ret void
+}
+
+declare void @llvm.epitome.x87.fstpl(ptr)
+
+define void @FLDS(ptr "reg"="r64" %n) "enc"="rex(0, 0, 4, n) | 11011001 | rm(0, n, 4, 1, 0, 0, 1)" "asm"="flds 0({n})" "nodecode" {
+  call void @llvm.epitome.x87.flds(ptr %n)
+  ret void
+}
+
+declare void @llvm.epitome.x87.flds(ptr)
+
+define void @FSTPS(ptr "reg"="r64" %n) "enc"="rex(0, 0, 4, n) | 11011001 | rm(3, n, 4, 1, 0, 0, 1)" "asm"="fstps 0({n})" "nodecode" {
+  call void @llvm.epitome.x87.fstps(ptr %n)
+  ret void
+}
+
+declare void @llvm.epitome.x87.fstps(ptr)
+
+define void @FILDLL(ptr "reg"="r64" %n) "enc"="rex(0, 0, 4, n) | 11011111 | rm(5, n, 4, 1, 0, 0, 1)" "asm"="fildll 0({n})" "nodecode" {
+  call void @llvm.epitome.x87.fildll(ptr %n)
+  ret void
+}
+
+declare void @llvm.epitome.x87.fildll(ptr)
+
+define void @FISTPLL(ptr "reg"="r64" %n) "enc"="rex(0, 0, 4, n) | 11011111 | rm(7, n, 4, 1, 0, 0, 1)" "asm"="fistpll 0({n})" "nodecode" {
+  call void @llvm.epitome.x87.fistpll(ptr %n)
+  ret void
+}
+
+declare void @llvm.epitome.x87.fistpll(ptr)
+
+define void @FNSTCW(ptr "reg"="r64" %n) "enc"="rex(0, 0, 4, n) | 11011001 | rm(7, n, 4, 1, 0, 0, 1)" "asm"="fnstcw 0({n})" "nodecode" {
+  call void @llvm.epitome.x87.fnstcw(ptr %n)
+  ret void
+}
+
+declare void @llvm.epitome.x87.fnstcw(ptr)
+
+define void @FLDCW(ptr "reg"="r64" %n) "enc"="rex(0, 0, 4, n) | 11011001 | rm(5, n, 4, 1, 0, 0, 1)" "asm"="fldcw 0({n})" "nodecode" {
+  call void @llvm.epitome.x87.fldcw(ptr %n)
+  ret void
+}
+
+declare void @llvm.epitome.x87.fldcw(ptr)
+
+define void @FADDP() "enc"="11011110 | 11000001" "asm"="faddp %st, %st(1)" "nodecode" {
+  call void @llvm.epitome.x87.fadd()
+  ret void
+}
+
+declare void @llvm.epitome.x87.fadd()
+
+define void @FSUBP() "enc"="11011110 | 11101001" "asm"="fsubrp %st, %st(1)" "nodecode" {
+  call void @llvm.epitome.x87.fsub()
+  ret void
+}
+
+declare void @llvm.epitome.x87.fsub()
+
+define void @FMULP() "enc"="11011110 | 11001001" "asm"="fmulp %st, %st(1)" "nodecode" {
+  call void @llvm.epitome.x87.fmul()
+  ret void
+}
+
+declare void @llvm.epitome.x87.fmul()
+
+define void @FDIVP() "enc"="11011110 | 11111001" "asm"="fdivrp %st, %st(1)" "nodecode" {
+  call void @llvm.epitome.x87.fdiv()
+  ret void
+}
+
+declare void @llvm.epitome.x87.fdiv()
+
+define void @FCHS() "enc"="11011001 | 11100000" "asm"="fchs" "nodecode" {
+  call void @llvm.epitome.x87.fchs()
+  ret void
+}
+
+declare void @llvm.epitome.x87.fchs()
+
+define void @FABS() "enc"="11011001 | 11100001" "asm"="fabs" "nodecode" {
+  call void @llvm.epitome.x87.fabs()
+  ret void
+}
+
+declare void @llvm.epitome.x87.fabs()
+
+define void @FPOP() "enc"="11011101 | 11011000" "asm"="fstp %st(0)" "nodecode" {
+  call void @llvm.epitome.x87.pop()
+  ret void
+}
+
+declare void @llvm.epitome.x87.pop()
+
+define %fflags @FUCOMPI() "enc"="11011111 | 11101001" "asm"="fucompi %st(1), %st" "sets"="zcp" "nomatch" "nodecode" {
+  ret %fflags poison
+}
+
+declare i1 @llvm.epitome.x87.cmp.ogt(ptr, ptr)
+
+define i1 @x87.cmp.ogt(ptr "reg"="r64" %a, ptr "reg"="r64" %b) "recipe"="x87.cmp.ogt.expand" {
+  %r = call i1 @llvm.epitome.x87.cmp.ogt(ptr %a, ptr %b)
+  ret i1 %r
+}
+
+define i1 @x87.cmp.ogt.expand(ptr %a, ptr %b) {
+  call void @FLDT(ptr %b)
+  call void @FLDT(ptr %a)
+  %f = call %fflags @FUCOMPI()
+  call void @FPOP()
+  %c = call i1 @cc.f.ogt(%fflags %f)
+  %r = call i1 @SETCC(i1 %c)
+  ret i1 %r
+}
+
+declare i1 @llvm.epitome.x87.cmp.oge(ptr, ptr)
+
+define i1 @x87.cmp.oge(ptr "reg"="r64" %a, ptr "reg"="r64" %b) "recipe"="x87.cmp.oge.expand" {
+  %r = call i1 @llvm.epitome.x87.cmp.oge(ptr %a, ptr %b)
+  ret i1 %r
+}
+
+define i1 @x87.cmp.oge.expand(ptr %a, ptr %b) {
+  call void @FLDT(ptr %b)
+  call void @FLDT(ptr %a)
+  %f = call %fflags @FUCOMPI()
+  call void @FPOP()
+  %c = call i1 @cc.f.oge(%fflags %f)
+  %r = call i1 @SETCC(i1 %c)
+  ret i1 %r
+}
+
+declare i1 @llvm.epitome.x87.cmp.ult(ptr, ptr)
+
+define i1 @x87.cmp.ult(ptr "reg"="r64" %a, ptr "reg"="r64" %b) "recipe"="x87.cmp.ult.expand" {
+  %r = call i1 @llvm.epitome.x87.cmp.ult(ptr %a, ptr %b)
+  ret i1 %r
+}
+
+define i1 @x87.cmp.ult.expand(ptr %a, ptr %b) {
+  call void @FLDT(ptr %b)
+  call void @FLDT(ptr %a)
+  %f = call %fflags @FUCOMPI()
+  call void @FPOP()
+  %c = call i1 @cc.f.ult(%fflags %f)
+  %r = call i1 @SETCC(i1 %c)
+  ret i1 %r
+}
+
+declare i1 @llvm.epitome.x87.cmp.ule(ptr, ptr)
+
+define i1 @x87.cmp.ule(ptr "reg"="r64" %a, ptr "reg"="r64" %b) "recipe"="x87.cmp.ule.expand" {
+  %r = call i1 @llvm.epitome.x87.cmp.ule(ptr %a, ptr %b)
+  ret i1 %r
+}
+
+define i1 @x87.cmp.ule.expand(ptr %a, ptr %b) {
+  call void @FLDT(ptr %b)
+  call void @FLDT(ptr %a)
+  %f = call %fflags @FUCOMPI()
+  call void @FPOP()
+  %c = call i1 @cc.f.ule(%fflags %f)
+  %r = call i1 @SETCC(i1 %c)
+  ret i1 %r
+}
+
+declare i1 @llvm.epitome.x87.cmp.ueq(ptr, ptr)
+
+define i1 @x87.cmp.ueq(ptr "reg"="r64" %a, ptr "reg"="r64" %b) "recipe"="x87.cmp.ueq.expand" {
+  %r = call i1 @llvm.epitome.x87.cmp.ueq(ptr %a, ptr %b)
+  ret i1 %r
+}
+
+define i1 @x87.cmp.ueq.expand(ptr %a, ptr %b) {
+  call void @FLDT(ptr %b)
+  call void @FLDT(ptr %a)
+  %f = call %fflags @FUCOMPI()
+  call void @FPOP()
+  %c = call i1 @cc.f.ueq(%fflags %f)
+  %r = call i1 @SETCC(i1 %c)
+  ret i1 %r
+}
+
+declare i1 @llvm.epitome.x87.cmp.one(ptr, ptr)
+
+define i1 @x87.cmp.one(ptr "reg"="r64" %a, ptr "reg"="r64" %b) "recipe"="x87.cmp.one.expand" {
+  %r = call i1 @llvm.epitome.x87.cmp.one(ptr %a, ptr %b)
+  ret i1 %r
+}
+
+define i1 @x87.cmp.one.expand(ptr %a, ptr %b) {
+  call void @FLDT(ptr %b)
+  call void @FLDT(ptr %a)
+  %f = call %fflags @FUCOMPI()
+  call void @FPOP()
+  %c = call i1 @cc.f.one(%fflags %f)
+  %r = call i1 @SETCC(i1 %c)
+  ret i1 %r
+}
+
+declare i1 @llvm.epitome.x87.cmp.uno(ptr, ptr)
+
+define i1 @x87.cmp.uno(ptr "reg"="r64" %a, ptr "reg"="r64" %b) "recipe"="x87.cmp.uno.expand" {
+  %r = call i1 @llvm.epitome.x87.cmp.uno(ptr %a, ptr %b)
+  ret i1 %r
+}
+
+define i1 @x87.cmp.uno.expand(ptr %a, ptr %b) {
+  call void @FLDT(ptr %b)
+  call void @FLDT(ptr %a)
+  %f = call %fflags @FUCOMPI()
+  call void @FPOP()
+  %c = call i1 @cc.f.uno(%fflags %f)
+  %r = call i1 @SETCC(i1 %c)
+  ret i1 %r
+}
+
+declare i1 @llvm.epitome.x87.cmp.ord(ptr, ptr)
+
+define i1 @x87.cmp.ord(ptr "reg"="r64" %a, ptr "reg"="r64" %b) "recipe"="x87.cmp.ord.expand" {
+  %r = call i1 @llvm.epitome.x87.cmp.ord(ptr %a, ptr %b)
+  ret i1 %r
+}
+
+define i1 @x87.cmp.ord.expand(ptr %a, ptr %b) {
+  call void @FLDT(ptr %b)
+  call void @FLDT(ptr %a)
+  %f = call %fflags @FUCOMPI()
+  call void @FPOP()
+  %c = call i1 @cc.f.ord(%fflags %f)
+  %r = call i1 @SETCC(i1 %c)
+  ret i1 %r
 }
 
 define <2 x i64> @MOVAPSrr(<2 x i64> "reg"="x" %n) "enc"="rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)" "asm"="movaps {n}, {d}" "copy"="x" "nodecode" {

@@ -1369,7 +1369,19 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                 Value::Const(c) => uses_split |= split_count(cx, cx.m.constant(*c).ty).is_some(),
                 Value::Metadata(_) => {}
             });
-            let res_split = res_ty.and_then(|t| split_count(cx, t));
+            let mut res_split = res_ty.and_then(|t| split_count(cx, t));
+            // A phi of masks: split as the comparisons making them are
+            // (which may come later, round a loop), its lanes as wide.
+            let mut mask_eb = None;
+            if let (Op::Phi { .. }, Some(t), Some(r), None) = (&f.insts[i.index()].op, res_ty, res, res_split)
+                && let Some((len, _, 1)) = vec_info(cx, t)
+                && let Some(w) = mask_width(cx, f, Value::Local(r), &mut Vec::new())
+            {
+                let it = cx.m.types.int(w);
+                let wide = vec_ty(cx, len, it);
+                res_split = split_count(cx, wide);
+                mask_eb = Some(w);
+            }
             let odd_shuffle = match &f.insts[i.index()].op {
                 Op::ShuffleVector { .. } => !native_shuffle(cx, f, i),
                 _ => false,
@@ -1548,7 +1560,7 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                 Op::Phi { fmf, .. } => {
                     let n = res_split.ok_or("a phi of split masks")?;
                     let (vlen, elem, eb) = vec_info(cx, res_ty.unwrap()).unwrap();
-                    let pt = part(cx, vlen, elem, eb);
+                    let pt = part(cx, vlen, elem, mask_eb.unwrap_or(eb));
                     let mut phis = Vec::new();
                     for _ in 0..n {
                         let p = bld.f.add_inst(Op::Phi { fmf, incoming: vec![] }, Some((None, pt)));

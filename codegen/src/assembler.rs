@@ -36,7 +36,8 @@
 //! `.cfi_*` directives of unwind tables, with `.cfi_personality` and
 //! `.cfi_lsda` (the encodings we write); `.long symbol@GOT-label` (Mach-O)
 //! or `.long symbol-label` (ELF), with the label at the field (exception
-//! tables' references to types); and
+//! tables' references to types) or, for ELF, earlier in its section (a
+//! relative lookup table's entries); and
 //! `.subsections_via_symbols`, which is accepted and ignored.
 
 use std::collections::{HashMap, HashSet};
@@ -814,10 +815,15 @@ impl<'t> Assembler<'t> {
                     });
                 }
                 Later::Got { section, offset, symbol, label, line } => {
-                    if labels.get(&label) != Some(&(section, offset)) {
-                        errors.push(err(line, format!("{label} is not where the reference is")));
-                        continue;
-                    }
+                    // (ELF's label may be earlier in the section: a
+                    // relative lookup table's start.)
+                    let at = match labels.get(&label) {
+                        Some(&(s, at)) if s == section && (at == offset || syntax == Syntax::Elf && at <= offset) => at,
+                        _ => {
+                            errors.push(err(line, format!("{label} is not where the reference is")));
+                            continue;
+                        }
+                    };
                     let usage = if syntax == Syntax::MachO { RelocUse::GotPcRel32 } else { RelocUse::EhPcRel };
                     let kind = self
                         .t
@@ -833,7 +839,7 @@ impl<'t> Assembler<'t> {
                         offset,
                         kind: RelocKind(kind as u16),
                         symbol,
-                        addend: 0,
+                        addend: (offset - at) as i64,
                         instr: None,
                     });
                 }
