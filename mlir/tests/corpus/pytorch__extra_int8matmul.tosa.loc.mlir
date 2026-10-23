@@ -1,0 +1,28 @@
+#loc2 = loc("./pytorch/extra_int8matmul.tosa.mlir":2:25)
+#loc3 = loc("./pytorch/extra_int8matmul.tosa.mlir":2:49)
+"builtin.module"() ({
+  "func.func"() <{function_type = (tensor<32x8xi8>, tensor<8x8xi8>) -> tensor<32x8xi32>, sym_name = "int8matmul"}> ({
+  ^bb0(%arg0: tensor<32x8xi8> loc("./pytorch/extra_int8matmul.tosa.mlir":2:25), %arg1: tensor<8x8xi8> loc("./pytorch/extra_int8matmul.tosa.mlir":2:49)):
+    %0 = "tosa.const"() <{values = dense<0> : tensor<1xi8>}> : () -> tensor<1xi8> loc(#loc4)
+    %1 = "tosa.const_shape"() <{values = dense<[1, 32, 8]> : tensor<3xindex>}> : () -> !tosa.shape<3> loc(#loc5)
+    %2 = "tosa.const_shape"() <{values = dense<[1, 8, 8]> : tensor<3xindex>}> : () -> !tosa.shape<3> loc(#loc6)
+    %3 = "tosa.const_shape"() <{values = dense<[32, 8]> : tensor<2xindex>}> : () -> !tosa.shape<2> loc(#loc7)
+    %4 = "tosa.reshape"(%arg0, %1) : (tensor<32x8xi8>, !tosa.shape<3>) -> tensor<1x32x8xi8> loc(#loc8)
+    %5 = "tosa.reshape"(%arg1, %2) : (tensor<8x8xi8>, !tosa.shape<3>) -> tensor<1x8x8xi8> loc(#loc9)
+    %6 = "tosa.matmul"(%4, %5, %0, %0) : (tensor<1x32x8xi8>, tensor<1x8x8xi8>, tensor<1xi8>, tensor<1xi8>) -> tensor<1x32x8xi32> loc(#loc10)
+    %7 = "tosa.reshape"(%6, %3) : (tensor<1x32x8xi32>, !tosa.shape<2>) -> tensor<32x8xi32> loc(#loc11)
+    "func.return"(%7) : (tensor<32x8xi32>) -> () loc(#loc12)
+  }) : () -> () loc(#loc1)
+}) : () -> () loc(#loc)
+#loc = loc("./pytorch/extra_int8matmul.tosa.mlir":1:1)
+#loc1 = loc("./pytorch/extra_int8matmul.tosa.mlir":2:3)
+#loc4 = loc("./pytorch/extra_int8matmul.tosa.mlir":3:10)
+#loc5 = loc("./pytorch/extra_int8matmul.tosa.mlir":4:10)
+#loc6 = loc("./pytorch/extra_int8matmul.tosa.mlir":5:10)
+#loc7 = loc("./pytorch/extra_int8matmul.tosa.mlir":6:10)
+#loc8 = loc("./pytorch/extra_int8matmul.tosa.mlir":7:10)
+#loc9 = loc("./pytorch/extra_int8matmul.tosa.mlir":8:10)
+#loc10 = loc("./pytorch/extra_int8matmul.tosa.mlir":9:10)
+#loc11 = loc("./pytorch/extra_int8matmul.tosa.mlir":10:10)
+#loc12 = loc("./pytorch/extra_int8matmul.tosa.mlir":11:5)
+

@@ -1,0 +1,19 @@
+ExportedProgram:
+    class GraphModule(torch.nn.Module):
+        def forward(self, b_count: "f32[1]", x: "f32[3]"):
+            # File: export_extra.py:34 in forward, code: self.count.add_(1)
+            add_: "f32[1]" = torch.ops.aten.add_.Tensor(b_count, 1);  b_count = None
+    
+            # File: export_extra.py:35 in forward, code: return x * self.count
+            mul: "f32[3]" = torch.ops.aten.mul.Tensor(x, add_);  x = add_ = None
+            return (mul,)
+    
+Graph signature:
+    # inputs
+    b_count: BUFFER target='count' persistent=True
+    x: USER_INPUT
+    
+    # outputs
+    mul: USER_OUTPUT
+    
+Range constraints: {}

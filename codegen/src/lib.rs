@@ -41,7 +41,7 @@ use epitome_ir::Module;
 use epitome_ir::layout::DataLayout;
 use epitome_ir::module::*;
 
-use crate::mir::MFunc;
+use crate::mir::{MFunc, Opcode};
 use crate::prepare::Ctx;
 use crate::target::Target;
 
@@ -188,6 +188,16 @@ fn compile_function(t: &Target, abi: &abi::Abi, cx: &mut Ctx, job: &Job, opts: &
     let now = Instant::now();
     let mut mf = isel::Sel::new(t, abi, cx, &prepared, &job.name, job.global).run()?;
     timing::add(&timing::SELECT, now);
+    // What the description says instructions clobber.
+    for b in &mut mf.blocks {
+        for inst in &mut b.insts {
+            if let Opcode::Instr(i) = inst.op
+                && !t.instrs[i].clobbers.is_empty()
+            {
+                inst.imp_defs = t.instrs[i].clobbers.clone();
+            }
+        }
+    }
     peephole::redundant_compares(t, &mut mf);
     // Until nothing changes: an address made from one by adding to it
     // becomes one itself.

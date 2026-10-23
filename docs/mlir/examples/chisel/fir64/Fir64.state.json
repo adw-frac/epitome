@@ -1,0 +1,40 @@
+[
+  {
+    "name": "Fir64",
+    "numStateBytes": 94,
+    "initialFnSym": "",
+    "finalFnSym": "",
+    "states": [
+      {
+        "name": "clock",
+        "offset": 24,
+        "numBits": 1,
+        "type": "input"
+      },
+      {
+        "name": "reset",
+        "offset": 25,
+        "numBits": 1,
+        "type": "input"
+      },
+      {
+        "name": "io_in",
+        "offset": 26,
+        "numBits": 8,
+        "type": "input"
+      },
+      {
+        "name": "io_valid",
+        "offset": 27,
+        "numBits": 1,
+        "type": "input"
+      },
+      {
+        "name": "io_out",
+        "offset": 92,
+        "numBits": 16,
+        "type": "output"
+      }
+    ]
+  }
+]

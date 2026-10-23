@@ -1,0 +1,17 @@
+ExportedProgram:
+    class GraphModule(torch.nn.Module):
+        def forward(self, p_conv_weight: "f32[2, 1, 3, 3]", p_conv_bias: "f32[2]", x: "f32[1, 1, 5, 5]"):
+            # File: <site-packages>/torch/nn/modules/conv.py:565 in forward, code: return self._conv_forward(input, self.weight, self.bias)
+            conv2d: "f32[1, 2, 5, 5]" = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias, [1, 1], [1, 1]);  x = p_conv_weight = p_conv_bias = None
+            return (conv2d,)
+    
+Graph signature:
+    # inputs
+    p_conv_weight: PARAMETER target='conv.weight'
+    p_conv_bias: PARAMETER target='conv.bias'
+    x: USER_INPUT
+    
+    # outputs
+    conv2d: USER_OUTPUT
+    
+Range constraints: {}

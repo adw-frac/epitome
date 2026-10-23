@@ -1,0 +1,27 @@
+ExportedProgram:
+    class GraphModule(torch.nn.Module):
+        def forward(self, p_fc1_weight: "f32[8, 4]", p_fc1_bias: "f32[8]", p_fc2_weight: "f32[2, 8]", p_fc2_bias: "f32[2]", x: "f32[1, 4]"):
+            # File: <site-packages>/torch/nn/modules/linear.py:134 in forward, code: return F.linear(input, self.weight, self.bias)
+            permute: "f32[4, 8]" = torch.ops.aten.permute.default(p_fc1_weight, [1, 0]);  p_fc1_weight = None
+            addmm: "f32[1, 8]" = torch.ops.aten.addmm.default(p_fc1_bias, x, permute);  p_fc1_bias = x = permute = None
+    
+            # File: export_extra.py:24 in forward, code: return self.fc2(torch.relu(self.fc1(x)))
+            relu: "f32[1, 8]" = torch.ops.aten.relu.default(addmm);  addmm = None
+    
+            # File: <site-packages>/torch/nn/modules/linear.py:134 in forward, code: return F.linear(input, self.weight, self.bias)
+            permute_1: "f32[8, 2]" = torch.ops.aten.permute.default(p_fc2_weight, [1, 0]);  p_fc2_weight = None
+            addmm_1: "f32[1, 2]" = torch.ops.aten.addmm.default(p_fc2_bias, relu, permute_1);  p_fc2_bias = relu = permute_1 = None
+            return (addmm_1,)
+    
+Graph signature:
+    # inputs
+    p_fc1_weight: PARAMETER target='fc1.weight'
+    p_fc1_bias: PARAMETER target='fc1.bias'
+    p_fc2_weight: PARAMETER target='fc2.weight'
+    p_fc2_bias: PARAMETER target='fc2.bias'
+    x: USER_INPUT
+    
+    # outputs
+    addmm_1: USER_OUTPUT
+    
+Range constraints: {}

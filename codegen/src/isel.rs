@@ -104,6 +104,10 @@ pub struct Sel<'a, 'b> {
     uses: Vec<u32>,
     inst_block: Vec<Option<BlockId>>,
     pos: Vec<usize>,
+    /// Each local's last two uses, in layout order: a post-increment of a
+    /// pointer must be at its last use before the increment, or the old
+    /// pointer stays live beside the new and costs a copy.
+    last_uses: Vec<[Option<InstId>; 2]>,
     /// The bits above which a register is known to be zero.
     zbits: HashMap<VReg, u32>,
     /// Booleans whose registers hold exactly 0 or 1 wherever they are made
@@ -127,12 +131,20 @@ pub struct Sel<'a, 'b> {
     /// for integers and (block, bits, class) for floating point: a later
     /// use in the same block takes the same register.
     block_ints: HashMap<(usize, i64, bool), VReg>,
+    /// Making something in the entry block for a loop (`in_entry`): the
+    /// entry block's own constants are not reused then, since one made for
+    /// its terminator (a call's argument) comes after where this goes.
+    entering: bool,
     block_floats: HashMap<(usize, u64, Class), VReg>,
     /// The addresses of globals made in each block, for later uses there.
     block_addrs: HashMap<(usize, ConstId), VReg>,
     /// `move_wide_of` for 32 and 64 bits.
     move_wide: [Option<(usize, usize, u32)>; 2],
     hoisted_addr: HashMap<ConstId, VReg>,
+    /// Vector constants made once in the entry block, for use in loops, and
+    /// those made in each block, for later uses there.
+    hoisted_vectors: HashMap<(ConstId, Class), VReg>,
+    block_vectors: HashMap<(usize, ConstId, Class), VReg>,
     /// The registers holding each part of a small struct parameter.
     agg_params: HashMap<LocalId, Vec<VReg>>,
     /// Where a variadic function's variable arguments start, from the
@@ -313,10 +325,15 @@ impl<'a, 'b> Sel<'a, 'b> {
         global: bool,
     ) -> Self {
         let mut uses = vec![0u32; f.locals.len()];
+        let mut last_uses = vec![[None; 2]; f.locals.len()];
         for i in f.insts_in_order() {
             f.insts[i.index()].op.for_each_value(|v| {
                 if let Value::Local(x) = v {
                     uses[x.index()] += 1;
+                    let l: &mut [Option<InstId>; 2] = &mut last_uses[x.index()];
+                    if l[1] != Some(i) {
+                        *l = [l[1], Some(i)];
+                    }
                 }
             });
         }
@@ -370,6 +387,7 @@ impl<'a, 'b> Sel<'a, 'b> {
             uses,
             inst_block,
             pos,
+            last_uses,
             zbits: HashMap::new(),
             clean,
             needed: HashSet::new(),
@@ -380,10 +398,13 @@ impl<'a, 'b> Sel<'a, 'b> {
             in_loop: Vec::new(),
             hoisted: HashMap::new(),
             block_ints: HashMap::new(),
+            entering: false,
             block_floats: HashMap::new(),
             block_addrs: HashMap::new(),
             move_wide: [move_wide_of(t, false), move_wide_of(t, true)],
             hoisted_addr: HashMap::new(),
+            hoisted_vectors: HashMap::new(),
+            block_vectors: HashMap::new(),
             agg_params: HashMap::new(),
             va_offset: 0,
             va_areas: None,
@@ -817,6 +838,24 @@ impl<'a, 'b> Sel<'a, 'b> {
         let mut extras = Vec::new();
         for (tree, operand) in &p.extra {
             let x = self.find_extra(tree, covered[0], &mut params)?;
+            // The base written back: its last use must be the increment,
+            // and the one before, this instruction or one before it.
+            if let crate::target::Tree::Op(_, kids) = tree
+                && let Some(crate::target::Tree::Leaf(k)) = kids.first()
+                && let Some(Term::V(Value::Local(base))) = params[*k]
+            {
+                let [before, last] = self.last_uses[base.index()];
+                let root = covered[0];
+                let ok = last == Some(x)
+                    && before.is_none_or(|u| {
+                        u == root
+                            || (self.inst_block[u.index()] == self.inst_block[root.index()]
+                                && self.pos[u.index()] < self.pos[root.index()])
+                    });
+                if !ok {
+                    return None;
+                }
+            }
             covered.push(x);
             extras.push((x, *operand));
         }
@@ -1323,7 +1362,9 @@ impl<'a, 'b> Sel<'a, 'b> {
         let cur = self.cur;
         let saved = std::mem::take(&mut self.mf.blocks[0].insts);
         self.cur = 0;
+        let was = std::mem::replace(&mut self.entering, true);
         let r = make(self);
+        self.entering = was;
         let made = std::mem::replace(&mut self.mf.blocks[0].insts, saved);
         let at = self.mf.blocks[0].term_start.min(self.mf.blocks[0].insts.len());
         let n = made.len();
@@ -1335,6 +1376,33 @@ impl<'a, 'b> Sel<'a, 'b> {
 
     fn hoisting(&self) -> bool {
         self.cur != 0 && self.in_loop.get(self.cur).copied().unwrap_or(false)
+    }
+
+    /// A register holding vector constant `c`: made once in the entry block
+    /// for a loop, as an integer constant is (a vector takes two
+    /// instructions or more, and NEON has registers to spare for a loop's
+    /// constants), or once in its block.
+    fn vector_const(&mut self, c: ConstId, class: Class) -> Result<Reg, String> {
+        if let Some(&r) = self.hoisted_vectors.get(&(c, class)).filter(|_| self.hoisting()) {
+            return Ok(Reg::V(r));
+        }
+        if self.hoisting() && epitome_ir::chop::allow(|| "hoist a vector constant out of the loop".to_string()) {
+            let r = self.in_entry(|s| s.make_vector_const(c, class))?;
+            if let Reg::V(x) = r {
+                self.hoisted_vectors.insert((c, class), x);
+            }
+            return Ok(r);
+        }
+        if let Some(&r) = self.block_vectors.get(&(self.cur, c, class)).filter(|_| !self.entering) {
+            return Ok(Reg::V(r));
+        }
+        let r = self.make_vector_const(c, class)?;
+        if let Reg::V(x) = r {
+            if !self.entering {
+                self.block_vectors.insert((self.cur, c, class), x);
+            }
+        }
+        Ok(r)
     }
 
     /// Is global `g` reached through the global offset table: defined
@@ -1355,7 +1423,7 @@ impl<'a, 'b> Sel<'a, 'b> {
     /// from an integer register; otherwise its bits made in integer
     /// registers and moved in, or zero and each nonzero lane inserted,
     /// whichever takes fewer instructions.
-    fn vector_const(&mut self, c: ConstId, class: Class) -> Result<Reg, String> {
+    fn make_vector_const(&mut self, c: ConstId, class: Class) -> Result<Reg, String> {
         let k = self.cx.m.constant(c).clone();
         let Type::Vector { len, elem, .. } = self.cx.m.types.get(k.ty).clone() else {
             return self.err("a vector constant of a scalar type");
@@ -1508,12 +1576,14 @@ impl<'a, 'b> Sel<'a, 'b> {
             }
             return Ok(r);
         }
-        if let Some(&r) = self.block_ints.get(&(self.cur, v, wide)) {
+        if let Some(&r) = self.block_ints.get(&(self.cur, v, wide)).filter(|_| !self.entering) {
             return Ok(Reg::V(r));
         }
         let r = self.make_int(v, wide)?;
         if let Reg::V(x) = r {
-            self.block_ints.insert((self.cur, v, wide), x);
+            if !self.entering {
+                self.block_ints.insert((self.cur, v, wide), x);
+            }
             // A positive one is zero above its highest set bit.
             if v >= 0 {
                 self.zbits.insert(x, 64 - (v as u64).leading_zeros());

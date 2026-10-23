@@ -46,6 +46,10 @@ short) has to do to work like LLVM. They are split into two halves:
 - [Correct, but not yet good](later.md): code generation that gives the
   right answers the long way (through memory, lane by lane), and what
   would be better.
+- [MLIR](mlir.md): reading MLIR, lowering it to Epitome's IR through
+  dialect descriptions written in LLVM IR, and compiling `hw`, `comb` and
+  `seq` into cycle-based simulators; the paths from PyTorch and from
+  Chisel. Its specification is in [`docs/mlir`](../mlir/README.md).
 
 ## Clean-room rules
 
@@ -77,6 +81,7 @@ how they were found in
 | Braun et al., "Simple and Efficient Construction of Static Single Assignment Form", CC 2013 | Rebuilding SSA form in `parallel.md` |
 | Cooper, Harvey and Kennedy, "A Simple, Fast Dominance Algorithm", 2001 | The dominator tree |
 | Tarjan, "Depth-First Search and Linear Graph Algorithms", 1972 | Call-graph SCCs |
+| [MLIR's](https://mlir.llvm.org/docs/), [CIRCT's](https://circt.llvm.org/docs/) and torch-mlir's documentation, the FIRRTL specification; see [`docs/mlir`](../mlir/README.md) | `mlir.md` |
 
 The pass list on the Passes page says it may be incomplete. Where we learn
 about a pass from another public document, we add that source to the entry.

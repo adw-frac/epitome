@@ -90,6 +90,11 @@ define i32 @ADDWrr(i32 "reg"="w" %n, i32 "reg"="w" %m)
 - Other attributes: `"nodecode"` keeps an entry out of the disassembler,
   where another entry has the same encoding and reads better (for example,
   `cset` for `csinc` with both sources the zero register).
+  `"clobbers"="d0-d31,x12"` lists registers the instruction overwrites that
+  are not its operands, as a convention lists registers: the allocator
+  keeps values out of them across it, and the frame saves those of them a
+  function must keep (SME's `smstart` zeroes every vector register, so a
+  function that uses it saves `d8`-`d15`).
 
 ### Immediates are what the encoding can hold
 
@@ -193,6 +198,14 @@ define i32 @srem.w.expand(i32 %a, i32 %b) {
 
 Casts between integer types that live in the same register class are free
 in an expansion: they name the same register.
+
+A recipe may have no result: a call to an intrinsic that only changes the
+machine's state, such as SME's `llvm.epitome.sme.fmopa.za0.s`, whose
+expansion loads two vectors into fixed registers and adds their outer
+product to ZA (`45-sme.ll`). Its instructions name the fixed registers in
+their encodings, and are `"nomatch"`, so that only the recipe, which keeps
+them together, uses them. The recipe check skips recipes with no value:
+there is nothing to evaluate.
 
 ### Instructions with two results
 

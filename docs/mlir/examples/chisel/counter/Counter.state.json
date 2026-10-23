@@ -1,0 +1,34 @@
+[
+  {
+    "name": "Counter",
+    "numStateBytes": 30,
+    "initialFnSym": "",
+    "finalFnSym": "",
+    "states": [
+      {
+        "name": "clock",
+        "offset": 24,
+        "numBits": 1,
+        "type": "input"
+      },
+      {
+        "name": "reset",
+        "offset": 25,
+        "numBits": 1,
+        "type": "input"
+      },
+      {
+        "name": "io_en",
+        "offset": 26,
+        "numBits": 1,
+        "type": "input"
+      },
+      {
+        "name": "io_count",
+        "offset": 29,
+        "numBits": 8,
+        "type": "output"
+      }
+    ]
+  }
+]

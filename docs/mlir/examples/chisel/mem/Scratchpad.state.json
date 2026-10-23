@@ -1,0 +1,52 @@
+[
+  {
+    "name": "Scratchpad",
+    "numStateBytes": 120,
+    "initialFnSym": "",
+    "finalFnSym": "",
+    "states": [
+      {
+        "name": "clock",
+        "offset": 24,
+        "numBits": 1,
+        "type": "input"
+      },
+      {
+        "name": "reset",
+        "offset": 25,
+        "numBits": 1,
+        "type": "input"
+      },
+      {
+        "name": "io_raddr",
+        "offset": 26,
+        "numBits": 4,
+        "type": "input"
+      },
+      {
+        "name": "io_wen",
+        "offset": 27,
+        "numBits": 1,
+        "type": "input"
+      },
+      {
+        "name": "io_waddr",
+        "offset": 28,
+        "numBits": 4,
+        "type": "input"
+      },
+      {
+        "name": "io_wdata",
+        "offset": 32,
+        "numBits": 32,
+        "type": "input"
+      },
+      {
+        "name": "io_rdata",
+        "offset": 116,
+        "numBits": 32,
+        "type": "output"
+      }
+    ]
+  }
+]

@@ -1,0 +1,52 @@
+[
+  {
+    "name": "GCD",
+    "numStateBytes": 41,
+    "initialFnSym": "",
+    "finalFnSym": "",
+    "states": [
+      {
+        "name": "clock",
+        "offset": 24,
+        "numBits": 1,
+        "type": "input"
+      },
+      {
+        "name": "reset",
+        "offset": 25,
+        "numBits": 1,
+        "type": "input"
+      },
+      {
+        "name": "io_value1",
+        "offset": 26,
+        "numBits": 16,
+        "type": "input"
+      },
+      {
+        "name": "io_value2",
+        "offset": 28,
+        "numBits": 16,
+        "type": "input"
+      },
+      {
+        "name": "io_loadingValues",
+        "offset": 30,
+        "numBits": 1,
+        "type": "input"
+      },
+      {
+        "name": "io_outputGCD",
+        "offset": 38,
+        "numBits": 16,
+        "type": "output"
+      },
+      {
+        "name": "io_outputValid",
+        "offset": 40,
+        "numBits": 1,
+        "type": "output"
+      }
+    ]
+  }
+]

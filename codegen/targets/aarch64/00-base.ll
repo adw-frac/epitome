@@ -15,6 +15,7 @@
 ;                   Arm's machine-readable specification
 ;   30-bits.ll      bit manipulation
 ;   40-float.ll     floating point
+;   45-sme.ll       the Scalable Matrix Extension: outer products into ZA
 ;   50-vectors.ll   vectors (Advanced SIMD), written by gen_vectors.py
 ;   60-recipes.ll   recipes: IR with no single instruction
 ;   65-runtime.ll   what is done by calling the runtime (quad precision)

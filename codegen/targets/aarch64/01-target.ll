@@ -98,9 +98,12 @@
 ; matter: neon (Advanced SIMD; the vector entries need it), fp-armv8, lse
 ; (atomics), and crc, aes, sha2 and sha3 (45-crypto.ll).
 
-!target.cpus = !{!1150, !1151}
+!target.cpus = !{!1150, !1151, !1152}
 !1150 = !{!"generic", !"fp-armv8", !"neon"}
 !1151 = !{!"apple-m1", !"fp-armv8", !"neon", !"lse", !"crc", !"aes", !"sha2", !"sha3"}
+; sme: the Scalable Matrix Extension (45-sme.ll), with 512-bit streaming
+; vectors on M4.
+!1152 = !{!"apple-m4", !"fp-armv8", !"neon", !"lse", !"crc", !"aes", !"sha2", !"sha3", !"sme"}
 
 ; ===========================================================================
 ; Relocations: those instructions name in "reloc" (and data's pointers),

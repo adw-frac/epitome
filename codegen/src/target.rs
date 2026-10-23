@@ -106,9 +106,12 @@ pub struct Instr {
     pub reloc: Option<crate::object::RelocKind>,
     /// Operand 1 (`d2`) is a second register result.
     pub second_result: bool,
-    /// Registers it writes besides its operands (`"clobbers"`: x86's
-    /// division writes rdx), and whether it writes the flags (`flags` in
-    /// that list), where the machine's arithmetic does.
+    /// Registers it writes besides its operands (`"clobbers"`, as a
+    /// convention lists registers: x86's division writes rdx, SME's
+    /// smstart the d registers), and whether it writes the flags (`flags`
+    /// in that list), where the machine's arithmetic does: the allocator
+    /// keeps values out of them across it, and the frame saves those a
+    /// function must keep.
     pub clobbers: Vec<u8>,
     pub clobbers_flags: bool,
     /// The features it needs (see `features.rs`).
@@ -519,6 +522,7 @@ pub const AARCH64_FILES: &[(&str, &str)] = &[
     ("30-bits.ll", include_str!("../targets/aarch64/30-bits.ll")),
     ("40-float.ll", include_str!("../targets/aarch64/40-float.ll")),
     ("45-crypto.ll", include_str!("../targets/aarch64/45-crypto.ll")),
+    ("45-sme.ll", include_str!("../targets/aarch64/45-sme.ll")),
     ("50-vectors.ll", include_str!("../targets/aarch64/50-vectors.ll")),
     ("60-recipes.ll", include_str!("../targets/aarch64/60-recipes.ll")),
     ("65-runtime.ll", include_str!("../targets/aarch64/65-runtime.ll")),
@@ -1711,6 +1715,7 @@ impl Target {
             is.insert(p.local, Is::Src(Src::Param(i)));
         }
         let mut emit = Vec::new();
+        let void = matches!(m.types.get(f.ty), Type::Function { ret, .. } if matches!(m.types.get(*ret), Type::Void));
         let insts: Vec<InstId> = f.blocks[f.entry().index()].insts.clone();
         let src_of = |is: &HashMap<LocalId, Is>, v: Value| -> Result<Is, String> {
             match v {
@@ -1766,15 +1771,20 @@ impl Target {
                     };
                     result = Some(k);
                 }
+                // A recipe for an operation with no result, such as a call
+                // to an intrinsic that only changes the machine's state.
+                Op::Ret(None) if void => {}
                 op => return Err(format!("unsupported in an expansion: {op:?}")),
             }
         }
         // The returned temporary is the pattern's result.
-        let r = result.ok_or("expansion without a result")?;
-        for e in &mut emit {
-            for a in &mut e.args {
-                if *a == Src::Temp(r) {
-                    *a = Src::Result;
+        if !void {
+            let r = result.ok_or("expansion without a result")?;
+            for e in &mut emit {
+                for a in &mut e.args {
+                    if *a == Src::Temp(r) {
+                        *a = Src::Result;
+                    }
                 }
             }
         }
@@ -1893,7 +1903,11 @@ impl Target {
                 }),
                 _ => false,
             });
-            if through_vectors || touches_memory {
+            // Nor those with no value, which only change the machine's
+            // state (SME's ZA and predicates): nothing to evaluate.
+            let void =
+                matches!(m.types.get(f.ty), Type::Function { ret, .. } if matches!(m.types.get(*ret), Type::Void));
+            if through_vectors || touches_memory || void {
                 continue;
             }
             let want = self.body_tree(f, &HashMap::new(), 0)?.ok_or("recipe without a value")?;

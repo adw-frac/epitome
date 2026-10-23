@@ -94,6 +94,61 @@ second kind, and less for the first.
 
 Without a model, a scheduler has nothing to go on, so the model comes first.
 
+### Measured on Apple M4 (SmolLM2 in BF16)
+
+Epitome emits instructions in source order, and a recipe's pieces in the
+order written. Measurements of the hot loops say that, on M4, order within
+a block is not what limits them:
+
+- **The SME kernel's inner loop** (5 `ld1w`, 4 `bfmopa`, address and loop
+  arithmetic) runs at 2.05 cycles a `bfmopa`, and so does a loop of
+  `bfmopa`s alone: the matrix unit's issue rate is the limit, and the
+  loads, addressing and branch are hidden. Software pipelining (the next
+  step's loads before this step's `bfmopa`s), unrolling and strength
+  reduction each change nothing.
+- **NEON loops**, against variants written by hand (cycles for four
+  elements):
+
+  | Loop | As emitted | Variant |
+  | --- | --- | --- |
+  | sigmoid (22 floating-point operations) | 5.46 | unrolled twice 5.45; two iterations interleaved 5.73 |
+  | element-wise multiply | 1.56 | pointers post-incremented 1.08; unrolled, `ldp`/`stp` 0.70 (in L1) |
+  | a row's sum | 2.42 | four accumulators 0.68 |
+
+  M4 is out of order with a large window: interleaving (what a modulo
+  scheduler does) does not help, and slightly hurts. What helps is fewer
+  instructions (addressing) and shorter loop-carried chains (a sum's
+  additions).
+- **llvm-mca** (LLVM 23.1.4, `-mcpu=apple-m4`) has no scheduling data for
+  SVE or SME instructions, and its Apple model is the Cyclone-era one
+  (`CyUnit*`, `fmla` latency 8): it predicts 17 cycles for the sigmoid loop
+  that runs in 5.8. It is not a guide for M4.
+
+So for tight loops on M4 the work went into transformations that are
+linear in the loop's size, rather than a scheduler:
+
+- **`lsr`** steps any constant stride (a vectorized loop's 4), indexes of
+  the form `offset + i + constant` (a row's offset; the constant becomes an
+  immediate, `ldr q, [p, #16]`), up to four arrays; offsets that are the
+  same computation count as one (compared to a fixed depth, so no CSE is
+  needed first). **`indvars`** makes the exit test exact for such strides
+  when start and bound are constants.
+- **Instruction selection** folds a pointer's increment into a load or
+  store (post-increment) only at the pointer's last use before it, from a
+  table of each value's last two uses built in the same pass as the use
+  counts; otherwise the old pointer stays live and costs a copy.
+- **`linalg-vectorize`** keeps up to four vectors of partial results for a
+  reduction, and makes a dimension of size one an index, not a loop.
+
+On SmolLM2 in BF16: 274M to 229M instructions a forward pass, 81.5M to
+77.4M cycles. Of those, the BF16 kernel is about 46M (its `bfmopa`s alone
+would take 34.4M), and about 29M are outside matrix products: the
+sigmoid of SiLU (bound by its floating-point operations), the logits' fill
+and copy, element-wise maps and transposes.
+
+A list scheduler remains useful for in-order cores (the RISC-V targets), as
+planned above; on M4 it would have nothing to gain in these loops.
+
 ## 4. Peepholes and other passes over machine IR
 
 Rules, like the combiner's, are the natural form. A machine rule is a

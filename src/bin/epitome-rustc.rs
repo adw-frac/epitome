@@ -268,6 +268,10 @@ fn object_of_inner(ll: &Path, ours_opt: bool) -> Result<Vec<u8>, String> {
     if !compiled.errors.is_empty() {
         return Err(compiled.errors.join("; "));
     }
+    // Each function's count of elective changes, for epitome-chop.
+    let counts: Vec<u64> = compiled.chop_counts.iter().map(|c| c.steps).collect();
+    epitome_ir::chop::report_counts("llc", &compiled.chop_names, &counts)
+        .map_err(|e| format!("EPITOME_CHOP_COUNTS: {e}"))?;
     compiled.object_file(&t)
 }
 

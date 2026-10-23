@@ -1345,6 +1345,13 @@ define <4 x float> @FMLAv4s(<4 x float> "reg"="q" %n, <4 x float> "reg"="q" %m, 
   ret <4 x float> %r
 }
 
+declare <4 x float> @llvm.fma.v4f32(<4 x float>, <4 x float>, <4 x float>)
+
+define <4 x float> @FMLAv4s.fma(<4 x float> "reg"="q" %n, <4 x float> "reg"="q" %m, <4 x float> "reg"="q" "tied" %a) "feature"="neon" "enc"="0 1 0 01110 0 0 1 m:5 11001 1 n:5 d:5" "asm"="fmla {d:4s}, {n:4s}, {m:4s}" "nodecode" {
+  %r = call <4 x float> @llvm.fma.v4f32(<4 x float> %n, <4 x float> %m, <4 x float> %a)
+  ret <4 x float> %r
+}
+
 define <4 x float> @FNEGv4s(<4 x float> "reg"="q" %n) "feature"="neon" "enc"="0 1 1 01110 1 0 10000 01111 10 n:5 d:5" "asm"="fneg {d:4s}, {n:4s}" {
   %r = fneg <4 x float> %n
   ret <4 x float> %r
