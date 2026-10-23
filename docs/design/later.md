@@ -151,3 +151,27 @@ these are for after.
   value is spilled around each runtime call (q registers are all the
   callee's), and its sign is changed through a stack slot and two `eor`s
   (one with `xzr`) where `eor v.16b` with a constant would do.
+- **Register allocation's moves and spills** (`regalloc.rs`): across a
+  sample of crates we make 1.20 times llc's instructions (82,943 against
+  68,885), the most of the excess register moves (16,713 against 11,769)
+  and spill code (loads 7,474 against 4,871, stores 4,958 against 2,674).
+  The moves left are mostly arguments copied into registers and out again
+  when a register an argument arrived in is needed for another, and loop
+  phis whose incoming values were allocated elsewhere: linear scan
+  assigns each value as it comes, from hints. After allocation, copies in
+  a block that propagate, repeat or are overwritten go, and a spilled
+  value's copy is its load or store; but spilling is still of whole values
+  (a load before each use, a store after each definition, reused only
+  within a block), now evicting lighter values (fewer uses over their
+  length) for heavier ones; it does not split ranges, so a value of a
+  long, sparsely used range is reloaded at every use (rand_chacha's
+  four-block refill). Better: coalescing of copies before allocation (or a
+  graph colouring that does it), and range splitting, as LLVM's greedy
+  allocator does.
+- **Frames** (`frame.rs`): every alloca has its own slot for the whole
+  function (a serde_json deserializer: 1,088 bytes of slots to llc's 336
+  for its whole frame), where slots of allocas whose lifetimes
+  (`llvm.lifetime.start` and `.end`) do not meet could share, as LLVM's
+  stack colouring does; and spill slots are never shared.
+- **Acquire loads** use `ldar`; with RCpc (the M1 has it) `ldapr` is
+  enough for C++'s and Rust's acquire, as LLVM's back end uses.

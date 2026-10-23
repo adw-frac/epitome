@@ -13,8 +13,10 @@
 use crate::mir::*;
 use crate::target::{Kind, Target};
 
-/// Return blocks this small are copied into blocks that jump to them.
-const MAX_TAIL: usize = 6;
+/// Return blocks this small are copied into blocks that jump to them: a
+/// return and one instruction (more, copied into every block that returns,
+/// costs more code than the branches it saves).
+const MAX_TAIL: usize = 2;
 
 /// How a block ends.
 #[derive(Clone, Debug)]
@@ -71,6 +73,82 @@ fn split(t: &Target, f: &MFunc) -> Vec<(Vec<MInst>, Exit)> {
         out.push((body, exit));
     }
     out
+}
+
+/// Whether two instructions are the same instruction.
+fn same(a: &MInst, b: &MInst) -> bool {
+    a.op == b.op
+        && a.ops == b.ops
+        && a.imp_uses == b.imp_uses
+        && a.imp_defs == b.imp_defs
+        && a.noreturn == b.noreturn
+        && a.barrier == b.barrier
+}
+
+/// Tail merging: blocks that end the same way (going on to the same block,
+/// or leaving the function) and with the same instructions before that
+/// share one copy of them. A block whose whole body is the shared tail is
+/// the copy; else the tail becomes a block of its own, which both go on to.
+/// Tails shorter than two instructions are left (the branch to the copy
+/// costs one), and so are tails that leave the function no longer than
+/// those copied into blocks (`MAX_TAIL`, the other way). Each merge is an
+/// elective change (autochop).
+fn merge_tails(f: &mut MFunc, parts: &mut Vec<(Vec<MInst>, Exit)>) {
+    let tail_of = |a: &[MInst], b: &[MInst]| {
+        a.iter()
+            .rev()
+            .zip(b.iter().rev())
+            .take_while(|(x, y)| same(x, y) && !matches!(x.op, Opcode::Cfi(_) | Opcode::Asm { .. }))
+            .count()
+    };
+    let name = f.name.clone();
+    for _ in 0..4 {
+        let mut changed = false;
+        let n = parts.len();
+        for j in 1..n {
+            let key = |e: &Exit| match e {
+                Exit::Goto(x) => Some(Some(*x)),
+                Exit::Leaves => Some(None),
+                Exit::Cond { .. } => None,
+            };
+            let Some(kj) = key(&parts[j].1) else { continue };
+            let least = if kj.is_none() { MAX_TAIL + 1 } else { 2 };
+            let best = (1..parts.len())
+                .filter(|&i| i != j && key(&parts[i].1) == Some(kj) && kj != Some(i) && kj != Some(j))
+                .map(|i| (tail_of(&parts[i].0, &parts[j].0), i))
+                .max();
+            let Some((len, i)) = best else { continue };
+            if len < least || !epitome_ir::chop::allow(|| format!("{name}: merge a tail of {len} instructions")) {
+                continue;
+            }
+            let (li, lj) = (parts[i].0.len(), parts[j].0.len());
+            let to = if len == li {
+                i
+            } else if len == lj {
+                j
+            } else {
+                let tail = parts[i].0.split_off(li - len);
+                let exit = parts[i].1.clone();
+                parts.push((tail, exit));
+                let label = format!("{}.tail", f.blocks[i].label);
+                f.blocks.push(MBlock { label, insts: Vec::new(), succs: Vec::new(), term_start: 0 });
+                parts[i].1 = Exit::Goto(parts.len() - 1);
+                parts.len() - 1
+            };
+            // (Block `i`, split, already goes to the new block.)
+            for k in [i, j] {
+                if k != to && !matches!(parts[k].1, Exit::Goto(x) if x == to) {
+                    let l = parts[k].0.len();
+                    parts[k].0.truncate(l - len);
+                    parts[k].1 = Exit::Goto(to);
+                }
+            }
+            changed = true;
+        }
+        if !changed {
+            break;
+        }
+    }
 }
 
 /// The conditional branch taken exactly when `branch` is not.
@@ -133,6 +211,9 @@ pub fn place(t: &Target, f: &mut MFunc) {
             }
         }
     }
+
+    merge_tails(f, &mut parts);
+    let n = parts.len();
 
     let succs = |e: &Exit| -> Vec<usize> {
         match e {

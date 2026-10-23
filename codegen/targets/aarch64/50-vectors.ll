@@ -1278,7 +1278,7 @@ define <2 x i32> @DUPv2s(i32 "reg"="w" %n) "feature"="neon" "enc"="0 0 0 0111000
   ret <2 x i32> %r
 }
 
-define i8 @UMOVb(<16 x i8> "reg"="q" %n, i64 "imm" %idx) "feature"="neon" "enc"="0 0 0 01110000 imm5:5=idx*2+1 0 0111 1 n:5 d:5" "asm"="umov {d}, {n:.b}[{idx}]" {
+define i8 @UMOVb(<16 x i8> "reg"="q" %n, i64 "imm" %idx) "feature"="neon" "zext"="8" "enc"="0 0 0 01110000 imm5:5=idx*2+1 0 0111 1 n:5 d:5" "asm"="umov {d}, {n:.b}[{idx}]" {
   %r = extractelement <16 x i8> %n, i64 %idx
   ret i8 %r
 }
@@ -1288,7 +1288,7 @@ define <16 x i8> @INSb(<16 x i8> "reg"="q" "tied" %old, i8 "reg"="w" %n, i64 "im
   ret <16 x i8> %r
 }
 
-define i16 @UMOVh(<8 x i16> "reg"="q" %n, i64 "imm" %idx) "feature"="neon" "enc"="0 0 0 01110000 imm5:5=idx*4+2 0 0111 1 n:5 d:5" "asm"="umov {d}, {n:.h}[{idx}]" {
+define i16 @UMOVh(<8 x i16> "reg"="q" %n, i64 "imm" %idx) "feature"="neon" "zext"="16" "enc"="0 0 0 01110000 imm5:5=idx*4+2 0 0111 1 n:5 d:5" "asm"="umov {d}, {n:.h}[{idx}]" {
   %r = extractelement <8 x i16> %n, i64 %idx
   ret i16 %r
 }
@@ -2585,7 +2585,7 @@ define <2 x i64> @MOVIzero() "feature"="neon" "enc"="0 1 1 0111100000 000 1110 0
 define <2 x i64> @MOVq(<2 x i64> "reg"="q" %n) "feature"="neon" "enc"="0 1 0 01110 10 1 m:5=n 00011 1 n:5 d:5" "asm"="mov {d:16b}, {n:16b}" "copy"="q" "nomatch" {
   ret <2 x i64> %n
 }
-define i8 @UMOVb64(<8 x i8> "reg"="v" %n, i64 "imm" %idx) "feature"="neon" "enc"="0 0 0 01110000 imm5:5=idx*2+1 0 0111 1 n:5 d:5" "asm"="umov {d}, {n:.b}[{idx}]" "nodecode" {
+define i8 @UMOVb64(<8 x i8> "reg"="v" %n, i64 "imm" %idx) "feature"="neon" "zext"="8" "enc"="0 0 0 01110000 imm5:5=idx*2+1 0 0111 1 n:5 d:5" "asm"="umov {d}, {n:.b}[{idx}]" "nodecode" {
   %r = extractelement <8 x i8> %n, i64 %idx
   ret i8 %r
 }
@@ -2595,7 +2595,7 @@ define <8 x i8> @INSb64(<8 x i8> "reg"="v" "tied" %old, i8 "reg"="w" %n, i64 "im
   ret <8 x i8> %r
 }
 
-define i16 @UMOVh64(<4 x i16> "reg"="v" %n, i64 "imm" %idx) "feature"="neon" "enc"="0 0 0 01110000 imm5:5=idx*4+2 0 0111 1 n:5 d:5" "asm"="umov {d}, {n:.h}[{idx}]" "nodecode" {
+define i16 @UMOVh64(<4 x i16> "reg"="v" %n, i64 "imm" %idx) "feature"="neon" "zext"="16" "enc"="0 0 0 01110000 imm5:5=idx*4+2 0 0111 1 n:5 d:5" "asm"="umov {d}, {n:.h}[{idx}]" "nodecode" {
   %r = extractelement <4 x i16> %n, i64 %idx
   ret i16 %r
 }

@@ -141,8 +141,9 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
     }
     slots.extend(save_at.iter().copied());
     // Where the saves are too far from sp for a store's offset (RISC-V's
-    // reach 2047 bytes), the frame is made in two steps: the part above the
-    // lowest save first, with the saves near sp, then the rest.
+    // reach 2047 bytes, AArch64's pairs 504), the frame is made in two
+    // steps: the part above the lowest save first, with the saves near sp,
+    // then the rest.
     let sp = t.machine.sp;
     let reaches = |slots: &[(u8, i64)]| {
         slots.iter().all(|&(reg, at)| {
@@ -150,7 +151,19 @@ pub fn lower(t: &Target, f: &mut MFunc) -> Result<(), String> {
             t.role(&role).is_some_and(|i| t.instrs[i].fits(&[None, None, Some(at)]))
         })
     };
-    let low = if reaches(&slots) { 0 } else { slots.iter().map(|s| s.1).min().unwrap_or(0) / align * align };
+    // And where pairs would not reach them, with enough saves that pairs
+    // save more than the second step costs.
+    let pairs_reach = |slots: &[(u8, i64)]| {
+        slots.iter().all(|&(reg, at)| {
+            let role = format!("store.pair.{}", t.machine.save_name(reg));
+            t.role(&role).is_none_or(|i| t.instrs[i].fits(&[None, None, None, Some(at)]))
+        })
+    };
+    let low = if reaches(&slots) && (slots.len() < 4 || pairs_reach(&slots)) {
+        0
+    } else {
+        slots.iter().map(|s| s.1).min().unwrap_or(0) / align * align
+    };
     let near: Vec<(u8, i64)> = slots.iter().map(|&(reg, at)| (reg, at - low)).collect();
     let (saves, restores) = save_restore(t, &near);
     // The unwind rules (unwind.rs) go after what they describe: where the

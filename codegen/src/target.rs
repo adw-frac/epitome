@@ -82,6 +82,9 @@ pub struct Instr {
     /// Its value is that address itself (`add` or `getelementptr` of base
     /// and offset, returned): an address computation, not an access.
     pub address_of: bool,
+    /// It reads or writes memory, or calls: its body loads, stores, calls,
+    /// fences or makes an atomic access.
+    pub memory: bool,
     pub func: GlobalId,
 }
 
@@ -925,6 +928,26 @@ impl Target {
                     .unwrap_or_default(),
                 base_offset: base_offset_of(m, f, has_result),
                 address_of: has_result && base_offset_of(m, f, has_result).is_some() && returns_first(f),
+                memory: f.blocks.iter().flat_map(|b| &b.insts).any(|i| match &f.insts[i.index()].op {
+                    Op::Load { .. }
+                    | Op::Store { .. }
+                    | Op::Fence { .. }
+                    | Op::AtomicRmw { .. }
+                    | Op::CmpXchg { .. } => true,
+                    // A call of a function, or of an intrinsic that may
+                    // touch memory or order it (exclusive loads, barriers,
+                    // hints, traps), not one that only computes.
+                    Op::Call(c) => crate::prepare::callee_name(m, c).is_none_or(|n| {
+                        !n.starts_with("llvm.")
+                            || [
+                                "ld", "st", "dmb", "dsb", "isb", "clrex", "hint", "prefetch", "barrier", "break",
+                                "hlt", "trap",
+                            ]
+                            .iter()
+                            .any(|k| n.contains(k))
+                    }),
+                    _ => false,
+                }),
                 func: g,
             });
         }

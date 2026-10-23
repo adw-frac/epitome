@@ -81,3 +81,18 @@ fn exact_float_bits_after_attributes() {
     let m = parse_module(src).unwrap_or_else(|e| panic!("{e}"));
     assert!(m.to_string().contains("noundef"));
 }
+
+/// Module assembly with options and several lines (`module asm(target_cpu:
+/// "apple-m1")`, as newer LLVM writes Rust's `global_asm!`), and printed
+/// back so.
+#[test]
+fn module_assembly_with_options() {
+    let src = "module asm(target_cpu: \"apple-m1\")\n    \".pushsection __DATA,__d\"\n    \"\"\n    \".popsection\"\n";
+    let m = parse_module(src).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(m.module_asm.len(), 3);
+    assert_eq!(m.module_asm_options, vec![("target_cpu".to_string(), b"apple-m1".to_vec())]);
+    let printed = m.to_string();
+    assert!(printed.contains("module asm(target_cpu: \"apple-m1\")"), "{printed}");
+    let again = parse_module(&printed).unwrap();
+    assert_eq!(again.module_asm, m.module_asm);
+}

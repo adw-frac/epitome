@@ -133,7 +133,9 @@ pub fn frame_addresses(t: &Target, mf: &mut MFunc) -> usize {
 }
 
 /// **Load and store pairs.** After frame lowering, when offsets are final:
-/// two neighbouring loads (or stores) of one register class, from one base
+/// two loads (or stores) of one register class, neighbours or with only
+/// instructions between that touch no memory and leave the second's
+/// registers alone (it moves up to the first), from one base
 /// register at offsets one register's width apart, become one pair
 /// instruction (`ldp`, `stp`), when the description has one for the class
 /// (roles `load.pair.<class>`, `store.pair.<class>`) and it holds the lower
@@ -174,23 +176,57 @@ pub fn pair_memory(t: &Target, mf: &mut MFunc) -> usize {
     };
     let name = mf.name.clone();
     let mut made = 0;
+    // What an instruction between two accesses must not be, for the second
+    // to move up to the first: one that touches memory, calls or orders.
+    let fence = |inst: &MInst| {
+        inst.barrier
+            || !inst.imp_defs.is_empty()
+            || match inst.op {
+                Opcode::Instr(k) => t.instrs[k].memory,
+                Opcode::Asm { .. } => true,
+                _ => false,
+            }
+    };
     for b in &mut mf.blocks {
         let old = std::mem::take(&mut b.insts);
+        let mut gone = vec![false; old.len()];
         let mut new = Vec::with_capacity(old.len());
-        let mut k = 0;
-        while k < old.len() {
-            if let (Some((i, ra, base, ka)), Some((j, rb, base_b, kb))) =
-                (access(&old[k]), old.get(k + 1).and_then(access))
-                && i == j
+        for k in 0..old.len() {
+            if gone[k] {
+                continue;
+            }
+            let Some((i, ra, base, ka)) = access(&old[k]) else {
+                new.push(old[k].clone());
+                continue;
+            };
+            let (pair, width, load) = single[&i];
+            // The next access, if nothing between touches memory.
+            let Some(j) = (k + 1..old.len().min(k + 7)).find(|&j| access(&old[j]).is_some() || fence(&old[j])) else {
+                new.push(old[k].clone());
+                continue;
+            };
+            let mut paired = false;
+            if let Some((i2, rb, base_b, kb)) = access(&old[j])
+                && !gone[j]
+                && i2 == i
                 && base == base_b
             {
-                let (pair, width, load) = single[&i];
+                // The second moves up past those between: they must not
+                // write the base, or read or write the second's register
+                // (a load's result; a store's value, written).
+                let clear = old[k + 1..j].iter().all(|between| {
+                    let (defs, uses) = between.defs_uses(t);
+                    let names = |ks: &[usize], r: u8| ks.iter().any(|&q| between.ops[q] == MOp::Reg(Reg::P(r)));
+                    !names(&defs, base) && !names(&defs, rb) && !(load && names(&uses, rb))
+                });
                 let ((lo_r, lo_k), (hi_r, _)) = if ka < kb { ((ra, ka), (rb, kb)) } else { ((rb, kb), (ra, ka)) };
                 let apart = (ka - kb).abs() == width;
                 // A load pair writes both at once: two different registers,
-                // and the first of the two loads must not change the base.
-                let ok_load = !load || (ra != rb && ra != base);
-                if apart
+                // and the first of the two loads must not change the base
+                // (nor the second, moved up past what reads it).
+                let ok_load = !load || (ra != rb && ra != base && (j == k + 1 || rb != base));
+                if clear
+                    && apart
                     && ok_load
                     && t.instrs[pair].fits(&[None, None, None, Some(lo_k)])
                     && epitome_ir::chop::allow(|| format!("{name}: pair two accesses at [{base}, #{lo_k}]"))
@@ -198,12 +234,13 @@ pub fn pair_memory(t: &Target, mf: &mut MFunc) -> usize {
                     let r = |n: u8| MOp::Reg(Reg::P(n));
                     new.push(MInst::new(pair, vec![r(lo_r), r(hi_r), r(base), MOp::Imm(lo_k)]));
                     made += 1;
-                    k += 2;
-                    continue;
+                    gone[j] = true;
+                    paired = true;
                 }
             }
-            new.push(old[k].clone());
-            k += 1;
+            if !paired {
+                new.push(old[k].clone());
+            }
         }
         b.insts = new;
     }

@@ -397,11 +397,37 @@ impl<'a> Parser<'a> {
                         _ => return Err(self.error_at(what, "expected 'datalayout' or 'triple'")),
                     }
                 }
+                // `module asm "line"`, or with options and several lines:
+                // `module asm(target_cpu: "apple-m1") "line" "line"`.
                 "module" => {
                     self.next();
                     self.expect("asm")?;
+                    if self.peek().0 == "(" {
+                        self.next();
+                        while self.peek().0 != ")" {
+                            // (`target_cpu:` is one token, as a label is.)
+                            let key = self.next().0.to_string();
+                            let key = match key.strip_suffix(':') {
+                                Some(k) => k.to_string(),
+                                None => {
+                                    self.expect(":")?;
+                                    key
+                                }
+                            };
+                            let value = self.expect_string()?;
+                            self.m.module_asm_options.push((key, value));
+                            if self.peek().0 == "," {
+                                self.next();
+                            }
+                        }
+                        self.expect(")")?;
+                    }
                     let s = self.expect_string()?;
                     self.m.module_asm.push(s);
+                    while self.peek().is_string() {
+                        let s = self.expect_string()?;
+                        self.m.module_asm.push(s);
+                    }
                 }
                 "attributes" => self.parse_attr_group()?,
                 "define" | "declare" => self.parse_function()?,

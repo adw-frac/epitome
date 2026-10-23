@@ -150,6 +150,77 @@ fn shuffle(b: &mut Builder, cx: &mut Ctx, a: Value, bv: Value, lanes: &[i32], ty
     b.op(Op::ShuffleVector { a, b: bv, mask }, Some(ty))
 }
 
+/// How mask `v` is split (its parts' count and type), as the comparison that
+/// made it was, through logic, freezes, selects and phis; `None` if it is
+/// not.
+fn mask_split(cx: &mut Ctx, f: &Function, v: Value, seen: &mut Vec<LocalId>) -> Option<(usize, TypeId)> {
+    let Value::Local(x) = v else { return None };
+    let LocalDef::Inst(d) = f.locals[x.index()].def else { return None };
+    if seen.contains(&x) {
+        return None;
+    }
+    seen.push(x);
+    let r = match &f.insts[d.index()].op {
+        Op::ICmp { lhs, .. } | Op::FCmp { lhs, .. } => {
+            let t = cx.value_ty(f, *lhs);
+            let n = split_count(cx, t);
+            match (n, vec_info(cx, t)) {
+                (Some(n), Some((len, _, eb))) => {
+                    let i1 = cx.m.types.int(1);
+                    Some((n, part(cx, len, i1, eb)))
+                }
+                _ => None,
+            }
+        }
+        Op::Binary { lhs, rhs, .. } => mask_split(cx, f, *lhs, seen).or_else(|| mask_split(cx, f, *rhs, seen)),
+        Op::Freeze(a) => mask_split(cx, f, *a, seen),
+        Op::Select { then_value, else_value, .. } => {
+            mask_split(cx, f, *then_value, seen).or_else(|| mask_split(cx, f, *else_value, seen))
+        }
+        Op::Phi { incoming, .. } => incoming.clone().iter().find_map(|(v, _)| mask_split(cx, f, *v, seen)),
+        _ => None,
+    };
+    seen.pop();
+    r
+}
+
+/// The parts of mask `v` as the parts of another mask it meets are
+/// (`n` of `part_ty`): its own if it is split, else cut into them lane by
+/// lane (a mask whose type is legal, as a phi's, combined with one split
+/// as the comparison of narrow lanes that made it was).
+fn mask_parts(
+    cx: &mut Ctx,
+    parts: &HashMap<LocalId, Vec<Value>>,
+    bld: &mut Builder,
+    v: Value,
+    n: usize,
+    part_ty: TypeId,
+) -> Result<Vec<Value>, String> {
+    if !matches!(v, Value::Local(x) if !parts.contains_key(&x)) {
+        return parts_of(cx, parts, bld.f, v, n, part_ty);
+    }
+    let i1 = cx.m.types.int(1);
+    let i64t = cx.m.types.int(64);
+    let lane = |cx: &mut Ctx, bld: &mut Builder, k: u32| {
+        let at = cx.int(i64t, k as i64);
+        bld.op(Op::ExtractElement { vector: v, index: at }, Some(i1))
+    };
+    let Some((m, _, _)) = vec_info(cx, part_ty) else {
+        return Ok((0..n).map(|p| lane(cx, bld, p as u32)).collect());
+    };
+    Ok((0..n)
+        .map(|p| {
+            let mut acc = poison(cx, part_ty);
+            for j in 0..m {
+                let x = lane(cx, bld, p as u32 * m + j);
+                let to = cx.int(i64t, j as i64);
+                acc = bld.op(Op::InsertElement { vector: acc, element: x, index: to }, Some(part_ty));
+            }
+            acc
+        })
+        .collect())
+}
+
 fn poison(cx: &mut Ctx, ty: TypeId) -> Value {
     Value::Const(cx.m.consts.intern(Constant { ty, kind: ConstKind::Poison }))
 }
@@ -348,10 +419,21 @@ fn pointer_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                                 _ => None,
                             }
                         };
+                        // (A splat: of what a lane can be, a splat of it;
+                        // of a global's address, as a vector of it.)
                         let kind = match k.kind {
+                            ConstKind::Splat(e) if lane(cx, e).is_some() => ConstKind::Splat(lane(cx, e).unwrap()),
+                            ConstKind::Splat(e) => {
+                                let Type::Vector { len, .. } = *cx.m.types.get(k.ty) else { unreachable!() };
+                                ConstKind::Vector(vec![e; len as usize])
+                            }
+                            other => other,
+                        };
+                        let kind = match kind {
                             ConstKind::Zero | ConstKind::Null => ConstKind::Zero,
                             ConstKind::Poison => ConstKind::Poison,
                             ConstKind::Undef => ConstKind::Undef,
+                            ConstKind::Splat(e) => ConstKind::Splat(e),
                             ConstKind::Vector(es) => {
                                 let lanes: Vec<Option<ConstId>> = es.iter().map(|&e| lane(cx, e)).collect();
                                 if lanes.iter().all(Option::is_some) {
@@ -394,7 +476,11 @@ fn pointer_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                 }) else {
                     unreachable!()
                 };
-                let ConstKind::Vector(es) = cx.m.constant(orig).kind.clone() else { unreachable!() };
+                let es = match cx.m.constant(orig).kind.clone() {
+                    ConstKind::Vector(es) => es,
+                    ConstKind::Splat(e) => vec![e; lanes.len()],
+                    _ => unreachable!(),
+                };
                 let mut n = 0;
                 let mut cur = Value::Const(cx.m.consts.intern(Constant { ty: t, kind: ConstKind::Zero }));
                 op.for_each_value(|v| {
@@ -1376,7 +1462,16 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                 Value::Const(c) => uses_split |= split_count(cx, cx.m.constant(*c).ty).is_some(),
                 Value::Metadata(_) => {}
             });
-            let res_split = res_ty.and_then(|t| split_count(cx, t));
+            // (A phi of masks is split as the masks it is of are: their
+            // comparisons'.)
+            let mask_phi = match &f.insts[i.index()].op {
+                Op::Phi { .. } => res_ty.and_then(|t| {
+                    vec_info(cx, t).filter(|v| v.2 == 1)?;
+                    mask_split(cx, f, f.result(i), &mut Vec::new())
+                }),
+                _ => None,
+            };
+            let res_split = res_ty.and_then(|t| split_count(cx, t)).or(mask_phi.map(|m| m.0));
             let odd_shuffle = match &f.insts[i.index()].op {
                 Op::ShuffleVector { .. } => !native_shuffle(cx, f, i),
                 _ => false,
@@ -1399,11 +1494,60 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         .ok_or("a binary operation on a split vector with a legal result")?;
                     let n = ps.len();
                     let pt = cx.value_ty(bld.f, ps[0]);
-                    let l = parts_of(cx, &parts, bld.f, lhs, n, pt)?;
-                    let r = parts_of(cx, &parts, bld.f, rhs, n, pt)?;
+                    let l = mask_parts(cx, &parts, &mut bld, lhs, n, pt)?;
+                    let r = mask_parts(cx, &parts, &mut bld, rhs, n, pt)?;
                     out_parts = Some(
                         (0..n).map(|p| bld.op(Op::Binary { op, flags, fmf, lhs: l[p], rhs: r[p] }, Some(pt))).collect(),
                     );
+                }
+                // A select of masks, one of them split as the comparison
+                // that made it was: part by part (the result split so too,
+                // as a binary operation's is). By a scalar, a select of each
+                // part; by a mask, logic.
+                Op::Select { fmf, cond, then_value, else_value }
+                    if res_split.is_none() && vec_info(cx, res_ty.unwrap()).is_some_and(|(_, _, eb)| eb == 1) =>
+                {
+                    let ps = [cond, then_value, else_value]
+                        .iter()
+                        .find_map(|v| if let Value::Local(x) = v { parts.get(x).cloned() } else { None })
+                        .ok_or("a select of a split mask with a legal result")?;
+                    let n = ps.len();
+                    let pt = cx.value_ty(bld.f, ps[0]);
+                    let t = mask_parts(cx, &parts, &mut bld, then_value, n, pt)?;
+                    let e = mask_parts(cx, &parts, &mut bld, else_value, n, pt)?;
+                    let i1 = cx.m.types.int(1);
+                    if cx.value_ty(bld.f, cond) == i1 {
+                        out_parts = Some(
+                            (0..n)
+                                .map(|p| bld.op(Op::Select { fmf, cond, then_value: t[p], else_value: e[p] }, Some(pt)))
+                                .collect(),
+                        );
+                    } else {
+                        let c = mask_parts(cx, &parts, &mut bld, cond, n, pt)?;
+                        let one = cx.int(i1, 1);
+                        let Value::Const(one) = one else { unreachable!() };
+                        let ones = if pt == i1 {
+                            Value::Const(one)
+                        } else {
+                            Value::Const(cx.m.consts.intern(Constant { ty: pt, kind: ConstKind::Splat(one) }))
+                        };
+                        let bin = |bld: &mut Builder, op, lhs, rhs| {
+                            bld.op(
+                                Op::Binary { op, flags: IntFlags::NONE, fmf: FastMath::default(), lhs, rhs },
+                                Some(pt),
+                            )
+                        };
+                        out_parts = Some(
+                            (0..n)
+                                .map(|p| {
+                                    let a = bin(&mut bld, BinOp::And, c[p], t[p]);
+                                    let nc = bin(&mut bld, BinOp::Xor, c[p], ones);
+                                    let b = bin(&mut bld, BinOp::And, nc, e[p]);
+                                    bin(&mut bld, BinOp::Or, a, b)
+                                })
+                                .collect(),
+                        );
+                    }
                 }
                 Op::Binary { op, flags, fmf, lhs, rhs } => {
                     let n = res_split.unwrap();
@@ -1448,7 +1592,13 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                         Some((0..n).map(|p| bld.op(Op::FCmp { pred, fmf, lhs: l[p], rhs: r[p] }, Some(mt))).collect());
                 }
                 Op::Select { fmf, cond, then_value, else_value } => {
-                    let n = res_split.ok_or("a select of split vectors with a legal result")?;
+                    let n = res_split.ok_or_else(|| {
+                        let r = bld.f.insts[i.index()].result.unwrap();
+                        format!(
+                            "a select of split vectors with a legal result ({})",
+                            epitome_ir::printer::local_name(bld.f, r)
+                        )
+                    })?;
                     let (vlen, elem, eb) = vec_info(cx, res_ty.unwrap()).unwrap();
                     let pt = part(cx, vlen, elem, eb);
                     let t = parts_of(cx, &parts, bld.f, then_value, n, pt)?;
@@ -1555,7 +1705,10 @@ pub fn legalize_vectors(cx: &mut Ctx, f: &mut Function) -> Result<(), String> {
                 Op::Phi { fmf, .. } => {
                     let n = res_split.ok_or("a phi of split masks")?;
                     let (vlen, elem, eb) = vec_info(cx, res_ty.unwrap()).unwrap();
-                    let pt = part(cx, vlen, elem, eb);
+                    let pt = match mask_phi {
+                        Some((_, pt)) => pt,
+                        None => part(cx, vlen, elem, eb),
+                    };
                     let mut phis = Vec::new();
                     for _ in 0..n {
                         let p = bld.f.add_inst(Op::Phi { fmf, incoming: vec![] }, Some((None, pt)));

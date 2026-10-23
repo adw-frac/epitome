@@ -1232,8 +1232,9 @@ impl<'a, 'b> Sel<'a, 'b> {
     }
 
     /// A vector constant: zero with `movi`; a splat by duplicating the lane
-    /// from an integer register; otherwise zero, then each nonzero lane
-    /// inserted.
+    /// from an integer register; otherwise its bits made in integer
+    /// registers and moved in, or zero and each nonzero lane inserted,
+    /// whichever takes fewer instructions.
     fn vector_const(&mut self, c: ConstId, class: Class) -> Result<Reg, String> {
         let k = self.cx.m.constant(c).clone();
         let Type::Vector { len, elem, .. } = self.cx.m.types.get(k.ty).clone() else {
@@ -1268,6 +1269,40 @@ impl<'a, 'b> Sel<'a, 'b> {
             let dup = self.t.by_role(&format!("dup.{arr}"));
             self.push(MInst::new(dup, vec![MOp::Reg(Reg::V(d)), MOp::Reg(g)]));
             return Ok(Reg::V(d));
+        }
+        // Lanes that would take more inserting than their bits take
+        // making: the bits made in integer registers, 64 at a time, and
+        // moved in.
+        let total = len * ebits;
+        let nonzero = lanes.iter().filter(|&&l| l != 0).count();
+        if total == 64 || total == 128 {
+            let mut halves = [0u64; 2];
+            for (k, &l) in lanes.iter().enumerate() {
+                let at = k as u32 * ebits;
+                let m = if ebits == 64 { u64::MAX } else { (1u64 << ebits) - 1 };
+                halves[(at / 64) as usize] |= (l as u64 & m) << (at % 64);
+            }
+            let halves = &halves[..(total / 64) as usize];
+            let chunks = |u: u64| {
+                let z = (0..4).filter(|i| (u >> (16 * i)) & 0xffff != 0).count();
+                let n = (0..4).filter(|i| (!u >> (16 * i)) & 0xffff != 0).count();
+                z.min(n).max(1)
+            };
+            let cost: usize = halves.iter().map(|&h| chunks(h) + 1).sum();
+            if cost < 2 * nonzero + 1 {
+                let fmov = self.t.by_role("move.d.x");
+                let lo = self.int_reg(halves[0] as i64, true, true)?;
+                self.push(MInst::new(fmov, vec![MOp::Reg(Reg::V(d)), MOp::Reg(lo)]));
+                if let Some(&hi) = halves.get(1) {
+                    let insd = self.t.by_role("ins.d");
+                    let g = self.int_reg(hi as i64, true, true)?;
+                    self.push(MInst::new(
+                        insd,
+                        vec![MOp::Reg(Reg::V(d)), MOp::Reg(Reg::V(d)), MOp::Reg(g), MOp::Imm(1)],
+                    ));
+                }
+                return Ok(Reg::V(d));
+            }
         }
         let zero = self.t.by_role("movi.zero");
         self.push(MInst::new(zero, vec![MOp::Reg(Reg::V(d))]));
@@ -1316,6 +1351,10 @@ impl<'a, 'b> Sel<'a, 'b> {
         let r = self.make_int(v, wide)?;
         if let Reg::V(x) = r {
             self.block_ints.insert((self.cur, v, wide), x);
+            // A positive one is zero above its highest set bit.
+            if v >= 0 {
+                self.zbits.insert(x, 64 - (v as u64).leading_zeros());
+            }
         }
         Ok(r)
     }
@@ -1538,6 +1577,26 @@ impl<'a, 'b> Sel<'a, 'b> {
                 self.set_zbits(r, z);
             }
             self.push(MInst::new(e.instr, ops));
+        }
+        // An `and` alone with a constant whose top bit (in its type) is
+        // clear: the bits above the constant's are zero, however the
+        // constant was made.
+        if p.nodes == 1
+            && let Op::Binary { op: BinOp::And, lhs, rhs, .. } = self.f.insts[root.index()].op
+            && let Some(Reg::V(r)) = result.map(Reg::V)
+        {
+            let ty = self.f.locals[self.f.insts[root.index()].result.unwrap().index()].ty;
+            let bits = self.bits(ty);
+            let c = self.cx.const_int(rhs).or_else(|| self.cx.const_int(lhs));
+            if let Some(c) = c
+                && !self.is_vector(ty)
+                && c >= 0
+                && (bits >= 64 || c < 1 << (bits - 1))
+            {
+                let z = 64 - (c as u64).leading_zeros();
+                let e = self.zbits.entry(r).or_insert(z);
+                *e = (*e).min(z);
+            }
         }
         if let Some(n) = m.next
             && Some(n) != layout_next
@@ -2438,6 +2497,17 @@ impl<'a, 'b> Sel<'a, 'b> {
             (_, true, 16) => "sext.16",
             _ => return Ok(r),
         };
+        // Already so: zero, or a value zero above its bits (or, for a sign
+        // extension, above all but its top bit, which is zero).
+        let known = match r {
+            Reg::P(p) => self.t.machine.zero == Some(p),
+            Reg::V(v) => {
+                self.zbits.get(&v).is_some_and(|&z| if role.starts_with("zext") { z <= bits } else { z < bits })
+            }
+        };
+        if known {
+            return Ok(r);
+        }
         let d = self.ivreg(false);
         let Some(ext) = self.t.role(role) else {
             // Without one: shifted up to the top of the register and back,
@@ -2757,8 +2827,8 @@ impl<'a, 'b> Sel<'a, 'b> {
         Ok(())
     }
 
-    /// Phis become copies at the end of each predecessor, through
-    /// temporaries so that values swapped between phis stay right.
+    /// Phis become copies at the end of each predecessor, ordered so that
+    /// values swapped between phis stay right.
     fn emit_phi_copies(&mut self) -> Result<(), String> {
         let f = self.f;
         for &s in &f.layout {
@@ -2785,7 +2855,8 @@ impl<'a, 'b> Sel<'a, 'b> {
                 let saved = std::mem::take(&mut self.mf.blocks[pb].insts);
                 let at = self.mf.blocks[pb].term_start.min(saved.len());
                 self.cur = pb;
-                let mut finals = Vec::new();
+                // (phi's register, incoming value's register, class)
+                let mut pending: Vec<(Reg, Reg, Class)> = Vec::new();
                 for &phi in &phis {
                     let Op::Phi { incoming, .. } = &f.insts[phi.index()].op else { unreachable!() };
                     let r = f.insts[phi.index()].result.unwrap();
@@ -2796,13 +2867,36 @@ impl<'a, 'b> Sel<'a, 'b> {
                     let ty = f.locals[r.index()].ty;
                     let class = self.class_of_ty(ty);
                     let src = self.reg_for(v, class)?;
-                    let tmp = self.mf.new_vreg(class);
-                    self.push(MInst::copy(Reg::V(tmp), src));
-                    let d = self.vreg_of(r);
-                    finals.push(MInst::copy(Reg::V(d), Reg::V(tmp)));
+                    let d = Reg::V(self.vreg_of(r));
+                    if src != d {
+                        pending.push((d, src, class));
+                    }
                 }
-                let mut copies = std::mem::take(&mut self.mf.blocks[pb].insts);
-                copies.extend(finals);
+                // The copies together, in an order where none overwrites
+                // what another is still to read: each as soon as nothing
+                // left reads its phi's register; where all that are left
+                // do (a cycle, values swapped), one of those registers is
+                // copied aside first and read from there.
+                while !pending.is_empty() {
+                    let ready = pending.iter().position(|&(d, _, _)| !pending.iter().any(|&(_, s, _)| s == d));
+                    match ready {
+                        Some(k) => {
+                            let (d, s, _) = pending.remove(k);
+                            self.push(MInst::copy(d, s));
+                        }
+                        None => {
+                            let (d, _, class) = pending[0];
+                            let tmp = Reg::V(self.mf.new_vreg(class));
+                            self.push(MInst::copy(tmp, d));
+                            for c in &mut pending {
+                                if c.1 == d {
+                                    c.1 = tmp;
+                                }
+                            }
+                        }
+                    }
+                }
+                let copies = std::mem::take(&mut self.mf.blocks[pb].insts);
                 let mut insts = saved;
                 let n = copies.len();
                 insts.splice(at..at, copies);

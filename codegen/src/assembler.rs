@@ -29,8 +29,10 @@
 //! format's rules, so the object file is the one `epitome-llc` writes
 //! directly for the same program.
 //!
-//! The directives are those the code generator writes: `.text`, `.data`,
-//! `.bss`, `.section`, `.globl`, `.p2align`, `.type`, `.size`, `.byte`,
+//! The directives are those the code generator writes, and modules'
+//! own assembly (Rust's `global_asm!`) uses: `.text`, `.data`, `.bss`,
+//! `.section`, `.pushsection` and `.popsection`, `.globl`, `.p2align`,
+//! `.type`, `.size`, `.byte`,
 //! `.short`, `.long`, `.quad` (of numbers, or of `symbol+offset`),
 //! `.ascii`, `.asciz`, `.space`, `.zero` and `.build_version`; the
 //! `.cfi_*` directives of unwind tables, with `.cfi_personality` and
@@ -412,6 +414,8 @@ impl<'t> Assembler<'t> {
         let mut obj = Object::default();
         let mut by_kind: HashMap<(SectionKind, Option<String>), usize> = HashMap::new();
         let mut cur: Option<usize> = None;
+        // Sections `.pushsection` left, for `.popsection`.
+        let mut pushed: Vec<(Option<usize>, bool)> = Vec::new();
         let mut discard = false;
         let mut held: Option<String> = None;
         let mut labels: HashMap<String, (usize, u64)> = HashMap::new();
@@ -479,6 +483,18 @@ impl<'t> Assembler<'t> {
                 let (name, args) = d.split_once(char::is_whitespace).unwrap_or((d, ""));
                 let args = args.trim();
                 let list = || split_args(args);
+                // (The section to go back to, kept before the switch.)
+                match name {
+                    "pushsection" => pushed.push((cur, discard)),
+                    "popsection" => {
+                        let (c, d) =
+                            pushed.pop().ok_or_else(|| err(n, "a .popsection without a .pushsection".into()))?;
+                        cur = c;
+                        discard = d;
+                        continue;
+                    }
+                    _ => {}
+                }
                 let mut switch = |kind: Option<(SectionKind, Option<String>)>| {
                     discard = kind.is_none();
                     if let Some((k, name)) = kind {
@@ -489,7 +505,7 @@ impl<'t> Assembler<'t> {
                     "text" => switch(Some((SectionKind::Text, None))),
                     "data" => switch(Some((SectionKind::Data, None))),
                     "bss" => switch(Some((SectionKind::Bss, None))),
-                    "section" => {
+                    "section" | "pushsection" => {
                         let kind =
                             section_kind(args, syntax).ok_or_else(|| err(n, "a section not supported".into()))?;
                         switch(kind);

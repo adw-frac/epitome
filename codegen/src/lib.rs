@@ -7,6 +7,7 @@ pub mod aggregates;
 pub mod asm;
 pub mod assembler;
 pub mod atomics;
+pub mod bitmaps;
 pub mod check;
 pub mod divconst;
 pub mod eh;
@@ -14,6 +15,7 @@ pub mod elf;
 pub mod enc;
 pub mod features;
 pub mod frame;
+pub mod huge;
 pub mod intrinsics;
 pub mod isel;
 pub mod layout;
@@ -54,6 +56,8 @@ pub struct Compiled {
     /// module's triple (`arm64-apple-macosx26.0.0`), else 11.0.
     pub min_os: (u32, u32, u32),
     pub asm: String,
+    /// Whether the module had assembly of its own, which `asm` ends with.
+    pub module_asm: bool,
     /// With `keep_going`: the functions that could not be compiled, and why.
     pub errors: Vec<String>,
     /// Autochop: the functions counted (in module order), each one's count
@@ -334,11 +338,22 @@ pub fn compile(t: &Target, m: &mut Module, opts: &Options) -> Result<Compiled, S
     asm::print_globals(&abi, &globals, &mut out);
     let aliases = asm::collect_aliases(&cx, &abi)?;
     asm::print_aliases(&aliases, &mut out);
+    // The module's own assembly, after ours (which the assembler then
+    // assembles, rather than the object being written directly).
+    let module_asm = !cx.m.module_asm.is_empty();
+    if module_asm {
+        out.push_str(&format!("\t{}\n", abi.section_directive(object::SectionKind::Text)));
+        for line in &cx.m.module_asm {
+            out.push_str(&String::from_utf8_lossy(line));
+            out.push('\n');
+        }
+    }
     if abi.syntax == abi::Syntax::Elf {
         // The stack need not be executable.
         out.push_str("\t.section .note.GNU-stack,\"\",%progbits\n");
     }
     Ok(Compiled {
+        module_asm,
         funcs,
         globals,
         aliases,
@@ -373,7 +388,7 @@ impl Compiled {
     /// inline assembly, whose text only an assembler reads, by assembling
     /// the assembly.
     pub fn object_file(&self, t: &Target) -> Result<Vec<u8>, String> {
-        if self.funcs.iter().any(|f| !f.asms.is_empty()) {
+        if self.module_asm || self.funcs.iter().any(|f| !f.asms.is_empty()) {
             return assembler::Assembler::new(t).assemble(&self.asm, Some(self.abi.syntax)).and_then(|a| a.file(t));
         }
         let obj = self.object(t)?;
