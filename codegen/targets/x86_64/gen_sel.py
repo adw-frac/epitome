@@ -289,6 +289,53 @@ def division():
               'movl $0, {d:r32}', [f'ret {ty} 0'], ' "nomatch" "nodecode"')
 
 
+def indexed_memory():
+    """Loads, stores and address arithmetic at a base plus an index
+    scaled by 1, 2, 4 or 8: what an array's element is (`(%rdi,%rdx,4)`).
+    The index is never rsp (4 is no index), which allocation never
+    gives."""
+    rex8 = lambda r, x, b: (f'{{ if({r}<4) rex(0, {r}, {x}, {b}) ; 0100 0 R:1=({r})>>3 X:1=({x})>>3 B:1=({b})>>3 }}')
+    loads = [('i64', 'movq', '10001011', 1, '{d}', 'r64', '', None), ('i32', 'movl', '10001011', 0, '{d}', 'r32', '32', None),
+             ('i8', 'movzbl', '00001111 | 10110110', 0, '{d:r32}', 'r32', '8', None),
+             ('i16', 'movzwl', '00001111 | 10110111', 0, '{d:r32}', 'r32', '16', None),
+             ('ptr', 'movq', '10001011', 1, '{d}', 'r64', '', None)]
+    sloads = [('i32', 'i8', 'movsbl', '00001111 | 10111110', 0), ('i32', 'i16', 'movswl', '00001111 | 10111111', 0),
+              ('i64', 'i8', 'movsbq', '00001111 | 10111110', 1), ('i64', 'i16', 'movswq', '00001111 | 10111111', 1),
+              ('i64', 'i32', 'movslq', '01100011', 1)]
+    stores = [('i64', 'movq', '10001001', 1, '{t}', 'r64'), ('i32', 'movl', '10001001', 0, '{t}', 'r32'),
+              ('i16', 'movw', '10001001', 0, '{t:r16}', 'r32'), ('i8', 'movb', '10001000', 0, '{t:r8}', 'r32'),
+              ('ptr', 'movq', '10001001', 1, '{t}', 'r64')]
+    fl = [('double', '11110010 | ', 'movsd', 'd'), ('float', '11110011 | ', 'movss', 's')]
+    for k, sc in enumerate([1, 2, 4, 8]):
+        # The address: n plus the index shifted.
+        off = ['%a = getelementptr i8, ptr %n, i64 %m.index'] if k == 0 else \
+              [f'%o = shl i64 %m.index, {k}', '%a = getelementptr i8, ptr %n, i64 %o']
+        prm = ['ptr "reg"="r64" %n', 'i64 "reg"="r64" %m.index']
+        mem = f'({{n}},{{m.index}},{sc})'
+        for ty, mn, op, w, d, cls, zext, _ in loads:
+            entry(ty, f'LD{ty.upper()}X{sc}', prm, f'rex({w}, d, m.index, n) | {op} | rm(d, n, m.index, {sc}, 0, 0, 1)',
+                  f'{mn} {mem}, {d}', off + [f'%r = load {ty}, ptr %a', f'ret {ty} %r'],
+                  f' "dclass"="{cls}"' + (f' "zext"="{zext}"' if zext else ''))
+        for ty, src, mn, op, w in sloads:
+            entry(ty, f'LD{src.upper()}S{ty[1:]}X{sc}', prm, f'rex({w}, d, m.index, n) | {op} | rm(d, n, m.index, {sc}, 0, 0, 1)',
+                  f'{mn} {mem}, {{d}}', off + [f'%v = load {src}, ptr %a', f'%r = sext {src} %v to {ty}', f'ret {ty} %r'])
+        for ty, mn, op, w, t, cls in stores:
+            pre = '01100110 | ' if ty == 'i16' else ''
+            rx = rex8('t', 'm.index', 'n') if ty == 'i8' else f'rex({w}, t, m.index, n)'
+            entry('void', f'ST{ty.upper()}X{sc}', [f'{ty} "reg"="{cls}" %t'] + prm, f'{pre}{rx} | {op} | rm(t, n, m.index, {sc}, 0, 0, 1)',
+                  f'{mn} {t}, {mem}', off + [f'store {ty} %t, ptr %a', 'ret void'])
+        for ty, pre, mn, cls in fl:
+            entry(ty, f'LD{cls.upper()}X{sc}', prm, f'{pre}rex(0, d, m.index, n) | 00001111 | 00010000 | rm(d, n, m.index, {sc}, 0, 0, 1)',
+                  f'{mn} {mem}, {{d}}', off + [f'%r = load {ty}, ptr %a', f'ret {ty} %r'], f' "dclass"="{cls}"')
+            entry('void', f'ST{cls.upper()}X{sc}', [f'{ty} "reg"="{cls}" %t'] + prm,
+                  f'{pre}rex(0, t, m.index, n) | 00001111 | 00010001 | rm(t, n, m.index, {sc}, 0, 0, 1)', f'{mn} {{t}}, {mem}',
+                  off + [f'store {ty} %t, ptr %a', 'ret void'])
+        # The address itself (lea), but for scale 1, which LEA64rr is.
+        if k > 0:
+            entry('ptr', f'LEA64X{sc}', prm, f'rex(1, d, m.index, n) | 10001101 | rm(d, n, m.index, {sc}, 0, 0, 1)', f'leaq {mem}, {{d}}',
+                  off + ['ret ptr %a'])
+
+
 def recipes():
     """Minimum and maximum: compare, then move one over the other if it
     wins."""
@@ -1016,6 +1063,7 @@ def main():
     alu()
     moves()
     memory()
+    indexed_memory()
     compares()
     control()
     division()
