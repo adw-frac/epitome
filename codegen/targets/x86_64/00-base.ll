@@ -97,7 +97,10 @@
 !1104 = !{!"asm-comment", !"#"}
 !1105 = !{!"cpu", !"x86-64"}
 !1106 = !{!"cfi-data-align", !"-8"}
-!1107 = !{!"external-via-got", !"no"}
+; Symbols another module may define (not dso_local: -fPIC's, and what is
+; only declared) are reached through the GOT, which a linker relaxes in a
+; program.
+!1107 = !{!"external-via-got", !"yes"}
 ; Instructions are 1 to 15 bytes; the entries are many, so their encodings
 ; are read when first used.
 !1108 = !{!"instruction-unit", !"1"}
@@ -250,7 +253,8 @@
 !1200 = !{!"name", !"abs64", !"elf", !"1", !"elf-name", !"R_X86_64_64", !"use", !"data8"}
 !1201 = !{!"name", !"pc32", !"elf", !"2", !"elf-name", !"R_X86_64_PC32", !"use", !"eh-pcrel", !"target", !"pc + v"}
 !1202 = !{!"name", !"plt32", !"elf", !"4", !"elf-name", !"R_X86_64_PLT32", !"use", !"call", !"target", !"pc + v"}
-!1203 = !{!"name", !"gotpcrel", !"elf", !"9", !"elf-name", !"R_X86_64_GOTPCREL", !"elf-syntax", !"{s}@GOTPCREL", !"use", !"got", !"target", !"pc + v"}
+; (A mov's: relaxable, as assemblers write it for one with REX.)
+!1203 = !{!"name", !"gotpcrel", !"elf", !"42", !"elf-name", !"R_X86_64_REX_GOTPCRELX", !"elf-syntax", !"{s}@GOTPCREL", !"use", !"got", !"target", !"pc + v"}
 !1204 = !{!"name", !"abs32s", !"elf", !"11", !"elf-name", !"R_X86_64_32S"}
 !1205 = !{!"name", !"pc32x", !"elf", !"2", !"elf-name", !"R_X86_64_PC32", !"target", !"pc + v"}
 ; A thread-local variable's offset from the thread pointer, in the GOT

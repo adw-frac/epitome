@@ -5,7 +5,8 @@
 //! For each `tests/programs/NAME.c` of `PROGRAMS` (and `tests/x86/NAME.c` of
 //! `X86_PROGRAMS`) and its `NAME.main.c`, in
 //! the configurations of `tests/programs.rs` (clang -O0, that through
-//! epitome-opt, -O2 without vectorising, and -O2), the test:
+//! epitome-opt, -O2 without vectorising, and -O2), and `-O2 -fPIC` (linked
+//! into a shared library the main calls), the test:
 //!
 //! 1. compiles clang's IR for `x86_64-linux-gnu` to assembly, assembles it
 //!    with epitome-as, links it with the main (built by clang), runs it,
@@ -95,6 +96,7 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<(), S
         ("opt", &["-O0", "-Xclang", "-disable-O0-optnone"]),
         ("O2", &["-O2", "-fno-vectorize", "-fno-slp-vectorize", "-fno-unroll-loops"]),
         ("vec", &["-O2"]),
+        ("pic", &["-O2", "-fPIC"]),
     ];
     for (config, flags) in configs {
         if tails && matches!(*config, "O0" | "opt") {
@@ -128,12 +130,25 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<(), S
         let obj = tmp.join(format!("{stem}.o"));
         std::fs::write(&obj, &ours).unwrap();
         let exe = tmp.join(&stem);
-        run(Command::new("clang")
-            .args(["-O2", "-no-pie"])
-            .arg(&obj)
-            .arg(&main)
-            .args(["-lm", "-latomic", "-o"])
-            .arg(&exe))?;
+        if *config == "pic" {
+            // A shared library of ours, which the main is linked with.
+            let lib = tmp.join(format!("lib{stem}.so"));
+            run(Command::new("clang").arg("-shared").arg(&obj).arg("-o").arg(&lib))?;
+            run(Command::new("clang")
+                .arg("-O2")
+                .arg(&main)
+                .arg(&lib)
+                .arg(format!("-Wl,-rpath,{}", tmp.display()))
+                .args(["-lm", "-latomic", "-o"])
+                .arg(&exe))?;
+        } else {
+            run(Command::new("clang")
+                .args(["-O2", "-no-pie"])
+                .arg(&obj)
+                .arg(&main)
+                .args(["-lm", "-latomic", "-o"])
+                .arg(&exe))?;
+        }
         let got = run(&mut Command::new(&exe))?;
         if got != want {
             return Err(format!("{stem}: output differs from clang's build; see {}", s.display()));
