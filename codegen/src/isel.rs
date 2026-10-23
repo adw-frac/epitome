@@ -777,7 +777,17 @@ impl<'a, 'b> Sel<'a, 'b> {
                         return None;
                     }
                 }
-                Kind::Sym | Kind::Cond => return None,
+                // A global's address, as the instruction names it (x86's
+                // `sym(%rip)`): not one reached through the GOT, nor a
+                // thread-local's.
+                Kind::Sym => {
+                    let Term::V(Value::Const(c)) = t else { return None };
+                    let Some((g, 0)) = prepare::const_address(self.cx, c) else { return None };
+                    if self.via_got(g) || self.cx.m.global(g).props.thread_local.is_some() {
+                        return None;
+                    }
+                }
+                Kind::Cond => return None,
             }
         }
         // Immediates must fit their instructions.
@@ -1189,18 +1199,8 @@ impl<'a, 'b> Sel<'a, 'b> {
                     }
                     return Ok(r);
                 }
-                let gl = self.cx.m.global(g);
-                let name = gl.name.clone().unwrap_or_default();
-                // Symbols defined elsewhere (another library) are reached
-                // through the global offset table, which the loader fills in.
-                let declared_only = match &gl.kind {
-                    GlobalKind::Function(f) => !f.has_body,
-                    GlobalKind::Variable(v) => v.init.is_none(),
-                    _ => false,
-                };
-                let via_got = self.t.machine.external_via_got
-                    && (declared_only
-                        || (!gl.props.dso_local && !matches!(gl.props.linkage, Linkage::Internal | Linkage::Private)));
+                let name = self.cx.m.global(g).name.clone().unwrap_or_default();
+                let via_got = self.via_got(g);
                 let d = self.ivreg(true);
                 // In one instruction, where the machine has one (x86's
                 // `lea sym(%rip)`, `mov sym@GOTPCREL(%rip)`), else two.
@@ -1256,6 +1256,20 @@ impl<'a, 'b> Sel<'a, 'b> {
 
     fn hoisting(&self) -> bool {
         self.cur != 0 && self.in_loop.get(self.cur).copied().unwrap_or(false)
+    }
+
+    /// Is global `g` reached through the global offset table: defined
+    /// elsewhere (another library), where the loader fills it in?
+    fn via_got(&self, g: GlobalId) -> bool {
+        let gl = self.cx.m.global(g);
+        let declared_only = match &gl.kind {
+            GlobalKind::Function(f) => !f.has_body,
+            GlobalKind::Variable(v) => v.init.is_none(),
+            _ => false,
+        };
+        self.t.machine.external_via_got
+            && (declared_only
+                || (!gl.props.dso_local && !matches!(gl.props.linkage, Linkage::Internal | Linkage::Private)))
     }
 
     /// A vector constant: zero with `movi`; a splat by duplicating the lane
@@ -1520,6 +1534,10 @@ impl<'a, 'b> Sel<'a, 'b> {
             vals[i] = Some(match (pp.kind, t) {
                 (Kind::Reg(class), Term::V(v)) => MOp::Reg(self.reg_for(v, class)?),
                 (Kind::Imm, t) => MOp::Imm(self.imm_of(t, pp.bits).unwrap()),
+                (Kind::Sym, Term::V(Value::Const(c))) => {
+                    let (g, _) = prepare::const_address(self.cx, c).ok_or("a symbol operand that is not a global")?;
+                    MOp::Sym(self.cx.m.global(g).name.clone().unwrap_or_default())
+                }
                 (Kind::Label, Term::B(b)) => MOp::Label(self.bmap[&b]),
                 _ => return self.err("bad operand"),
             });

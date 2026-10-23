@@ -326,6 +326,41 @@ def indexed_memory():
                   off + ['ret ptr %a'])
 
 
+def rip_memory():
+    """Loads and stores of a global's own address, RIP-relative
+    (`movl counter(%rip), %eax`): one instruction, not its address made
+    first. (Not of what the GOT reaches: selection takes these only for
+    globals of this module.)"""
+    rex8 = lambda r: f'{{ if({r}<4) rex(0, {r}, 0, 0) ; 0100 0 R:1=({r})>>3 0 0 }}'
+    loads = [('i64', 'movq', '10001011', 1, '{d}', 'r64', ''), ('i32', 'movl', '10001011', 0, '{d}', 'r32', '32'),
+             ('i8', 'movzbl', '00001111 | 10110110', 0, '{d:r32}', 'r32', '8'),
+             ('i16', 'movzwl', '00001111 | 10110111', 0, '{d:r32}', 'r32', '16'),
+             ('ptr', 'movq', '10001011', 1, '{d}', 'r64', '')]
+    for ty, mn, op, w, d, cls, zext in loads:
+        entry(ty, f'LD{ty.upper()}rip', ['ptr "sym" %s'], f'rex({w}, d, 0, 0) | {op} | rm(d, 16, 4, 1, 0, s, 1)',
+              f'{mn} {{s}}(%rip), {d}', [f'%r = load {ty}, ptr %s', f'ret {ty} %r'],
+              f' "reloc"="pc32x" "dclass"="{cls}"' + (f' "zext"="{zext}"' if zext else ''))
+    for ty, src, mn, op, w in [('i32', 'i8', 'movsbl', '00001111 | 10111110', 0), ('i32', 'i16', 'movswl', '00001111 | 10111111', 0),
+                               ('i64', 'i8', 'movsbq', '00001111 | 10111110', 1), ('i64', 'i16', 'movswq', '00001111 | 10111111', 1),
+                               ('i64', 'i32', 'movslq', '01100011', 1)]:
+        entry(ty, f'LD{src.upper()}S{ty[1:]}rip', ['ptr "sym" %s'], f'rex({w}, d, 0, 0) | {op} | rm(d, 16, 4, 1, 0, s, 1)',
+              f'{mn} {{s}}(%rip), {{d}}', [f'%v = load {src}, ptr %s', f'%r = sext {src} %v to {ty}', f'ret {ty} %r'],
+              ' "reloc"="pc32x"')
+    for ty, mn, op, w, t, cls in [('i64', 'movq', '10001001', 1, '{t}', 'r64'), ('i32', 'movl', '10001001', 0, '{t}', 'r32'),
+                                  ('i16', 'movw', '10001001', 0, '{t:r16}', 'r32'), ('i8', 'movb', '10001000', 0, '{t:r8}', 'r32'),
+                                  ('ptr', 'movq', '10001001', 1, '{t}', 'r64')]:
+        pre = '01100110 | ' if ty == 'i16' else ''
+        rx = rex8('t') if ty == 'i8' else f'rex({w}, t, 0, 0)'
+        entry('void', f'ST{ty.upper()}rip', [f'{ty} "reg"="{cls}" %t', 'ptr "sym" %s'], f'{pre}{rx} | {op} | rm(t, 16, 4, 1, 0, s, 1)',
+              f'{mn} {t}, {{s}}(%rip)', [f'store {ty} %t, ptr %s', 'ret void'], ' "reloc"="pc32x"')
+    for ty, pre, mn, cls in [('double', '11110010 | ', 'movsd', 'd'), ('float', '11110011 | ', 'movss', 's')]:
+        entry(ty, f'LD{cls.upper()}rip', ['ptr "sym" %s'], f'{pre}rex(0, d, 0, 0) | 00001111 | 00010000 | rm(d, 16, 4, 1, 0, s, 1)',
+              f'{mn} {{s}}(%rip), {{d}}', [f'%r = load {ty}, ptr %s', f'ret {ty} %r'], f' "reloc"="pc32x" "dclass"="{cls}"')
+        entry('void', f'ST{cls.upper()}rip', [f'{ty} "reg"="{cls}" %t', 'ptr "sym" %s'],
+              f'{pre}rex(0, t, 0, 0) | 00001111 | 00010001 | rm(t, 16, 4, 1, 0, s, 1)', f'{mn} {{t}}, {{s}}(%rip)',
+              [f'store {ty} %t, ptr %s', 'ret void'], ' "reloc"="pc32x"')
+
+
 def recipes():
     """Minimum and maximum: compare, then move one over the other if it
     wins."""
@@ -1054,6 +1089,7 @@ def main():
     moves()
     memory()
     indexed_memory()
+    rip_memory()
     compares()
     control()
     division()

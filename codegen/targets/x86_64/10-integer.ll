@@ -777,6 +777,106 @@ define ptr @LEA64X8(ptr "reg"="r64" %n, i64 "reg"="r64" %m.index) "enc"="rex(1, 
   ret ptr %a
 }
 
+define i64 @LDI64rip(ptr "sym" %s) "enc"="rex(1, d, 0, 0) | 10001011 | rm(d, 16, 4, 1, 0, s, 1)" "asm"="movq {s}(%rip), {d}" "reloc"="pc32x" "dclass"="r64" "nodecode" {
+  %r = load i64, ptr %s
+  ret i64 %r
+}
+
+define i32 @LDI32rip(ptr "sym" %s) "enc"="rex(0, d, 0, 0) | 10001011 | rm(d, 16, 4, 1, 0, s, 1)" "asm"="movl {s}(%rip), {d}" "reloc"="pc32x" "dclass"="r32" "zext"="32" "nodecode" {
+  %r = load i32, ptr %s
+  ret i32 %r
+}
+
+define i8 @LDI8rip(ptr "sym" %s) "enc"="rex(0, d, 0, 0) | 00001111 | 10110110 | rm(d, 16, 4, 1, 0, s, 1)" "asm"="movzbl {s}(%rip), {d:r32}" "reloc"="pc32x" "dclass"="r32" "zext"="8" "nodecode" {
+  %r = load i8, ptr %s
+  ret i8 %r
+}
+
+define i16 @LDI16rip(ptr "sym" %s) "enc"="rex(0, d, 0, 0) | 00001111 | 10110111 | rm(d, 16, 4, 1, 0, s, 1)" "asm"="movzwl {s}(%rip), {d:r32}" "reloc"="pc32x" "dclass"="r32" "zext"="16" "nodecode" {
+  %r = load i16, ptr %s
+  ret i16 %r
+}
+
+define ptr @LDPTRrip(ptr "sym" %s) "enc"="rex(1, d, 0, 0) | 10001011 | rm(d, 16, 4, 1, 0, s, 1)" "asm"="movq {s}(%rip), {d}" "reloc"="pc32x" "dclass"="r64" "nodecode" {
+  %r = load ptr, ptr %s
+  ret ptr %r
+}
+
+define i32 @LDI8S32rip(ptr "sym" %s) "enc"="rex(0, d, 0, 0) | 00001111 | 10111110 | rm(d, 16, 4, 1, 0, s, 1)" "asm"="movsbl {s}(%rip), {d}" "reloc"="pc32x" "nodecode" {
+  %v = load i8, ptr %s
+  %r = sext i8 %v to i32
+  ret i32 %r
+}
+
+define i32 @LDI16S32rip(ptr "sym" %s) "enc"="rex(0, d, 0, 0) | 00001111 | 10111111 | rm(d, 16, 4, 1, 0, s, 1)" "asm"="movswl {s}(%rip), {d}" "reloc"="pc32x" "nodecode" {
+  %v = load i16, ptr %s
+  %r = sext i16 %v to i32
+  ret i32 %r
+}
+
+define i64 @LDI8S64rip(ptr "sym" %s) "enc"="rex(1, d, 0, 0) | 00001111 | 10111110 | rm(d, 16, 4, 1, 0, s, 1)" "asm"="movsbq {s}(%rip), {d}" "reloc"="pc32x" "nodecode" {
+  %v = load i8, ptr %s
+  %r = sext i8 %v to i64
+  ret i64 %r
+}
+
+define i64 @LDI16S64rip(ptr "sym" %s) "enc"="rex(1, d, 0, 0) | 00001111 | 10111111 | rm(d, 16, 4, 1, 0, s, 1)" "asm"="movswq {s}(%rip), {d}" "reloc"="pc32x" "nodecode" {
+  %v = load i16, ptr %s
+  %r = sext i16 %v to i64
+  ret i64 %r
+}
+
+define i64 @LDI32S64rip(ptr "sym" %s) "enc"="rex(1, d, 0, 0) | 01100011 | rm(d, 16, 4, 1, 0, s, 1)" "asm"="movslq {s}(%rip), {d}" "reloc"="pc32x" "nodecode" {
+  %v = load i32, ptr %s
+  %r = sext i32 %v to i64
+  ret i64 %r
+}
+
+define void @STI64rip(i64 "reg"="r64" %t, ptr "sym" %s) "enc"="rex(1, t, 0, 0) | 10001001 | rm(t, 16, 4, 1, 0, s, 1)" "asm"="movq {t}, {s}(%rip)" "reloc"="pc32x" "nodecode" {
+  store i64 %t, ptr %s
+  ret void
+}
+
+define void @STI32rip(i32 "reg"="r32" %t, ptr "sym" %s) "enc"="rex(0, t, 0, 0) | 10001001 | rm(t, 16, 4, 1, 0, s, 1)" "asm"="movl {t}, {s}(%rip)" "reloc"="pc32x" "nodecode" {
+  store i32 %t, ptr %s
+  ret void
+}
+
+define void @STI16rip(i16 "reg"="r32" %t, ptr "sym" %s) "enc"="01100110 | rex(0, t, 0, 0) | 10001001 | rm(t, 16, 4, 1, 0, s, 1)" "asm"="movw {t:r16}, {s}(%rip)" "reloc"="pc32x" "nodecode" {
+  store i16 %t, ptr %s
+  ret void
+}
+
+define void @STI8rip(i8 "reg"="r32" %t, ptr "sym" %s) "enc"="{ if(t<4) rex(0, t, 0, 0) ; 0100 0 R:1=(t)>>3 0 0 } | 10001000 | rm(t, 16, 4, 1, 0, s, 1)" "asm"="movb {t:r8}, {s}(%rip)" "reloc"="pc32x" "nodecode" {
+  store i8 %t, ptr %s
+  ret void
+}
+
+define void @STPTRrip(ptr "reg"="r64" %t, ptr "sym" %s) "enc"="rex(1, t, 0, 0) | 10001001 | rm(t, 16, 4, 1, 0, s, 1)" "asm"="movq {t}, {s}(%rip)" "reloc"="pc32x" "nodecode" {
+  store ptr %t, ptr %s
+  ret void
+}
+
+define double @LDDrip(ptr "sym" %s) "enc"="11110010 | rex(0, d, 0, 0) | 00001111 | 00010000 | rm(d, 16, 4, 1, 0, s, 1)" "asm"="movsd {s}(%rip), {d}" "reloc"="pc32x" "dclass"="d" "nodecode" {
+  %r = load double, ptr %s
+  ret double %r
+}
+
+define void @STDrip(double "reg"="d" %t, ptr "sym" %s) "enc"="11110010 | rex(0, t, 0, 0) | 00001111 | 00010001 | rm(t, 16, 4, 1, 0, s, 1)" "asm"="movsd {t}, {s}(%rip)" "reloc"="pc32x" "nodecode" {
+  store double %t, ptr %s
+  ret void
+}
+
+define float @LDSrip(ptr "sym" %s) "enc"="11110011 | rex(0, d, 0, 0) | 00001111 | 00010000 | rm(d, 16, 4, 1, 0, s, 1)" "asm"="movss {s}(%rip), {d}" "reloc"="pc32x" "dclass"="s" "nodecode" {
+  %r = load float, ptr %s
+  ret float %r
+}
+
+define void @STSrip(float "reg"="s" %t, ptr "sym" %s) "enc"="11110011 | rex(0, t, 0, 0) | 00001111 | 00010001 | rm(t, 16, 4, 1, 0, s, 1)" "asm"="movss {t}, {s}(%rip)" "reloc"="pc32x" "nodecode" {
+  store float %t, ptr %s
+  ret void
+}
+
 define %flags @CMP64rr(i64 "reg"="r64" %n, i64 "reg"="r64" %m) "enc"="rex(1, m, 0, n) | 00111001 | rr(m, n)" "asm"="cmpq {m}, {n}" "sets"="zcso" "nodecode" {
   %f0 = insertvalue %flags poison, i64 %n, 0
   %f = insertvalue %flags %f0, i64 %m, 1
