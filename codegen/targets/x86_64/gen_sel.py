@@ -1343,6 +1343,27 @@ def reductions():
             '%s = call <2 x i64> @PADDQ.2xi64(<2 x i64> %l, <2 x i64> %h)'] + two('%s'), ' "feature"="avx2"')
 
 
+def mul64():
+    """64-bit lanes multiplied (SSE2 and AVX2 have 32 by 32 to 64 only):
+    lo(a)lo(b) + ((hi(a)lo(b) + lo(a)hi(b)) << 32)."""
+    def body(pfx, ty, mul, srl, sll, add):
+        return [f'%h = call {ty} @{srl}({ty} %a, i64 32)', f'%g = call {ty} @{srl}({ty} %b, i64 32)',
+                f'%p = call {ty} @{mul}({ty} %a, {ty} %b)', f'%q = call {ty} @{mul}({ty} %h, {ty} %b)',
+                f'%u = call {ty} @{mul}({ty} %a, {ty} %g)', f'%s = call {ty} @{add}({ty} %q, {ty} %u)',
+                f'%t = call {ty} @{sll}({ty} %s, i64 32)', f'%r = call {ty} @{add}({ty} %p, {ty} %t)', f'ret {ty} %r']
+    out.append('define <2 x i64> @mul.2xi64(<2 x i64> "reg"="xv" %a, <2 x i64> "reg"="xv" %b) "recipe"="mul.2xi64.expand" {\n'
+               '  %r = mul <2 x i64> %a, %b\n  ret <2 x i64> %r\n}\n')
+    out.append('define <2 x i64> @mul.2xi64.expand(<2 x i64> %a, <2 x i64> %b) {\n' +
+               ''.join(f'  {l}\n' for l in body('', '<2 x i64>', 'PMULUDQ', 'PSRLQi.2xi64', 'PSLLQi.2xi64', 'PADDQ.2xi64')) + '}\n')
+    enc, _ = xed('vpmuludq {o0}, {o1}, {o2}', ('ye', 'ye', 'ye'))
+    entry('<4 x i64>', 'VPMULUDQ', ['<4 x i64> "reg"="yv" %n', '<4 x i64> "reg"="yv" %m'], renamed(enc, {'o0': 'm', 'o1': 'n', 'o2': 'd'}),
+          'vpmuludq {m}, {n}, {d}', ['ret <4 x i64> %n'], ' "dclass"="yv" "nomatch" "feature"="avx2"')
+    out.append('define <4 x i64> @mul.4xi64(<4 x i64> "reg"="yv" %a, <4 x i64> "reg"="yv" %b) "recipe"="mul.4xi64.expand" "feature"="avx2" {\n'
+               '  %r = mul <4 x i64> %a, %b\n  ret <4 x i64> %r\n}\n')
+    out.append('define <4 x i64> @mul.4xi64.expand(<4 x i64> %a, <4 x i64> %b) {\n' +
+               ''.join(f'  {l}\n' for l in body('', '<4 x i64>', 'VPMULUDQ', 'VPSRLQi.4xi64', 'VPSLLQi.4xi64', 'VPADDQ.4xi64')) + '}\n')
+
+
 def vector_copies():
     """Copies of the vector and mask registers (the register allocator's)."""
     entry('<2 x i64>', 'MOVAPSrr', ['<2 x i64> "reg"="x" %n'], 'rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)',
@@ -1384,6 +1405,7 @@ def main():
     sse_recipes()
     avx2()
     reductions()
+    mul64()
     vector_copies()
     sys.stdout.write('\n'.join(out))
 

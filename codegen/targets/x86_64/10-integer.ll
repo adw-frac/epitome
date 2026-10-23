@@ -6134,6 +6134,44 @@ define i64 @reduce.add.4xi64.expand(<4 x i64> %v) {
   ret i64 %r
 }
 
+define <2 x i64> @mul.2xi64(<2 x i64> "reg"="xv" %a, <2 x i64> "reg"="xv" %b) "recipe"="mul.2xi64.expand" {
+  %r = mul <2 x i64> %a, %b
+  ret <2 x i64> %r
+}
+
+define <2 x i64> @mul.2xi64.expand(<2 x i64> %a, <2 x i64> %b) {
+  %h = call <2 x i64> @PSRLQi.2xi64(<2 x i64> %a, i64 32)
+  %g = call <2 x i64> @PSRLQi.2xi64(<2 x i64> %b, i64 32)
+  %p = call <2 x i64> @PMULUDQ(<2 x i64> %a, <2 x i64> %b)
+  %q = call <2 x i64> @PMULUDQ(<2 x i64> %h, <2 x i64> %b)
+  %u = call <2 x i64> @PMULUDQ(<2 x i64> %a, <2 x i64> %g)
+  %s = call <2 x i64> @PADDQ.2xi64(<2 x i64> %q, <2 x i64> %u)
+  %t = call <2 x i64> @PSLLQi.2xi64(<2 x i64> %s, i64 32)
+  %r = call <2 x i64> @PADDQ.2xi64(<2 x i64> %p, <2 x i64> %t)
+  ret <2 x i64> %r
+}
+
+define <4 x i64> @VPMULUDQ(<4 x i64> "reg"="yv" %n, <4 x i64> "reg"="yv" %m) "enc"="{ if(m<8) vex(d, 0, m, 1, 0, n, 1, 1) | 11110100 | 11 reg:3=d&7 rm:3=m&7 ; if(n<8) vex(d, 0, n, 1, 0, m, 1, 1) | 11110100 | 11 reg:3=d&7 rm:3=n&7 ; vex(d, 0, m, 1, 0, n, 1, 1) | 11110100 | 11 reg:3=d&7 rm:3=m&7 ; evexr(d, m, 1, 1, n, 1, 1, 0, 0, 0) | 11110100 | 11 reg:3=d&7 rm:3=m&7 ; vex(d, 0, n, 1, 0, m, 1, 1) | 11110100 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpmuludq {m}, {n}, {d}" "dclass"="yv" "nomatch" "feature"="avx2" "nodecode" {
+  ret <4 x i64> %n
+}
+
+define <4 x i64> @mul.4xi64(<4 x i64> "reg"="yv" %a, <4 x i64> "reg"="yv" %b) "recipe"="mul.4xi64.expand" "feature"="avx2" {
+  %r = mul <4 x i64> %a, %b
+  ret <4 x i64> %r
+}
+
+define <4 x i64> @mul.4xi64.expand(<4 x i64> %a, <4 x i64> %b) {
+  %h = call <4 x i64> @VPSRLQi.4xi64(<4 x i64> %a, i64 32)
+  %g = call <4 x i64> @VPSRLQi.4xi64(<4 x i64> %b, i64 32)
+  %p = call <4 x i64> @VPMULUDQ(<4 x i64> %a, <4 x i64> %b)
+  %q = call <4 x i64> @VPMULUDQ(<4 x i64> %h, <4 x i64> %b)
+  %u = call <4 x i64> @VPMULUDQ(<4 x i64> %a, <4 x i64> %g)
+  %s = call <4 x i64> @VPADDQ.4xi64(<4 x i64> %q, <4 x i64> %u)
+  %t = call <4 x i64> @VPSLLQi.4xi64(<4 x i64> %s, i64 32)
+  %r = call <4 x i64> @VPADDQ.4xi64(<4 x i64> %p, <4 x i64> %t)
+  ret <4 x i64> %r
+}
+
 define <2 x i64> @MOVAPSrr(<2 x i64> "reg"="x" %n) "enc"="rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)" "asm"="movaps {n}, {d}" "copy"="x" "dclass"="x" "nodecode" {
   ret <2 x i64> %n
 }
