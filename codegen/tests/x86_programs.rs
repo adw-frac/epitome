@@ -144,8 +144,12 @@ fn check_program(t: &Target, dir: &Path, tmp: &Path, name: &str) -> Result<(), S
                 .args(["-lm", "-latomic", "-o"])
                 .arg(&exe))?;
         } else {
+            // (The main as the code it calls: 256-bit vectors are passed in
+            // ymm registers only with AVX.)
+            let main_flags: &[&str] = if *config == "avx2" { &["-mavx2", "-mfma"] } else { &[] };
             run(Command::new("clang")
                 .args(["-O2", "-no-pie"])
+                .args(main_flags)
                 .arg(&obj)
                 .arg(&main)
                 .args(["-lm", "-latomic", "-o"])

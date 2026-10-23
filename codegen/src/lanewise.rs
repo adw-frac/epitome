@@ -215,8 +215,16 @@ impl Lanes {
             return match k.kind {
                 ConstKind::Vector(es) => es.iter().map(|&e| lane(cx, Some(e))).collect(),
                 ConstKind::Splat(e) => (0..len).map(|_| lane(cx, Some(e))).collect(),
+                // (Zero lanes as numbers: selection reads an integer's
+                // zeroinitializer as no constant.)
                 ConstKind::Zero => {
-                    let z = Value::Const(cx.m.consts.intern(Constant { ty: ety, kind: ConstKind::Zero }));
+                    let z = match cx.m.types.get(ety) {
+                        Type::Int(_) => cx.int(ety, 0),
+                        Type::Float | Type::Double | Type::Half => {
+                            Value::Const(cx.m.consts.intern(Constant { ty: ety, kind: ConstKind::Float(0) }))
+                        }
+                        _ => Value::Const(cx.m.consts.intern(Constant { ty: ety, kind: ConstKind::Zero })),
+                    };
                     vec![z; len as usize]
                 }
                 _ => (0..len).map(|_| lane(cx, None)).collect(),

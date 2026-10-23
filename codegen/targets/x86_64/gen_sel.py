@@ -431,15 +431,13 @@ def recipes():
         out.append(f'define {ty} @select.{w}.expand(i1 %c, {ty} %a, {ty} %b) {{\n'
                    f'  %f = call %flags @TESTB1(i1 %c)\n  %ne = call i1 @cc.ne(%flags %f)\n'
                    f'  %r = call {ty} @{cm}(i1 %ne, {ty} %a, {ty} %b)\n  ret {ty} %r\n}}\n')
-    # A boolean sign-extended: 0 or -1, its zero-extension negated.
+    # A boolean sign-extended: 0 or -1, its lowest bit negated (what is
+    # above it is undefined: a truncation leaves it).
     for ty in ('i8', 'i16', 'i32', 'i64'):
         w = 1 if ty == 'i64' else 0
-        d = '{d}' if ty == 'i64' else '{d}'
-        entry(ty, f'ZEXT1to{ty}', ['i1 "reg"="r32" %n'],
-              '{ if(n<4) rex(0, d, 0, n) | 00001111 | 10110110 | rr(d, n) ; '
-              '0100 0 R:1=d>>3 0 B:1=n>>3 | 00001111 | 10110110 | rr(d, n) }',
-              'movzbl {n:r8}, {d:r32}', [f'%r = zext i1 %n to {ty}', f'ret {ty} %r'], ' "nomatch"' +
-              (' "dclass"="r32"' if ty in ('i8', 'i16') else ''))
+        entry(ty, f'ZEXT1to{ty}', ['i1 "reg"="r32" "tied" %n'], 'rex(0, 0, 0, d) | 10000011 | rr(4, d) | 00000001',
+              'andl $1, {d:r32}', [f'%r = zext i1 %n to {ty}', f'ret {ty} %r'], ' "clobbers"="flags" "nomatch"' +
+              (' "dclass"="r32"' if ty in ('i8', 'i16') else ' "dclass"="r64"' if w else ''))
         entry(ty, f'NEGx{ty}', [f'{ty} "reg"="{"r64" if w else "r32"}" "tied" %n'],
               f'rex({w}, 0, 0, d) | 11110111 | rr(3, d)', f'neg{"q" if w else "l"} {{d}}',
               [f'%r = sub {ty} 0, %n', f'ret {ty} %r'], ' "clobbers"="flags" "nomatch"' +
@@ -1364,6 +1362,62 @@ def mul64():
                ''.join(f'  {l}\n' for l in body('', '<4 x i64>', 'VPMULUDQ', 'VPSRLQi.4xi64', 'VPSLLQi.4xi64', 'VPADDQ.4xi64')) + '}\n')
 
 
+def more_compares():
+    """AVX2's other comparisons (as SSE2's: swapped, inverted, unsigned by
+    the greatest or with signs flipped), and absolute values (AVX2's
+    vpabs; SSE2's of the sign spread: (x ^ s) - s)."""
+    tag = lambda ty: ty.strip('<>').replace(' x ', 'x')
+    feat = ' "feature"="avx2"'
+    enc, _ = xed('vpcmpeqd {o0}, {o1}, {o2}', ('y', 'y', 'y'))
+    entry('<4 x i64>', 'VALLONES', [], renamed(enc, {'o0': 'd', 'o1': 'd', 'o2': 'd'}), 'vpcmpeqd {d}, {d}, {d}',
+          ['ret <4 x i64> splat (i64 -1)'], ' "dclass"="yv" "nomatch"' + feat)
+    def recipe(name, ret, params, body, expand):
+        ps = ', '.join(f'{t} "reg"="yv" %{n}' for t, n in params)
+        plain = ', '.join(f'{t} %{n}' for t, n in params)
+        out.append(f'define {ret} @{name}({ps}) "recipe"="{name}.expand"{feat} {{\n' + ''.join(f'  {l}\n' for l in body) + '}\n')
+        out.append(f'define {ret} @{name}.expand({plain}) {{\n' + ''.join(f'  {l}\n' for l in expand) + '}\n')
+    for ty, sfx, eb, n in [('<32 x i8>', 'b', 8, 32), ('<16 x i16>', 'w', 16, 16), ('<8 x i32>', 'd', 32, 8), ('<4 x i64>', 'q', 64, 4)]:
+        T = tag(ty)
+        S = sfx.upper()
+        M = f'<{n} x i1>'
+        eq, gt = f'VPCMPEQ{S}.{T}', f'VPCMPGT{S}.{T}'
+        notm = lambda x: [f'%xi = sext {M} {x} to {ty}', '%on = call <4 x i64> @VALLONES()', f'%ot = bitcast <4 x i64> %on to {ty}',
+                          f'%ni = call {ty} @VPXOR.{T}({ty} %xi, {ty} %ot)', f'%r = trunc {ty} %ni to {M}', f'ret {M} %r']
+        p2 = [(ty, 'a'), (ty, 'b')]
+        recipe(f'vslt.{T}', M, p2, [f'%r = icmp slt {ty} %a, %b', f'ret {M} %r'], [f'%r = call {M} @{gt}({ty} %b, {ty} %a)', f'ret {M} %r'])
+        for pred, inner, a, b in [('ne', eq, '%a', '%b'), ('sge', gt, '%b', '%a'), ('sle', gt, '%a', '%b')]:
+            recipe(f'v{pred}.{T}', M, p2, [f'%r = icmp {pred} {ty} %a, %b', f'ret {M} %r'],
+                   [f'%c = call {M} @{inner}({ty} {a}, {ty} {b})'] + notm('%c'))
+        if eb < 64:
+            mx = f'VPMAXU{S}.{T}'
+            for pred, x, y, inv in [('uge', '%a', '%b', False), ('ule', '%b', '%a', False), ('ult', '%a', '%b', True), ('ugt', '%b', '%a', True)]:
+                body = [f'%m = call {ty} @{mx}({ty} {x}, {ty} {y})', f'%c = call {M} @{eq}({ty} %m, {ty} {x})']
+                recipe(f'v{pred}.{T}', M, p2, [f'%r = icmp {pred} {ty} %a, %b', f'ret {M} %r'], body + (notm('%c') if inv else [f'ret {M} %c']))
+        else:
+            for pred, x, y, inv in [('ugt', '%fa', '%fb', False), ('ult', '%fb', '%fa', False), ('ule', '%fa', '%fb', True), ('uge', '%fb', '%fa', True)]:
+                body = ['%o = call <4 x i64> @VALLONES()', '%sg = call <4 x i64> @VPSLLQi.4xi64(<4 x i64> %o, i64 63)',
+                        '%fa = call <4 x i64> @VPXOR.4xi64(<4 x i64> %a, <4 x i64> %sg)',
+                        '%fb = call <4 x i64> @VPXOR.4xi64(<4 x i64> %b, <4 x i64> %sg)', f'%c = call {M} @{gt}({ty} {x}, {ty} {y})']
+                recipe(f'v{pred}.{T}', M, p2, [f'%r = icmp {pred} {ty} %a, %b', f'ret {M} %r'], body + (notm('%c') if inv else [f'ret {M} %c']))
+        if eb < 64:
+            enc, _ = xed(f'vpabs{sfx} {{o0}}, {{o1}}', ('ye', 'ye'))
+            for flag in ('false', 'true'):
+                entry(ty, f'VPABS{S}.{flag}.{T}', [f'{ty} "reg"="yv" %n'], renamed(enc, {'o0': 'n', 'o1': 'd'}), f'vpabs{sfx} {{n}}, {{d}}',
+                      [f'%r = call {ty} @llvm.abs.v{n}i{eb}({ty} %n, i1 {flag})', f'ret {ty} %r'], ' "dclass"="yv"' + feat)
+            out.append(f'declare {ty} @llvm.abs.v{n}i{eb}({ty}, i1)\n')
+    # SSE2's absolute values of 16- and 32-bit lanes.
+    for ty, cls, eb, n, sra, sub, xor in [('<4 x i32>', 'xv', 32, 4, 'PSRADi.4xi32', 'PSUBD.4xi32', 'PXOR.4xi32'),
+                                         ('<8 x i16>', 'xv', 16, 8, 'PSRAWi.8xi16', 'PSUBW.8xi16', 'PXOR.8xi16'),
+                                         ('<2 x i32>', 'xh', 32, 2, 'PSRADi.2xi32', 'PSUBD.2xi32', 'PXOR.2xi32')]:
+        T = tag(ty)
+        out.append(f'declare {ty} @llvm.abs.v{n}i{eb}({ty}, i1)\n')
+        for flag in ('false', 'true'):
+            out.append(f'define {ty} @abs.{flag}.{T}({ty} "reg"="{cls}" %x) "recipe"="abs.{flag}.{T}.expand" {{\n'
+                       f'  %r = call {ty} @llvm.abs.v{n}i{eb}({ty} %x, i1 {flag})\n  ret {ty} %r\n}}\n')
+            out.append(f'define {ty} @abs.{flag}.{T}.expand({ty} %x) {{\n  %s = call {ty} @{sra}({ty} %x, i32 {eb - 1})\n'
+                       f'  %y = call {ty} @{xor}({ty} %x, {ty} %s)\n  %r = call {ty} @{sub}({ty} %y, {ty} %s)\n  ret {ty} %r\n}}\n')
+
+
 def vector_copies():
     """Copies of the vector and mask registers (the register allocator's)."""
     entry('<2 x i64>', 'MOVAPSrr', ['<2 x i64> "reg"="x" %n'], 'rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)',
@@ -1406,6 +1460,7 @@ def main():
     avx2()
     reductions()
     mul64()
+    more_compares()
     vector_copies()
     sys.stdout.write('\n'.join(out))
 

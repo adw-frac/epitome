@@ -1279,7 +1279,7 @@ define ptr @select.p.expand(i1 %c, ptr %a, ptr %b) {
   ret ptr %r
 }
 
-define i8 @ZEXT1toi8(i1 "reg"="r32" %n) "enc"="{ if(n<4) rex(0, d, 0, n) | 00001111 | 10110110 | rr(d, n) ; 0100 0 R:1=d>>3 0 B:1=n>>3 | 00001111 | 10110110 | rr(d, n) }" "asm"="movzbl {n:r8}, {d:r32}" "nomatch" "dclass"="r32" "nodecode" {
+define i8 @ZEXT1toi8(i1 "reg"="r32" "tied" %n) "enc"="rex(0, 0, 0, d) | 10000011 | rr(4, d) | 00000001" "asm"="andl $1, {d:r32}" "clobbers"="flags" "nomatch" "dclass"="r32" "nodecode" {
   %r = zext i1 %n to i8
   ret i8 %r
 }
@@ -1300,7 +1300,7 @@ define i8 @sext.1.i8.expand(i1 %n) {
   ret i8 %r
 }
 
-define i16 @ZEXT1toi16(i1 "reg"="r32" %n) "enc"="{ if(n<4) rex(0, d, 0, n) | 00001111 | 10110110 | rr(d, n) ; 0100 0 R:1=d>>3 0 B:1=n>>3 | 00001111 | 10110110 | rr(d, n) }" "asm"="movzbl {n:r8}, {d:r32}" "nomatch" "dclass"="r32" "nodecode" {
+define i16 @ZEXT1toi16(i1 "reg"="r32" "tied" %n) "enc"="rex(0, 0, 0, d) | 10000011 | rr(4, d) | 00000001" "asm"="andl $1, {d:r32}" "clobbers"="flags" "nomatch" "dclass"="r32" "nodecode" {
   %r = zext i1 %n to i16
   ret i16 %r
 }
@@ -1321,7 +1321,7 @@ define i16 @sext.1.i16.expand(i1 %n) {
   ret i16 %r
 }
 
-define i32 @ZEXT1toi32(i1 "reg"="r32" %n) "enc"="{ if(n<4) rex(0, d, 0, n) | 00001111 | 10110110 | rr(d, n) ; 0100 0 R:1=d>>3 0 B:1=n>>3 | 00001111 | 10110110 | rr(d, n) }" "asm"="movzbl {n:r8}, {d:r32}" "nomatch" "nodecode" {
+define i32 @ZEXT1toi32(i1 "reg"="r32" "tied" %n) "enc"="rex(0, 0, 0, d) | 10000011 | rr(4, d) | 00000001" "asm"="andl $1, {d:r32}" "clobbers"="flags" "nomatch" "nodecode" {
   %r = zext i1 %n to i32
   ret i32 %r
 }
@@ -1342,7 +1342,7 @@ define i32 @sext.1.i32.expand(i1 %n) {
   ret i32 %r
 }
 
-define i64 @ZEXT1toi64(i1 "reg"="r32" %n) "enc"="{ if(n<4) rex(0, d, 0, n) | 00001111 | 10110110 | rr(d, n) ; 0100 0 R:1=d>>3 0 B:1=n>>3 | 00001111 | 10110110 | rr(d, n) }" "asm"="movzbl {n:r8}, {d:r32}" "nomatch" "nodecode" {
+define i64 @ZEXT1toi64(i1 "reg"="r32" "tied" %n) "enc"="rex(0, 0, 0, d) | 10000011 | rr(4, d) | 00000001" "asm"="andl $1, {d:r32}" "clobbers"="flags" "nomatch" "dclass"="r64" "nodecode" {
   %r = zext i1 %n to i64
   ret i64 %r
 }
@@ -6170,6 +6170,572 @@ define <4 x i64> @mul.4xi64.expand(<4 x i64> %a, <4 x i64> %b) {
   %t = call <4 x i64> @VPSLLQi.4xi64(<4 x i64> %s, i64 32)
   %r = call <4 x i64> @VPADDQ.4xi64(<4 x i64> %p, <4 x i64> %t)
   ret <4 x i64> %r
+}
+
+define <4 x i64> @VALLONES() "enc"="{ if(d<8) vex(d, 0, d, 1, 0, d, 1, 1) | 01110110 | 11 reg:3=d&7 rm:3=d&7 ; if(d<8) vex(d, 0, d, 1, 0, d, 1, 1) | 01110110 | 11 reg:3=d&7 rm:3=d&7 ; vex(d, 0, d, 1, 0, d, 1, 1) | 01110110 | 11 reg:3=d&7 rm:3=d&7 ; vex(d, 0, d, 1, 0, d, 1, 1) | 01110110 | 11 reg:3=d&7 rm:3=d&7 }" "asm"="vpcmpeqd {d}, {d}, {d}" "dclass"="yv" "nomatch" "feature"="avx2" "nodecode" {
+  ret <4 x i64> splat (i64 -1)
+}
+
+define <32 x i1> @vslt.32xi8(<32 x i8> "reg"="yv" %a, <32 x i8> "reg"="yv" %b) "recipe"="vslt.32xi8.expand" "feature"="avx2" {
+  %r = icmp slt <32 x i8> %a, %b
+  ret <32 x i1> %r
+}
+
+define <32 x i1> @vslt.32xi8.expand(<32 x i8> %a, <32 x i8> %b) {
+  %r = call <32 x i1> @VPCMPGTB.32xi8(<32 x i8> %b, <32 x i8> %a)
+  ret <32 x i1> %r
+}
+
+define <32 x i1> @vne.32xi8(<32 x i8> "reg"="yv" %a, <32 x i8> "reg"="yv" %b) "recipe"="vne.32xi8.expand" "feature"="avx2" {
+  %r = icmp ne <32 x i8> %a, %b
+  ret <32 x i1> %r
+}
+
+define <32 x i1> @vne.32xi8.expand(<32 x i8> %a, <32 x i8> %b) {
+  %c = call <32 x i1> @VPCMPEQB.32xi8(<32 x i8> %a, <32 x i8> %b)
+  %xi = sext <32 x i1> %c to <32 x i8>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <32 x i8>
+  %ni = call <32 x i8> @VPXOR.32xi8(<32 x i8> %xi, <32 x i8> %ot)
+  %r = trunc <32 x i8> %ni to <32 x i1>
+  ret <32 x i1> %r
+}
+
+define <32 x i1> @vsge.32xi8(<32 x i8> "reg"="yv" %a, <32 x i8> "reg"="yv" %b) "recipe"="vsge.32xi8.expand" "feature"="avx2" {
+  %r = icmp sge <32 x i8> %a, %b
+  ret <32 x i1> %r
+}
+
+define <32 x i1> @vsge.32xi8.expand(<32 x i8> %a, <32 x i8> %b) {
+  %c = call <32 x i1> @VPCMPGTB.32xi8(<32 x i8> %b, <32 x i8> %a)
+  %xi = sext <32 x i1> %c to <32 x i8>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <32 x i8>
+  %ni = call <32 x i8> @VPXOR.32xi8(<32 x i8> %xi, <32 x i8> %ot)
+  %r = trunc <32 x i8> %ni to <32 x i1>
+  ret <32 x i1> %r
+}
+
+define <32 x i1> @vsle.32xi8(<32 x i8> "reg"="yv" %a, <32 x i8> "reg"="yv" %b) "recipe"="vsle.32xi8.expand" "feature"="avx2" {
+  %r = icmp sle <32 x i8> %a, %b
+  ret <32 x i1> %r
+}
+
+define <32 x i1> @vsle.32xi8.expand(<32 x i8> %a, <32 x i8> %b) {
+  %c = call <32 x i1> @VPCMPGTB.32xi8(<32 x i8> %a, <32 x i8> %b)
+  %xi = sext <32 x i1> %c to <32 x i8>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <32 x i8>
+  %ni = call <32 x i8> @VPXOR.32xi8(<32 x i8> %xi, <32 x i8> %ot)
+  %r = trunc <32 x i8> %ni to <32 x i1>
+  ret <32 x i1> %r
+}
+
+define <32 x i1> @vuge.32xi8(<32 x i8> "reg"="yv" %a, <32 x i8> "reg"="yv" %b) "recipe"="vuge.32xi8.expand" "feature"="avx2" {
+  %r = icmp uge <32 x i8> %a, %b
+  ret <32 x i1> %r
+}
+
+define <32 x i1> @vuge.32xi8.expand(<32 x i8> %a, <32 x i8> %b) {
+  %m = call <32 x i8> @VPMAXUB.32xi8(<32 x i8> %a, <32 x i8> %b)
+  %c = call <32 x i1> @VPCMPEQB.32xi8(<32 x i8> %m, <32 x i8> %a)
+  ret <32 x i1> %c
+}
+
+define <32 x i1> @vule.32xi8(<32 x i8> "reg"="yv" %a, <32 x i8> "reg"="yv" %b) "recipe"="vule.32xi8.expand" "feature"="avx2" {
+  %r = icmp ule <32 x i8> %a, %b
+  ret <32 x i1> %r
+}
+
+define <32 x i1> @vule.32xi8.expand(<32 x i8> %a, <32 x i8> %b) {
+  %m = call <32 x i8> @VPMAXUB.32xi8(<32 x i8> %b, <32 x i8> %a)
+  %c = call <32 x i1> @VPCMPEQB.32xi8(<32 x i8> %m, <32 x i8> %b)
+  ret <32 x i1> %c
+}
+
+define <32 x i1> @vult.32xi8(<32 x i8> "reg"="yv" %a, <32 x i8> "reg"="yv" %b) "recipe"="vult.32xi8.expand" "feature"="avx2" {
+  %r = icmp ult <32 x i8> %a, %b
+  ret <32 x i1> %r
+}
+
+define <32 x i1> @vult.32xi8.expand(<32 x i8> %a, <32 x i8> %b) {
+  %m = call <32 x i8> @VPMAXUB.32xi8(<32 x i8> %a, <32 x i8> %b)
+  %c = call <32 x i1> @VPCMPEQB.32xi8(<32 x i8> %m, <32 x i8> %a)
+  %xi = sext <32 x i1> %c to <32 x i8>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <32 x i8>
+  %ni = call <32 x i8> @VPXOR.32xi8(<32 x i8> %xi, <32 x i8> %ot)
+  %r = trunc <32 x i8> %ni to <32 x i1>
+  ret <32 x i1> %r
+}
+
+define <32 x i1> @vugt.32xi8(<32 x i8> "reg"="yv" %a, <32 x i8> "reg"="yv" %b) "recipe"="vugt.32xi8.expand" "feature"="avx2" {
+  %r = icmp ugt <32 x i8> %a, %b
+  ret <32 x i1> %r
+}
+
+define <32 x i1> @vugt.32xi8.expand(<32 x i8> %a, <32 x i8> %b) {
+  %m = call <32 x i8> @VPMAXUB.32xi8(<32 x i8> %b, <32 x i8> %a)
+  %c = call <32 x i1> @VPCMPEQB.32xi8(<32 x i8> %m, <32 x i8> %b)
+  %xi = sext <32 x i1> %c to <32 x i8>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <32 x i8>
+  %ni = call <32 x i8> @VPXOR.32xi8(<32 x i8> %xi, <32 x i8> %ot)
+  %r = trunc <32 x i8> %ni to <32 x i1>
+  ret <32 x i1> %r
+}
+
+define <32 x i8> @VPABSB.false.32xi8(<32 x i8> "reg"="yv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 00011100 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 00011100 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpabsb {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <32 x i8> @llvm.abs.v32i8(<32 x i8> %n, i1 false)
+  ret <32 x i8> %r
+}
+
+define <32 x i8> @VPABSB.true.32xi8(<32 x i8> "reg"="yv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 00011100 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 00011100 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpabsb {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <32 x i8> @llvm.abs.v32i8(<32 x i8> %n, i1 true)
+  ret <32 x i8> %r
+}
+
+declare <32 x i8> @llvm.abs.v32i8(<32 x i8>, i1)
+
+define <16 x i1> @vslt.16xi16(<16 x i16> "reg"="yv" %a, <16 x i16> "reg"="yv" %b) "recipe"="vslt.16xi16.expand" "feature"="avx2" {
+  %r = icmp slt <16 x i16> %a, %b
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @vslt.16xi16.expand(<16 x i16> %a, <16 x i16> %b) {
+  %r = call <16 x i1> @VPCMPGTW.16xi16(<16 x i16> %b, <16 x i16> %a)
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @vne.16xi16(<16 x i16> "reg"="yv" %a, <16 x i16> "reg"="yv" %b) "recipe"="vne.16xi16.expand" "feature"="avx2" {
+  %r = icmp ne <16 x i16> %a, %b
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @vne.16xi16.expand(<16 x i16> %a, <16 x i16> %b) {
+  %c = call <16 x i1> @VPCMPEQW.16xi16(<16 x i16> %a, <16 x i16> %b)
+  %xi = sext <16 x i1> %c to <16 x i16>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <16 x i16>
+  %ni = call <16 x i16> @VPXOR.16xi16(<16 x i16> %xi, <16 x i16> %ot)
+  %r = trunc <16 x i16> %ni to <16 x i1>
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @vsge.16xi16(<16 x i16> "reg"="yv" %a, <16 x i16> "reg"="yv" %b) "recipe"="vsge.16xi16.expand" "feature"="avx2" {
+  %r = icmp sge <16 x i16> %a, %b
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @vsge.16xi16.expand(<16 x i16> %a, <16 x i16> %b) {
+  %c = call <16 x i1> @VPCMPGTW.16xi16(<16 x i16> %b, <16 x i16> %a)
+  %xi = sext <16 x i1> %c to <16 x i16>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <16 x i16>
+  %ni = call <16 x i16> @VPXOR.16xi16(<16 x i16> %xi, <16 x i16> %ot)
+  %r = trunc <16 x i16> %ni to <16 x i1>
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @vsle.16xi16(<16 x i16> "reg"="yv" %a, <16 x i16> "reg"="yv" %b) "recipe"="vsle.16xi16.expand" "feature"="avx2" {
+  %r = icmp sle <16 x i16> %a, %b
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @vsle.16xi16.expand(<16 x i16> %a, <16 x i16> %b) {
+  %c = call <16 x i1> @VPCMPGTW.16xi16(<16 x i16> %a, <16 x i16> %b)
+  %xi = sext <16 x i1> %c to <16 x i16>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <16 x i16>
+  %ni = call <16 x i16> @VPXOR.16xi16(<16 x i16> %xi, <16 x i16> %ot)
+  %r = trunc <16 x i16> %ni to <16 x i1>
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @vuge.16xi16(<16 x i16> "reg"="yv" %a, <16 x i16> "reg"="yv" %b) "recipe"="vuge.16xi16.expand" "feature"="avx2" {
+  %r = icmp uge <16 x i16> %a, %b
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @vuge.16xi16.expand(<16 x i16> %a, <16 x i16> %b) {
+  %m = call <16 x i16> @VPMAXUW.16xi16(<16 x i16> %a, <16 x i16> %b)
+  %c = call <16 x i1> @VPCMPEQW.16xi16(<16 x i16> %m, <16 x i16> %a)
+  ret <16 x i1> %c
+}
+
+define <16 x i1> @vule.16xi16(<16 x i16> "reg"="yv" %a, <16 x i16> "reg"="yv" %b) "recipe"="vule.16xi16.expand" "feature"="avx2" {
+  %r = icmp ule <16 x i16> %a, %b
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @vule.16xi16.expand(<16 x i16> %a, <16 x i16> %b) {
+  %m = call <16 x i16> @VPMAXUW.16xi16(<16 x i16> %b, <16 x i16> %a)
+  %c = call <16 x i1> @VPCMPEQW.16xi16(<16 x i16> %m, <16 x i16> %b)
+  ret <16 x i1> %c
+}
+
+define <16 x i1> @vult.16xi16(<16 x i16> "reg"="yv" %a, <16 x i16> "reg"="yv" %b) "recipe"="vult.16xi16.expand" "feature"="avx2" {
+  %r = icmp ult <16 x i16> %a, %b
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @vult.16xi16.expand(<16 x i16> %a, <16 x i16> %b) {
+  %m = call <16 x i16> @VPMAXUW.16xi16(<16 x i16> %a, <16 x i16> %b)
+  %c = call <16 x i1> @VPCMPEQW.16xi16(<16 x i16> %m, <16 x i16> %a)
+  %xi = sext <16 x i1> %c to <16 x i16>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <16 x i16>
+  %ni = call <16 x i16> @VPXOR.16xi16(<16 x i16> %xi, <16 x i16> %ot)
+  %r = trunc <16 x i16> %ni to <16 x i1>
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @vugt.16xi16(<16 x i16> "reg"="yv" %a, <16 x i16> "reg"="yv" %b) "recipe"="vugt.16xi16.expand" "feature"="avx2" {
+  %r = icmp ugt <16 x i16> %a, %b
+  ret <16 x i1> %r
+}
+
+define <16 x i1> @vugt.16xi16.expand(<16 x i16> %a, <16 x i16> %b) {
+  %m = call <16 x i16> @VPMAXUW.16xi16(<16 x i16> %b, <16 x i16> %a)
+  %c = call <16 x i1> @VPCMPEQW.16xi16(<16 x i16> %m, <16 x i16> %b)
+  %xi = sext <16 x i1> %c to <16 x i16>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <16 x i16>
+  %ni = call <16 x i16> @VPXOR.16xi16(<16 x i16> %xi, <16 x i16> %ot)
+  %r = trunc <16 x i16> %ni to <16 x i1>
+  ret <16 x i1> %r
+}
+
+define <16 x i16> @VPABSW.false.16xi16(<16 x i16> "reg"="yv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 00011101 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 00011101 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpabsw {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <16 x i16> @llvm.abs.v16i16(<16 x i16> %n, i1 false)
+  ret <16 x i16> %r
+}
+
+define <16 x i16> @VPABSW.true.16xi16(<16 x i16> "reg"="yv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 00011101 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 00011101 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpabsw {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <16 x i16> @llvm.abs.v16i16(<16 x i16> %n, i1 true)
+  ret <16 x i16> %r
+}
+
+declare <16 x i16> @llvm.abs.v16i16(<16 x i16>, i1)
+
+define <8 x i1> @vslt.8xi32(<8 x i32> "reg"="yv" %a, <8 x i32> "reg"="yv" %b) "recipe"="vslt.8xi32.expand" "feature"="avx2" {
+  %r = icmp slt <8 x i32> %a, %b
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @vslt.8xi32.expand(<8 x i32> %a, <8 x i32> %b) {
+  %r = call <8 x i1> @VPCMPGTD.8xi32(<8 x i32> %b, <8 x i32> %a)
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @vne.8xi32(<8 x i32> "reg"="yv" %a, <8 x i32> "reg"="yv" %b) "recipe"="vne.8xi32.expand" "feature"="avx2" {
+  %r = icmp ne <8 x i32> %a, %b
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @vne.8xi32.expand(<8 x i32> %a, <8 x i32> %b) {
+  %c = call <8 x i1> @VPCMPEQD.8xi32(<8 x i32> %a, <8 x i32> %b)
+  %xi = sext <8 x i1> %c to <8 x i32>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <8 x i32>
+  %ni = call <8 x i32> @VPXOR.8xi32(<8 x i32> %xi, <8 x i32> %ot)
+  %r = trunc <8 x i32> %ni to <8 x i1>
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @vsge.8xi32(<8 x i32> "reg"="yv" %a, <8 x i32> "reg"="yv" %b) "recipe"="vsge.8xi32.expand" "feature"="avx2" {
+  %r = icmp sge <8 x i32> %a, %b
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @vsge.8xi32.expand(<8 x i32> %a, <8 x i32> %b) {
+  %c = call <8 x i1> @VPCMPGTD.8xi32(<8 x i32> %b, <8 x i32> %a)
+  %xi = sext <8 x i1> %c to <8 x i32>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <8 x i32>
+  %ni = call <8 x i32> @VPXOR.8xi32(<8 x i32> %xi, <8 x i32> %ot)
+  %r = trunc <8 x i32> %ni to <8 x i1>
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @vsle.8xi32(<8 x i32> "reg"="yv" %a, <8 x i32> "reg"="yv" %b) "recipe"="vsle.8xi32.expand" "feature"="avx2" {
+  %r = icmp sle <8 x i32> %a, %b
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @vsle.8xi32.expand(<8 x i32> %a, <8 x i32> %b) {
+  %c = call <8 x i1> @VPCMPGTD.8xi32(<8 x i32> %a, <8 x i32> %b)
+  %xi = sext <8 x i1> %c to <8 x i32>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <8 x i32>
+  %ni = call <8 x i32> @VPXOR.8xi32(<8 x i32> %xi, <8 x i32> %ot)
+  %r = trunc <8 x i32> %ni to <8 x i1>
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @vuge.8xi32(<8 x i32> "reg"="yv" %a, <8 x i32> "reg"="yv" %b) "recipe"="vuge.8xi32.expand" "feature"="avx2" {
+  %r = icmp uge <8 x i32> %a, %b
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @vuge.8xi32.expand(<8 x i32> %a, <8 x i32> %b) {
+  %m = call <8 x i32> @VPMAXUD.8xi32(<8 x i32> %a, <8 x i32> %b)
+  %c = call <8 x i1> @VPCMPEQD.8xi32(<8 x i32> %m, <8 x i32> %a)
+  ret <8 x i1> %c
+}
+
+define <8 x i1> @vule.8xi32(<8 x i32> "reg"="yv" %a, <8 x i32> "reg"="yv" %b) "recipe"="vule.8xi32.expand" "feature"="avx2" {
+  %r = icmp ule <8 x i32> %a, %b
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @vule.8xi32.expand(<8 x i32> %a, <8 x i32> %b) {
+  %m = call <8 x i32> @VPMAXUD.8xi32(<8 x i32> %b, <8 x i32> %a)
+  %c = call <8 x i1> @VPCMPEQD.8xi32(<8 x i32> %m, <8 x i32> %b)
+  ret <8 x i1> %c
+}
+
+define <8 x i1> @vult.8xi32(<8 x i32> "reg"="yv" %a, <8 x i32> "reg"="yv" %b) "recipe"="vult.8xi32.expand" "feature"="avx2" {
+  %r = icmp ult <8 x i32> %a, %b
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @vult.8xi32.expand(<8 x i32> %a, <8 x i32> %b) {
+  %m = call <8 x i32> @VPMAXUD.8xi32(<8 x i32> %a, <8 x i32> %b)
+  %c = call <8 x i1> @VPCMPEQD.8xi32(<8 x i32> %m, <8 x i32> %a)
+  %xi = sext <8 x i1> %c to <8 x i32>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <8 x i32>
+  %ni = call <8 x i32> @VPXOR.8xi32(<8 x i32> %xi, <8 x i32> %ot)
+  %r = trunc <8 x i32> %ni to <8 x i1>
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @vugt.8xi32(<8 x i32> "reg"="yv" %a, <8 x i32> "reg"="yv" %b) "recipe"="vugt.8xi32.expand" "feature"="avx2" {
+  %r = icmp ugt <8 x i32> %a, %b
+  ret <8 x i1> %r
+}
+
+define <8 x i1> @vugt.8xi32.expand(<8 x i32> %a, <8 x i32> %b) {
+  %m = call <8 x i32> @VPMAXUD.8xi32(<8 x i32> %b, <8 x i32> %a)
+  %c = call <8 x i1> @VPCMPEQD.8xi32(<8 x i32> %m, <8 x i32> %b)
+  %xi = sext <8 x i1> %c to <8 x i32>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <8 x i32>
+  %ni = call <8 x i32> @VPXOR.8xi32(<8 x i32> %xi, <8 x i32> %ot)
+  %r = trunc <8 x i32> %ni to <8 x i1>
+  ret <8 x i1> %r
+}
+
+define <8 x i32> @VPABSD.false.8xi32(<8 x i32> "reg"="yv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 00011110 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 00011110 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpabsd {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <8 x i32> @llvm.abs.v8i32(<8 x i32> %n, i1 false)
+  ret <8 x i32> %r
+}
+
+define <8 x i32> @VPABSD.true.8xi32(<8 x i32> "reg"="yv" %n) "enc"="{ vex(d, 0, n, 2, 0, 0, 1, 1) | 00011110 | 11 reg:3=d&7 rm:3=n&7 ; evexr(d, n, 2, 0, 0, 1, 1, 0, 0, 0) | 00011110 | 11 reg:3=d&7 rm:3=n&7 }" "asm"="vpabsd {n}, {d}" "dclass"="yv" "feature"="avx2" "nodecode" {
+  %r = call <8 x i32> @llvm.abs.v8i32(<8 x i32> %n, i1 true)
+  ret <8 x i32> %r
+}
+
+declare <8 x i32> @llvm.abs.v8i32(<8 x i32>, i1)
+
+define <4 x i1> @vslt.4xi64(<4 x i64> "reg"="yv" %a, <4 x i64> "reg"="yv" %b) "recipe"="vslt.4xi64.expand" "feature"="avx2" {
+  %r = icmp slt <4 x i64> %a, %b
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @vslt.4xi64.expand(<4 x i64> %a, <4 x i64> %b) {
+  %r = call <4 x i1> @VPCMPGTQ.4xi64(<4 x i64> %b, <4 x i64> %a)
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @vne.4xi64(<4 x i64> "reg"="yv" %a, <4 x i64> "reg"="yv" %b) "recipe"="vne.4xi64.expand" "feature"="avx2" {
+  %r = icmp ne <4 x i64> %a, %b
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @vne.4xi64.expand(<4 x i64> %a, <4 x i64> %b) {
+  %c = call <4 x i1> @VPCMPEQQ.4xi64(<4 x i64> %a, <4 x i64> %b)
+  %xi = sext <4 x i1> %c to <4 x i64>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <4 x i64>
+  %ni = call <4 x i64> @VPXOR.4xi64(<4 x i64> %xi, <4 x i64> %ot)
+  %r = trunc <4 x i64> %ni to <4 x i1>
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @vsge.4xi64(<4 x i64> "reg"="yv" %a, <4 x i64> "reg"="yv" %b) "recipe"="vsge.4xi64.expand" "feature"="avx2" {
+  %r = icmp sge <4 x i64> %a, %b
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @vsge.4xi64.expand(<4 x i64> %a, <4 x i64> %b) {
+  %c = call <4 x i1> @VPCMPGTQ.4xi64(<4 x i64> %b, <4 x i64> %a)
+  %xi = sext <4 x i1> %c to <4 x i64>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <4 x i64>
+  %ni = call <4 x i64> @VPXOR.4xi64(<4 x i64> %xi, <4 x i64> %ot)
+  %r = trunc <4 x i64> %ni to <4 x i1>
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @vsle.4xi64(<4 x i64> "reg"="yv" %a, <4 x i64> "reg"="yv" %b) "recipe"="vsle.4xi64.expand" "feature"="avx2" {
+  %r = icmp sle <4 x i64> %a, %b
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @vsle.4xi64.expand(<4 x i64> %a, <4 x i64> %b) {
+  %c = call <4 x i1> @VPCMPGTQ.4xi64(<4 x i64> %a, <4 x i64> %b)
+  %xi = sext <4 x i1> %c to <4 x i64>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <4 x i64>
+  %ni = call <4 x i64> @VPXOR.4xi64(<4 x i64> %xi, <4 x i64> %ot)
+  %r = trunc <4 x i64> %ni to <4 x i1>
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @vugt.4xi64(<4 x i64> "reg"="yv" %a, <4 x i64> "reg"="yv" %b) "recipe"="vugt.4xi64.expand" "feature"="avx2" {
+  %r = icmp ugt <4 x i64> %a, %b
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @vugt.4xi64.expand(<4 x i64> %a, <4 x i64> %b) {
+  %o = call <4 x i64> @VALLONES()
+  %sg = call <4 x i64> @VPSLLQi.4xi64(<4 x i64> %o, i64 63)
+  %fa = call <4 x i64> @VPXOR.4xi64(<4 x i64> %a, <4 x i64> %sg)
+  %fb = call <4 x i64> @VPXOR.4xi64(<4 x i64> %b, <4 x i64> %sg)
+  %c = call <4 x i1> @VPCMPGTQ.4xi64(<4 x i64> %fa, <4 x i64> %fb)
+  ret <4 x i1> %c
+}
+
+define <4 x i1> @vult.4xi64(<4 x i64> "reg"="yv" %a, <4 x i64> "reg"="yv" %b) "recipe"="vult.4xi64.expand" "feature"="avx2" {
+  %r = icmp ult <4 x i64> %a, %b
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @vult.4xi64.expand(<4 x i64> %a, <4 x i64> %b) {
+  %o = call <4 x i64> @VALLONES()
+  %sg = call <4 x i64> @VPSLLQi.4xi64(<4 x i64> %o, i64 63)
+  %fa = call <4 x i64> @VPXOR.4xi64(<4 x i64> %a, <4 x i64> %sg)
+  %fb = call <4 x i64> @VPXOR.4xi64(<4 x i64> %b, <4 x i64> %sg)
+  %c = call <4 x i1> @VPCMPGTQ.4xi64(<4 x i64> %fb, <4 x i64> %fa)
+  ret <4 x i1> %c
+}
+
+define <4 x i1> @vule.4xi64(<4 x i64> "reg"="yv" %a, <4 x i64> "reg"="yv" %b) "recipe"="vule.4xi64.expand" "feature"="avx2" {
+  %r = icmp ule <4 x i64> %a, %b
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @vule.4xi64.expand(<4 x i64> %a, <4 x i64> %b) {
+  %o = call <4 x i64> @VALLONES()
+  %sg = call <4 x i64> @VPSLLQi.4xi64(<4 x i64> %o, i64 63)
+  %fa = call <4 x i64> @VPXOR.4xi64(<4 x i64> %a, <4 x i64> %sg)
+  %fb = call <4 x i64> @VPXOR.4xi64(<4 x i64> %b, <4 x i64> %sg)
+  %c = call <4 x i1> @VPCMPGTQ.4xi64(<4 x i64> %fa, <4 x i64> %fb)
+  %xi = sext <4 x i1> %c to <4 x i64>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <4 x i64>
+  %ni = call <4 x i64> @VPXOR.4xi64(<4 x i64> %xi, <4 x i64> %ot)
+  %r = trunc <4 x i64> %ni to <4 x i1>
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @vuge.4xi64(<4 x i64> "reg"="yv" %a, <4 x i64> "reg"="yv" %b) "recipe"="vuge.4xi64.expand" "feature"="avx2" {
+  %r = icmp uge <4 x i64> %a, %b
+  ret <4 x i1> %r
+}
+
+define <4 x i1> @vuge.4xi64.expand(<4 x i64> %a, <4 x i64> %b) {
+  %o = call <4 x i64> @VALLONES()
+  %sg = call <4 x i64> @VPSLLQi.4xi64(<4 x i64> %o, i64 63)
+  %fa = call <4 x i64> @VPXOR.4xi64(<4 x i64> %a, <4 x i64> %sg)
+  %fb = call <4 x i64> @VPXOR.4xi64(<4 x i64> %b, <4 x i64> %sg)
+  %c = call <4 x i1> @VPCMPGTQ.4xi64(<4 x i64> %fb, <4 x i64> %fa)
+  %xi = sext <4 x i1> %c to <4 x i64>
+  %on = call <4 x i64> @VALLONES()
+  %ot = bitcast <4 x i64> %on to <4 x i64>
+  %ni = call <4 x i64> @VPXOR.4xi64(<4 x i64> %xi, <4 x i64> %ot)
+  %r = trunc <4 x i64> %ni to <4 x i1>
+  ret <4 x i1> %r
+}
+
+declare <4 x i32> @llvm.abs.v4i32(<4 x i32>, i1)
+
+define <4 x i32> @abs.false.4xi32(<4 x i32> "reg"="xv" %x) "recipe"="abs.false.4xi32.expand" {
+  %r = call <4 x i32> @llvm.abs.v4i32(<4 x i32> %x, i1 false)
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @abs.false.4xi32.expand(<4 x i32> %x) {
+  %s = call <4 x i32> @PSRADi.4xi32(<4 x i32> %x, i32 31)
+  %y = call <4 x i32> @PXOR.4xi32(<4 x i32> %x, <4 x i32> %s)
+  %r = call <4 x i32> @PSUBD.4xi32(<4 x i32> %y, <4 x i32> %s)
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @abs.true.4xi32(<4 x i32> "reg"="xv" %x) "recipe"="abs.true.4xi32.expand" {
+  %r = call <4 x i32> @llvm.abs.v4i32(<4 x i32> %x, i1 true)
+  ret <4 x i32> %r
+}
+
+define <4 x i32> @abs.true.4xi32.expand(<4 x i32> %x) {
+  %s = call <4 x i32> @PSRADi.4xi32(<4 x i32> %x, i32 31)
+  %y = call <4 x i32> @PXOR.4xi32(<4 x i32> %x, <4 x i32> %s)
+  %r = call <4 x i32> @PSUBD.4xi32(<4 x i32> %y, <4 x i32> %s)
+  ret <4 x i32> %r
+}
+
+declare <8 x i16> @llvm.abs.v8i16(<8 x i16>, i1)
+
+define <8 x i16> @abs.false.8xi16(<8 x i16> "reg"="xv" %x) "recipe"="abs.false.8xi16.expand" {
+  %r = call <8 x i16> @llvm.abs.v8i16(<8 x i16> %x, i1 false)
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @abs.false.8xi16.expand(<8 x i16> %x) {
+  %s = call <8 x i16> @PSRAWi.8xi16(<8 x i16> %x, i32 15)
+  %y = call <8 x i16> @PXOR.8xi16(<8 x i16> %x, <8 x i16> %s)
+  %r = call <8 x i16> @PSUBW.8xi16(<8 x i16> %y, <8 x i16> %s)
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @abs.true.8xi16(<8 x i16> "reg"="xv" %x) "recipe"="abs.true.8xi16.expand" {
+  %r = call <8 x i16> @llvm.abs.v8i16(<8 x i16> %x, i1 true)
+  ret <8 x i16> %r
+}
+
+define <8 x i16> @abs.true.8xi16.expand(<8 x i16> %x) {
+  %s = call <8 x i16> @PSRAWi.8xi16(<8 x i16> %x, i32 15)
+  %y = call <8 x i16> @PXOR.8xi16(<8 x i16> %x, <8 x i16> %s)
+  %r = call <8 x i16> @PSUBW.8xi16(<8 x i16> %y, <8 x i16> %s)
+  ret <8 x i16> %r
+}
+
+declare <2 x i32> @llvm.abs.v2i32(<2 x i32>, i1)
+
+define <2 x i32> @abs.false.2xi32(<2 x i32> "reg"="xh" %x) "recipe"="abs.false.2xi32.expand" {
+  %r = call <2 x i32> @llvm.abs.v2i32(<2 x i32> %x, i1 false)
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @abs.false.2xi32.expand(<2 x i32> %x) {
+  %s = call <2 x i32> @PSRADi.2xi32(<2 x i32> %x, i32 31)
+  %y = call <2 x i32> @PXOR.2xi32(<2 x i32> %x, <2 x i32> %s)
+  %r = call <2 x i32> @PSUBD.2xi32(<2 x i32> %y, <2 x i32> %s)
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @abs.true.2xi32(<2 x i32> "reg"="xh" %x) "recipe"="abs.true.2xi32.expand" {
+  %r = call <2 x i32> @llvm.abs.v2i32(<2 x i32> %x, i1 true)
+  ret <2 x i32> %r
+}
+
+define <2 x i32> @abs.true.2xi32.expand(<2 x i32> %x) {
+  %s = call <2 x i32> @PSRADi.2xi32(<2 x i32> %x, i32 31)
+  %y = call <2 x i32> @PXOR.2xi32(<2 x i32> %x, <2 x i32> %s)
+  %r = call <2 x i32> @PSUBD.2xi32(<2 x i32> %y, <2 x i32> %s)
+  ret <2 x i32> %r
 }
 
 define <2 x i64> @MOVAPSrr(<2 x i64> "reg"="x" %n) "enc"="rex(0, d, 0, n) | 00001111 | 00101000 | rr(d, n)" "asm"="movaps {n}, {d}" "copy"="x" "dclass"="x" "nodecode" {
