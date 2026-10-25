@@ -86,14 +86,14 @@ W = 'vector<16xi32>'
 H = 'vector<8xi32>'
 
 
-def matmul_bf16(rows):
+def matmul_bf16(rows, zeroed=False):
     """C[rows, n] += A[rows, k] B[k, n], B packed as BF16 pairs in panels
     of 64 columns (k/2 rows of 64 words each). A's rows are rounded to
     BF16 into at first, a row of k/2 pairs each; then, for each panel, the
     rows x 64 block of C is in 4 rows registers while each row of pairs
     of the panel is multiplied in: four vectors of B, and a pair of A
     broadcast for each row, vdpbf16ps adding both products of a pair."""
-    name = f'__epitome_avx512_matmul_bf16_r{rows}'
+    name = f'__epitome_avx512_matmul_bf16_r{rows}' + ('_z' if zeroed else '')
     b = Body()
     zero, one = b.index(0), b.index(1)
     ki = b.op('k', 'arith.index_cast %k : i64 to index')
@@ -139,7 +139,12 @@ def matmul_bf16(rows):
         def block():
             bases = [b.gep(cr, j64) for cr in crs]
             return [b.gep(base, b.const(16 * q)) if q else base for base in bases for q in range(4)]
-        acc = [b.load(p, F) for p in block()]
+        # C's block, or zeros when C starts zeroed (and is not read).
+        if zeroed:
+            z = b.op('z', f'arith.constant dense<0.000000e+00> : {F}')
+            acc = [z] * (4 * rows)
+        else:
+            acc = [b.load(p, F) for p in block()]
         def step(p, acc):
             p64 = b.cast(p)
             # (A panel's rows are 64 words apart: ldb is 64.)
@@ -165,11 +170,11 @@ def matmul_bf16(rows):
               f'    iterator_types = ["parallel", "parallel", "reduction"],\n'
               f'    body = ["arith.mulf", "arith.addf"],\n'
               f'    tile = array<i64: {rows}, 64>, whole_rows, pack_b = 64, transpose_a,\n'
-              f'    function = @{name}}}> : () -> ()\n\n')
+              f'    function = @{name}, zeroed = @{name}_z}}> : () -> ()\n\n')
     head = (f'func.func private @{name}(%c: !llvm.ptr, %ldc: i64, %a: !llvm.ptr, %lda: i64, %at: !llvm.ptr, '
             f'%b: !llvm.ptr, %ldb: i64, %k: i64, %n: i64, %panel: i64) attributes {{llvm.no_inline, '
             f'llvm.passthrough = [["target-features", "{FEATURES}"]]}} {{\n')
-    return kernel + head + '\n'.join(b.lines) + '\n}\n'
+    return ('' if zeroed else kernel) + head + '\n'.join(b.lines) + '\n}\n'
 
 
 def main():
@@ -186,12 +191,12 @@ def main():
 // of a word of B into each f32 lane of C. The kernels are the same but for
 // how many rows of C they keep in registers: four (16 vectors of the 32),
 // then one for the rows left over. The functions alone use AVX-512
-// ("target-features"), so the rest of a program needs only AVX2.
+// ("target-features"), so the rest of a program needs only AVX2. Each has
+// a twin for C that starts zeroed (`zeroed`): its sums start at zero
+// rather than at C, which is then not read.
 
 """)
-    sys.stdout.write(matmul_bf16(4))
-    sys.stdout.write('\n')
-    sys.stdout.write(matmul_bf16(1))
+    sys.stdout.write('\n'.join(matmul_bf16(rows, zeroed) for rows in (4, 1) for zeroed in (False, True)))
 
 
 main()

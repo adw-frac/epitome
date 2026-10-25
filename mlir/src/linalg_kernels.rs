@@ -50,6 +50,7 @@ pub fn run(src: &Module, kernels: &str) -> Result<Module, String> {
         resources: src.resources(),
         packed: HashMap::new(),
         blobs: Vec::new(),
+        zero: None,
     };
     for top in src.top_ops().collect::<Vec<_>>() {
         if src.op_name(top) != "builtin.module" {
@@ -99,6 +100,9 @@ struct Cx<'a> {
     /// format), and the new blobs.
     packed: HashMap<(String, u64, String), String>,
     blobs: Vec<Item>,
+    /// For the operation being lowered: the zero its output was just filled
+    /// with, the fill left out, for the kernels to do or redo.
+    zero: Option<ValueId>,
 }
 
 /// Removes `memref.get_global`s whose result nothing uses, then the
@@ -178,6 +182,9 @@ struct Kernel {
     /// B must be a constant, which the pass stores in this format (`bf16`)
     /// in panels of `pack_b` columns.
     weights: Option<String>,
+    /// The function's twin for C that starts zeroed: its sums start at
+    /// zero, and C is not read.
+    zeroed: Option<String>,
 }
 
 fn load(name: &str) -> Result<&'static Set, String> {
@@ -245,6 +252,10 @@ fn load(name: &str) -> Result<&'static Set, String> {
             pack_b: m.op_attr(op, "pack_b").and_then(|a| m.int_of(a)).map(|p| p as u64),
             transpose_a: m.op_attr(op, "transpose_a").is_some(),
             weights: m.op_attr(op, "weights").and_then(|a| m.string_of(a)),
+            zeroed: match m.op_attr(op, "zeroed").map(|a| m.attr(a)) {
+                Some(Attr::SymbolRef(p)) => Some(p[0].clone()),
+                _ => None,
+            },
         });
     }
     let set: &'static Set = Box::leak(Box::new(Set { m, kernels }));
@@ -279,34 +290,89 @@ fn func(
             for (&a, &n) in src.blocks[b.index()].args.iter().zip(&out.blocks[nb.index()].args.clone()) {
                 map.insert(a, n);
             }
-            for &op in &src.blocks[b.index()].ops {
-                // The kernels that compute it, in the order of the file.
-                let ks: Vec<&Kernel> = if src.op_name(op) == "linalg.generic" {
-                    set.kernels
-                        .iter()
-                        .filter(|k| k.weights.is_none() || k.weights == cx.weights)
-                        .filter(|k| matches(src, op, &set.m, k))
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+            let weights = cx.weights.clone();
+            let kernels_for = |op: OpId| -> Vec<&Kernel> {
+                if src.op_name(op) != "linalg.generic" {
+                    return Vec::new();
+                }
+                set.kernels
+                    .iter()
+                    .filter(|k| k.weights.is_none() || k.weights == weights)
+                    .filter(|k| matches(src, op, &set.m, k))
+                    .collect()
+            };
+            let ops = &src.blocks[b.index()].ops;
+            // A fill of zeros into a matrix product's output just before it,
+            // left for the product's lowering: a kernel whose sums start at
+            // zero makes it unneeded.
+            let mut deferred: Option<OpId> = None;
+            for (i, &op) in ops.iter().enumerate() {
+                if let Some(&next) = ops.get(i + 1)
+                    && zero_fill(src, op).is_some_and(|mem| src.ops[next.index()].operands.get(2) == Some(&mem))
+                    && kernels_for(next).first().is_some_and(|k| !k.batch)
+                {
+                    deferred = Some(op);
+                    continue;
+                }
+                let ks = kernels_for(op);
+                let fill = deferred.take();
                 let done = match ks.first() {
                     Some(k) if k.batch => batched(src, op, out, nb, parent, cx, &ks, map)?,
                     Some(_) => {
                         let o = &src.ops[op.index()];
                         let operands = [o.operands[0], o.operands[1], o.operands[2]].map(|v| map[&v]);
                         let props = dict(src, o.properties);
-                        tiles(src, op, operands, &props, out, nb, parent, cx, &ks, map)?
+                        cx.zero = fill.map(|f| map[&src.ops[f.index()].operands[0]]);
+                        let done = tiles(src, op, operands, &props, out, nb, parent, cx, &ks, map)?;
+                        if done && cx.zero.is_some() {
+                            return Err("a fill left out and not done".into());
+                        }
+                        cx.zero = None;
+                        done
                     }
                     None => false,
                 };
                 if !done {
+                    if let Some(f) = fill {
+                        out.clone_op(src, f, Some(nb), map)?;
+                    }
                     out.clone_op(src, op, Some(nb), map)?;
                 }
             }
         }
     }
     Ok(())
+}
+
+/// The buffer `op` fills, if it is a `linalg.fill` of +0.0.
+fn zero_fill(src: &Module, op: OpId) -> Option<ValueId> {
+    if src.op_name(op) != "linalg.fill" {
+        return None;
+    }
+    let [value, mem] = src.ops[op.index()].operands[..] else { return None };
+    let ValueDef::Result { op: c, .. } = src.values[value.index()].def else { return None };
+    if src.op_name(c) != "arith.constant" {
+        return None;
+    }
+    match src.op_attr(c, "value").map(|a| src.attr(a)) {
+        Some(Attr::Float { text, .. }) if text.parse::<f64>().is_ok_and(|v| v.to_bits() == 0) => Some(mem),
+        _ => None,
+    }
+}
+
+/// `linalg.fill` of `value` into `mem`, at the end of `block`.
+fn fill(out: &mut Module, block: BlockId, value: ValueId, mem: ValueId) {
+    let elem = out.value_type(value);
+    let segments = out.dense_array_attr("i32", &[1, 1]);
+    let f = OpSpec::new("linalg.fill")
+        .operands(&[value, mem])
+        .prop("operandSegmentSizes", segments)
+        .regions(1)
+        .build(out, Some(block));
+    let region = out.region_of(f, 0);
+    let body = out.add_block(region, &[elem, elem]);
+    let x = out.blocks[body.index()].args[0];
+    OpSpec::new("linalg.yield").operands(&[x]).build(out, Some(body));
 }
 
 /// Whether `op` is the `linalg.generic` kernel `k` computes: the same maps,
@@ -504,24 +570,39 @@ fn tiles(
         return Ok(false);
     }
 
+    // A fill of zeros left out for this product: the kernel's twin whose
+    // sums start at zero, and fills of only what loops do; or the fill.
+    let zeroed = match (cx.zero.take(), &k.zeroed) {
+        (Some(z), Some(_)) if k.whole_rows => Some(z),
+        (Some(z), _) => {
+            fill(out, block, z, c);
+            None
+        }
+        (None, _) => None,
+    };
+    let function = match (&zeroed, &k.zeroed) {
+        (Some(_), Some(z)) => z.clone(),
+        _ => k.function.clone(),
+    };
+
     // The kernel's function, once in the module.
-    let fname = match cx.imported.get(&k.function) {
+    let fname = match cx.imported.get(&function) {
         Some(n) => n.clone(),
         None => {
             let f = set
                 .m
                 .top_ops()
                 .find(|&f| {
-                    set.m.op_attr(f, "sym_name").and_then(|a| set.m.string_of(a)).as_deref() == Some(&k.function)
+                    set.m.op_attr(f, "sym_name").and_then(|a| set.m.string_of(a)).as_deref() == Some(&function)
                 })
-                .ok_or_else(|| format!("no function @{} in the kernels", k.function))?;
+                .ok_or_else(|| format!("no function @{function} in the kernels"))?;
             out.import_op(&set.m, f, Some(module_block), &mut HashMap::new())?;
             // Before the functions that call it, as upstream places them.
             let ops = &mut out.blocks[module_block.index()].ops;
             let new = ops.pop().unwrap();
             ops.insert(0, new);
-            cx.imported.insert(k.function.clone(), k.function.clone());
-            k.function.clone()
+            cx.imported.insert(function.clone(), function.clone());
+            function.clone()
         }
     };
 
@@ -677,9 +758,9 @@ fn tiles(
         OpSpec::new("func.call").operands(&args).prop("callee", callee).build(out, Some(ob));
         OpSpec::new("scf.yield").build(out, Some(ob));
         if nk < n {
-            edge_columns(src, op, [a, b, c], props, out, block, map, full, nk)?;
+            edge_columns(src, op, [a, b, c], props, out, block, map, full, nk, zeroed)?;
         }
-        return rest_rows(src, op, [a, b, c], props, out, block, module_block, cx, &ks[ki + 1..], map, full, at)
+        return rest_rows(src, op, [a, b, c], props, out, block, module_block, cx, &ks[ki + 1..], map, full, at, zeroed)
             .map(|()| true);
     }
     let inner = OpSpec::new("scf.for").operands(&[zero, nend, cols]).regions(1).build(out, Some(ob));
@@ -710,7 +791,7 @@ fn tiles(
     OpSpec::new("func.call").operands(&args).prop("callee", callee).build(out, Some(ib));
     OpSpec::new("scf.yield").build(out, Some(ib));
 
-    rest_rows(src, op, [a, b, c], props, out, block, module_block, cx, &ks[ki + 1..], map, full, at)?;
+    rest_rows(src, op, [a, b, c], props, out, block, module_block, cx, &ks[ki + 1..], map, full, at, zeroed)?;
     Ok(true)
 }
 
@@ -727,6 +808,7 @@ fn edge_columns(
     map: &mut HashMap<ValueId, ValueId>,
     rows: u64,
     from: u64,
+    zero: Option<ValueId>,
 ) -> Result<(), String> {
     let (sa, elem) = out.shaped(out.value_type(a)).ok_or("an operand of unknown shape")?;
     let (sb, _) = out.shaped(out.value_type(b)).ok_or("an operand of unknown shape")?;
@@ -753,6 +835,9 @@ fn edge_columns(
     let va = view(out, a, 0, rows, 0, kk)?;
     let vb = view(out, b, 0, kk, from, n - from)?;
     let vc = view(out, c, 0, rows, from, n - from)?;
+    if let Some(z) = zero {
+        fill(out, block, z, vc);
+    }
     let o = &src.ops[op.index()];
     let mut spec = OpSpec::new("linalg.generic").operands(&[va, vb, vc]).regions(1).loc(o.loc);
     for (key, v) in props {
@@ -780,6 +865,7 @@ fn rest_rows(
     map: &mut HashMap<ValueId, ValueId>,
     full: u64,
     at: ValueId,
+    zero: Option<ValueId>,
 ) -> Result<(), String> {
     let o = &src.ops[op.index()];
     let (sa, elem) = out.shaped(out.value_type(a)).ok_or("an operand of unknown shape")?;
@@ -808,7 +894,12 @@ fn rest_rows(
         };
         let va = view(out, a, &layout(out, out.value_type(a)).unwrap(), kk);
         let vc = view(out, c, &lc, n);
-        if !tiles(src, op, [va, b, vc], props, out, block, module_block, cx, ks, map)? {
+        cx.zero = zero;
+        let done = tiles(src, op, [va, b, vc], props, out, block, module_block, cx, ks, map)?;
+        if let Some(z) = cx.zero.take() {
+            fill(out, block, z, vc);
+        }
+        if !done {
             let mut spec = OpSpec::new("linalg.generic").operands(&[va, b, vc]).regions(1).loc(o.loc);
             for (key, v) in props {
                 spec = spec.prop(key, *v);

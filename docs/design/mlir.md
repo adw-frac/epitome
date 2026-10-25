@@ -723,6 +723,9 @@ same tokens at each step for f32 and for BF16 respectively:
 | a contraction vectorized along a parallel loop when the innermost is not contiguous (attention's) | 21 |
 | `tanh` as arithmetic (GELU's), not a call of `tanhf` | 17 |
 | the kernel's accumulators in zmm16-31 too, not spilled (the allocator kept each value to its class's registers, so the vector file's 32 could be offered); A's pairs interleaved, one pointer for every row | 14 |
+| the logits' fill a memset (`loopidiom`), and vectors with tails for what is not a multiple of the width | 13.4 |
+| the logits worked out in the output argument, not a buffer copied there (`bufferize`) | 10.6 |
+| no fill: the kernel's twin whose sums start at zero, fills only of the columns loops do | 10.3 |
 
 `linalg-fold-constants` now also works out an element-wise
 `linalg.generic` whose result is only sliced (`tensor.extract_slice`, a

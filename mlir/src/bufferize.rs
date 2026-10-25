@@ -22,6 +22,13 @@
 //! - `tensor.pad` becomes a buffer filled with the padding value, and a
 //!   copy of the input into a `memref.subview` of it.
 //! - Every buffer allocated is freed (`memref.dealloc`) before returning.
+//! - A buffer allocated only to be worked out and then copied whole into a
+//!   result's argument (through views: `memref.expand_shape`,
+//!   `memref.collapse_shape`) is that argument instead, viewed as the
+//!   buffer was, and the copy goes: what LLVM's `memcpyopt` does for a
+//!   call that writes a temporary copied to its destination. Only when
+//!   nothing between the allocation and the copy touches the argument, or
+//!   any other argument of its element type (which might share its memory).
 
 use std::collections::{HashMap, HashSet};
 
@@ -54,7 +61,131 @@ pub fn run(src: &Module) -> Result<Module, String> {
             _ => lower_top(src, top, &mut out, None, &mut globals)?,
         }
     }
+    let funcs: Vec<OpId> = (0..out.ops.len() as u32)
+        .map(OpId)
+        .filter(|&f| out.op_name(f) == "func.func" && out.ops[f.index()].parent.is_some())
+        .collect();
+    for f in funcs {
+        forward_copies(&mut out, f);
+    }
     Ok(out)
+}
+
+/// The values each operation in `op` (itself included, and what its
+/// regions hold) uses.
+fn used_in(m: &Module, op: OpId) -> HashSet<ValueId> {
+    let mut used = HashSet::new();
+    m.walk(op, &mut |o| used.extend(m.ops[o.index()].operands.iter().copied()));
+    used
+}
+
+/// Buffers copied whole into an argument, made that argument (see the
+/// module's documentation).
+fn forward_copies(m: &mut Module, f: OpId) {
+    let Some(&region) = m.ops[f.index()].regions.first() else { return };
+    let Some(&block) = m.regions[region.index()].blocks.first() else { return };
+    while forward_one(m, block) {}
+}
+
+/// Forwards the first copy in `block` that can be; whether there was one.
+fn forward_one(m: &mut Module, block: BlockId) -> bool {
+    let args = m.blocks[block.index()].args.clone();
+    let ops = m.blocks[block.index()].ops.clone();
+    for (ci, &copy) in ops.iter().enumerate() {
+        if m.op_name(copy) == "memref.copy" && forward(m, block, &args, &ops, ci, copy) {
+            return true;
+        }
+    }
+    false
+}
+
+fn forward(m: &mut Module, block: BlockId, args: &[ValueId], ops: &[OpId], ci: usize, copy: OpId) -> bool {
+    let [src, dst] = m.ops[copy.index()].operands[..] else { return false };
+    // Into an argument with no layout of its own.
+    let dst_ty = m.value_type(dst);
+    if !args.contains(&dst) || crate::build::strided_layout(m, dst_ty).is_some() {
+        return false;
+    }
+    let Some((_, dst_elem)) = m.shaped(dst_ty) else { return false };
+    // From views of an allocation in this block.
+    let mut chain = Vec::new();
+    let mut at = src;
+    let alloc = loop {
+        let ValueDef::Result { op, .. } = m.values[at.index()].def else { return false };
+        match m.op_name(op) {
+            "memref.alloc" if m.ops[op.index()].operands.is_empty() => break op,
+            "memref.expand_shape" | "memref.collapse_shape" => {
+                chain.push(op);
+                at = m.ops[op.index()].operands[0];
+            }
+            _ => return false,
+        }
+    };
+    let Some(ai) = ops.iter().position(|&o| o == alloc) else { return false };
+    let buffer = m.ops[alloc.index()].results[0];
+    if ai > ci || crate::build::strided_layout(m, m.value_type(buffer)).is_some() {
+        return false;
+    }
+    // The buffer used only before the copy (and freed after it); the views
+    // only on the way to the copy; and between the allocation and the copy,
+    // no argument the destination might share memory with.
+    let views: Vec<ValueId> = chain.iter().map(|&o| m.ops[o.index()].results[0]).collect();
+    let sharing: Vec<ValueId> =
+        args.iter().copied().filter(|&a| m.shaped(m.value_type(a)).is_some_and(|(_, e)| e == dst_elem)).collect();
+    for (k, &o) in ops.iter().enumerate() {
+        if o == copy || chain.contains(&o) {
+            continue;
+        }
+        let used = used_in(m, o);
+        if views.iter().any(|v| used.contains(v)) {
+            return false;
+        }
+        if used.contains(&buffer) && k > ci && m.op_name(o) != "memref.dealloc" {
+            return false;
+        }
+        if k > ai && k < ci && sharing.iter().any(|a| used.contains(a)) {
+            return false;
+        }
+    }
+    // The argument, viewed back the way the copy viewed the buffer, where
+    // the allocation was.
+    let mut view = dst;
+    for &o in &chain {
+        let to = m.value_type(m.ops[o.index()].operands[0]);
+        let reassoc = m.op_attr(o, "reassociation").expect("a reshape with no reassociation");
+        let inverse = if m.op_name(o) == "memref.expand_shape" {
+            OpSpec::new("memref.collapse_shape").prop("reassociation", reassoc)
+        } else {
+            let (shape, _) = m.shaped(to).expect("a reshape of no shape");
+            let shape: Vec<i64> = shape.iter().map(|&d| d as i64).collect();
+            let sizes = m.dense_array_attr("i64", &shape);
+            OpSpec::new("memref.expand_shape").prop("reassociation", reassoc).prop("static_output_shape", sizes)
+        };
+        let v = inverse.operands(&[view]).results(&[to]).build(m, Some(block));
+        view = m.result(v);
+        let list = &mut m.blocks[block.index()].ops;
+        list.pop();
+        let at = list.iter().position(|&x| x == alloc).unwrap();
+        list.insert(at, v);
+    }
+    // The buffer's uses now the argument's view; the allocation, its frees,
+    // the views and the copy gone.
+    for o in m.ops.iter_mut() {
+        for x in o.operands.iter_mut() {
+            if *x == buffer {
+                *x = view;
+            }
+        }
+    }
+    let frees: Vec<OpId> = m.blocks[block.index()]
+        .ops
+        .iter()
+        .copied()
+        .filter(|&o| m.op_name(o) == "memref.dealloc" && m.ops[o.index()].operands == [view])
+        .collect();
+    let gone: HashSet<OpId> = chain.iter().copied().chain([alloc, copy]).chain(frees).collect();
+    m.blocks[block.index()].ops.retain(|o| !gone.contains(o));
+    true
 }
 
 /// An operation with its properties and attributes but not its regions'

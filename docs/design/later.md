@@ -206,16 +206,13 @@ these are for after.
 - **Pairs of vector stores**: AArch64's `stp q`, for written-out memsets
   and copies (`peephole::pair_memory` pairs x and w registers only).
 - **The LLM on x86-64** (`examples/llm.rs`, TinyStories-1M with
-  `--avx512 --weights=bf16`: 14 ms a forward pass on a Zen 5 core, M4's
-  SME 3.5 ms). Left: the 64 x 50257 logits are zeroed (`linalg.fill`)
-  and then read and written by the kernel, where its accumulators could
-  start at zero; they are then copied to the output, where `bufferize`
-  could write them in place; the kernel streams a panel of B for each 4
-  rows, where one call for all the rows could keep it in L1; its loop's
-  addresses are a shift and an add each step, where pointers that step
-  would do; f32 matrix
-  products (attention's, of non-constant operands) are vectorized loops,
-  with no AVX-512 kernel; `maximumf` is eight instructions on x86 (no
-  IEEE maximum there), where a clamp by a constant needs one `maxps`.
+  `--avx512 --weights=bf16`: 10.3 ms a forward pass on a Zen 5 core, M4's
+  SME 2.6 ms). Left: the element-wise operations (about 45%), each its
+  own pass over memory where fusing them would make one; attention's f32
+  products, vectorized loops that load and store C every step, with no
+  AVX-512 kernel; the BF16 kernel streams a panel of B for each 4 rows,
+  where one call for all the rows could keep it in L1; buffers allocated
+  for every forward pass (`malloc`, then page faults); `maximumf` is eight
+  instructions on x86, and a scalar one a call of `fmaximumf`.
 - **Acquire loads** use `ldar`; with RCpc (the M1 has it) `ldapr` is
   enough for C++'s and Rust's acquire, as LLVM's back end uses.
