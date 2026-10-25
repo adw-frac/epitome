@@ -776,6 +776,25 @@ attention). The window's 230-odd operations become about 170 calls of
 | --- | --- | --- | --- | --- | --- | --- |
 | ms a window | 2.16 | 1.58 | 1.07 | 0.80 | 0.75 | 0.89 |
 
+**Billions of weights.** Qwen2.5-3B (36 layers, 3.1 billion weights;
+24.7 GB of MLIR from `export.py`) builds on the same machine in two
+minutes, at most 93 GB of memory, and writes PyTorch's 53 tokens. Its
+BF16 weights, 7.4 GB, are more than x86-64 code can reach in an
+executable (within 2 GB of itself), so `weights::externalize` puts every
+constant of a megabyte or more in `weights-bf16.bin`, and each
+`memref.get_global` of one becomes `__epitome_weights()`, the driver's
+copy of the file, plus its offset. A window of 64 tokens is about 400
+GFLOP:
+
+| Threads | 1 | 4 | 8 | 16 | 32 | 64 |
+| --- | --- | --- | --- | --- | --- | --- |
+| ms a window | 1592 | 471 | 278 | 194 | 192 | 331 |
+
+Past 16 nothing gains: the window's 64 rows, four a chunk, are 16
+chunks, and each chunk streams all of a layer's weights; splitting the
+large products by their columns instead (each thread its own part of the
+weights, as tensor parallelism does) is the next step.
+
 ## 6. Dialect descriptions
 
 A description is written in the dialect it lowers to. `torch` lowers to
