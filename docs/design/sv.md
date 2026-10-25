@@ -208,7 +208,8 @@ Where the reference and the standard differ, we follow the standard:
   (a `"` in macro text always starts one, 22.5.1), so `x` is not
   replaced. Verilator agrees. `test1800`'s
   `22.05-define/triple_quote_stringification.sv` expects `"a \"go\" b"`
-  from `` `TQ(go) ``, which looks like a bug in the test.
+  from `` `TQ(go) ``, which looks like a bug in the test
+  ([IEEE1800-2023-tests#1](https://github.com/andy-thomason/IEEE1800-2023-tests/issues/1)).
 - A macro with an escaped name takes formal arguments after the single
   space that ends the name (22.5.1). Verilator reads the parenthesis as
   part of the macro's text.
