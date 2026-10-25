@@ -12,3 +12,11 @@ define i32 @ZERO32r() "enc"="rex(0, d, 0, d) | 00110001 | rr(d, d)" "asm"="xorl 
 define i64 @ZERO64r() "enc"="rex(0, d, 0, d) | 00110001 | rr(d, d)" "asm"="xorl {d:r32}, {d:r32}" "clobbers"="flags" "role"="zero.r64" "nomatch" "nodecode" {
   ret i64 0
 }
+
+; Upper halves of the vector registers zeroed (role vzeroupper): put before
+; returns and calls by functions that use 256- or 512-bit registers, so
+; that code using only their low 128 bits, with legacy SSE encodings, does
+; not wait on the upper halves (peephole::upper_halves).
+define void @VZEROUPPER() "enc"="vex(0, 0, 0, 1, 0, 0, 0, 0) | 01110111" "asm"="vzeroupper" "role"="vzeroupper" "nomatch" "nodecode" {
+  ret void
+}

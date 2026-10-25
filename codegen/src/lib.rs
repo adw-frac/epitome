@@ -183,6 +183,19 @@ fn compile_function(t: &Target, abi: &abi::Abi, cx: &mut Ctx, job: &Job, opts: &
     use std::time::Instant;
     cx.features = features::of_function(t, cx.m, &job.body.fn_attrs, opts.mcpu.as_deref(), &opts.mattr)?;
     let now = Instant::now();
+    // A vector wider than 128 bits returned, or passed to a call, in a
+    // register `vzeroupper` would clear (peephole::upper_halves).
+    let wide = |cx: &Ctx, ty: epitome_ir::types::TypeId| {
+        matches!(cx.m.types.get(ty), epitome_ir::types::Type::Vector { .. }) && cx.size_of(ty).is_ok_and(|n| n > 16)
+    };
+    let wide_return = match cx.m.types.get(job.body.ty) {
+        epitome_ir::types::Type::Function { ret, .. } => wide(cx, *ret),
+        _ => false,
+    };
+    let wide_call = job.body.insts.iter().any(|i| match &i.op {
+        epitome_ir::module::Op::Call(call) => call.args.iter().any(|a| wide(cx, cx.value_ty(&job.body, a.value))),
+        _ => false,
+    });
     let prepared = prepare::prepare(cx, &job.body, &job.name)?;
     timing::add(&timing::PREPARE, now);
     let now = Instant::now();
@@ -226,6 +239,7 @@ fn compile_function(t: &Target, abi: &abi::Abi, cx: &mut Ctx, job: &Job, opts: &
             peephole::pair_memory(t, &mut mf);
             peephole::three_address(t, &mut mf);
             peephole::short_forms(t, &mut mf);
+            peephole::upper_halves(t, &mut mf, !wide_return, !wide_call);
             timing::add(&timing::FRAME, now);
             let now = Instant::now();
             layout::place(t, &mut mf);

@@ -260,6 +260,43 @@ pub fn pair_memory(t: &Target, mf: &mut MFunc) -> usize {
 /// with 0 (role `cmpi.<class>`) becomes a test of it with itself (role
 /// `test.<class>`, a byte shorter), which sets the flags as the compare
 /// does. Each change is an elective one (autochop). Returns how many.
+/// `vzeroupper` (the description's role `vzeroupper`) before each return
+/// and call of a function that uses registers of 256 bits or more: code
+/// after it that uses only the low 128 bits of the vector registers, with
+/// legacy SSE encodings, would otherwise wait on their upper halves (the
+/// transition between AVX and SSE). As LLVM's x86 back end does; not
+/// before a return of a wide vector (`at_returns` false), nor before calls
+/// when some call passes one (`at_calls` false). The number put in.
+pub fn upper_halves(t: &Target, mf: &mut MFunc, at_returns: bool, at_calls: bool) -> usize {
+    let Some(vz) = t.role("vzeroupper") else { return 0 };
+    let m = &t.machine;
+    let wide = mf.blocks.iter().flat_map(|b| &b.insts).any(|inst| match inst.op {
+        Opcode::Instr(k) => t.instrs[k].operands.iter().any(|o| matches!(o.kind, Kind::Reg(c) if m.def(c).bits >= 256)),
+        _ => false,
+    });
+    if !wide {
+        return 0;
+    }
+    let mut made = 0;
+    for b in &mut mf.blocks {
+        let mut k = 0;
+        while k < b.insts.len() {
+            let call = b.insts[k].is_call(t);
+            let ret = matches!(b.insts[k].op, Opcode::Instr(i) if t.has_role(i, "ret"));
+            let tail =
+                matches!(b.insts[k].op, Opcode::Instr(i) if t.has_role(i, "tailcall") || t.has_role(i, "tailcallr"));
+            let leaves = (ret && at_returns) || ((call || tail) && at_calls);
+            if leaves {
+                b.insts.insert(k, MInst::new(vz, Vec::new()));
+                made += 1;
+                k += 1;
+            }
+            k += 1;
+        }
+    }
+    made
+}
+
 pub fn short_forms(t: &Target, mf: &mut MFunc) -> usize {
     let m = &t.machine;
     let class_name = |k: usize| match t.instrs[k].operands.first().map(|o| o.kind) {
