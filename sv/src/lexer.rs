@@ -9,6 +9,7 @@
 //! is digits even if it looks like a name (`'h ab`), and a UDP table has its
 //! own single-character entries.
 
+use crate::keywords::Keywords;
 use crate::source::Error;
 
 /// A token: a slice of the source. The end-of-file token is the empty slice
@@ -62,10 +63,20 @@ impl<'a> Token<'a> {
         self.0.len() > 1 && self.0.starts_with('$')
     }
 
-    /// `` `define ``, `` `FOO ``: a compiler directive or macro use.
+    /// `` `define ``, `` `FOO ``, `` `\M@CRO ``: a compiler directive or
+    /// macro use.
     pub fn is_directive(self) -> bool {
-        self.0.len() > 1 && self.0.starts_with('`') && self.0.as_bytes()[1].is_ascii_alphabetic()
-            || self.0.starts_with("`_")
+        let b = self.0.as_bytes();
+        b.len() > 1
+            && b[0] == b'`'
+            && (b[1].is_ascii_alphabetic() || b[1] == b'_' || b[1] == b'\\' && b.len() > 2 && b[2] != b'`')
+    }
+
+    /// The name of a directive or macro use, without the backtick or an
+    /// escaped name's backslash.
+    pub fn directive_name(self) -> &'a str {
+        let name = &self.0[1..];
+        name.strip_prefix('\\').unwrap_or(name)
     }
 
     /// `"..."` or `"""..."""`.
@@ -111,260 +122,9 @@ impl<'a> Token<'a> {
     }
 }
 
-/// The reserved keywords of 1800-2023 (Annex B), sorted for binary search.
-pub const KEYWORDS: &[&str] = &[
-    "accept_on",
-    "alias",
-    "always",
-    "always_comb",
-    "always_ff",
-    "always_latch",
-    "and",
-    "assert",
-    "assign",
-    "assume",
-    "automatic",
-    "before",
-    "begin",
-    "bind",
-    "bins",
-    "binsof",
-    "bit",
-    "break",
-    "buf",
-    "bufif0",
-    "bufif1",
-    "byte",
-    "case",
-    "casex",
-    "casez",
-    "cell",
-    "chandle",
-    "checker",
-    "class",
-    "clocking",
-    "cmos",
-    "config",
-    "const",
-    "constraint",
-    "context",
-    "continue",
-    "cover",
-    "covergroup",
-    "coverpoint",
-    "cross",
-    "deassign",
-    "default",
-    "defparam",
-    "design",
-    "disable",
-    "dist",
-    "do",
-    "edge",
-    "else",
-    "end",
-    "endcase",
-    "endchecker",
-    "endclass",
-    "endclocking",
-    "endconfig",
-    "endfunction",
-    "endgenerate",
-    "endgroup",
-    "endinterface",
-    "endmodule",
-    "endpackage",
-    "endprimitive",
-    "endprogram",
-    "endproperty",
-    "endsequence",
-    "endspecify",
-    "endtable",
-    "endtask",
-    "enum",
-    "event",
-    "eventually",
-    "expect",
-    "export",
-    "extends",
-    "extern",
-    "final",
-    "first_match",
-    "for",
-    "force",
-    "foreach",
-    "forever",
-    "fork",
-    "forkjoin",
-    "function",
-    "generate",
-    "genvar",
-    "global",
-    "highz0",
-    "highz1",
-    "if",
-    "iff",
-    "ifnone",
-    "ignore_bins",
-    "illegal_bins",
-    "implements",
-    "implies",
-    "import",
-    "incdir",
-    "include",
-    "initial",
-    "inout",
-    "input",
-    "inside",
-    "instance",
-    "int",
-    "integer",
-    "interconnect",
-    "interface",
-    "intersect",
-    "join",
-    "join_any",
-    "join_none",
-    "large",
-    "let",
-    "liblist",
-    "library",
-    "local",
-    "localparam",
-    "logic",
-    "longint",
-    "macromodule",
-    "matches",
-    "medium",
-    "modport",
-    "module",
-    "nand",
-    "negedge",
-    "nettype",
-    "new",
-    "nexttime",
-    "nmos",
-    "nor",
-    "noshowcancelled",
-    "not",
-    "notif0",
-    "notif1",
-    "null",
-    "or",
-    "output",
-    "package",
-    "packed",
-    "parameter",
-    "pmos",
-    "posedge",
-    "primitive",
-    "priority",
-    "program",
-    "property",
-    "protected",
-    "pull0",
-    "pull1",
-    "pulldown",
-    "pullup",
-    "pulsestyle_ondetect",
-    "pulsestyle_onevent",
-    "pure",
-    "rand",
-    "randc",
-    "randcase",
-    "randsequence",
-    "rcmos",
-    "real",
-    "realtime",
-    "ref",
-    "reg",
-    "reject_on",
-    "release",
-    "repeat",
-    "restrict",
-    "return",
-    "rnmos",
-    "rpmos",
-    "rtran",
-    "rtranif0",
-    "rtranif1",
-    "s_always",
-    "s_eventually",
-    "s_nexttime",
-    "s_until",
-    "s_until_with",
-    "scalared",
-    "sequence",
-    "shortint",
-    "shortreal",
-    "showcancelled",
-    "signed",
-    "small",
-    "soft",
-    "solve",
-    "specify",
-    "specparam",
-    "static",
-    "string",
-    "strong",
-    "strong0",
-    "strong1",
-    "struct",
-    "super",
-    "supply0",
-    "supply1",
-    "sync_accept_on",
-    "sync_reject_on",
-    "table",
-    "tagged",
-    "task",
-    "this",
-    "throughout",
-    "time",
-    "timeprecision",
-    "timeunit",
-    "tran",
-    "tranif0",
-    "tranif1",
-    "tri",
-    "tri0",
-    "tri1",
-    "triand",
-    "trior",
-    "trireg",
-    "type",
-    "typedef",
-    "union",
-    "unique",
-    "unique0",
-    "unsigned",
-    "until",
-    "until_with",
-    "untyped",
-    "use",
-    "uwire",
-    "var",
-    "vectored",
-    "virtual",
-    "void",
-    "wait",
-    "wait_order",
-    "wand",
-    "weak",
-    "weak0",
-    "weak1",
-    "while",
-    "wildcard",
-    "wire",
-    "with",
-    "within",
-    "wor",
-    "xnor",
-    "xor",
-];
-
+/// A reserved keyword of 1800-2023, the default set.
 pub fn is_keyword(s: &str) -> bool {
-    KEYWORDS.binary_search(&s).is_ok()
+    Keywords::LATEST.contains(s)
 }
 
 /// Operators and punctuation, longest first so the first match is the
@@ -416,6 +176,19 @@ impl<'a> Lexer<'a> {
     pub fn set_pos(&mut self, pos: usize) {
         self.pos = pos;
         self.digits_of = None;
+    }
+
+    /// The whole text this lexer reads.
+    pub fn text(&self) -> &'a str {
+        self.src
+    }
+
+    /// Lexes the next token as the digits of a literal with base `base`
+    /// (`b'b'`, `b'o'`, `b'd'` or `b'h'`), if it starts like digits. The
+    /// preprocessor uses this when a base and its digits come from
+    /// different macros.
+    pub fn expect_digits(&mut self, base: u8) {
+        self.digits_of = Some(base);
     }
 
     fn rest(&self) -> &'a str {
@@ -518,15 +291,19 @@ impl<'a> Lexer<'a> {
     }
 
     /// A directive or macro use, or one of the macro-body forms
-    /// `` `" ``, ` `` ` and `` `\`" `` (22.5.1).
+    /// `` `" ``, `` `""" ``, ` `` ` and `` `\`" `` (22.5.1). A macro's name
+    /// may be an escaped identifier: `` `\M@CRO ``.
     fn backtick(&mut self) -> Result<Token<'a>, Error<'a>> {
         let start = self.pos;
         let rest = &self.rest()[1..];
         if rest.bytes().next().is_some_and(|c| c.is_ascii_alphabetic() || c == b'_') {
             self.pos += 1;
             self.take_while(is_ident_char);
-        } else if let Some(form) = ["\\`\"", "`", "\""].iter().find(|f| rest.starts_with(**f)) {
+        } else if let Some(form) = ["\\`\"", "`", "\"\"\"", "\""].iter().find(|f| rest.starts_with(**f)) {
             self.pos += 1 + form.len();
+        } else if rest.starts_with('\\') && rest.as_bytes().get(1).is_some_and(|c| c.is_ascii_graphic()) {
+            self.pos += 2;
+            self.take_while(|c| c.is_ascii_graphic());
         } else {
             return Err(self.error(start, 1, "expected a directive name after `"));
         }
@@ -660,8 +437,6 @@ mod tests {
 
     #[test]
     fn keywords_are_sorted() {
-        assert!(KEYWORDS.windows(2).all(|w| w[0] < w[1]));
-        assert_eq!(KEYWORDS.len(), 248);
         assert!(Token("module").is_keyword());
         assert!(!Token("\\module").is_keyword());
         assert!(Token("\\module").is_name());
@@ -757,6 +532,11 @@ d""#
             texts("`define M(a) `\"a`\" ``x `\\`\""),
             ["`define", "M", "(", "a", ")", "`\"", "a", "`\"", "``", "x", "`\\`\"", ""]
         );
+        assert_eq!(texts("`\"\"\"y`\"\"\""), ["`\"\"\"", "y", "`\"\"\"", ""]);
+        let t = texts("`\\M@CRO3 (1)");
+        assert_eq!(t, ["`\\M@CRO3", "(", "1", ")", ""]);
+        assert!(Token(t[0]).is_directive() && Token(t[0]).directive_name() == "M@CRO3");
+        assert!(!Token("`\\`\"").is_directive() && !Token("`\"").is_directive());
     }
 
     fn error(text: &str) -> String {

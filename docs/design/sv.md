@@ -10,8 +10,11 @@ The work is measured against the
 (`test1800`): 1478 self-checking tests, one directory per clause of the
 standard. For sources and status labels, see the [index](README.md).
 
-**Status:** Partial. The crate exists with a skeleton lexer. The parser
-is next (section 10, step 2).
+**Status:** Partial. The lexer and the preprocessor are done: every legal
+`test1800` test preprocesses, the clause 22 tests that should fail in the
+preprocessor do, and the output matches Verilator's `-E` token for token
+on all 772 tests both accept (section 4.4). The parser is next (section
+10, step 2).
 
 ## 1. Goals
 
@@ -92,37 +95,123 @@ text a token can point into is therefore held in one `SourceMap`:
 - each file read, and each piece of text the preprocessor makes, is a
   `Source { name, text, origin }`, kept for the life of the compilation
   (text is never moved once added, so slices stay valid);
-- `SourceMap::locate(&str)` finds which source holds a slice by its
-  address, by binary search on the sources' address ranges, then gives
-  `name:line:col`;
-- `origin` says where text from a macro came from (the `` `define `` and
-  the use), so an error inside an expansion can say "in expansion of
-  `` `FOO `` at a.sv:12:5".
+- `SourceMap::find(&str)` finds which source holds a slice from its
+  address, and `SourceMap::render` gives `name:line:col`, the line and a
+  caret. The search is linear; it only runs when reporting an error or
+  printing `-E` output, and can become a binary search on address
+  ranges if that is ever slow;
+- `origin` says which macro made a piece of text and where it was used,
+  so an error inside an expansion ends with "note: in expansion of
+  `` `FOO ``" at the use;
+- `` `line `` directives are kept with the source they appear in, and
+  applied when a position is reported.
 
 Most tokens come straight from a file, so the common case costs nothing.
 
 ## 4. Preprocessing (clause 22)
 
-Compiler directives start with a backtick. The preprocessor works on
-tokens, not characters, and passes through every token that is not a
-directive, unchanged and still pointing into its file.
+**Done**, in `sv/src/preprocess.rs`. `epitome-sv -E` prints its output.
 
-- `` `define ``, `` `undef ``, `` `undefineall ``, macros with arguments
-  and default arguments, `` `" ``, `` `\`" `` and ` `` ` (token pasting).
-  A pasted or stringified token is new text, added to the source map.
-- `` `ifdef ``, `` `ifndef ``, `` `elsif ``, `` `else ``, `` `endif ``,
-  including the 2023 expressions in `` `ifdef (A && !B) ``.
-- `` `include `` with `"file"` and `<file>`, searched in the including
-  file's directory and then the `-I` list.
-- `` `timescale ``, `` `default_nettype ``, `` `celldefine ``,
-  `` `unconnected_drive ``, `` `pragma ``, `` `line ``, `` `__FILE__ ``,
-  `` `__LINE__ ``, `` `resetall ``: recorded as attributes on the tokens
-  that follow, for elaboration to read.
-- `` `begin_keywords `` / `` `end_keywords ``: a stack of keyword sets
-  (1364-1995 through 1800-2023). The lexer asks the current set whether a
-  word is a keyword (section 5).
+### 4.1 Frames and tokens
 
-The output is a stream of tokens, each still a `&str` into some source.
+The preprocessor reads tokens from a stack of frames, each a lexer over
+some text in the source map: the files named on the command line, files
+reached by `` `include ``, and the text of macro expansions. Any token
+that is not a directive is passed through unchanged, still a slice of the
+text it came from. Directives are acted on and dropped.
+
+The output is `Output { tokens, states }`. Each token carries the index
+of a `State`: the keyword set (`` `begin_keywords ``), `` `timescale ``,
+`` `default_nettype ``, `` `unconnected_drive `` and `` `celldefine `` in
+force when it was read. The parser asks `Output::is_keyword`, which uses
+the token's own keyword set, rather than `Token::is_keyword`.
+
+All the files of a run form one compilation unit, so macros carry from
+one file to the next. Macros given with `-D name=text` or
+`+define+name=text`, and the coverage constants of 40.3.1, are defined
+first, from a source named `<command line>`.
+
+### 4.2 Macros
+
+A use of a macro is expanded by putting the actual arguments (or the
+defaults) into the macro's text, as text, and pushing the result as a new
+frame. Its source records the macro's name and where it was used, so an
+error inside it ends with "note: in expansion of `` `M `` at file:line:col".
+Because the text is read again, macros in the arguments and in the text
+expand after substitution, and a macro passed as an argument cannot pick
+up the outer macro's formal names (22.5.1).
+
+The text of a definition runs to the first newline that is not escaped
+by a backslash and is not inside a block comment or a `"""` string.
+Building the expansion works on characters:
+
+- comments are dropped; a backslash-newline becomes a newline, except
+  inside a string literal, where both go;
+- a formal's name, as a whole word, becomes the argument; nothing is
+  replaced inside a string literal, even one inside `` `" `` or
+  `` `""" ``;
+- `` `" `` and `` `""" `` become `"` and `"""`, with arguments still
+  replaced between them, and macros used between them expanded into the
+  string; `` `\`" `` becomes `\"`; ` `` ` disappears, joining what is on
+  either side.
+
+A macro with no arguments and none of these forms in its text is read
+straight from its definition, so its tokens point into the defining file.
+
+A base and its digits may come from different macros (`` `W`B`D `` for
+`12'hfA`). The preprocessor remembers that the last token was a base and
+tells the next frame's lexer to read digits.
+
+A macro that uses itself is caught when expansions nest 256 deep.
+`` `include `` nests to 64 files.
+
+### 4.3 The other directives
+
+- `` `ifdef ``, `` `ifndef ``, `` `elsif ``, `` `else ``, `` `endif ``:
+  a stack of conditions, with the 2023 expressions (`!`, `&&`, `||`,
+  `->`, `<->`, parentheses). Ignored text is still lexed, so it must be
+  lexically valid, and a `` `define `` in it is read past whole, so a
+  directive in its text cannot end the block. A conditional must end in
+  the file it started in.
+- `` `include "file" `` looks in the including file's directory, then the
+  `-I` directories, then the current directory. `` `include <file> ``
+  looks only in `Options::system_include_dirs`, which is empty: Epitome
+  has none of the files the standard defines. Only white space and
+  comments may follow on the line.
+- `` `timescale ``, `` `default_nettype ``, `` `unconnected_drive ``,
+  `` `nounconnected_drive ``, `` `resetall ``, `` `begin_keywords `` and
+  `` `end_keywords `` must be outside design elements. The preprocessor
+  counts design elements from the keywords it passes through (`module`
+  to `endmodule` and so on, but not `extern module`, `virtual interface`,
+  an `interface` port or `interface class`).
+- `` `line `` remaps the following lines of its file, for error messages
+  and for `` `__LINE__ `` and `` `__FILE__ ``.
+- `` `pragma `` needs a name and is otherwise ignored, as the standard
+  allows for pragmas a tool does not know. Annex E's directives are
+  accepted and ignored.
+
+### 4.4 Testing
+
+- Unit tests in `preprocess.rs` cover each rule above with small
+  examples of our own.
+- `tests/test1800.rs` preprocesses every test of `test1800`. All legal
+  tests must preprocess; the six should-fail tests whose error is the
+  preprocessor's must be rejected.
+- `tests/reference.rs` runs Verilator as a program (`-E -P`) over the
+  same tests, lexes its output, and compares the token streams. Set
+  `SV_REFERENCE_PP` to the `verilator` binary. All 772 tests that both
+  accept give the same tokens.
+
+Where the reference and the standard differ, we follow the standard:
+
+- In `` `define TQ(x) `"""a "x" b`""" ``, the `"x"` is a string literal
+  (a `"` in macro text always starts one, 22.5.1), so `x` is not
+  replaced. Verilator agrees. `test1800`'s
+  `22.05-define/triple_quote_stringification.sv` expects `"a \"go\" b"`
+  from `` `TQ(go) ``, which looks like a bug in the test.
+- A macro with an escaped name takes formal arguments after the single
+  space that ends the name (22.5.1). Verilator reads the parenthesis as
+  part of the macro's text.
 
 ## 5. Lexing (clause 5)
 
@@ -250,7 +339,8 @@ pass rate on the clauses it targets stops climbing.
    test (341 of them) gives the right answer, then every legal test in
    the suite parses. The cargo test reports the count that parse and lists
    the first failures with `file:line:col`.
-3. **Preprocessor**: clause 22 and every test that uses `` `define ``.
+3. **Preprocessor** (Done): clause 22 and every test that uses
+   `` `define ``; see section 4.4.
 4. **Elaboration**: `:type: elaboration` tests, clauses 6, 7, 11, 23, 26,
    27.
 5. **Simulation of the synthesisable subset**: the runtime with
@@ -265,11 +355,9 @@ Icarus (66.8% and 68.6% today).
 
 ## 11. Open questions
 
-- **Open:** whether the preprocessor runs once over a whole file before
-  parsing, or lazily as the parser pulls tokens. Lazy is needed if
-  `` `begin_keywords `` changes the keywords of tokens already lexed;
-  eager is simpler. Start eager, with the keyword question asked when the
-  parser looks at a token, not when it is lexed.
+- **Decided:** the preprocessor runs over the whole compilation unit
+  before parsing, and each token records the keyword set it was read
+  under, so `` `begin_keywords `` needs nothing lazy.
 - **Open:** how much of four-state arithmetic to do inline in IR and how
   much to call the runtime for, for wide vectors.
 - **Open:** whether to lower to the MLIR `hw`/`comb`/`seq` form and reuse
