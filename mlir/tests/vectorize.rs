@@ -62,6 +62,18 @@ const FUNCS: &str = r#""builtin.module"() ({
     }) : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
     return %r : tensor<8x16xf32>
   }) : () -> ()
+  "func.func"() <{function_type = (tensor<8x16xf32>) -> tensor<8x16xf32>, sym_name = "tanh1s"}> ({
+  ^bb0(%x: tensor<8x16xf32>):
+    %one = arith.constant 1.000000e+00 : f32
+    %e = "tensor.empty"() : () -> tensor<8x16xf32>
+    %r = "linalg.generic"(%x, %e) <{indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0, d1)>], iterator_types = [#linalg.iterator_type<parallel>, #linalg.iterator_type<parallel>], operandSegmentSizes = array<i32: 1, 1>}> ({
+    ^bb0(%a: f32, %b: f32):
+      %t = "math.tanh"(%a) <{fastmath = #arith.fastmath<none>}> : (f32) -> f32
+      %s = arith.addf %t, %one : f32
+      linalg.yield %s : f32
+    }) : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
+    return %r : tensor<8x16xf32>
+  }) : () -> ()
   "func.func"() <{function_type = (tensor<8x19xf32>) -> tensor<8x1xf32>, sym_name = "sums19"}> ({
   ^bb0(%x: tensor<8x19xf32>):
     %zero = arith.constant 0.000000e+00 : f32
@@ -117,6 +129,7 @@ unsafe extern "C" {
     fn tanhs(x: *const f32, r: *mut f32);
     fn scaled(x: *const f32, y: *const f32, r: *mut f32);
     fn sums19(x: *const f32, r: *mut f32);
+    fn tanh1s(x: *const f32, r: *mut f32);
     fn exps19(x: *const f32, r: *mut f32);
     fn lows19(r: *mut f32);
 }
@@ -151,6 +164,13 @@ fn main() {
     unsafe { scaled(x.as_ptr(), y.as_ptr(), r.as_mut_ptr()) };
     let want: Vec<f32> = (0..128).map(|i| x[i] * y[i / 16]).collect();
     check("scaled", &r, &want, 0.0);
+    // tanh(x) + 1, which is 2 / (1 + e^-2x) (GELU's).
+    for scale in [1.0f32, 1.0 / 16.0] {
+        let xs: Vec<f32> = x.iter().map(|v| v * scale).collect();
+        unsafe { tanh1s(xs.as_ptr(), r.as_mut_ptr()) };
+        let want: Vec<f32> = xs.iter().map(|v| ((*v as f64).tanh() + 1.0) as f32).collect();
+        check("tanh1s", &r, &want, 1e-6);
+    }
     // 19 a row: four vectors of four, then three one at a time.
     let x19: Vec<f32> = (0..152).map(|i| ((i * 37 % 101) as f32 - 50.0) / 7.0).collect();
     let mut r19 = vec![f32::NAN; 152];

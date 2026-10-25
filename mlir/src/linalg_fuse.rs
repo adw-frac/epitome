@@ -273,9 +273,32 @@ fn fuse(
             maps.push(cmaps[k].clone());
         }
     }
-    let new_ins = c_ins - 1 + p_ins;
-    let operands: Vec<ValueId> =
-        operands.iter().map(|v| map.get(v).copied().ok_or("an operand from outside")).collect::<Result<_, _>>()?;
+    // The block arguments the operands stand for: the producer's inputs'
+    // in place of input i.
+    let (pb, cb) = (body_of(src, p), body_of(src, c));
+    let (pargs, cargs) = (&src.blocks[pb.index()].args, &src.blocks[cb.index()].args);
+    let mut arg_srcs: Vec<ValueId> = Vec::new();
+    for (k, &a) in cargs.iter().enumerate() {
+        if k == i {
+            arg_srcs.extend(&pargs[..p_ins]);
+        } else {
+            arg_srcs.push(a);
+        }
+    }
+    // An input read twice through the same map (the producer's and the
+    // consumer's both of x) is read once: later ones stand for the first.
+    let all_ins = c_ins - 1 + p_ins;
+    let mut same_as: Vec<Option<usize>> = vec![None; operands.len()];
+    for k in 0..all_ins {
+        same_as[k] = (0..k).find(|&j| same_as[j].is_none() && operands[j] == operands[k] && maps[j] == maps[k]);
+    }
+    let kept: Vec<usize> = (0..operands.len()).filter(|&k| same_as[k].is_none()).collect();
+    let new_ins = kept.iter().filter(|&&k| k < all_ins).count();
+    let maps: Vec<Map> = kept.iter().map(|&k| maps[k].clone()).collect();
+    let operands: Vec<ValueId> = kept
+        .iter()
+        .map(|&k| map.get(&operands[k]).copied().ok_or("an operand from outside"))
+        .collect::<Result<_, _>>()?;
     let results: Vec<TypeId> = co.results.iter().map(|&r| src.value_type(r)).collect();
     let mut spec = OpSpec::new("linalg.generic").operands(&operands).results(&results).regions(1).loc(co.loc);
     for (k, v) in dict(src, co.properties) {
@@ -301,21 +324,18 @@ fn fuse(
         map.insert(old, n);
     }
     // The body: the producer's, then the consumer's.
-    let (pb, cb) = (body_of(src, p), body_of(src, c));
-    let (pargs, cargs) = (&src.blocks[pb.index()].args, &src.blocks[cb.index()].args);
-    let mut arg_srcs: Vec<ValueId> = Vec::new();
-    for (k, &a) in cargs.iter().enumerate() {
-        if k == i {
-            arg_srcs.extend(&pargs[..p_ins]);
-        } else {
-            arg_srcs.push(a);
-        }
-    }
-    let types: Vec<TypeId> = arg_srcs.iter().map(|&a| src.value_type(a)).collect();
+    let types: Vec<TypeId> = kept.iter().map(|&k| src.value_type(arg_srcs[k])).collect();
     let region = out.region_of(new, 0);
     let nb = out.add_block(region, &types);
-    for (&a, &n) in arg_srcs.iter().zip(&out.blocks[nb.index()].args.clone()) {
-        map.insert(a, n);
+    let new_args = out.blocks[nb.index()].args.clone();
+    for (n, &k) in kept.iter().enumerate() {
+        map.insert(arg_srcs[k], new_args[n]);
+    }
+    for k in 0..arg_srcs.len() {
+        if let Some(j) = same_as[k] {
+            let v = map[&arg_srcs[j]];
+            map.insert(arg_srcs[k], v);
+        }
     }
     for &b in &src.blocks[pb.index()].ops {
         if src.op_name(b) == "linalg.yield" {

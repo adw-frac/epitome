@@ -28,10 +28,58 @@ use crate::ir::*;
 pub fn run(src: &Module) -> Result<Module, String> {
     let mut out = src.empty_like();
     let mut map = HashMap::new();
+    let mut uses: HashMap<ValueId, usize> = HashMap::new();
+    for o in &src.ops {
+        for &v in &o.operands {
+            *uses.entry(v).or_default() += 1;
+        }
+    }
     for top in src.top_ops().collect::<Vec<_>>() {
-        copy(src, top, &mut out, None, &mut map)?;
+        copy(src, top, &mut out, None, &mut map, &uses)?;
     }
     Ok(out)
+}
+
+/// Whether `v` is the constant 1.0 (or a vector of it, a dense constant
+/// or a broadcast).
+fn is_one(src: &Module, v: ValueId) -> bool {
+    let ValueDef::Result { op, .. } = src.values[v.index()].def else { return false };
+    if src.op_name(op) == "vector.broadcast" {
+        return is_one(src, src.ops[op.index()].operands[0]);
+    }
+    if src.op_name(op) == "arith.truncf" || src.op_name(op) == "arith.extf" {
+        return is_one(src, src.ops[op.index()].operands[0]);
+    }
+    if src.op_name(op) != "arith.constant" {
+        return false;
+    }
+    match src.op_attr(op, "value").map(|a| src.attr(a)) {
+        Some(Attr::Float { text, .. }) => text.parse::<f64>() == Ok(1.0),
+        Some(Attr::Builtin { keyword: "dense", body, .. }) => {
+            body.trim_matches(|c| c == '<' || c == '>').parse::<f64>() == Ok(1.0)
+        }
+        _ => false,
+    }
+}
+
+/// For `tanh(z) + 1`, with the tanh used there alone: the tanh's operation
+/// and z.
+fn tanh_plus_one(src: &Module, op: OpId, uses: &HashMap<ValueId, usize>) -> Option<(OpId, ValueId)> {
+    if src.op_name(op) != "arith.addf" {
+        return None;
+    }
+    let o = &src.ops[op.index()];
+    let [a, b] = o.operands[..] else { return None };
+    for (t, one) in [(a, b), (b, a)] {
+        if let ValueDef::Result { op: th, .. } = src.values[t.index()].def
+            && src.op_name(th) == "math.tanh"
+            && is_one(src, one)
+            && uses.get(&t) == Some(&1)
+        {
+            return Some((th, src.ops[th.index()].operands[0]));
+        }
+    }
+    None
 }
 
 fn copy(
@@ -40,8 +88,40 @@ fn copy(
     out: &mut Module,
     block: Option<BlockId>,
     map: &mut HashMap<ValueId, ValueId>,
+    uses: &HashMap<ValueId, usize>,
 ) -> Result<(), String> {
     let o = &src.ops[op.index()];
+    // tanh(z) + 1 is 2 / (1 + e^-2z): one exp, an add and a divide, where
+    // tanh is those and more; and no cancellation for z below 0. (GELU's
+    // 0.5 x (1 + tanh(...)).) The tanh is left for here.
+    if let Some(block) = block
+        && o.results.first().is_some_and(|&r| f32_lanes(src, src.value_type(r)).is_some())
+    {
+        if src.op_name(op) == "math.tanh"
+            && let [r] = o.results[..]
+            && uses.get(&r) == Some(&1)
+            && src
+                .ops
+                .iter()
+                .enumerate()
+                .any(|(k, u)| u.operands.contains(&r) && tanh_plus_one(src, OpId(k as u32), uses).is_some())
+        {
+            return Ok(());
+        }
+        if let Some((_, z)) = tanh_plus_one(src, op, uses) {
+            let z = *map.get(&z).ok_or("an operand from outside")?;
+            let mut e = Expand { out, block, ty: src.value_type(o.results[0]) };
+            let minus_two = e.float(-2.0);
+            let z2 = e.f("arith.mulf", z, minus_two);
+            let ex = e.exp(z2);
+            let one = e.float(1.0);
+            let d = e.f("arith.addf", ex, one);
+            let two = e.float(2.0);
+            let r = e.f("arith.divf", two, d);
+            map.insert(o.results[0], r);
+            return Ok(());
+        }
+    }
     if src.op_name(op) == "math.exp"
         && let Some(block) = block
         && f32_lanes(src, src.value_type(o.results[0])).is_some()
@@ -107,7 +187,7 @@ fn copy(
         }
         for (&b, &nb) in blocks.iter().zip(&new_blocks) {
             for &inner in &src.blocks[b.index()].ops {
-                copy(src, inner, out, Some(nb), map)?;
+                copy(src, inner, out, Some(nb), map, uses)?;
             }
         }
     }
