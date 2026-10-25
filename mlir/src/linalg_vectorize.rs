@@ -59,6 +59,12 @@ fn copy(
         let width = plan.width;
         return Vectorize { src, out, map, width, swap: plan.swap }.lower(op, &plan, block);
     }
+    if src.op_name(op) == "linalg.fill"
+        && let Some(block) = block
+        && let Some(w) = fill_width(src, op, width)
+    {
+        return Vectorize { src, out, map, width: w, swap: 0 }.fill(op, block);
+    }
     let o = &src.ops[op.index()];
     if o.regions.is_empty() {
         out.clone_op(src, op, block, map)?;
@@ -183,6 +189,9 @@ fn plan(src: &Module, op: OpId, width: u64) -> Option<Plan> {
     // The innermost loop, else a parallel one in its place; the widest
     // vectors that fit.
     let widths: Vec<u64> = std::iter::successors(Some(width), |&w| (w > 4 && w % 2 == 0).then_some(w / 2)).collect();
+    // Widths that divide the loop first; then the widest that fits, the
+    // elements past the last whole vector one at a time.
+    for tail in [false, true] {
     for swap in std::iter::once(d).chain((0..d).rev().filter(|&k| !reduction[k])) {
         let swapped = |k: usize| {
             if k == swap {
@@ -200,10 +209,11 @@ fn plan(src: &Module, op: OpId, width: u64) -> Option<Plan> {
         let mut reduction = reduction.clone();
         reduction.swap(swap, d);
         for &w in &widths {
-            if let Some(p) = plan_at(src, op, w, maps.clone(), &reduction, swap) {
+            if let Some(p) = plan_at(src, op, w, maps.clone(), &reduction, swap, tail) {
                 return Some(p);
             }
         }
+    }
     }
     None
 }
@@ -239,7 +249,16 @@ fn rename(e: &Expr, to: &dyn Fn(usize) -> usize) -> Expr {
 
 /// The plan for `op` with `maps` (its own, `swap` swapped with the last
 /// loop) and vectors of `width`, if it can be vectorized so.
-fn plan_at(src: &Module, op: OpId, width: u64, maps: Vec<Map>, reduction: &[bool], swap: usize) -> Option<Plan> {
+#[allow(clippy::too_many_arguments)]
+fn plan_at(
+    src: &Module,
+    op: OpId,
+    width: u64,
+    maps: Vec<Map>,
+    reduction: &[bool],
+    swap: usize,
+    tail: bool,
+) -> Option<Plan> {
     let o = &src.ops[op.index()];
     let n = maps[0].dims;
     let d = n - 1;
@@ -274,7 +293,7 @@ fn plan_at(src: &Module, op: OpId, width: u64, maps: Vec<Map>, reduction: &[bool
         }
     }
     let sizes: Vec<u64> = sizes.into_iter().collect::<Option<_>>()?;
-    if sizes[d] % width != 0 || sizes[d] == 0 {
+    if sizes[d] < width || (!tail && sizes[d] % width != 0) {
         return None;
     }
 
@@ -343,6 +362,45 @@ fn plan_at(src: &Module, op: OpId, width: u64, maps: Vec<Map>, reduction: &[bool
     Some(Plan { maps, sizes, vector, combine: Some(combine), width, swap })
 }
 
+/// The width a `linalg.fill` is done at: of `f32`, into a buffer whose
+/// last dimension is contiguous and at least 4.
+fn fill_width(src: &Module, op: OpId, width: u64) -> Option<u64> {
+    let o = &src.ops[op.index()];
+    let [value, mem] = o.operands[..] else { return None };
+    if !matches!(src.ty(src.value_type(value)), Type::Float("f32")) {
+        return None;
+    }
+    // A constant whose four bytes are one byte (0.0, all ones) is left to
+    // linalg-to-loops: epitome-opt makes that loop a memset.
+    if let ValueDef::Result { op: c, .. } = src.values[value.index()].def
+        && src.op_name(c) == "arith.constant"
+        && let Some(Attr::Float { text, .. }) = src.op_attr(c, "value").map(|a| src.attr(a))
+        && let Some(bits) = parse_f32_bits(text)
+        && bits.to_le_bytes().iter().all(|&b| b == bits as u8)
+    {
+        return None;
+    }
+    let ty = src.value_type(mem);
+    if !matches!(src.ty(src.resolve_type(ty)), Type::MemRef { .. }) {
+        return None;
+    }
+    let (shape, _) = src.shaped(ty)?;
+    let last = *shape.last()?;
+    let stride = crate::build::strided_layout(src, ty).map_or(1, |(s, _)| *s.last().unwrap_or(&1));
+    if stride != 1 {
+        return None;
+    }
+    std::iter::successors(Some(width), |&w| (w > 4 && w % 2 == 0).then_some(w / 2)).find(|&w| last >= w)
+}
+
+/// An `f32` attribute's bits, from its text (`0.000000e+00`, `0xFF800000`).
+fn parse_f32_bits(text: &str) -> Option<u32> {
+    match text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+        Some(hex) => u32::from_str_radix(hex, 16).ok(),
+        None => text.parse::<f32>().ok().map(f32::to_bits),
+    }
+}
+
 /// A constant integer exponent from 0 to 16.
 fn small_power(src: &Module, v: ValueId) -> Option<i64> {
     let ValueDef::Result { op, .. } = src.values[v.index()].def else { return None };
@@ -393,7 +451,19 @@ impl Vectorize<'_> {
         step: u64,
         carried: &[ValueId],
     ) -> (OpId, BlockId, ValueId, Vec<ValueId>) {
-        let lb = self.index_const(block, 0);
+        self.for_range(block, 0, n, step, carried)
+    }
+
+    /// `scf.for %iv = from to n step s`, as `for_loop`.
+    fn for_range(
+        &mut self,
+        block: BlockId,
+        from: u64,
+        n: u64,
+        step: u64,
+        carried: &[ValueId],
+    ) -> (OpId, BlockId, ValueId, Vec<ValueId>) {
+        let lb = self.index_const(block, from as i64);
         let ub = self.index_const(block, n as i64);
         let st = self.index_const(block, step as i64);
         let types: Vec<TypeId> = carried.iter().map(|&v| self.out.value_type(v)).collect();
@@ -545,6 +615,46 @@ impl Vectorize<'_> {
         Ok(())
     }
 
+    /// A `linalg.fill`: each row's whole vectors stored a splat at a time,
+    /// then the elements past them one at a time.
+    fn fill(&mut self, op: OpId, block: BlockId) -> Result<(), String> {
+        let src = self.src;
+        let o = &src.ops[op.index()];
+        let value = *self.map.get(&o.operands[0]).ok_or("an operand from outside")?;
+        let mem = *self.map.get(&o.operands[1]).ok_or("an operand from outside")?;
+        let (shape, _) = self.out.shaped(self.out.value_type(mem)).ok_or("a fill of no shape")?;
+        let (last, outer) = shape.split_last().ok_or("a fill of a scalar")?;
+        let mut at = block;
+        let mut ivs = Vec::new();
+        let mut loops = Vec::new();
+        for &s in outer {
+            if s == 1 {
+                ivs.push(self.index_const(at, 0));
+                continue;
+            }
+            let (f, b, iv, _) = self.for_loop(at, s, 1, &[]);
+            loops.push((f, b));
+            ivs.push(iv);
+            at = b;
+        }
+        let splat = self.splat(at, value);
+        let whole = last / self.width * self.width;
+        for (from, to, step, vector) in [(0, whole, self.width, true), (whole, *last, 1, false)] {
+            if from == to {
+                continue;
+            }
+            let (_, inner, iv, _) = self.for_range(at, from, to, step, &[]);
+            let mut idx = ivs.clone();
+            idx.push(iv);
+            self.store(inner, if vector { splat } else { value }, mem, &idx, vector);
+            OpSpec::new("scf.yield").build(self.out, Some(inner));
+        }
+        for &(_, b) in loops.iter().rev() {
+            OpSpec::new("scf.yield").build(self.out, Some(b));
+        }
+        Ok(())
+    }
+
     fn lower(&mut self, op: OpId, plan: &Plan, block: BlockId) -> Result<(), String> {
         let src = self.src;
         let o = &src.ops[op.index()];
@@ -578,29 +688,39 @@ impl Vectorize<'_> {
 
         match &plan.combine {
             None => {
-                let (_, inner, iv, _) = self.for_loop(at, plan.sizes[d], self.width, &[]);
-                ivs.push(iv);
-                for (k, &v) in operands.iter().enumerate() {
-                    if k >= n_ins && !ops.iter().any(|&p| src.ops[p.index()].operands.contains(&bargs[k])) {
+                // Whole vectors, then the elements past them one at a time.
+                let whole = plan.sizes[d] / self.width * self.width;
+                for (from, to, step, vector) in [(0, whole, self.width, true), (whole, plan.sizes[d], 1, false)] {
+                    if from == to {
                         continue;
                     }
-                    let idx = self.indices(inner, &plan.maps[k], &ivs);
-                    let x = self.load(inner, v, &idx, plan.vector[k]);
-                    self.map.insert(bargs[k], x);
-                }
-                for &p in &ops {
-                    if src.op_name(p) == "linalg.yield" {
-                        for (k, y) in src.ops[p.index()].operands.iter().enumerate() {
-                            let v = *self.map.get(y).ok_or("a yield of an unknown value")?;
-                            let v = self.splat(inner, v);
-                            let idx = self.indices(inner, &plan.maps[n_ins + k], &ivs);
-                            self.store(inner, v, operands[n_ins + k], &idx, true);
+                    let (_, inner, iv, _) = self.for_range(at, from, to, step, &[]);
+                    let mut ivs = ivs.clone();
+                    ivs.push(iv);
+                    for (k, &v) in operands.iter().enumerate() {
+                        if k >= n_ins && !ops.iter().any(|&p| src.ops[p.index()].operands.contains(&bargs[k])) {
+                            continue;
                         }
-                        break;
+                        let idx = self.indices(inner, &plan.maps[k], &ivs);
+                        let x = self.load(inner, v, &idx, vector && plan.vector[k]);
+                        self.map.insert(bargs[k], x);
                     }
-                    self.body_op(inner, p, &ivs)?;
+                    for &p in &ops {
+                        if src.op_name(p) == "linalg.yield" {
+                            for (k, y) in src.ops[p.index()].operands.iter().enumerate() {
+                                let mut v = *self.map.get(y).ok_or("a yield of an unknown value")?;
+                                if vector {
+                                    v = self.splat(inner, v);
+                                }
+                                let idx = self.indices(inner, &plan.maps[n_ins + k], &ivs);
+                                self.store(inner, v, operands[n_ins + k], &idx, vector);
+                            }
+                            break;
+                        }
+                        self.body_op(inner, p, &ivs)?;
+                    }
+                    OpSpec::new("scf.yield").build(self.out, Some(inner));
                 }
-                OpSpec::new("scf.yield").build(self.out, Some(inner));
             }
             Some(combine) => {
                 // Each output's old value, and a vector of partial results:
@@ -634,8 +754,9 @@ impl Vectorize<'_> {
                 // for the one before (a sum: the latency of an addition).
                 let vectors = plan.sizes[d] / self.width;
                 let unroll = [UNROLL, 2, 1].into_iter().find(|&u| vectors % u == 0 && vectors >= u).unwrap();
+                let whole = vectors * self.width;
                 let carried: Vec<ValueId> = (0..unroll as usize).flat_map(|_| inits.iter().copied()).collect();
-                let (f, inner, iv, accs) = self.for_loop(at, plan.sizes[d], self.width * unroll, &carried);
+                let (f, inner, iv, accs) = self.for_loop(at, whole, self.width * unroll, &carried);
                 let mut next = Vec::new();
                 for u in 0..unroll as usize {
                     let ivu = if u == 0 {
@@ -694,6 +815,7 @@ impl Vectorize<'_> {
                     partial.push(vs[0]);
                 }
                 // The lanes combined, then with the old value.
+                let mut finals = Vec::new();
                 for (k, &c) in combine.iter().enumerate() {
                     let kind = match src.op_name(c) {
                         "arith.addf" => "add",
@@ -720,7 +842,40 @@ impl Vectorize<'_> {
                         .prop("fastmath", fm)
                         .build(self.out, Some(at));
                     let both = self.out.result(both);
-                    self.store(at, both, operands[n_ins + k], &idx, false);
+                    finals.push((both, idx, k));
+                }
+                // The elements past the last whole vector, one at a time.
+                if whole < plan.sizes[d] {
+                    let carried: Vec<ValueId> = finals.iter().map(|(v, _, _)| *v).collect();
+                    let (f, inner, iv, accs) = self.for_range(at, whole, plan.sizes[d], 1, &carried);
+                    let mut ivs_t = ivs.clone();
+                    ivs_t.push(iv);
+                    for (k, &v) in operands[..n_ins].iter().enumerate() {
+                        let idx = self.indices(inner, &plan.maps[k], &ivs_t);
+                        let x = self.load(inner, v, &idx, false);
+                        self.map.insert(bargs[k], x);
+                    }
+                    for k in 0..combine.len() {
+                        self.map.insert(bargs[n_ins + k], accs[k]);
+                    }
+                    let mut next = Vec::new();
+                    for &p in &ops {
+                        if src.op_name(p) == "linalg.yield" {
+                            for y in &src.ops[p.index()].operands {
+                                next.push(*self.map.get(y).ok_or("a yield of an unknown value")?);
+                            }
+                            break;
+                        }
+                        self.body_op(inner, p, &ivs_t)?;
+                    }
+                    OpSpec::new("scf.yield").operands(&next).build(self.out, Some(inner));
+                    let results = self.out.ops[f.index()].results.clone();
+                    for (fin, r) in finals.iter_mut().zip(results) {
+                        fin.0 = r;
+                    }
+                }
+                for (v, idx, k) in finals {
+                    self.store(at, v, operands[n_ins + k], &idx, false);
                 }
             }
         }
