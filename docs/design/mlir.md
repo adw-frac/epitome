@@ -726,6 +726,16 @@ same tokens at each step for f32 and for BF16 respectively:
 | the logits' fill a memset (`loopidiom`), and vectors with tails for what is not a multiple of the width | 13.4 |
 | the logits worked out in the output argument, not a buffer copied there (`bufferize`) | 10.6 |
 | no fill: the kernel's twin whose sums start at zero, fills only of the columns loops do | 10.3 |
+| the causal mask's select vectorized (i1 operands, loaded as bytes) | 9.1 |
+| element-wise operations fused into their user (`linalg-fuse-elementwise`); integer compares vectorized | 7.9 |
+| attention's products summed in registers (the reduction innermost); exp's clamp by selects; bitcasts of 256-bit vectors in registers | 6.5 |
+| layer norm's f64 vectorized | 5.9 |
+| one arena for a call's buffers, not dozens of mallocs whose memory comes back faulted; exp underflows to 0 (no denormals) | 5.1 |
+| `vzeroupper` before returns and calls (4-wide SSE code waited on the BF16 kernel's dirty upper halves) | 4.3 |
+| element-wise loops 8 vectors an iteration (exp's chain overlapped) | 3.0 |
+| maximum reductions in vector registers, not a libm call a lane | 2.9 |
+| GELU's tanh(z) + 1 as 2 / (1 + e^-2z); a fused input read once | 2.5 |
+| q k^T by an AVX-512 f32 kernel: 4 rows x 64 columns in 16 registers, A broadcast once for all of them | 2.05 |
 
 `linalg-fold-constants` now also works out an element-wise
 `linalg.generic` whose result is only sliced (`tensor.extract_slice`, a

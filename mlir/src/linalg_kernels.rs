@@ -185,6 +185,8 @@ struct Kernel {
     /// The function's twin for C that starts zeroed: its sums start at
     /// zero, and C is not read.
     zeroed: Option<String>,
+    /// The number of columns must be a multiple of this.
+    col_multiple: Option<u64>,
 }
 
 fn load(name: &str) -> Result<&'static Set, String> {
@@ -252,6 +254,7 @@ fn load(name: &str) -> Result<&'static Set, String> {
             pack_b: m.op_attr(op, "pack_b").and_then(|a| m.int_of(a)).map(|p| p as u64),
             transpose_a: m.op_attr(op, "transpose_a").is_some(),
             weights: m.op_attr(op, "weights").and_then(|a| m.string_of(a)),
+            col_multiple: m.op_attr(op, "col_multiple").and_then(|a| m.int_of(a)).map(|c| c as u64),
             zeroed: match m.op_attr(op, "zeroed").map(|a| m.attr(a)) {
                 Some(Attr::SymbolRef(p)) => Some(p[0].clone()),
                 _ => None,
@@ -464,6 +467,11 @@ fn batched(
     if shapes.iter().any(|s| s.0.len() != 3 || s.0[0] != batch) || shapes[0].0[1] < fewest {
         return Ok(false);
     }
+    // Some kernel takes matrices of this many columns.
+    let n = shapes[2].0[2];
+    if !ks.iter().any(|k| k.col_multiple.is_none_or(|c| n % c == 0)) {
+        return Ok(false);
+    }
     // A matmul's maps and iterators, for the rows past the last whole tile.
     let maps = ["(d0, d1, d2) -> (d0, d2)", "(d0, d1, d2) -> (d2, d1)", "(d0, d1, d2) -> (d0, d1)"]
         .iter()
@@ -541,7 +549,7 @@ fn tiles(
     // panels); rows past its last whole tile go to the next.
     let mut chosen = None;
     for (i, k) in ks.iter().enumerate() {
-        if k.tile.0 > m {
+        if k.tile.0 > m || k.col_multiple.is_some_and(|c| n % c != 0) {
             continue;
         }
         if let (Some(w), Some(p)) = (&k.weights, k.pack_b) {

@@ -177,6 +177,66 @@ def matmul_bf16(rows, zeroed=False):
     return ('' if zeroed else kernel) + head + '\n'.join(b.lines) + '\n}\n'
 
 
+def matmul_f32(rows, zeroed=False):
+    """C[rows, n] += A[rows, k] B[k, n] in f32, n a multiple of 64 (for
+    attention's products, whose B is not a constant): for each 64 columns,
+    the rows x 64 block of C in 4 rows registers while each row of B (four
+    vectors) is multiplied in, an element of A broadcast for each row of
+    C, by fused multiply-adds. A is read as it is (`transpose_a`)."""
+    name = f'__epitome_avx512_matmul_f32_r{rows}' + ('_z' if zeroed else '')
+    b = Body()
+    zero, one = b.index(0), b.index(1)
+    ki = b.op('k', 'arith.index_cast %k : i64 to index')
+    ni = b.op('n', 'arith.index_cast %n : i64 to index')
+    c64 = b.index(64)
+    ars = [b.gep('%a', b.int('mul', b.const(r), '%lda')) if r else '%a' for r in range(rows)]
+    crs = [b.gep('%c', b.int('mul', b.const(r), '%ldc')) if r else '%c' for r in range(rows)]
+    def panel(j, _):
+        j64 = b.cast(j)
+        def block():
+            bases = [b.gep(cr, j64) for cr in crs]
+            return [b.gep(base, b.const(16 * q)) if q else base for base in bases for q in range(4)]
+        if zeroed:
+            z = b.op('z', f'arith.constant dense<0.000000e+00> : {F}')
+            acc = [z] * (4 * rows)
+        else:
+            acc = [b.load(p, F) for p in block()]
+        bj = b.gep('%b', j64)
+        def step(p, acc):
+            p64 = b.cast(p)
+            row = b.gep(bj, b.int('mul', p64, '%ldb'))
+            bs = [b.load(b.gep(row, b.const(16 * q)) if q else row, F) for q in range(4)]
+            new = []
+            for r in range(rows):
+                x = b.load(b.gep(ars[r], p64), 'f32')
+                s = b.op('s', f'"vector.broadcast"({x}) : (f32) -> {F}')
+                for q in range(4):
+                    new.append(b.op('v', f'"math.fma"({s}, {bs[q]}, {acc[4 * r + q]}) <{{fastmath = #arith.fastmath<none>}}> : ({F}, {F}, {F}) -> {F}'))
+            return new
+        out = b.loop(zero, ki, one, acc, step)
+        for v, p in zip(out, block()):
+            b.store(v, p, F)
+        return []
+    b.loop(zero, ni, c64, [], panel)
+    b.line('"func.return"() : () -> ()')
+    kernels = ''
+    if not zeroed:
+        for op, maps in [('matmul', ['(d0, d1, d2) -> (d0, d2)', '(d0, d1, d2) -> (d2, d1)', '(d0, d1, d2) -> (d0, d1)']),
+                         ('batch_matmul', ['(d0, d1, d2, d3) -> (d0, d1, d3)', '(d0, d1, d2, d3) -> (d0, d3, d2)',
+                                           '(d0, d1, d2, d3) -> (d0, d1, d2)'])]:
+            iters = '["parallel", "parallel", "reduction"]' if op == 'matmul' else '["parallel", "parallel", "parallel", "reduction"]'
+            kernels += (f'"epitome.kernel"() <{{op = "{op}", element = f32,\n'
+                        f'    indexing_maps = [{", ".join(f"affine_map<{m}>" for m in maps)}],\n'
+                        f'    iterator_types = {iters},\n'
+                        f'    body = ["arith.mulf", "arith.addf"],\n'
+                        f'    tile = array<i64: {rows}, 64>, whole_rows, transpose_a, col_multiple = 64,\n'
+                        f'    function = @{name}, zeroed = @{name}_z}}> : () -> ()\n\n')
+    head = (f'func.func private @{name}(%c: !llvm.ptr, %ldc: i64, %a: !llvm.ptr, %lda: i64, %at: !llvm.ptr, '
+            f'%b: !llvm.ptr, %ldb: i64, %k: i64, %n: i64) attributes {{llvm.no_inline, '
+            f'llvm.passthrough = [["target-features", "{FEATURES}"]]}} {{\n')
+    return kernels + head + '\n'.join(b.lines) + '\n}\n'
+
+
 def main():
     sys.stdout.write("""// Kernels for x86-64 with AVX-512 and AVX512-BF16: data for
 // `mlir/src/linalg_kernels.rs` (`--pass=linalg-to-kernels=x86-avx512`).
@@ -197,6 +257,9 @@ def main():
 
 """)
     sys.stdout.write('\n'.join(matmul_bf16(rows, zeroed) for rows in (4, 1) for zeroed in (False, True)))
+    sys.stdout.write("\n// Matrix products in f32 of B that is not a constant (attention's), n\n"
+                     '// a multiple of 64: see matmul_f32 in gen_x86_avx512.py.\n\n')
+    sys.stdout.write('\n'.join(matmul_f32(4, zeroed) for zeroed in (False, True)))
 
 
 main()
