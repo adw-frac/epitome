@@ -133,6 +133,10 @@ struct Plan {
     /// The loop made the innermost, swapped with the last (in `maps`,
     /// already).
     swap: usize,
+    /// A product's sum, when the vectors run along a parallel loop: the
+    /// reduction's loop, innermost, its vectors of partial sums carried in
+    /// registers (see `lower_accumulate`).
+    accumulate: Option<usize>,
 }
 
 /// How many vectors of partial results a reduction keeps, at most.
@@ -344,13 +348,32 @@ fn plan_at(
         if !vector[n_ins..].iter().all(|&v| v) {
             return None;
         }
-        return Some(Plan { maps, sizes, vector, combine: None, width, swap });
+        // Along a parallel loop, with one reduction outside it whose
+        // outputs the vectors run along: the reduction innermost, carrying
+        // the outputs.
+        let reductions: Vec<usize> = (0..d).filter(|&k| reduction[k]).collect();
+        if let [r] = reductions[..]
+            && sizes[d] % width == 0
+            && maps[n_ins..].iter().all(|m| m.results.iter().all(|e| !uses_dim(e, r)))
+            && let Some(combine) = combines(src, ops, bargs, n_ins)
+        {
+            return Some(Plan { maps, sizes, vector, combine: Some(combine), width, swap, accumulate: Some(r) });
+        }
+        return Some(Plan { maps, sizes, vector, combine: None, width, swap, accumulate: None });
     }
     // A reduction along the innermost loop only, each output its old value
     // combined with something else, and read nowhere else.
     if reduction[..d].iter().any(|&r| r) || vector[n_ins..].iter().any(|&v| v) {
         return None;
     }
+    let combine = combines(src, ops, bargs, n_ins)?;
+    Some(Plan { maps, sizes, vector, combine: Some(combine), width, swap, accumulate: None })
+}
+
+/// Each output's combining operation, when each is its old value combined
+/// (`addf`, a maximum, ...) with what the rest of the body works out, and
+/// read nowhere else.
+fn combines(src: &Module, ops: &[OpId], bargs: &[ValueId], n_ins: usize) -> Option<Vec<OpId>> {
     let &yield_op = ops.last()?;
     let mut combine = Vec::new();
     for (k, &y) in src.ops[yield_op.index()].operands.iter().enumerate() {
@@ -367,7 +390,7 @@ fn plan_at(
         }
         combine.push(c);
     }
-    Some(Plan { maps, sizes, vector, combine: Some(combine), width, swap })
+    Some(combine)
 }
 
 /// The width a `linalg.fill` is done at: of `f32`, into a buffer whose
@@ -663,7 +686,111 @@ impl Vectorize<'_> {
         Ok(())
     }
 
+    /// A product's sum along a parallel loop's vectors (`Plan::accumulate`):
+    /// the other parallel loops (the last of them unrolled, up to four of
+    /// its iterations at once, for chains of additions that do not wait on
+    /// each other), the vectors' loop, then the reduction's, innermost,
+    /// carrying each output's vector of partial sums, stored once after it.
+    fn lower_accumulate(&mut self, op: OpId, plan: &Plan, block: BlockId, r: usize) -> Result<(), String> {
+        let src = self.src;
+        let o = &src.ops[op.index()];
+        let operands: Vec<ValueId> = o
+            .operands
+            .iter()
+            .map(|v| self.map.get(v).copied().ok_or("an operand from outside"))
+            .collect::<Result<_, _>>()?;
+        let n_ins = crate::bufferize::inputs_of(src, op);
+        let n_outs = operands.len() - n_ins;
+        let n = plan.sizes.len();
+        let d = n - 1;
+        let body = src.regions[o.regions[0].index()].blocks[0];
+        let bargs = src.blocks[body.index()].args.clone();
+        let ops = src.blocks[body.index()].ops.clone();
+        let index = self.out.index_type();
+
+        let mut ivs: Vec<Option<ValueId>> = vec![None; n];
+        let outer: Vec<usize> = (0..d).filter(|&k| k != r).collect();
+        let unrolled = outer.last().copied().filter(|&k| plan.sizes[k] > 1);
+        let unroll = unrolled.map_or(1, |k| [4u64, 2, 1].into_iter().find(|&u| plan.sizes[k] % u == 0).unwrap());
+        let mut at = block;
+        let mut loops = Vec::new();
+        for &k in &outer {
+            if plan.sizes[k] == 1 {
+                ivs[k] = Some(self.index_const(at, 0));
+                continue;
+            }
+            let step = if Some(k) == unrolled { unroll } else { 1 };
+            let (f, b, iv, _) = self.for_loop(at, plan.sizes[k], step, &[]);
+            loops.push((f, b));
+            ivs[k] = Some(iv);
+            at = b;
+        }
+        let (f, b, iv, _) = self.for_loop(at, plan.sizes[d], self.width, &[]);
+        loops.push((f, b));
+        ivs[d] = Some(iv);
+        at = b;
+        ivs[r] = Some(self.index_const(at, 0));
+        // Each unrolled copy's indices.
+        let mut copies: Vec<Vec<ValueId>> = Vec::new();
+        for u in 0..unroll {
+            let mut c: Vec<ValueId> = ivs.iter().map(|v| v.unwrap()).collect();
+            if u > 0 {
+                let k = unrolled.unwrap();
+                let off = self.index_const(at, u as i64);
+                let a = OpSpec::new("arith.addi").operands(&[c[k], off]).results(&[index]).build(self.out, Some(at));
+                c[k] = self.out.result(a);
+            }
+            copies.push(c);
+        }
+        // The outputs' vectors, then the sum over the reduction's loop.
+        let mut inits = Vec::new();
+        let mut out_idx = Vec::new();
+        for c in &copies {
+            for k in 0..n_outs {
+                let idx = self.indices(at, &plan.maps[n_ins + k], c);
+                inits.push(self.load(at, operands[n_ins + k], &idx, true));
+                out_idx.push(idx);
+            }
+        }
+        let (f, inner, iv_r, accs) = self.for_loop(at, plan.sizes[r], 1, &inits);
+        let mut next = Vec::new();
+        for (u, c) in copies.iter().enumerate() {
+            let mut c = c.clone();
+            c[r] = iv_r;
+            for (k, &v) in operands[..n_ins].iter().enumerate() {
+                let idx = self.indices(inner, &plan.maps[k], &c);
+                let x = self.load(inner, v, &idx, plan.vector[k]);
+                self.map.insert(bargs[k], x);
+            }
+            for k in 0..n_outs {
+                self.map.insert(bargs[n_ins + k], accs[u * n_outs + k]);
+            }
+            for &p in &ops {
+                if src.op_name(p) == "linalg.yield" {
+                    for y in &src.ops[p.index()].operands {
+                        let v = *self.map.get(y).ok_or("a yield of an unknown value")?;
+                        next.push(self.splat(inner, v));
+                    }
+                    break;
+                }
+                self.body_op(inner, p, &c)?;
+            }
+        }
+        OpSpec::new("scf.yield").operands(&next).build(self.out, Some(inner));
+        let results = self.out.ops[f.index()].results.clone();
+        for (k, (&v, idx)) in results.iter().zip(&out_idx).enumerate() {
+            self.store(at, v, operands[n_ins + k % n_outs], idx, true);
+        }
+        for &(_, b) in loops.iter().rev() {
+            OpSpec::new("scf.yield").build(self.out, Some(b));
+        }
+        Ok(())
+    }
+
     fn lower(&mut self, op: OpId, plan: &Plan, block: BlockId) -> Result<(), String> {
+        if let Some(r) = plan.accumulate {
+            return self.lower_accumulate(op, plan, block, r);
+        }
         let src = self.src;
         let o = &src.ops[op.index()];
         let operands: Vec<ValueId> = o

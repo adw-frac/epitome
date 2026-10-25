@@ -7,7 +7,8 @@
 //! r = x - k ln 2 (ln 2 in two parts, so that r is exact), |r| <= ln 2 / 2.
 //! e^r is the polynomial of Cephes' `expf`, good to about an ulp; 2^k is k
 //! put in a float's exponent. k is rounded by adding 1.5 * 2^23, which
-//! leaves k in the low bits of the sum. x is clamped first, to where 2^k
+//! leaves k in the low bits of the sum. x is clamped first (a NaN stays
+//! one), to where 2^k
 //! is a normal float: e^x underflows to about 1.2e-38 rather than 0 below
 //! -87.3, and stops at about 1.7e38 above 88.
 //!
@@ -255,9 +256,14 @@ impl Expand<'_> {
 
     fn exp(&mut self, x: ValueId) -> ValueId {
         let ity = self.int_ty();
+        // Clamped by compares and selects, which keep a NaN: x86 has no
+        // one instruction for IEEE's maximum (`arith.maximumf`), and these
+        // are two each there.
         let (lo, hi) = (self.float(-87.336_55), self.float(88.0));
-        let x = self.f("arith.maximumf", x, lo);
-        let x = self.f("arith.minimumf", x, hi);
+        let below = self.less(x, lo);
+        let x = self.select(below, lo, x);
+        let above = self.less(hi, x);
+        let x = self.select(above, hi, x);
         // k = round(x / ln 2), as a float and as an integer.
         let log2e = self.float(std::f32::consts::LOG2_E);
         let magic = self.float(12_582_912.0); // 1.5 * 2^23

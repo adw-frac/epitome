@@ -3094,7 +3094,8 @@ fn half_arith(cx: &mut Ctx, f: &mut Function) {
 
 /// Bitcasts, in forms the code generator has: between registers where
 /// both types are ones a register holds whole (integers and floating point
-/// of up to 64 bits; vectors of 64 or 128 bits of lanes of a byte or more;
+/// of up to 64 bits; vectors of 64 bits, or of 128 up to the vector
+/// registers' width, of lanes of a byte or more;
 /// a mask and the integer of its bits), and a 64-bit vector and `i64`
 /// through `<8 x i8>` (`fmov`). Any other (a vector narrower than a
 /// register or wider than one, `i128` and a vector, vectors of one lane) is
@@ -3112,14 +3113,20 @@ fn vector_int_bitcasts(cx: &mut Ctx, f: &mut Function) {
         _ => None,
     };
     // Held whole by a register (vectors only where there are vector
-    // registers).
-    let has_vectors = cx.vector_bits() > 0;
+    // registers, and no wider than they are: 256 bits with AVX2).
+    let vector_bits = cx.vector_bits();
+    let has_vectors = vector_bits > 0;
     let register = |cx: &Ctx, ty: TypeId| match cx.m.types.get(ty) {
         Type::Int(b) => *b <= 64,
         Type::Float | Type::Double | Type::Ptr(_) => true,
         Type::Vector { len, elem, scalable: false } => {
             let eb = cx.size_of(*elem).unwrap_or(0) * 8;
-            has_vectors && *len > 1 && len.is_power_of_two() && eb >= 8 && matches!(len * eb as u32, 64 | 128)
+            let bits = len * eb as u32;
+            has_vectors
+                && *len > 1
+                && len.is_power_of_two()
+                && eb >= 8
+                && (bits == 64 || (bits >= 128 && bits <= vector_bits))
         }
         _ => false,
     };
