@@ -10,7 +10,8 @@
 //! contiguous dimension of every operand that it indexes (the others are
 //! the same for each lane and broadcast), its size is a multiple of
 //! `width` (or of half of it, and so on down to 4, then vectors of that
-//! many lanes), the elements it loads in vectors are `f32`, and its body is
+//! many lanes), the elements it loads in vectors are `f32` (or integers
+//! of 1 to 32 bits, as a mask is made of, compared), and its body is
 //! arithmetic that has a vector form. Failing that, another parallel loop
 //! that is so may be made the innermost instead (the two swapped): a
 //! matrix product's columns rather than its sum, each lane then summing
@@ -149,6 +150,7 @@ const ELEMENTWISE: &[&str] = &[
     "arith.maxnumf",
     "arith.minnumf",
     "arith.cmpf",
+    "arith.cmpi",
     "arith.select",
     "math.exp",
     "math.tanh",
@@ -288,7 +290,9 @@ fn plan_at(
             [] => vector.push(false),
             [r] if r + 1 == shape.len() && m.results[r] == Expr::Dim(d) => {
                 let last_stride = crate::build::strided_layout(src, src.value_type(v)).map_or(1, |(s, _)| s[r]);
-                if last_stride != 1 || !matches!(src.ty(elem), Type::Float("f32") | Type::Int { width: 1, .. }) {
+                if last_stride != 1
+                    || !matches!(src.ty(elem), Type::Float("f32") | Type::Int { width: 1 | 8 | 16 | 32, .. })
+                {
                     return None;
                 }
                 vector.push(true);
