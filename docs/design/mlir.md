@@ -750,27 +750,57 @@ in the order the scalar loops do. `math-polynomial-approximation` expands
 `math.tanh`: below 1/4 the odd Taylor series to x^9, above it 1 - 2 /
 (e^2|x| + 1), then x's sign.
 
-`linalg-split=<chunks>[:<rows>]` (`mlir/src/linalg_split.rs`, after
-`bufferize`) splits each `linalg.generic`, `linalg.fill` and
+`linalg-split=<chunks>[:<rows>[:<cols>]]` (`mlir/src/linalg_split.rs`,
+after `bufferize`) splits each `linalg.generic`, `linalg.fill` and
 `memref.copy` it can among threads, the memory first: along the parallel
 dimension that gives the most chunks (up to 16 here), each chunk's
 operands views of those that dimension indexes, each chunk writing whole
-64-byte lines of its own. Consecutive operations split into as many
+64-byte lines of its own; the chunks as long as each other but the last,
+which may be shorter (its task then calls one of two functions, each of
+static shapes, by an indirect call). Operations split into as many
 chunks share a task where every buffer any of them writes is split the
 same way by all, so that a chunk reads only what it wrote or what none
-writes, and the threads meet once for the lot. A matrix product is split
-by its batch (attention's heads) or by its rows, at least as many as the
-kernel's tile has (4 on AVX-512, 64 on SME), never by its columns, and
-`linalg-to-kernels` then lowers each chunk's product; the LM head (2^23
-multiply-adds or more) is left whole, for the kernels' split by columns.
+writes, and the threads meet once for the lot. "The same way" is in
+elements of the buffer, not of the view: each access's chunk is a block
+of `per x stride` elements in each period of `extent x stride`, from the
+view's strided layout, so that a split survives `expand_shape`,
+`collapse_shape` and `subview` (a projection's columns, 128 to a chunk,
+are attention's heads, one to a chunk, after the reshape and transpose).
+An operation that cannot join the task waits, with what depends on it,
+while later operations that go on from what the task writes join it (Q's
+RoPE after Q's projection, past K's and V's).
+
+Large matrix products of constant weights (2^23 multiply-adds or more)
+are split as tensor parallelism (Megatron) splits a layer, never by
+their rows, each of which would read all the weights:
+
+- by their columns, whole panels of `cols` (64, the kernels' packing) to
+  a chunk: Q's projection a head a chunk, the MLP's gate and up 11 panels
+  a chunk and 7 to the last; each chunk's columns of the weights its own;
+- or, where the task has split their input by the columns they sum over
+  (the heads, the MLP's hidden units), by those: each chunk's sums of its
+  part (its rows of the weights) go to a buffer of its own, and an
+  operation added after the task adds them up, split by rows with the
+  residual and the next norm (the row-parallel layer's all-reduce).
+
+`linalg-to-kernels` packs the whole matrix once and gives each chunk's
+call its panels (or its rows of every panel), so each thread reads only
+its own weights; and it goes through the panels of a large product a
+group at a time, as many as half a core's cache holds, every block of
+rows for each group, rather than every panel for each block of rows (the
+LM head's chunk of 149 panels is 39 MB, read 16 times). A product's batch
+(attention's heads) or, for small ones, its rows (at least as many as the
+kernel's tile has: 4 on AVX-512, 64 on SME) are split as before.
 The driver's pool gives each thread a fixed block of each job's chunks
 (thread t, of T, does chunks t C / T up to (t + 1) C / T), so that a
 thread does the same part of each operation split the same way, as where
 each processor has memory of its own; what moves between threads is where
 one operation's split differs from the next's (rows to heads and back, in
-attention). The window's 230-odd operations become about 170 calls of
-`__epitome_parallel_for`. On the M4 Pro (SME BF16), 1.65 ms on one thread,
-0.82 ms on four; past four the efficiency cores hold the rest up.
+attention). The window's 230-odd operations become 78 calls of
+`__epitome_parallel_for` (about 170 before the products were split as
+tensor parallelism splits them). On the M4 Pro (SME BF16), 1.93 ms on one
+thread (1.67 before: the sums of partial products) and 0.80 ms on four
+(0.98); past four the efficiency cores hold the rest up.
 
 | Threads (x86-64) | 1 | 2 | 4 | 8 | 16 | 32 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -784,16 +814,52 @@ executable (within 2 GB of itself), so `weights::externalize` puts every
 constant of a megabyte or more in `weights-bf16.bin`, and each
 `memref.get_global` of one becomes `__epitome_weights()`, the driver's
 copy of the file, plus its offset. A window of 64 tokens is about 400
-GFLOP:
+GFLOP. `--bench` times the passes after the first (which loads the
+weights; counting it, as before, put 55 ms on each pass at 16 threads),
+and `EPITOME_PROFILE=1` adds each task's time. On a 32-core EPYC (Zen 5,
+AVX512-BF16, no AMX; 210 GB/s read by 8 threads or more), ms a pass:
 
-| Threads | 1 | 4 | 8 | 16 | 32 | 64 |
-| --- | --- | --- | --- | --- | --- | --- |
-| ms a window | 1592 | 471 | 278 | 194 | 192 | 331 |
+| Threads | 1 | 8 | 16 | 32 | 64 |
+| --- | --- | --- | --- | --- | --- |
+| rows, and the kernels' split of large products by columns | 1259 | 218 | 155 | 160 | 275 |
+| tensor parallel (the products of weights by columns, or by what they sum over) | 1315 | 233 | 168 | 185 | 233 |
 
-Past 16 nothing gains: the window's 64 rows, four a chunk, are 16
-chunks, and each chunk streams all of a layer's weights; splitting the
-large products by their columns instead (each thread its own part of the
-weights, as tensor parallelism does) is the next step.
+Tensor parallelism cuts the window's tasks from about 1900 to 437, 12 a
+layer, and each thread reads only its own part of the weights; it is a
+little slower on this machine, whose threads share memory anyway, by the
+sums of partial products (each row-parallel product writes 16 of its
+output, which another task adds up: about 1 ms a layer on one thread).
+At 16 threads, a layer:
+
+| Task | Chunks | ms |
+| --- | --- | --- |
+| RMSNorm (16 sums are a 64-byte line: 4 chunks) | 4 | 0.05 |
+| Q's projection, a head a chunk | 16 | 0.17 |
+| Q's bias, transpose, RoPE | 16 | 0.27 |
+| K's projection, 4 panels; K's bias, transpose, RoPE; V's projection | 4, 16, 4 | 0.18 |
+| attention, a head a chunk | 16 | 0.12 |
+| its transpose and the output projection, by the heads it sums over | 16 | 0.29 |
+| the sums, the residual | 16 | 0.12 |
+| RMSNorm | 4 | 0.05 |
+| gate, up, SiLU, down (by the hidden units it sums over) | 16 | 2.19 |
+| the sums, the residual | 16 | 0.09 |
+
+The MLP, 8.7 GFLOP, runs at 4 TFLOP/s on 16 threads, 16 times one
+thread's rate. What moves between threads is K and V (two heads, 64 KB),
+the norms' input, and each row-parallel product's 16 partial outputs.
+
+PyTorch 2.16 on the same machine, the same model and window (`use_cache`
+off, logits for every position), ms a pass:
+
+| | 16 threads | 32 | 64 |
+| --- | --- | --- | --- |
+| float32, eager | 669 | 515 | 2758 |
+| float32, `torch.compile` | 552 | 411 | 2033 |
+| bfloat16, eager | 135 | 114 | 696 |
+| bfloat16, `torch.compile` | 123 | 96 | 537 |
+
+PyTorch's bfloat16 rounds the activations too, where Epitome's kernels
+round only the weights and the rows of A they read, summing in f32.
 
 ## 6. Dialect descriptions
 

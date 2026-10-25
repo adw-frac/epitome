@@ -77,7 +77,13 @@ pub fn run(src: &Module, kernels: &str) -> Result<Module, String> {
             for &b in &src.regions[r.index()].blocks {
                 for &op in &src.blocks[b.index()].ops {
                     if src.op_name(op) == "func.func" {
+                        // A task of linalg-split's runs on a thread already:
+                        // its products are not split again.
+                        let name = src.op_attr(op, "sym_name").and_then(|a| src.string_of(a)).unwrap_or_default();
+                        let parallel = cx.parallel;
+                        cx.parallel &= !name.contains(".part");
                         func(src, op, &mut out, block, &mut cx, &mut map)?;
+                        cx.parallel = parallel;
                     } else {
                         out.clone_op(src, op, Some(block), &mut map)?;
                     }
@@ -120,6 +126,10 @@ struct Cx<'a> {
 /// waking them costs more than they save.
 const PARALLEL_MACS: u64 = 1 << 23;
 
+/// The bytes of packed weights a group of panels has at most: half a core's
+/// own cache (1 MB on Zen 5, more on others), the rest for A and C.
+const CACHE: u64 = 1 << 19;
+
 /// Chunks of columns a product split among threads has, at most: several a
 /// thread, for the slower ones to share out.
 const PARALLEL_CHUNKS: u64 = 64;
@@ -127,17 +137,37 @@ const PARALLEL_CHUNKS: u64 = 64;
 /// Removes `memref.get_global`s whose result nothing uses, then the
 /// constant `memref.global`s nothing gets.
 fn drop_unused_globals(m: &mut Module) {
-    let used: std::collections::HashSet<ValueId> = m.ops.iter().flat_map(|o| o.operands.iter().copied()).collect();
-    for b in 0..m.blocks.len() {
-        let ops = std::mem::take(&mut m.blocks[b].ops);
-        let kept = ops
-            .into_iter()
-            .filter(|&op| {
-                let o = &m.ops[op.index()];
-                !(m.name(o.name) == "memref.get_global" && !used.contains(&o.results[0]))
-            })
-            .collect();
-        m.blocks[b].ops = kept;
+    // With what only takes its address and nothing uses (a chunk's slice of
+    // weights that were packed, as linalg-split gives a task one), until
+    // nothing more goes.
+    let unused_address = |m: &Module, op: OpId, used: &std::collections::HashSet<ValueId>| {
+        let o = &m.ops[op.index()];
+        matches!(
+            m.op_name(op),
+            "memref.get_global"
+                | "memref.extract_aligned_pointer_as_index"
+                | "arith.index_cast"
+                | "llvm.inttoptr"
+                | "llvm.getelementptr"
+                | "llvm.mul"
+                | "llvm.mlir.constant"
+                | "builtin.unrealized_conversion_cast"
+        ) && o.results.iter().all(|r| !used.contains(r))
+    };
+    loop {
+        let used: std::collections::HashSet<ValueId> =
+            m.blocks.iter().flat_map(|b| &b.ops).flat_map(|&op| m.ops[op.index()].operands.iter().copied()).collect();
+        let mut dropped = false;
+        for b in 0..m.blocks.len() {
+            let ops = std::mem::take(&mut m.blocks[b].ops);
+            let n = ops.len();
+            let kept: Vec<OpId> = ops.into_iter().filter(|&op| !unused_address(m, op, &used)).collect();
+            dropped |= kept.len() != n;
+            m.blocks[b].ops = kept;
+        }
+        if !dropped {
+            break;
+        }
     }
     let mut got = std::collections::HashSet::new();
     for b in &m.blocks {
@@ -705,9 +735,9 @@ fn tiles(
         Some(p) if k.whole_rows && n % p == 0 => pack(out, b, p, "f32", module_block, block, cx)?,
         _ => None,
     };
-    let (packed, scales) = match packed {
-        Some((v, s)) => (Some(v), s),
-        None => (None, None),
+    let (packed, scales, rows_b, slice) = match packed {
+        Some(p) => (Some(p.panels), p.scales, p.rows, p.slice),
+        None => (None, None, kk, None),
     };
     // A packed panel's size in words.
     let bits = match k.weights.as_deref() {
@@ -717,8 +747,35 @@ fn tiles(
     };
     let (pat, pc) = (pointer(out, at), pointer(out, c));
     let pa = if k.transpose_a { pointer(out, a) } else { pat };
-    let pb = pointer(out, packed.unwrap_or(b));
-    let scale_ptr = scales.map(|sc| pointer(out, sc));
+    let mut pb = pointer(out, packed.unwrap_or(b));
+    let mut scale_ptr = scales.map(|sc| pointer(out, sc));
+    // A chunk's slice of the weights (linalg-split's): its panels, or its
+    // rows of them, and its columns' scales.
+    if let Some((chunk, words, cols)) = slice {
+        let i32t = out.int_type(32);
+        let flags = out.int_attr(0, i32t);
+        let at = |out: &mut Module, p: ValueId, per: u64| -> ValueId {
+            let step = c64(out, per as i64);
+            let off = add(
+                out,
+                OpSpec::new("llvm.mul").operands(&[chunk, step]).results(&[i64t]).prop("overflowFlags", flags),
+            );
+            let et = out.type_attr(elem);
+            let nw = out.int_attr(0, i32t);
+            let raw = out.dense_array_attr("i32", &[i32::MIN as i64]);
+            add(
+                out,
+                OpSpec::new("llvm.getelementptr")
+                    .operands(&[p, off])
+                    .results(&[ptr])
+                    .prop("elem_type", et)
+                    .prop("noWrapFlags", nw)
+                    .prop("rawConstantIndices", raw),
+            )
+        };
+        pb = at(out, pb, words);
+        scale_ptr = scale_ptr.map(|sp| at(out, sp, cols));
+    }
     let ldc = c64(out, lc.0[0] as i64);
     let (lda, offa) = if k.transpose_a {
         (c64(out, la.0[0] as i64), c64(out, la.1 as i64))
@@ -726,7 +783,7 @@ fn tiles(
         (c64(out, m as i64), c64(out, 0))
     };
     let (ldb, offb, panel) = match (packed, k.pack_b) {
-        (Some(_), Some(p)) => (c64(out, p as i64), c64(out, 0), Some(c64(out, (p * kk * bits / 32) as i64))),
+        (Some(_), Some(p)) => (c64(out, p as i64), c64(out, 0), Some(c64(out, (p * rows_b * bits / 32) as i64))),
         (None, Some(p)) => (c64(out, lb.0[0] as i64), c64(out, lb.1 as i64), Some(c64(out, p as i64))),
         _ => (c64(out, lb.0[0] as i64), c64(out, lb.1 as i64), None),
     };
@@ -793,7 +850,47 @@ fn tiles(
         )
         .map(|()| true);
     }
-    let outer = OpSpec::new("scf.for").operands(&[zero, mend, rows]).regions(1).build(out, Some(block));
+    // Packed weights a group of panels at a time, as many as a core's cache
+    // holds, each group for every block of rows, so that they are read from
+    // memory once rather than once for each block of rows.
+    let group = match (packed, k.pack_b) {
+        (Some(_), Some(p)) if k.whole_rows => (CACHE / (p * kk * bits / 8)).max(1) * p,
+        _ => nk,
+    };
+    let (mut rb, mut gblock) = (block, None);
+    let (mut pc, mut pb, mut scale_ptr, mut nv) = (pc, pb, scale_ptr, nv);
+    if group < nk {
+        let (p, panel) = (k.pack_b.unwrap(), panel.unwrap());
+        let (nkv, step) = (cidx(out, nk as i64), cidx(out, group as i64));
+        let (cols, pv) = (c64(out, group as i64), c64(out, p as i64));
+        let g = OpSpec::new("scf.for").operands(&[zero, nkv, step]).regions(1).build(out, Some(block));
+        let gr = out.region_of(g, 0);
+        let gb = out.add_block(gr, &[index]);
+        let j = out.blocks[gb.index()].args[0];
+        let j = OpSpec::new("arith.index_cast").operands(&[j]).results(&[i64t]).build(out, Some(gb));
+        let j = out.result(j);
+        // The group's columns: as many as it has, or those left.
+        let left = int(out, gb, "llvm.sub", nv, j);
+        let pred = out.int_attr(2, i64t); // slt
+        let i1 = out.int_type(1);
+        let short = OpSpec::new("llvm.icmp")
+            .operands(&[left, cols])
+            .results(&[i1])
+            .prop("predicate", pred)
+            .build(out, Some(gb));
+        let short = out.result(short);
+        let n = OpSpec::new("llvm.select").operands(&[short, left, cols]).results(&[i64t]).build(out, Some(gb));
+        nv = out.result(n);
+        pc = gep(out, gb, pc, j);
+        let panels = OpSpec::new("llvm.udiv").operands(&[j, pv]).results(&[i64t]).build(out, Some(gb));
+        let panels = out.result(panels);
+        let words = int(out, gb, "llvm.mul", panels, panel);
+        pb = gep(out, gb, pb, words);
+        scale_ptr = scale_ptr.map(|sp| gep(out, gb, sp, j));
+        rb = gb;
+        gblock = Some(gb);
+    }
+    let outer = OpSpec::new("scf.for").operands(&[zero, mend, rows]).regions(1).build(out, Some(rb));
     let r1 = out.region_of(outer, 0);
     let ob = out.add_block(r1, &[index]);
     let i = out.blocks[ob.index()].args[0];
@@ -826,6 +923,9 @@ fn tiles(
         args.extend(scale_ptr);
         OpSpec::new("func.call").operands(&args).prop("callee", callee).build(out, Some(ob));
         OpSpec::new("scf.yield").build(out, Some(ob));
+        if let Some(gb) = gblock {
+            OpSpec::new("scf.yield").build(out, Some(gb));
+        }
         if nk < n {
             edge_columns(src, op, [a, b, c], props, out, block, map, full, nk, zeroed)?;
         }
@@ -1206,19 +1306,47 @@ fn pack(
     module_block: BlockId,
     block: BlockId,
     cx: &mut Cx<'_>,
-) -> Result<Option<(ValueId, Option<ValueId>)>, String> {
-    let ValueDef::Result { op: get, .. } = out.values[b.index()].def else { return Ok(None) };
+) -> Result<Option<Packed>, String> {
+    // B, or the constant B is a chunk's slice of.
+    let (whole, step) = match sliced(out, b) {
+        Some((g, chunk, step)) => (g, Some((chunk, step))),
+        None => (b, None),
+    };
+    let ValueDef::Result { op: get, .. } = out.values[whole.index()].def else { return Ok(None) };
     if out.op_name(get) != "memref.get_global" {
         return Ok(None);
     }
     let Some(Attr::SymbolRef(p)) = out.op_attr(get, "name").map(|a| out.attr(a)).cloned() else { return Ok(None) };
     let name = p[0].clone();
-    let ty = out.value_type(b);
+    let ty = out.value_type(whole);
     let Some((shape, elem)) = out.shaped(ty) else { return Ok(None) };
     if strided_layout(out, ty).is_some() || shape.len() != 2 || !matches!(out.ty(elem), Type::Float("f32")) {
         return Ok(None);
     }
     let (kk, n) = (shape[0], shape[1]);
+    // A slice: whole panels, or rows of them (pairs for BF16), the chunk's
+    // distance from the first in words of the packed panels, and in
+    // columns.
+    let bits = match format {
+        "bf16" => 16,
+        "f32" => 32,
+        _ => 8,
+    };
+    let slice = match step {
+        None => None,
+        Some((chunk, step)) => {
+            let e = step / 4;
+            if step % 4 != 0 || bits == 8 {
+                return Ok(None);
+            } else if e % n == 0 && (e / n) % (32 / bits) == 0 {
+                Some((chunk, e / n * panel * bits / 32, 0))
+            } else if e < n && e % panel == 0 {
+                Some((chunk, e / panel * panel * kk * bits / 32, e))
+            } else {
+                return Ok(None);
+            }
+        }
+    };
     let cache = (name.clone(), panel, format.to_string());
     let new_name = match cx.packed.get(&cache) {
         Some(g) => g.clone(),
@@ -1403,7 +1531,48 @@ fn pack(
     };
     let packed = get(out, &new_name).ok_or("the packed global is missing")?;
     let scales = get(out, &format!("{new_name}_scales"));
-    Ok(Some((packed, scales)))
+    Ok(Some(Packed { panels: packed, scales, rows: kk, slice }))
+}
+
+/// Constant weights packed into panels: the panels, the columns' scales
+/// (for a format that has them), the rows of the whole, and for a chunk's
+/// slice of them, the chunk and its distance from the first, in words of
+/// panels and in columns.
+struct Packed {
+    panels: ValueId,
+    scales: Option<ValueId>,
+    rows: u64,
+    slice: Option<(ValueId, u64, u64)>,
+}
+
+/// The constant that `b` is a chunk's slice of, as linalg-split gives a
+/// task one: `unrealized_conversion_cast(getelementptr i8 (inttoptr(
+/// index_cast(extract_aligned_pointer_as_index(get_global))), chunk *
+/// step))`; with the chunk, and the step in bytes.
+fn sliced(out: &Module, b: ValueId) -> Option<(ValueId, ValueId, u64)> {
+    let def = |v: ValueId, name: &str| -> Option<OpId> {
+        let ValueDef::Result { op, .. } = out.values[v.index()].def else { return None };
+        (out.op_name(op) == name).then_some(op)
+    };
+    let operand = |op: OpId, k: usize| out.ops[op.index()].operands.get(k).copied();
+    let cast = def(b, "builtin.unrealized_conversion_cast")?;
+    let gep = def(operand(cast, 0)?, "llvm.getelementptr")?;
+    let i8t = out.ty(out.resolve_type(match out.op_attr(gep, "elem_type").map(|a| out.attr(a)) {
+        Some(Attr::Type(t)) => *t,
+        _ => return None,
+    }));
+    if !matches!(i8t, Type::Int { width: 8, .. }) {
+        return None;
+    }
+    let base = def(operand(gep, 0)?, "llvm.inttoptr")?;
+    let word = def(operand(base, 0)?, "arith.index_cast")?;
+    let address = def(operand(word, 0)?, "memref.extract_aligned_pointer_as_index")?;
+    let global = operand(address, 0)?;
+    def(global, "memref.get_global")?;
+    let mul = def(operand(gep, 1)?, "llvm.mul")?;
+    let step = def(operand(mul, 1)?, "llvm.mlir.constant")?;
+    let step = out.op_attr(step, "value").and_then(|a| out.int_of(a))?;
+    Some((global, operand(mul, 0)?, u64::try_from(step).ok()?))
 }
 
 /// `x` rounded to BF16, to nearest with ties to even, as `bfcvt` does.

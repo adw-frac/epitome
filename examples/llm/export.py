@@ -68,11 +68,13 @@ def main():
     args.add_argument("--model", default="roneneldan/TinyStories-1M")
     args.add_argument("--window", type=int, default=64)
     args.add_argument("--prompt", default="Once upon a time, there was a little dog called")
+    args.add_argument("--layers", type=int, help="only the first this many layers, to try the shapes quickly")
     a = args.parse_args()
     os.makedirs(a.out, exist_ok=True)
 
     tokenizer = AutoTokenizer.from_pretrained(a.model)
-    model = AutoModelForCausalLM.from_pretrained(a.model, attn_implementation="eager", dtype=torch.float32).eval()
+    more = {"num_hidden_layers": a.layers} if a.layers else {}
+    model = AutoModelForCausalLM.from_pretrained(a.model, attn_implementation="eager", dtype=torch.float32, **more).eval()
     # torch-mlir's importer needs every buffer in the state dict (causal
     # masks, rotary frequencies).
     for module in model.modules():

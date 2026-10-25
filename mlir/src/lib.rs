@@ -46,7 +46,7 @@ pub const PASSES: &[&str] = &[
     "linalg-fuse-elementwise",
     "bufferize",
     "linalg-to-kernels=<target>",
-    "linalg-split=<chunks>[:<rows>]",
+    "linalg-split=<chunks>[:<rows>[:<cols>]]",
     "outline-linalg",
     "linalg-vectorize=<width>",
     "linalg-to-loops",
@@ -85,14 +85,16 @@ pub fn run_pass(name: &str, m: &Module) -> Result<Module, String> {
         "linalg-fuse-elementwise" => linalg_fuse::run(m),
         "outline-linalg" => linalg_outline::run(m),
         _ if name.starts_with("linalg-split=") => {
-            // chunks[:rows], at most so many chunks, products' rows at least
-            // so many to a chunk.
+            // chunks[:rows[:cols]], at most so many chunks, products' rows at
+            // least so many to a chunk, their columns a multiple of so many
+            // (the kernels' panels, 64 by default).
             let arg = &name["linalg-split=".len()..];
-            let (chunks, rows) = arg.split_once(':').unwrap_or((arg, "1"));
-            let (Ok(chunks), Ok(rows)) = (chunks.parse(), rows.parse()) else {
-                return Err(format!("{name}: chunks[:rows] is expected"));
+            let mut parts = arg.split(':');
+            let mut next = |default: &str| parts.next().unwrap_or(default).parse::<u64>();
+            let (Ok(chunks), Ok(rows), Ok(cols)) = (next(""), next("1"), next("64")) else {
+                return Err(format!("{name}: chunks[:rows[:cols]] is expected"));
             };
-            linalg_split::run(m, chunks, rows)
+            linalg_split::run(m, chunks, rows, cols)
         }
         _ if name.starts_with("linalg-to-kernels=") => linalg_kernels::run(m, &name["linalg-to-kernels=".len()..]),
         _ if name.starts_with("linalg-vectorize=") => {

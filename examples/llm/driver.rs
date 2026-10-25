@@ -6,6 +6,7 @@
 //! target/smollm2/llm "Once upon a time, there was a little dog called"
 //! target/smollm2/llm --ids "..."   # the token ids too
 //! target/smollm2/llm --bench 10     # forward passes for 10 s, timed
+//! EPITOME_PROFILE=1 target/smollm2/llm --bench 10   # and each task's time
 //! target/smollm2/llm --score "6403 1980 ... | 8728 ..."   # how well it predicts the ids after |
 //! target/smollm2/llm --score-text "Some text."            # and text's tokens after the first
 //! ```
@@ -20,10 +21,10 @@
 //! `merges.txt`, and the window, vocabulary and end token are in
 //! `config.txt`, all next to the program (written by `export.py`).
 //!
-//! The model's largest matrix products (the LM head) are split among
-//! threads: it calls `__epitome_parallel_for`, which this program
-//! provides, with a pool of threads made the first time, one a core (at
-//! most 16), or `EPITOME_THREADS` of them (1: none but the caller).
+//! The model's work is split among threads: it calls
+//! `__epitome_parallel_for`, which this program provides, with a pool of
+//! threads made the first time, one a core (at most 16), or
+//! `EPITOME_THREADS` of them (1: none but the caller).
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -43,7 +44,44 @@ unsafe extern "C" {
 /// thread, the chunks at once.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __epitome_parallel_for(task: extern "C" fn(*mut u8, i64), context: *mut u8, chunks: i64) {
+    if !profiling() {
+        return pool::run(task, context, chunks);
+    }
+    let start = Instant::now();
     pool::run(task, context, chunks);
+    let secs = start.elapsed().as_secs_f64();
+    let mut times = TIMES.lock().unwrap();
+    match times.iter_mut().find(|t| t.0 == task as usize) {
+        Some(t) => {
+            t.1 += 1;
+            t.2 += secs;
+        }
+        None => times.push((task as usize, 1, secs, chunks)),
+    }
+}
+
+/// Whether to time each task (`EPITOME_PROFILE` set), for `--bench` to
+/// print: each task's calls, chunks and time.
+fn profiling() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("EPITOME_PROFILE").is_some())
+}
+
+/// Each task's address, calls, time and chunks.
+static TIMES: std::sync::Mutex<Vec<(usize, u64, f64, i64)>> = std::sync::Mutex::new(Vec::new());
+
+/// The tasks' times, most first, for each forward pass of `passes`: by
+/// their addresses' distance from `__epitome_weights` (for `nm` to name).
+fn print_times(passes: u64, ms: f64) {
+    let mut times = TIMES.lock().unwrap().clone();
+    times.sort_by(|a, b| b.2.total_cmp(&a.2));
+    let base = __epitome_weights as usize as i64;
+    let all: f64 = times.iter().map(|t| t.2).sum::<f64>() * 1e3 / passes as f64;
+    println!("{all:.2} ms of {ms:.2} in {} tasks; the rest on one thread", times.len());
+    for &(task, calls, secs, chunks) in &times {
+        let each = secs * 1e3 / passes as f64;
+        println!("{:+#x} {chunks:4} chunks {:3} calls {each:8.3} ms", task as i64 - base, calls / passes);
+    }
 }
 
 /// For the model: where its weights are, if they are in a file of their
@@ -309,7 +347,11 @@ fn main() {
     }
     let mut logits = vec![0f32; win * vocab];
     if let Some(secs) = bench {
-        // The same window again and again, for profiling.
+        // The same window again and again, for profiling; after one pass
+        // not timed (the weights loaded, the threads started).
+        // SAFETY: as below.
+        unsafe { forward(window.as_ptr(), logits.as_mut_ptr()) };
+        TIMES.lock().unwrap().clear();
         let start = Instant::now();
         let mut n = 0;
         while start.elapsed().as_secs_f64() < secs {
@@ -319,6 +361,9 @@ fn main() {
         }
         let ms = start.elapsed().as_secs_f64() * 1e3 / n as f64;
         println!("{n} forward passes, {ms:.2} ms each");
+        if profiling() {
+            print_times(n, ms);
+        }
         return;
     }
 

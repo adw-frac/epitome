@@ -30,10 +30,10 @@
 //!
 //! Operations are split among threads, their memory first
 //! (`linalg-split=16:4`, a product's rows at least the kernels' tile's),
-//! and the kernels' largest products (the LM head's) by their columns
-//! (`linalg-to-kernels=...:parallel`), by `__epitome_parallel_for`, which
-//! the driver provides (`EPITOME_THREADS` threads, by default one a core,
-//! up to 16).
+//! the large products of weights as tensor parallelism splits them (by
+//! their columns, or by the columns they sum over, each thread its own
+//! part of the weights), by `__epitome_parallel_for`, which the driver
+//! provides (`EPITOME_THREADS` threads, by default one a core, up to 16).
 //!
 //! `--weights=bf16` (with `--sme` or `--avx512`) stores constant weights in that format,
 //! rounding them, for the kernels of that format; the program is then
@@ -101,15 +101,17 @@ fn build(dir: &Path, dump: bool, sme: bool, weights: Option<&str>, file: bool) -
         Some(w) => format!("linalg-to-kernels={set}:{w}"),
         None => format!("linalg-to-kernels={set}"),
     };
-    // Large products split among the driver's threads.
+    // Large products that linalg-split leaves (of no constant weights) split
+    // among the driver's threads.
     let kernels = format!("{kernels}:parallel");
     let suffix = weights.map(|w| format!("-{w}")).unwrap_or_default();
     let mut passes: Vec<&str> = epitome_mlir::LINALG_TO_LLVM.to_vec();
     let mut at = passes.iter().position(|&p| p == "bufferize").unwrap() + 1;
     // Operations split among the driver's threads, in chunks of memory of
-    // their own.
-    // (A product's rows at least as many as a tile of the kernels': four
-    // for AVX-512's, 64 for SME's.)
+    // their own; large products of weights by their columns (whole panels
+    // of 64, as the kernels pack them) or by those they sum over.
+    // (Another product's rows at least as many as a tile of the kernels':
+    // four for AVX-512's, 64 for SME's.)
     passes.insert(at, if x86 { "linalg-split=16:4" } else { "linalg-split=16:64" });
     at += 1;
     if sme {

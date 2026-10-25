@@ -316,6 +316,16 @@ pub struct Module {
 }
 
 impl Module {
+    /// This module's types, attributes and names made `from`'s, a module
+    /// that has all of them and more (as one made by `empty_like` and
+    /// added to has): so that operations made in either can be copied to
+    /// the other.
+    pub(crate) fn adopt_interned(&mut self, from: &Module) {
+        self.types = from.types.clone();
+        self.attrs = from.attrs.clone();
+        self.names = from.names.clone();
+    }
+
     pub fn intern_type(&mut self, ty: Type) -> TypeId {
         TypeId(self.types.intern(ty))
     }
