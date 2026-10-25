@@ -825,36 +825,72 @@ impl Vectorize<'_> {
 
         match &plan.combine {
             None => {
-                // Whole vectors, then the elements past them one at a time.
+                // Whole vectors, two at a time where they pair up (so that
+                // two chains of a long body, as exp's, overlap), then the
+                // elements past them one at a time.
                 let whole = plan.sizes[d] / self.width * self.width;
-                for (from, to, step, vector) in [(0, whole, self.width, true), (whole, plan.sizes[d], 1, false)] {
+                let unroll = [8, 4, 2, 1]
+                    .into_iter()
+                    .find(|&u| (whole / self.width) % u == 0 && whole / self.width >= u)
+                    .unwrap_or(1);
+                let index = self.out.index_type();
+                for (from, to, step, vector, copies) in
+                    [(0, whole, self.width * unroll, true, unroll), (whole, plan.sizes[d], 1, false, 1)]
+                {
                     if from == to {
                         continue;
                     }
                     let (_, inner, iv, _) = self.for_range(at, from, to, step, &[]);
-                    let mut ivs = ivs.clone();
-                    ivs.push(iv);
-                    for (k, &v) in operands.iter().enumerate() {
-                        if k >= n_ins && !ops.iter().any(|&p| src.ops[p.index()].operands.contains(&bargs[k])) {
-                            continue;
+                    // Each copy's indices, and its values.
+                    let outer = self.map.clone();
+                    let mut maps = vec![outer; copies as usize];
+                    let mut copy_ivs = Vec::new();
+                    for u in 0..copies {
+                        let mut ivs = ivs.clone();
+                        ivs.push(if u == 0 {
+                            iv
+                        } else {
+                            let off = self.index_const(inner, (u * self.width) as i64);
+                            let a = OpSpec::new("arith.addi")
+                                .operands(&[iv, off])
+                                .results(&[index])
+                                .build(self.out, Some(inner));
+                            self.out.result(a)
+                        });
+                        copy_ivs.push(ivs);
+                    }
+                    for (u, ivs) in copy_ivs.iter().enumerate() {
+                        std::mem::swap(self.map, &mut maps[u]);
+                        for (k, &v) in operands.iter().enumerate() {
+                            if k >= n_ins && !ops.iter().any(|&p| src.ops[p.index()].operands.contains(&bargs[k])) {
+                                continue;
+                            }
+                            let idx = self.indices(inner, &plan.maps[k], ivs);
+                            let x = self.load(inner, v, &idx, vector && plan.vector[k]);
+                            self.map.insert(bargs[k], x);
                         }
-                        let idx = self.indices(inner, &plan.maps[k], &ivs);
-                        let x = self.load(inner, v, &idx, vector && plan.vector[k]);
-                        self.map.insert(bargs[k], x);
+                        std::mem::swap(self.map, &mut maps[u]);
                     }
                     for &p in &ops {
-                        if src.op_name(p) == "linalg.yield" {
-                            for (k, y) in src.ops[p.index()].operands.iter().enumerate() {
-                                let mut v = *self.map.get(y).ok_or("a yield of an unknown value")?;
-                                if vector {
-                                    v = self.splat(inner, v);
+                        for (u, ivs) in copy_ivs.iter().enumerate() {
+                            std::mem::swap(self.map, &mut maps[u]);
+                            if src.op_name(p) == "linalg.yield" {
+                                for (k, y) in src.ops[p.index()].operands.iter().enumerate() {
+                                    let mut v = *self.map.get(y).ok_or("a yield of an unknown value")?;
+                                    if vector {
+                                        v = self.splat(inner, v);
+                                    }
+                                    let idx = self.indices(inner, &plan.maps[n_ins + k], ivs);
+                                    self.store(inner, v, operands[n_ins + k], &idx, vector);
                                 }
-                                let idx = self.indices(inner, &plan.maps[n_ins + k], &ivs);
-                                self.store(inner, v, operands[n_ins + k], &idx, vector);
+                            } else {
+                                self.body_op(inner, p, ivs)?;
                             }
+                            std::mem::swap(self.map, &mut maps[u]);
+                        }
+                        if src.op_name(p) == "linalg.yield" {
                             break;
                         }
-                        self.body_op(inner, p, &ivs)?;
                     }
                     OpSpec::new("scf.yield").build(self.out, Some(inner));
                 }
