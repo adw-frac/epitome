@@ -184,7 +184,15 @@ fn plan(src: &Module, op: OpId, width: u64) -> Option<Plan> {
     // vectors that fit.
     let widths: Vec<u64> = std::iter::successors(Some(width), |&w| (w > 4 && w % 2 == 0).then_some(w / 2)).collect();
     for swap in std::iter::once(d).chain((0..d).rev().filter(|&k| !reduction[k])) {
-        let swapped = |k: usize| if k == swap { d } else if k == d { swap } else { k };
+        let swapped = |k: usize| {
+            if k == swap {
+                d
+            } else if k == d {
+                swap
+            } else {
+                k
+            }
+        };
         let maps: Vec<Map> = maps
             .iter()
             .map(|m| Map { dims: m.dims, syms: 0, results: m.results.iter().map(|e| rename(e, &swapped)).collect() })
@@ -477,7 +485,13 @@ impl Vectorize<'_> {
             let d = src.op_attr(inner, "dim").and_then(|a| src.int_of(a)).ok_or("linalg.index without dim")?;
             // (Its loop's place, after the swap.)
             let (d, last) = (d as usize, ivs.len() - 1);
-            let d = if d == self.swap { last } else if d == last { self.swap } else { d };
+            let d = if d == self.swap {
+                last
+            } else if d == last {
+                self.swap
+            } else {
+                d
+            };
             self.map.insert(i.results[0], ivs[d]);
             return Ok(());
         }

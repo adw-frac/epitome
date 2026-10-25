@@ -114,28 +114,47 @@ def matmul_bf16(rows):
             b.store(h, tr, H)
         return []
     b.loop(zero, ki, c16, [], convert)
+    # The rows' pairs interleaved, in at's second half (at holds k x rows
+    # f32, the pairs k/2 x rows words): step p's pairs of each row next to
+    # each other, so that one pointer and constant offsets reach them all.
+    if rows > 1:
+        inter = b.gep('%at', b.int('mul', b.const(rows), kw), 'i32')
+        def interleave(p, _):
+            p64 = b.cast(p)
+            to = b.gep(inter, b.int('mul', p64, b.const(rows)), 'i32')
+            for r in range(rows):
+                src = b.gep('%at', b.int('add', b.int('mul', b.const(r), kw), p64), 'i32')
+                b.store(b.load(src, 'i32'), b.gep(to, b.const(r), 'i32') if r else to, 'i32')
+            return []
+        b.loop(zero, kp, one, [], interleave)
+    else:
+        inter = '%at'
+    # Each row's start in C, made once: what the loops keep live is then a
+    # pointer a row, not one a vector of C.
+    crs = [b.gep('%c', b.int('mul', b.const(r), '%ldc')) if r else '%c' for r in range(rows)]
     def panel(j, _):
         j64 = b.cast(j)
         bj = b.gep('%b', b.int('mul', b.int('lshr', j64, six), '%panel'), 'i32')
-        cs = []
-        for r in range(rows):
-            for q in range(4):
-                off = b.int('add', b.int('mul', b.const(r), '%ldc'), b.int('add', j64, b.const(16 * q)))
-                cs.append(b.gep('%c', off))
-        acc = [b.load(p, F) for p in cs]
+        # C's block: a vector at each row's start plus j, and 16, 32, 48.
+        def block():
+            bases = [b.gep(cr, j64) for cr in crs]
+            return [b.gep(base, b.const(16 * q)) if q else base for base in bases for q in range(4)]
+        acc = [b.load(p, F) for p in block()]
         def step(p, acc):
             p64 = b.cast(p)
-            row = b.gep(bj, b.int('mul', p64, '%ldb'), 'i32')
+            # (A panel's rows are 64 words apart: ldb is 64.)
+            row = b.gep(bj, b.int('shl', p64, six), 'i32')
             bs = [b.load(b.gep(row, b.const(16 * q), 'i32') if q else row, W) for q in range(4)]
             new = []
+            pairs = b.gep(inter, b.int('mul', p64, b.const(rows)), 'i32')
             for r in range(rows):
-                pa = b.gep('%at', b.int('add', b.int('mul', b.const(r), kw), p64), 'i32')
+                pa = b.gep(pairs, b.const(r), 'i32') if r else pairs
                 s = b.op('s', f'"vector.broadcast"({b.load(pa, "i32")}) : (i32) -> {W}')
                 for q in range(4):
                     new.append(b.intrinsic('llvm.epitome.x86.dpbf16ps.512', [acc[4 * r + q], s, bs[q]], [F, W, W], F))
             return new
         out = b.loop(zero, kp, one, acc, step)
-        for v, p in zip(out, cs):
+        for v, p in zip(out, block()):
             b.store(v, p, F)
         return []
     b.loop(zero, ni, c64, [], panel)
@@ -163,7 +182,7 @@ def main():
 // as for aarch64-sme.mlir's BF16 kernel: each 64-column panel k/2 rows of
 // 64 words, a word two rows of a column (row 2i in the bottom half). A
 // block of rows of A is rounded to BF16 into at (vcvtneps2bf16), each row
-// k/2 pairs; vdpbf16ps adds both products of a pair of A, broadcast, and
+// k/2 pairs, then interleaved, each step's pairs of the rows together; vdpbf16ps adds both products of a pair of A, broadcast, and
 // of a word of B into each f32 lane of C. The kernels are the same but for
 // how many rows of C they keep in registers: four (16 vectors of the 32),
 // then one for the rows left over. The functions alone use AVX-512

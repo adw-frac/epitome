@@ -27,7 +27,7 @@
 !115 = !{!"eh-regs", !"%rax", !"%rdx"}
 !116 = !{!"fp-args", !"%xmm0-%xmm7"}
 !117 = !{!"fp-result", !"%xmm0"}
-!118 = !{!"fp-clobbers", !"%xmm0-%xmm15"}
+!118 = !{!"fp-clobbers", !"%xmm0-%xmm31"}
 !119 = !{!"fp-saved"}
 !120 = !{!"fp-scratch", !"%xmm15", !"%xmm14"}
 !121 = !{!"fp-results", !"%xmm0", !"%xmm1"}
