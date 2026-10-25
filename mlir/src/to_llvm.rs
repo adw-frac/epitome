@@ -401,6 +401,35 @@ impl<'a> Lower<'a> {
         self.out.dialect_attr("llvm.fastmath", Some("<none>"))
     }
 
+    /// `v` as a value plus a constant, through adds of constants: `None`
+    /// for the value when it is a constant itself.
+    fn split_constant(&self, v: ValueId) -> (Option<ValueId>, i64) {
+        let ValueDef::Result { op, .. } = self.out.values[v.index()].def else { return (Some(v), 0) };
+        let as_const = |x: ValueId| -> Option<i64> {
+            let ValueDef::Result { op, .. } = self.out.values[x.index()].def else { return None };
+            if self.out.op_name(op) != "llvm.mlir.constant" {
+                return None;
+            }
+            self.out.op_attr(op, "value").and_then(|a| self.out.int_of(a))
+        };
+        if let Some(c) = as_const(v) {
+            return (None, c);
+        }
+        if self.out.op_name(op) == "llvm.add"
+            && let [a, b] = self.out.ops[op.index()].operands[..]
+        {
+            if let Some(c) = as_const(b) {
+                let (x, k) = self.split_constant(a);
+                return (x, k.wrapping_add(c));
+            }
+            if let Some(c) = as_const(a) {
+                let (x, k) = self.split_constant(b);
+                return (x, k.wrapping_add(c));
+            }
+        }
+        (Some(v), 0)
+    }
+
     fn i64_const(&mut self, v: i64) -> ValueId {
         let i64t = self.out.int_type(64);
         let attr = self.out.int_attr(v, i64t);
@@ -440,8 +469,15 @@ impl<'a> Lower<'a> {
     /// The address of the element at `indices` of the memref `ptr`.
     fn address(&mut self, ptr: ValueId, indices: &[ValueId]) -> Result<ValueId, String> {
         let layout = self.layouts.get(&ptr).cloned().ok_or("a memref of unknown layout")?;
-        let mut off: Option<ValueId> = (layout.offset != 0).then(|| self.i64_const(layout.offset as i64));
+        // The offset: each index times its stride, the constant parts of
+        // indices (an unrolled copy's `i + 1`) added up apart and last, so
+        // that they become an access's displacement.
+        let mut constant = layout.offset as i64;
+        let mut off: Option<ValueId> = None;
         for (&i, &s) in indices.iter().zip(&layout.strides) {
+            let (i, c) = self.split_constant(i);
+            constant = constant.wrapping_add(c.wrapping_mul(s as i64));
+            let Some(i) = i else { continue };
             let term = if s == 1 {
                 i
             } else {
@@ -453,9 +489,13 @@ impl<'a> Lower<'a> {
                 Some(acc) => self.int_op("llvm.add", acc, term),
             });
         }
-        let off = match off {
-            Some(o) => o,
-            None => self.i64_const(0),
+        let off = match (off, constant) {
+            (Some(o), 0) => o,
+            (Some(o), c) => {
+                let c = self.i64_const(c);
+                self.int_op("llvm.add", o, c)
+            }
+            (None, c) => self.i64_const(c),
         };
         let ptr_ty = self.out.dialect_type("llvm.ptr", None);
         let elem = self.out.type_attr(layout.elem);

@@ -150,7 +150,6 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[V
             _ => None,
         };
         let Some(step) = step.filter(|&s| s > 0) else { continue };
-        let step_v = sh.int(64, step);
         // The exit test: the latch's branch on `i` or `i.next` against a
         // bound that does not change, for equality.
         let Some(t) = f.terminator(latch) else { continue };
@@ -170,15 +169,17 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[V
             continue;
         }
         // Every use of the counter: its increment, the test, or an index:
-        // the counter plus, perhaps, something that does not change in the
-        // loop, plus a constant (a vectorized loop unrolled reads
-        // `o + i + 4`). Each address: (the gep, its base, the offset that is
-        // not constant, the constant, its type).
-        let mut geps: Vec<(InstId, Value, Option<Value>, i64, TypeId)> = Vec::new();
+        // the counter, perhaps scaled by a constant (`i << 2`), plus values
+        // that do not change in the loop, plus a constant (a vectorized
+        // loop unrolled reads `o + i + 4`). Each address: (the gep, its
+        // base, the offsets that are not constant, the constant, its type,
+        // the scale).
+        type Address = (InstId, Value, Vec<Value>, i64, TypeId, i64);
+        let mut geps: Vec<Address> = Vec::new();
         let mut offsets: Vec<InstId> = Vec::new();
-        let mut work: Vec<(Value, Option<Value>, i64)> = vec![(i_v, None, 0)];
+        let mut work: Vec<(Value, Vec<Value>, i64, i64)> = vec![(i_v, Vec::new(), 0, 1)];
         let mut ok_users = true;
-        'walk: while let Some((v, off, c)) = work.pop() {
+        'walk: while let Some((v, off, c, scale)) = work.pop() {
             for u in users(f, v) {
                 if v == i_v && (u == inc || u == cmp || u == phi) {
                     continue;
@@ -197,19 +198,39 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[V
                             ok_users = false;
                             break 'walk;
                         }
-                        geps.push((u, *ptr, off, c, *source_ty));
+                        geps.push((u, *ptr, off.clone(), c, *source_ty, scale));
                     }
                     &Op::Binary { op: BinOp::Add, lhs, rhs, .. } if in_loop(f, l, u) => {
                         let x = if lhs == v { rhs } else { lhs };
                         let a = f.result(u);
                         match int_const(sh, x) {
-                            Some(k) if x != v => work.push((a, off, c.wrapping_add(k))),
-                            None if x != v && off.is_none() && invariant(f, l, x) => work.push((a, Some(x), c)),
+                            Some(k) if x != v => work.push((a, off.clone(), c.wrapping_add(k), scale)),
+                            None if x != v && off.len() < 2 && invariant(f, l, x) => {
+                                let mut more = off.clone();
+                                more.push(x);
+                                work.push((a, more, c, scale))
+                            }
                             _ => {
                                 ok_users = false;
                                 break 'walk;
                             }
                         }
+                        offsets.push(u);
+                    }
+                    // Scaled, before any offset that does not change: the
+                    // constant scales with it.
+                    &Op::Binary { op: op @ (BinOp::Shl | BinOp::Mul), lhs, rhs, .. }
+                        if in_loop(f, l, u) && lhs == v && off.is_empty() =>
+                    {
+                        let by = match (op, int_const(sh, rhs)) {
+                            (BinOp::Shl, Some(k)) if (0..16).contains(&k) => 1i64 << k,
+                            (BinOp::Mul, Some(k)) if (1..=1 << 16).contains(&k) => k,
+                            _ => {
+                                ok_users = false;
+                                break 'walk;
+                            }
+                        };
+                        work.push((f.result(u), off.clone(), c.wrapping_mul(by), scale * by));
                         offsets.push(u);
                     }
                     _ => {
@@ -223,18 +244,17 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[V
         if !ok_users || !next_users.iter().all(|&u| u == phi || u == cmp) {
             continue;
         }
-        // One pointer for each base and offset, offsets that are the same
-        // value counting as one.
-        let same_offset = |f: &Function, x: Option<Value>, y: Option<Value>| match (x, y) {
-            (None, None) => true,
-            (Some(x), Some(y)) => same(f, x, y, 4),
-            _ => false,
+        // One pointer for each base, scale and offsets, offsets that are
+        // the same values counting as one.
+        let same_offsets = |f: &Function, x: &[Value], y: &[Value]| {
+            x.len() == y.len() && x.iter().zip(y).all(|(&a, &b)| same(f, a, b, 4))
         };
-        let mut bases: Vec<(Value, Option<Value>, TypeId)> = Vec::new();
+        let mut bases: Vec<(Value, Vec<Value>, TypeId, i64)> = Vec::new();
         for g in geps.iter_mut() {
-            match bases.iter().find(|&&(b, o, ty)| b == g.1 && ty == g.4 && same_offset(f, o, g.2)) {
-                Some(&(_, o, _)) => g.2 = o,
-                None => bases.push((g.1, g.2, g.4)),
+            match bases.iter().find(|(b, o, ty, sc)| *b == g.1 && *ty == g.4 && *sc == g.5 && same_offsets(f, o, &g.2))
+            {
+                Some((_, o, _, _)) => g.2 = o.clone(),
+                None => bases.push((g.1, g.2.clone(), g.4, g.5)),
             }
         }
         if bases.len() > MAX_POINTERS {
@@ -261,33 +281,36 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[V
         let mut before_latch: Vec<InstId> = Vec::new();
 
         // A pointer for each array.
-        for (base, off, ty) in bases {
+        for (base, off, ty, scale) in bases {
             let ptr_ty = f.locals[f.insts
-                [geps.iter().find(|g| g.1 == base && g.2 == off && g.4 == ty).unwrap().0.index()]
+                [geps.iter().find(|g| g.1 == base && g.2 == off && g.4 == ty && g.5 == scale).unwrap().0.index()]
             .result
             .unwrap()
             .index()]
             .ty;
-            // Where it starts: base[start], or base[o + start].
-            let first_index = match off {
-                None => start,
-                Some(o) if int_const(sh, start) == Some(0) => o,
-                Some(o) => {
-                    let a = f.add_inst(
-                        Op::Binary {
-                            op: BinOp::Add,
-                            flags: IntFlags::NONE,
-                            fmf: FastMath::default(),
-                            lhs: o,
-                            rhs: start,
-                        },
-                        Some((Some(names.fresh("lsr.offset")), i64t)),
-                    );
-                    before_pre.push(a);
-                    f.result(a)
-                }
+            // Where it starts: base[start * scale + offsets].
+            let mut add = |f: &mut Function, lhs: Value, rhs: Value, op: BinOp| -> Value {
+                let a = f.add_inst(
+                    Op::Binary { op, flags: IntFlags::NONE, fmf: FastMath::default(), lhs, rhs },
+                    Some((Some(names.fresh("lsr.offset")), i64t)),
+                );
+                before_pre.push(a);
+                f.result(a)
             };
-            let first = if off.is_none() && int_const(sh, start) == Some(0) {
+            let mut first_index = match int_const(sh, start) {
+                Some(s) => (s != 0).then(|| sh.int(64, s.wrapping_mul(scale))),
+                None if scale == 1 => Some(start),
+                None => Some(add(f, start, sh.int(64, scale), BinOp::Mul)),
+            };
+            for &o in &off {
+                first_index = Some(match first_index {
+                    None => o,
+                    Some(x) => add(f, x, o, BinOp::Add),
+                });
+            }
+            let starts_at_base = first_index.is_none();
+            let first_index = first_index.unwrap_or_else(|| sh.int(64, 0));
+            let first = if starts_at_base {
                 base
             } else {
                 let g = f.add_inst(
@@ -310,7 +333,13 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[V
             f.blocks[h.index()].insts.insert(0, p);
             let pv = f.result(p);
             let step = f.add_inst(
-                Op::Gep { flags: GepFlags::default(), inrange: None, source_ty: ty, ptr: pv, indices: vec![step_v] },
+                Op::Gep {
+                    flags: GepFlags::default(),
+                    inrange: None,
+                    source_ty: ty,
+                    ptr: pv,
+                    indices: vec![sh.int(64, step * scale)],
+                },
                 Some((Some(names.fresh("lsr.ptr.next")), ptr_ty)),
             );
             before_latch.push(step);
@@ -319,8 +348,9 @@ fn reduce(sh: &Shared, f: &mut Function, names: &mut Names, l: &Loop, preds: &[V
                 incoming.push((first, pre));
                 incoming.push((sv, latch));
             }
-            for &(g, b, o, c, t2) in &geps {
-                if b == base && o == off && t2 == ty {
+            for (g, b, o, c, t2, sc) in &geps {
+                let (g, c) = (*g, *c);
+                if *b == base && *o == off && *t2 == ty && *sc == scale {
                     if c == 0 {
                         let gv = f.result(g);
                         f.replace_uses(gv, pv);

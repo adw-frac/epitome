@@ -294,19 +294,21 @@ fn exact_exit(sh: &Shared, f: &mut Function, guard: BlockId, into: BlockId, iv: 
     if e.pred == ICmpPred::Ne && iv.step.abs() == 1 {
         return true;
     }
+    // From a constant start to a constant bound the step divides the
+    // distance to (a vectorized loop, 4 at a time; or 1 at a time, with
+    // no flags, as MLIR's loops are): the counter reaches the bound
+    // exactly, and cannot wrap before.
+    let constant = |s: i64| match (int_of(sh, iv.start), int_of(sh, e.bound)) {
+        (Some(a), Some(b)) => {
+            let (a, b) = (eval::sext(a.value, a.bits), eval::sext(b.value, b.bits));
+            a < b && a >= 0 && (b - a) % s == 0
+        }
+        _ => false,
+    };
     let ok = match (iv.step, e.pred) {
+        (s, ICmpPred::Slt | ICmpPred::Ult) if s >= 1 && constant(s) => true,
         (1, ICmpPred::Slt) | (-1, ICmpPred::Sgt) => iv.flags.contains(IntFlags::NSW),
         (1, ICmpPred::Ult) => iv.flags.contains(IntFlags::NUW),
-        // A larger step, from a constant start to a constant bound it
-        // divides the distance to (a vectorized loop, 4 at a time): the
-        // counter reaches the bound exactly, and cannot wrap before.
-        (s, ICmpPred::Slt | ICmpPred::Ult) if s > 1 => match (int_of(sh, iv.start), int_of(sh, e.bound)) {
-            (Some(a), Some(b)) => {
-                let (a, b) = (eval::sext(a.value, a.bits), eval::sext(b.value, b.bits));
-                a < b && a >= 0 && (b - a) % s == 0
-            }
-            _ => false,
-        },
         _ => false,
     };
     if !ok || !starts_inside(sh, f, guard, into, iv, e.pred, e.bound) {
