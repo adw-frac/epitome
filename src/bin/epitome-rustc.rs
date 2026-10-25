@@ -261,7 +261,11 @@ fn wrap(rustc: &str, args: &[String]) -> ExitCode {
 /// which rustc bundles into it (`-l static=...`).
 fn bundles_native(args: &[String]) -> bool {
     args.iter().enumerate().any(|(k, a)| {
-        let v = if a == "-l" { args.get(k + 1).map(String::as_str).unwrap_or("") } else { a.strip_prefix("-l").unwrap_or("") };
+        let v = if a == "-l" {
+            args.get(k + 1).map(String::as_str).unwrap_or("")
+        } else {
+            a.strip_prefix("-l").unwrap_or("")
+        };
         v.starts_with("static")
     })
 }
@@ -321,7 +325,10 @@ fn library_without_llvm(
     match built {
         Ok(text_ours) => {
             let ours_ms = started.elapsed().as_millis();
-            note(log, &format!("{krate}: ours (library) | rustc_ms={rustc_ms} ours_ms={ours_ms} text_ours={text_ours}"));
+            note(
+                log,
+                &format!("{krate}: ours (library) | rustc_ms={rustc_ms} ours_ms={ours_ms} text_ours={text_ours}"),
+            );
             if let Some(c) = &cache {
                 c.store(&outputs);
             }
@@ -596,7 +603,9 @@ mod cache {
             let Ok(manifest) = std::fs::read_to_string(self.entry.join("manifest")) else { return false };
             for line in manifest.lines() {
                 let ok = match line.split('\t').collect::<Vec<_>>()[..] {
-                    ["file", h, path] => file_hash(Path::new(&path.replace(PROFILE, &self.profile))).as_deref() == Some(h),
+                    ["file", h, path] => {
+                        file_hash(Path::new(&path.replace(PROFILE, &self.profile))).as_deref() == Some(h)
+                    }
                     // (A path in the profile directory, such as OUT_DIR's, as
                     // the files' are.)
                     ["env", name, value] => {
