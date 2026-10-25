@@ -30,6 +30,7 @@ pub mod stablehlo_to_linalg;
 pub mod to_llvm;
 pub mod torch_to_linalg;
 pub mod translate;
+pub mod weights;
 
 pub use ir::Module;
 pub use parser::{ParseError, parse_module};

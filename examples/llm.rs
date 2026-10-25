@@ -39,6 +39,9 @@
 //! rounding them, for the kernels of that format; the program is then
 //! `llm-bf16`, and so on, so that the formats can be compared.
 //! `--dump` writes each stage's MLIR and the LLVM IR next to the model.
+//! Weights of more than a gigabyte (or any, with `--weights-file`) go in a
+//! file of their own beside the program, `weights.bin` (`weights-bf16.bin`
+//! for `llm-bf16`), which the driver loads, rather than in the program.
 //!
 //! ```sh
 //! python examples/llm/export.py --model HuggingFaceTB/SmolLM2-135M target/smollm2   # torch-mlir's Python
@@ -60,6 +63,7 @@ use epitome_codegen::{Options, compile};
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dump = args.iter().any(|a| a == "--dump");
+    let file = args.iter().any(|a| a == "--weights-file");
     let sme = args.iter().any(|a| a == "--sme" || a == "--avx512");
     let weights = args.iter().find_map(|a| a.strip_prefix("--weights=")).map(str::to_string);
     let dir = args
@@ -67,7 +71,7 @@ fn main() -> ExitCode {
         .find(|a| !a.starts_with("--"))
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("target/llm"));
-    match build(&dir, dump, sme, weights.as_deref()) {
+    match build(&dir, dump, sme, weights.as_deref(), file) {
         Ok(exe) => {
             println!("built {}", exe.display());
             ExitCode::SUCCESS
@@ -79,7 +83,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn build(dir: &Path, dump: bool, sme: bool, weights: Option<&str>) -> Result<PathBuf, String> {
+fn build(dir: &Path, dump: bool, sme: bool, weights: Option<&str>, file: bool) -> Result<PathBuf, String> {
     let step = |what: &str, start: Instant| println!("{what:<34} {:>6.2} s", start.elapsed().as_secs_f64());
 
     let path = dir.join("model.mlir");
@@ -121,6 +125,19 @@ fn build(dir: &Path, dump: bool, sme: bool, weights: Option<&str>) -> Result<Pat
     let at = passes.iter().position(|&p| p == "to-llvm").unwrap();
     passes.insert(at, "math-polynomial-approximation");
     for (k, pass) in passes.iter().enumerate() {
+        if *pass == "to-llvm" {
+            // A model of more than a gigabyte of weights: they go in a file of
+            // their own, which the driver loads (an executable's code reaches
+            // its data only within 2 GB of itself on x86-64).
+            let start = Instant::now();
+            let (out, weights) = epitome_mlir::weights::externalize(&m, 1 << 20)?;
+            if file || weights.len() >= 1 << 30 {
+                m = out;
+                let file = dir.join(format!("weights{suffix}.bin"));
+                std::fs::write(&file, &weights).map_err(|e| format!("{}: {e}", file.display()))?;
+                step(&format!("weights to {}", file.display()), start);
+            }
+        }
         let start = Instant::now();
         m = epitome_mlir::run_pass(pass, &m).map_err(|e| format!("{pass}: {e}"))?;
         step(pass, start);

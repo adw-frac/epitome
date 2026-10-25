@@ -27,6 +27,7 @@
 
 use std::collections::HashMap;
 use std::io::Write;
+use std::sync::OnceLock;
 use std::time::Instant;
 
 unsafe extern "C" {
@@ -45,6 +46,33 @@ pub unsafe extern "C" fn __epitome_parallel_for(task: extern "C" fn(*mut u8, i64
     pool::run(task, context, chunks);
 }
 
+/// For the model: where its weights are, if they are in a file of their
+/// own (`weights.bin`, beside the program, for `llm`; `weights-bf16.bin`
+/// for `llm-bf16`), loaded the first time, at a multiple of 64 bytes.
+#[unsafe(no_mangle)]
+pub extern "C" fn __epitome_weights() -> *const u8 {
+    static WEIGHTS: OnceLock<usize> = OnceLock::new();
+    *WEIGHTS.get_or_init(|| {
+        let exe = std::env::current_exe().unwrap_or_default();
+        let name = exe.file_name().and_then(|n| n.to_str()).unwrap_or("llm");
+        let file = exe.with_file_name(format!("weights{}.bin", name.strip_prefix("llm").unwrap_or("")));
+        let mut f = std::fs::File::open(&file).unwrap_or_else(|e| {
+            eprintln!("llm: {}: {e}", file.display());
+            std::process::exit(1)
+        });
+        let n = f.metadata().map(|m| m.len() as usize).unwrap_or(0);
+        let layout = std::alloc::Layout::from_size_align(n.max(64), 64).unwrap();
+        let p = unsafe { std::alloc::alloc(layout) };
+        let bytes = unsafe { std::slice::from_raw_parts_mut(p, n) };
+        use std::io::Read;
+        f.read_exact(bytes).unwrap_or_else(|e| {
+            eprintln!("llm: {}: {e}", file.display());
+            std::process::exit(1)
+        });
+        p as usize
+    }) as *const u8
+}
+
 /// Threads made once. Each job's chunks are shared out in fixed blocks:
 /// of `chunks` among `threads`, thread `t` (the caller is thread 0) does
 /// chunks `t * chunks / threads` up to `(t + 1) * chunks / threads`. So a
@@ -53,52 +81,80 @@ pub unsafe extern "C" fn __epitome_parallel_for(task: extern "C" fn(*mut u8, i64
 /// processor had memory of its own. Between jobs a thread waits by
 /// spinning for a while (the model's operations come microseconds apart),
 /// then by sleeping until the next.
+///
+/// A job is in one of a ring of slots, with its number; a thread claims
+/// each chunk before doing it, in a word that also holds the job's number,
+/// so a thread that comes late to a job (asleep, or not running) claims
+/// nothing of a later one. The caller does what is still unclaimed of the
+/// job after waiting a while, so that it never waits long for a thread the
+/// system is not running.
 mod pool {
-    use std::cell::UnsafeCell;
-    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::SeqCst};
+    use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering::SeqCst};
     use std::sync::{Condvar, Mutex, OnceLock};
+    use std::time::{Duration, Instant};
 
-    #[derive(Clone, Copy)]
-    struct Job {
-        task: extern "C" fn(*mut u8, i64),
-        context: usize,
-        chunks: i64,
+    /// Chunks a job can have: 32 to a claim word.
+    const MOST: i64 = 128;
+    const SLOTS: usize = 64;
+
+    #[derive(Default)]
+    struct Slot {
+        /// The job's number, 0 while it is being written.
+        job: AtomicU64,
+        task: AtomicUsize,
+        context: AtomicUsize,
+        chunks: AtomicI64,
+        /// The job's number (low 32 bits) above 32 bits of chunks claimed.
+        claimed: [AtomicU64; MOST as usize / 32],
+        done: AtomicI64,
+    }
+
+    impl Slot {
+        /// Chunk `i` of job `job`, done if no thread has claimed it.
+        fn take(&self, job: u64, task: extern "C" fn(*mut u8, i64), context: usize, i: i64) {
+            let word = &self.claimed[i as usize / 32];
+            let bit = 1u64 << (i % 32);
+            let mut w = word.load(SeqCst);
+            loop {
+                if w >> 32 != job & 0xffff_ffff || w & bit != 0 {
+                    return;
+                }
+                match word.compare_exchange(w, w | bit, SeqCst, SeqCst) {
+                    Ok(_) => break,
+                    Err(now) => w = now,
+                }
+            }
+            task(context as *mut u8, i);
+            self.done.fetch_add(1, SeqCst);
+        }
     }
 
     struct Pool {
         threads: usize,
-        /// The job's number: a new one when it changes.
-        generation: AtomicU64,
-        job: UnsafeCell<Option<Job>>,
-        /// The threads (besides the caller) done with this job: each says so,
-        /// those with no chunks of it too, before the next is written.
-        done: AtomicUsize,
+        /// The latest job's number.
+        latest: AtomicU64,
+        slots: Vec<Slot>,
         sleeping: AtomicUsize,
         lock: Mutex<()>,
         wake: Condvar,
     }
 
-    // The job is written only while no thread reads it: before the
-    // generation changes, after every chunk of the last one is done.
-    unsafe impl Sync for Pool {}
-
     /// Spins before a waiting thread sleeps.
     const SPINS: u32 = 1 << 18;
+    /// How long the caller waits for a thread to claim its chunks.
+    const PATIENCE: Duration = Duration::from_micros(20);
 
     impl Pool {
-        fn share(&self, job: Job, t: usize) {
+        fn block(&self, chunks: i64, t: usize) -> std::ops::Range<i64> {
             let n = self.threads as i64;
-            let (from, to) = (t as i64 * job.chunks / n, (t as i64 + 1) * job.chunks / n);
-            for i in from..to {
-                (job.task)(job.context as *mut u8, i);
-            }
+            t as i64 * chunks / n..(t as i64 + 1) * chunks / n
         }
 
         fn worker(&self, t: usize) {
             let mut seen = 0;
             loop {
                 let mut spins = 0;
-                while self.generation.load(SeqCst) == seen {
+                while self.latest.load(SeqCst) == seen {
                     if spins < SPINS {
                         spins += 1;
                         std::hint::spin_loop();
@@ -106,15 +162,24 @@ mod pool {
                     }
                     let mut guard = self.lock.lock().unwrap();
                     self.sleeping.fetch_add(1, SeqCst);
-                    while self.generation.load(SeqCst) == seen {
+                    while self.latest.load(SeqCst) == seen {
                         guard = self.wake.wait(guard).unwrap();
                     }
                     self.sleeping.fetch_sub(1, SeqCst);
                 }
-                seen = self.generation.load(SeqCst);
-                let job = unsafe { *self.job.get() }.unwrap();
-                self.share(job, t);
-                self.done.fetch_add(1, SeqCst);
+                seen = self.latest.load(SeqCst);
+                let slot = &self.slots[seen as usize % SLOTS];
+                // The job as it was when numbered `seen`, if it still is.
+                let before = slot.job.load(SeqCst);
+                let (task, context, chunks) =
+                    (slot.task.load(SeqCst), slot.context.load(SeqCst), slot.chunks.load(SeqCst));
+                if before != seen || slot.job.load(SeqCst) != seen {
+                    continue;
+                }
+                let task: extern "C" fn(*mut u8, i64) = unsafe { std::mem::transmute(task) };
+                for i in self.block(chunks, t) {
+                    slot.take(seen, task, context, i);
+                }
             }
         }
     }
@@ -125,15 +190,16 @@ mod pool {
             let threads = std::env::var("EPITOME_THREADS")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                // (Past 16, the LM head is as fast as memory lets it be, and
-                // waking more threads costs more than they save.)
-                .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()).min(16))
+                // Half the cores, as the threads spin between jobs and a job
+                // waits for the slowest: the rest are left for the system,
+                // whose work would otherwise stop a thread mid-job. (Past 16,
+                // the LM head is as fast as memory lets it be.)
+                .unwrap_or_else(|| (std::thread::available_parallelism().map_or(1, |n| n.get()) / 2).clamp(1, 16))
                 .max(1);
             let p: &'static Pool = Box::leak(Box::new(Pool {
                 threads,
-                generation: AtomicU64::new(0),
-                job: UnsafeCell::new(None),
-                done: AtomicUsize::new(0),
+                latest: AtomicU64::new(0),
+                slots: (0..SLOTS).map(|_| Slot::default()).collect(),
                 sleeping: AtomicUsize::new(0),
                 lock: Mutex::new(()),
                 wake: Condvar::new(),
@@ -147,23 +213,42 @@ mod pool {
 
     pub fn run(task: extern "C" fn(*mut u8, i64), context: *mut u8, chunks: i64) {
         let p = pool();
-        if p.threads == 1 || chunks <= 1 {
+        if p.threads == 1 || chunks <= 1 || chunks > MOST {
             for i in 0..chunks {
                 task(context, i);
             }
             return;
         }
-        let job = Job { task, context: context as usize, chunks };
-        unsafe { *p.job.get() = Some(job) };
-        p.done.store(0, SeqCst);
-        p.generation.fetch_add(1, SeqCst);
+        let job = p.latest.load(SeqCst) + 1;
+        let slot = &p.slots[job as usize % SLOTS];
+        slot.job.store(0, SeqCst);
+        slot.task.store(task as usize, SeqCst);
+        slot.context.store(context as usize, SeqCst);
+        slot.chunks.store(chunks, SeqCst);
+        slot.done.store(0, SeqCst);
+        for w in &slot.claimed {
+            w.store((job & 0xffff_ffff) << 32, SeqCst);
+        }
+        slot.job.store(job, SeqCst);
+        p.latest.store(job, SeqCst);
         if p.sleeping.load(SeqCst) > 0 {
             let _guard = p.lock.lock().unwrap();
             p.wake.notify_all();
         }
-        p.share(job, 0);
-        while p.done.load(SeqCst) < p.threads - 1 {
+        let context = context as usize;
+        for i in p.block(chunks, 0) {
+            slot.take(job, task, context, i);
+        }
+        let start = Instant::now();
+        let mut spins = 0u32;
+        while slot.done.load(SeqCst) < chunks {
             std::hint::spin_loop();
+            spins += 1;
+            if spins % 64 == 0 && start.elapsed() > PATIENCE {
+                for i in 0..chunks {
+                    slot.take(job, task, context, i);
+                }
+            }
         }
     }
 }
