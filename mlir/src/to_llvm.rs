@@ -981,7 +981,7 @@ impl<'a> Lower<'a> {
                 let mask = self.out.dense_array_attr("i32", &vec![0; dims[0].0 as usize]);
                 self.emit("llvm.shufflevector", &[one, poison], &[ty], vec![("mask", mask)])
             }
-            "vector.reduction" => {
+            "vector.reduction" => 'reduction: {
                 // The lanes combined in pairs: (a + b) + (c + d).
                 let ty = result_ty(self).unwrap();
                 let Type::Vector { dims, .. } = self.out.ty(self.out.value_type(args[0])).clone() else {
@@ -1000,6 +1000,49 @@ impl<'a> Lower<'a> {
                     "minnumf" => "llvm.intr.minnum",
                     _ => return Err(format!("a reduction of kind {kind} is not supported yet")),
                 };
+                // A maximum or minimum, whose order does not matter: in the
+                // vector registers, halves combined (then, of four floats or
+                // two doubles, the upper half brought down, and lane 1), not
+                // a lane at a time (x86 has no scalar IEEE maximum: a call).
+                let lanes = dims[0].0;
+                let bits = match self.out.ty(ty) {
+                    Type::Float("f32") => 32,
+                    Type::Float("f64") => 64,
+                    _ => 0,
+                };
+                if !matches!(kind.as_str(), "add" | "mul") && bits > 0 && lanes.is_power_of_two() && lanes * bits >= 128
+                {
+                    let fm = self.fastmath();
+                    let shuffle = |l: &mut Self, v: ValueId, lanes: &[i64]| -> ValueId {
+                        let vt = l.out.value_type(v);
+                        let elem = match l.out.ty(vt).clone() {
+                            Type::Vector { elem, .. } => elem,
+                            _ => unreachable!(),
+                        };
+                        let rt = l.out.intern_type(Type::Vector { dims: vec![(lanes.len() as u64, false)], elem });
+                        let poison = l.emit("llvm.mlir.poison", &[], &[vt], vec![]).unwrap();
+                        let mask = l.out.dense_array_attr("i32", lanes);
+                        l.emit("llvm.shufflevector", &[v, poison], &[rt], vec![("mask", mask)]).unwrap()
+                    };
+                    let mut v = args[0];
+                    let mut n = lanes as i64;
+                    while n * bits as i64 > 128 {
+                        let lo: Vec<i64> = (0..n / 2).collect();
+                        let hi: Vec<i64> = (n / 2..n).collect();
+                        let (a, b) = (shuffle(self, v, &lo), shuffle(self, v, &hi));
+                        let vt = self.out.value_type(a);
+                        v = self.emit(combine, &[a, b], &[vt], vec![("fastmathFlags", fm)]).unwrap();
+                        n /= 2;
+                    }
+                    let vt = self.out.value_type(v);
+                    let steps: &[&[i64]] = if bits == 32 { &[&[2, 3, 2, 3], &[1, 1, 1, 1]] } else { &[&[1, 1]] };
+                    for mask in steps {
+                        let s = shuffle(self, v, mask);
+                        v = self.emit(combine, &[v, s], &[vt], vec![("fastmathFlags", fm)]).unwrap();
+                    }
+                    let i = self.i64_const(0);
+                    break 'reduction self.emit("llvm.extractelement", &[v, i], &[ty], vec![]);
+                }
                 let mut lanes = Vec::new();
                 for k in 0..dims[0].0 {
                     let i = self.i64_const(k as i64);

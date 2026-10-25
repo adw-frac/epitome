@@ -885,6 +885,15 @@ def sse_vectors():
           'movaps {v}, {d}', ['%r = extractelement <2 x double> %v, i64 0', 'ret double %r'], ' "dclass"="d"')
     entry('double', 'UNPCKHPDlane1', ['<2 x double> "reg"="xv" "tied" %v'], leg(P66, '00010101', 'd', 'd'),
           'unpckhpd {d}, {d}', ['%r = extractelement <2 x double> %v, i64 1', 'ret double %r'], ' "dclass"="d"')
+    # A vector's upper half brought down (lanes 2, 3, 2, 3; for two lanes,
+    # 1, 1), and its lane 1 everywhere: pshufd, for reductions' trees.
+    for ty, mask, imm, name in [('<4 x float>', '2, i32 3, i32 2, i32 3', 238, 'hi'), ('<4 x i32>', '2, i32 3, i32 2, i32 3', 238, 'hi'),
+                                ('<2 x double>', '1, i32 1', 238, 'hi'), ('<2 x i64>', '1, i32 1', 238, 'hi'),
+                                ('<4 x float>', '1, i32 1, i32 1, i32 1', 85, 'one'), ('<4 x i32>', '1, i32 1, i32 1, i32 1', 85, 'one')]:
+        n = ty[1:].split()[0]
+        entry(ty, f'PSHUFD{name}.{tag(ty)}', [f'{ty} "reg"="xv" %v'], leg(P66, '01110000', 'd', 'v') + f' | {bits(imm)}',
+              f'pshufd ${imm}, {{v}}, {{d}}', [f'%r = shufflevector {ty} %v, {ty} poison, <{n} x i32> <i32 {mask}>', f'ret {ty} %r'],
+              ' "dclass"="xv"')
     # Splats.
     def splat_body(ty, et, x):
         return (f'  %i = insertelement {ty} poison, {et} {x}, i64 0\n'

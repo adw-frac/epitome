@@ -3735,6 +3735,36 @@ define double @UNPCKHPDlane1(<2 x double> "reg"="xv" "tied" %v) "enc"="01100110 
   ret double %r
 }
 
+define <4 x float> @PSHUFDhi.4xf32(<4 x float> "reg"="xv" %v) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | 11101110" "asm"="pshufd $238, {v}, {d}" "dclass"="xv" "nodecode" {
+  %r = shufflevector <4 x float> %v, <4 x float> poison, <4 x i32> <i32 2, i32 3, i32 2, i32 3>
+  ret <4 x float> %r
+}
+
+define <4 x i32> @PSHUFDhi.4xi32(<4 x i32> "reg"="xv" %v) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | 11101110" "asm"="pshufd $238, {v}, {d}" "dclass"="xv" "nodecode" {
+  %r = shufflevector <4 x i32> %v, <4 x i32> poison, <4 x i32> <i32 2, i32 3, i32 2, i32 3>
+  ret <4 x i32> %r
+}
+
+define <2 x double> @PSHUFDhi.2xf64(<2 x double> "reg"="xv" %v) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | 11101110" "asm"="pshufd $238, {v}, {d}" "dclass"="xv" "nodecode" {
+  %r = shufflevector <2 x double> %v, <2 x double> poison, <2 x i32> <i32 1, i32 1>
+  ret <2 x double> %r
+}
+
+define <2 x i64> @PSHUFDhi.2xi64(<2 x i64> "reg"="xv" %v) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | 11101110" "asm"="pshufd $238, {v}, {d}" "dclass"="xv" "nodecode" {
+  %r = shufflevector <2 x i64> %v, <2 x i64> poison, <2 x i32> <i32 1, i32 1>
+  ret <2 x i64> %r
+}
+
+define <4 x float> @PSHUFDone.4xf32(<4 x float> "reg"="xv" %v) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | 01010101" "asm"="pshufd $85, {v}, {d}" "dclass"="xv" "nodecode" {
+  %r = shufflevector <4 x float> %v, <4 x float> poison, <4 x i32> <i32 1, i32 1, i32 1, i32 1>
+  ret <4 x float> %r
+}
+
+define <4 x i32> @PSHUFDone.4xi32(<4 x i32> "reg"="xv" %v) "enc"="01100110 | rex(0, d, 0, v) | 00001111 | 01110000 | rr(d, v) | 01010101" "asm"="pshufd $85, {v}, {d}" "dclass"="xv" "nodecode" {
+  %r = shufflevector <4 x i32> %v, <4 x i32> poison, <4 x i32> <i32 1, i32 1, i32 1, i32 1>
+  ret <4 x i32> %r
+}
+
 define <4 x i32> @MOVDto(i32 "reg"="r32" %n) "enc"="01100110 | rex(0, d, 0, n) | 00001111 | 01101110 | rr(d, n)" "asm"="movd {n}, {d}" "dclass"="xv" "nodecode" {
   %r = insertelement <4 x i32> zeroinitializer, i32 %n, i64 0
   ret <4 x i32> %r
