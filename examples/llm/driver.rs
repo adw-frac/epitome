@@ -45,40 +45,78 @@ pub unsafe extern "C" fn __epitome_parallel_for(task: extern "C" fn(*mut u8, i64
     pool::run(task, context, chunks);
 }
 
-/// Threads made once, parked between jobs. A job's chunks are taken one at
-/// a time by whichever thread is free (the caller too), from a counter
-/// that is the job's own, so a thread that wakes late finds its job done
-/// rather than taking another's chunks.
+/// Threads made once. Each job's chunks are shared out in fixed blocks:
+/// of `chunks` among `threads`, thread `t` (the caller is thread 0) does
+/// chunks `t * chunks / threads` up to `(t + 1) * chunks / threads`. So a
+/// thread does the same part of each job split the same way, and works on
+/// the same memory from one operation to the next, as it would where each
+/// processor had memory of its own. Between jobs a thread waits by
+/// spinning for a while (the model's operations come microseconds apart),
+/// then by sleeping until the next.
 mod pool {
-    use std::sync::atomic::{AtomicI64, Ordering};
-    use std::sync::{Arc, Condvar, Mutex, OnceLock};
+    use std::cell::UnsafeCell;
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::SeqCst};
+    use std::sync::{Condvar, Mutex, OnceLock};
 
+    #[derive(Clone, Copy)]
     struct Job {
         task: extern "C" fn(*mut u8, i64),
         context: usize,
         chunks: i64,
-        next: AtomicI64,
-        done: AtomicI64,
-    }
-
-    impl Job {
-        fn work(&self) {
-            loop {
-                let i = self.next.fetch_add(1, Ordering::Relaxed);
-                if i >= self.chunks {
-                    return;
-                }
-                (self.task)(self.context as *mut u8, i);
-                self.done.fetch_add(1, Ordering::Release);
-            }
-        }
     }
 
     struct Pool {
         threads: usize,
-        /// The latest job, and how many there have been.
-        current: Mutex<(u64, Option<Arc<Job>>)>,
+        /// The job's number: a new one when it changes.
+        generation: AtomicU64,
+        job: UnsafeCell<Option<Job>>,
+        /// The threads (besides the caller) done with this job: each says so,
+        /// those with no chunks of it too, before the next is written.
+        done: AtomicUsize,
+        sleeping: AtomicUsize,
+        lock: Mutex<()>,
         wake: Condvar,
+    }
+
+    // The job is written only while no thread reads it: before the
+    // generation changes, after every chunk of the last one is done.
+    unsafe impl Sync for Pool {}
+
+    /// Spins before a waiting thread sleeps.
+    const SPINS: u32 = 1 << 18;
+
+    impl Pool {
+        fn share(&self, job: Job, t: usize) {
+            let n = self.threads as i64;
+            let (from, to) = (t as i64 * job.chunks / n, (t as i64 + 1) * job.chunks / n);
+            for i in from..to {
+                (job.task)(job.context as *mut u8, i);
+            }
+        }
+
+        fn worker(&self, t: usize) {
+            let mut seen = 0;
+            loop {
+                let mut spins = 0;
+                while self.generation.load(SeqCst) == seen {
+                    if spins < SPINS {
+                        spins += 1;
+                        std::hint::spin_loop();
+                        continue;
+                    }
+                    let mut guard = self.lock.lock().unwrap();
+                    self.sleeping.fetch_add(1, SeqCst);
+                    while self.generation.load(SeqCst) == seen {
+                        guard = self.wake.wait(guard).unwrap();
+                    }
+                    self.sleeping.fetch_sub(1, SeqCst);
+                }
+                seen = self.generation.load(SeqCst);
+                let job = unsafe { *self.job.get() }.unwrap();
+                self.share(job, t);
+                self.done.fetch_add(1, SeqCst);
+            }
+        }
     }
 
     fn pool() -> &'static Pool {
@@ -91,25 +129,17 @@ mod pool {
                 // waking more threads costs more than they save.)
                 .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()).min(16))
                 .max(1);
-            let p: &'static Pool =
-                Box::leak(Box::new(Pool { threads, current: Mutex::new((0, None)), wake: Condvar::new() }));
-            for _ in 1..threads {
-                std::thread::spawn(move || {
-                    let mut seen = 0;
-                    loop {
-                        let job = {
-                            let mut cur = p.current.lock().unwrap();
-                            while cur.0 == seen {
-                                cur = p.wake.wait(cur).unwrap();
-                            }
-                            seen = cur.0;
-                            cur.1.clone()
-                        };
-                        if let Some(job) = job {
-                            job.work();
-                        }
-                    }
-                });
+            let p: &'static Pool = Box::leak(Box::new(Pool {
+                threads,
+                generation: AtomicU64::new(0),
+                job: UnsafeCell::new(None),
+                done: AtomicUsize::new(0),
+                sleeping: AtomicUsize::new(0),
+                lock: Mutex::new(()),
+                wake: Condvar::new(),
+            }));
+            for t in 1..threads {
+                std::thread::spawn(move || p.worker(t));
             }
             p
         })
@@ -123,21 +153,16 @@ mod pool {
             }
             return;
         }
-        let job = Arc::new(Job {
-            task,
-            context: context as usize,
-            chunks,
-            next: AtomicI64::new(0),
-            done: AtomicI64::new(0),
-        });
-        {
-            let mut cur = p.current.lock().unwrap();
-            cur.0 += 1;
-            cur.1 = Some(job.clone());
+        let job = Job { task, context: context as usize, chunks };
+        unsafe { *p.job.get() = Some(job) };
+        p.done.store(0, SeqCst);
+        p.generation.fetch_add(1, SeqCst);
+        if p.sleeping.load(SeqCst) > 0 {
+            let _guard = p.lock.lock().unwrap();
+            p.wake.notify_all();
         }
-        p.wake.notify_all();
-        job.work();
-        while job.done.load(Ordering::Acquire) < chunks {
+        p.share(job, 0);
+        while p.done.load(SeqCst) < p.threads - 1 {
             std::hint::spin_loop();
         }
     }

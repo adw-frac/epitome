@@ -20,6 +20,7 @@ pub mod linalg_fuse;
 pub mod linalg_generalize;
 pub mod linalg_kernels;
 pub mod linalg_outline;
+pub mod linalg_split;
 pub mod linalg_to_loops;
 pub mod linalg_vectorize;
 pub mod math_approx;
@@ -44,6 +45,7 @@ pub const PASSES: &[&str] = &[
     "linalg-fuse-elementwise",
     "bufferize",
     "linalg-to-kernels=<target>",
+    "linalg-split=<chunks>[:<rows>]",
     "outline-linalg",
     "linalg-vectorize=<width>",
     "linalg-to-loops",
@@ -81,6 +83,16 @@ pub fn run_pass(name: &str, m: &Module) -> Result<Module, String> {
         "linalg-fold-constants" => linalg_fold::run(m),
         "linalg-fuse-elementwise" => linalg_fuse::run(m),
         "outline-linalg" => linalg_outline::run(m),
+        _ if name.starts_with("linalg-split=") => {
+            // chunks[:rows], at most so many chunks, products' rows at least
+            // so many to a chunk.
+            let arg = &name["linalg-split=".len()..];
+            let (chunks, rows) = arg.split_once(':').unwrap_or((arg, "1"));
+            let (Ok(chunks), Ok(rows)) = (chunks.parse(), rows.parse()) else {
+                return Err(format!("{name}: chunks[:rows] is expected"));
+            };
+            linalg_split::run(m, chunks, rows)
+        }
         _ if name.starts_with("linalg-to-kernels=") => linalg_kernels::run(m, &name["linalg-to-kernels=".len()..]),
         _ if name.starts_with("linalg-vectorize=") => {
             let width =

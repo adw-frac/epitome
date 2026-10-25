@@ -737,6 +737,7 @@ same tokens at each step for f32 and for BF16 respectively:
 | GELU's tanh(z) + 1 as 2 / (1 + e^-2z); a fused input read once | 2.5 |
 | q k^T by an AVX-512 f32 kernel: 4 rows x 64 columns in 16 registers, A broadcast once for all of them | 2.05 |
 | the LM head's columns split among 16 threads (`linalg-to-kernels=...:parallel`, the driver's `__epitome_parallel_for`) | 1.23 |
+| every operation split among 16 threads, its memory first (`linalg-split=16:4`, below); the threads spin between operations | 0.75 |
 
 `linalg-fold-constants` now also works out an element-wise
 `linalg.generic` whose result is only sliced (`tensor.extract_slice`, a
@@ -748,6 +749,32 @@ product's columns rather than its sum, each lane summing its own element
 in the order the scalar loops do. `math-polynomial-approximation` expands
 `math.tanh`: below 1/4 the odd Taylor series to x^9, above it 1 - 2 /
 (e^2|x| + 1), then x's sign.
+
+`linalg-split=<chunks>[:<rows>]` (`mlir/src/linalg_split.rs`, after
+`bufferize`) splits each `linalg.generic`, `linalg.fill` and
+`memref.copy` it can among threads, the memory first: along the parallel
+dimension that gives the most chunks (up to 16 here), each chunk's
+operands views of those that dimension indexes, each chunk writing whole
+64-byte lines of its own. Consecutive operations split into as many
+chunks share a task where every buffer any of them writes is split the
+same way by all, so that a chunk reads only what it wrote or what none
+writes, and the threads meet once for the lot. A matrix product is split
+by its batch (attention's heads) or by its rows, at least as many as the
+kernel's tile has (4 on AVX-512, 64 on SME), never by its columns, and
+`linalg-to-kernels` then lowers each chunk's product; the LM head (2^23
+multiply-adds or more) is left whole, for the kernels' split by columns.
+The driver's pool gives each thread a fixed block of each job's chunks
+(thread t, of T, does chunks t C / T up to (t + 1) C / T), so that a
+thread does the same part of each operation split the same way, as where
+each processor has memory of its own; what moves between threads is where
+one operation's split differs from the next's (rows to heads and back, in
+attention). The window's 230-odd operations become about 170 calls of
+`__epitome_parallel_for`. On the M4 Pro (SME BF16), 1.65 ms on one thread,
+0.82 ms on four; past four the efficiency cores hold the rest up.
+
+| Threads (x86-64) | 1 | 2 | 4 | 8 | 16 | 32 |
+| --- | --- | --- | --- | --- | --- | --- |
+| ms a window | 2.16 | 1.58 | 1.07 | 0.80 | 0.75 | 0.89 |
 
 ## 6. Dialect descriptions
 

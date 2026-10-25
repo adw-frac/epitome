@@ -162,7 +162,7 @@ fn llvm_type(m: &mut Module, ty: TypeId) -> TypeId {
 }
 
 /// Bytes in an element of type `ty`.
-fn elem_bytes(m: &Module, ty: TypeId) -> Result<u64, String> {
+pub(crate) fn elem_bytes(m: &Module, ty: TypeId) -> Result<u64, String> {
     Ok(match m.ty(m.resolve_type(ty)) {
         Type::Int { width, .. } => (*width as u64).div_ceil(8).max(1),
         Type::Index => 8,
@@ -895,6 +895,18 @@ impl<'a> Lower<'a> {
                 let alias = self.alias(p);
                 self.layouts.insert(alias, layout);
                 Some(alias)
+            }
+            "builtin.unrealized_conversion_cast" if args.len() == 1 => {
+                // A pointer as a memref (a task's operands come so): the same
+                // pointer, with the memref's layout.
+                let result = src.value_type(o.results[0]);
+                if matches!(src.ty(src.resolve_type(result)), Type::MemRef { .. }) {
+                    let alias = self.alias(args[0]);
+                    self.layouts.insert(alias, Layout::of(src, result)?);
+                    Some(alias)
+                } else {
+                    Some(args[0])
+                }
             }
             "memref.load" => Some(self.load(args[0], &args[1..])?),
             "memref.store" => {
