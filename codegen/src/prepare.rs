@@ -3250,9 +3250,14 @@ fn bool_memory(cx: &mut Ctx, f: &mut Function) {
 const MAX_MEM_PIECES: u64 = 16;
 
 /// Small `llvm.memset` and `llvm.memcpy` calls of a constant length are
-/// written out as stores (and, for a copy, loads), each as wide as the
-/// alignment and what is left allow (8, 4, 2 or 1 bytes), when that is at
-/// most `MAX_MEM_PIECES` of them; longer ones stay calls to the C library.
+/// written out as stores (and, for a copy, loads), when that is at most
+/// `MAX_MEM_PIECES` of them; longer ones stay calls to the C library. Where
+/// unaligned accesses are fast, every piece is as wide as the length
+/// allows, up to a vector register (16 bytes, 32 with AVX2) past 16 bytes
+/// and an integer register up to them, and the last overlaps the one
+/// before rather than a ladder of narrower ones: 15 bytes are two 8-byte
+/// stores, at 0 and 7. Elsewhere each piece is as wide as
+/// the alignment and what is left allow (8, 4, 2 or 1 bytes).
 /// `memcpyopt` turns runs of stores into memsets that come back here as
 /// wider stores. Volatile ones, and memsets of a value not known, stay
 /// calls.
@@ -3293,18 +3298,23 @@ fn expand_small_mem_ops(cx: &mut Ctx, f: &mut Function) {
                 continue;
             }
             let len = len as u64;
-            let widest = if cx.t.machine.unaligned_fast {
-                8
-            } else {
-                if copy { align(0).min(align(1)) } else { align(0) }.clamp(1, 8)
-            };
             // The pieces: (offset, bytes), each as wide as it can be.
             let mut pieces = Vec::new();
-            let mut at = 0u64;
-            while at < len {
-                let w = [8u64, 4, 2, 1].into_iter().find(|&w| w <= widest && at + w <= len).unwrap();
-                pieces.push((at, w));
-                at += w;
+            if cx.t.machine.unaligned_fast {
+                // (Up to 16 bytes, integer registers: their stores and loads
+                // have less latency, and the value needs no vector made.)
+                let widest = if len <= 16 { 8 } else { (cx.vector_bits() as u64 / 8).max(8) };
+                let w = [32u64, 16, 8, 4, 2, 1].into_iter().find(|&w| w <= widest && w <= len).unwrap();
+                let n = len.div_ceil(w);
+                pieces.extend((0..n).map(|k| (if k + 1 == n { len - w } else { k * w }, w)));
+            } else {
+                let widest = if copy { align(0).min(align(1)) } else { align(0) }.clamp(1, 8);
+                let mut at = 0u64;
+                while at < len {
+                    let w = [8u64, 4, 2, 1].into_iter().find(|&w| w <= widest && at + w <= len).unwrap();
+                    pieces.push((at, w));
+                    at += w;
+                }
             }
             if pieces.len() as u64 > MAX_MEM_PIECES
                 || !epitome_ir::chop::allow(|| {
@@ -3328,8 +3338,22 @@ fn expand_small_mem_ops(cx: &mut Ctx, f: &mut Function) {
                     // What alignment each piece really has: the call's, at
                     // most, and no more than its offset's.
                     let real = |a: u64| if off == 0 { a } else { a.min(1 << off.trailing_zeros()) };
-                    let ty = cx.m.types.int(8 * w as u32);
+                    // A vector of i64 for 16 and 32 bytes.
+                    let ty = if w > 8 {
+                        let i64t = cx.m.types.int(64);
+                        cx.m.types.intern(Type::Vector { scalable: false, len: (w / 8) as u32, elem: i64t })
+                    } else {
+                        cx.m.types.int(8 * w as u32)
+                    };
                     let value = match byte {
+                        Some(b) if w > 8 => {
+                            let i64t = cx.m.types.int(64);
+                            let lane = cx.int(i64t, (0..8).fold(0u64, |acc, _| (acc << 8) | b as u64) as i64);
+                            let Value::Const(lane) = lane else { unreachable!() };
+                            Value::Const(
+                                cx.m.consts.intern(Constant { ty, kind: ConstKind::Vector(vec![lane; (w / 8) as usize]) }),
+                            )
+                        }
                         Some(b) => {
                             let v = (0..w).fold(0u64, |acc, _| (acc << 8) | b as u64);
                             cx.int(ty, v as i64)

@@ -135,7 +135,6 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool, coalescing: bool) -> Res
     };
     let nv = f.vclass.len();
     let classes = f.vclass.clone();
-    let file_of_v = |v: VReg| m.def(classes[v as usize]).file;
     // A value wider than the registers a function preserves (a vector, of
     // which only the low 64 bits of AArch64's v8-v15 survive a call) cannot
     // be kept in one across a call.
@@ -367,9 +366,9 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool, coalescing: bool) -> Res
         } else {
             cands.extend(caller.chain(callee).copied());
         }
-        // Only registers of the value's own file.
-        let file = file_of_v(v);
-        cands.retain(|&p| m.file_of(p) == file);
+        // Only registers of the value's own class.
+        let class = classes[v as usize];
+        cands.retain(|&p| m.in_class(class, p));
         let free = cands.iter().copied().find(|p| taken.get(p).is_none_or(|busy| mine.iter().all(|&m| !busy.meets(m))));
         // Else a register whose values in the way are all lighter (and
         // movable), the lightest in all.
@@ -509,14 +508,14 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool, coalescing: bool) -> Res
             let mut vs: Vec<(VReg, Vec<u32>)> = seen.into_iter().filter(|(_, ps)| ps.len() > 1).collect();
             vs.sort_by_key(|(v, ps)| (ps[0], *v));
             for (v, ps) in vs {
-                let file = file_of_v(v);
+                let class = classes[v as usize];
                 let wide = too_wide(v);
                 let cands: Vec<u8> = caller_saved
                     .iter()
                     .chain(&fp_caller_saved)
                     .chain(callee_saved.iter().chain(&fp_callee_saved).filter(|_| !wide))
                     .copied()
-                    .filter(|&p| m.file_of(p) == file)
+                    .filter(|&p| m.in_class(class, p))
                     .collect();
                 let free = |taken: &HashMap<u8, Busy>, p: u8, iv: Interval| taken.get(&p).is_none_or(|b| !b.meets(iv));
                 let mut a = 0;
@@ -619,7 +618,7 @@ fn allocate_with(t: &Target, f: &mut MFunc, bail: bool, coalescing: bool) -> Res
                     _ => None,
                 };
                 if let Some((sl, v, p, load)) = direct
-                    && m.file_of(p) == m.def(vclass[v as usize]).file
+                    && m.in_class(vclass[v as usize], p)
                     && !(load && m.zero == Some(p))
                     && let Some((ld, st)) = spill_of(vclass[v as usize])
                 {

@@ -62,6 +62,40 @@ const FUNCS: &str = r#""builtin.module"() ({
     }) : (tensor<8x16xf32>, tensor<8x16xf32>) -> tensor<8x16xf32>
     return %r : tensor<8x16xf32>
   }) : () -> ()
+  "func.func"() <{function_type = (tensor<8x19xf32>) -> tensor<8x1xf32>, sym_name = "sums19"}> ({
+  ^bb0(%x: tensor<8x19xf32>):
+    %zero = arith.constant 0.000000e+00 : f32
+    %e = "tensor.empty"() : () -> tensor<8x1xf32>
+    %f = "linalg.fill"(%zero, %e) <{operandSegmentSizes = array<i32: 1, 1>}> ({
+    ^bb0(%a: f32, %b: f32):
+      linalg.yield %a : f32
+    }) : (f32, tensor<8x1xf32>) -> tensor<8x1xf32>
+    %r = "linalg.generic"(%x, %f) <{indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0, 0)>], iterator_types = [#linalg.iterator_type<parallel>, #linalg.iterator_type<reduction>], operandSegmentSizes = array<i32: 1, 1>}> ({
+    ^bb0(%a: f32, %acc: f32):
+      %s = arith.addf %a, %acc : f32
+      linalg.yield %s : f32
+    }) : (tensor<8x19xf32>, tensor<8x1xf32>) -> tensor<8x1xf32>
+    return %r : tensor<8x1xf32>
+  }) : () -> ()
+  "func.func"() <{function_type = (tensor<8x19xf32>) -> tensor<8x19xf32>, sym_name = "exps19"}> ({
+  ^bb0(%x: tensor<8x19xf32>):
+    %e = "tensor.empty"() : () -> tensor<8x19xf32>
+    %r = "linalg.generic"(%x, %e) <{indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>, affine_map<(d0, d1) -> (d0, d1)>], iterator_types = [#linalg.iterator_type<parallel>, #linalg.iterator_type<parallel>], operandSegmentSizes = array<i32: 1, 1>}> ({
+    ^bb0(%a: f32, %b: f32):
+      %s = "math.exp"(%a) <{fastmath = #arith.fastmath<none>}> : (f32) -> f32
+      linalg.yield %s : f32
+    }) : (tensor<8x19xf32>, tensor<8x19xf32>) -> tensor<8x19xf32>
+    return %r : tensor<8x19xf32>
+  }) : () -> ()
+  "func.func"() <{function_type = () -> tensor<8x19xf32>, sym_name = "lows19"}> ({
+    %low = arith.constant 0xFF800000 : f32
+    %e = "tensor.empty"() : () -> tensor<8x19xf32>
+    %f = "linalg.fill"(%low, %e) <{operandSegmentSizes = array<i32: 1, 1>}> ({
+    ^bb0(%a: f32, %b: f32):
+      linalg.yield %a : f32
+    }) : (f32, tensor<8x19xf32>) -> tensor<8x19xf32>
+    return %f : tensor<8x19xf32>
+  }) : () -> ()
   "func.func"() <{function_type = (tensor<8x16xf32>, tensor<8x1xf32>) -> tensor<8x16xf32>, sym_name = "scaled"}> ({
   ^bb0(%x: tensor<8x16xf32>, %y: tensor<8x1xf32>):
     %e = "tensor.empty"() : () -> tensor<8x16xf32>
@@ -82,6 +116,9 @@ unsafe extern "C" {
     fn exps(x: *const f32, r: *mut f32);
     fn tanhs(x: *const f32, r: *mut f32);
     fn scaled(x: *const f32, y: *const f32, r: *mut f32);
+    fn sums19(x: *const f32, r: *mut f32);
+    fn exps19(x: *const f32, r: *mut f32);
+    fn lows19(r: *mut f32);
 }
 fn check(what: &str, got: &[f32], want: &[f32], tolerance: f32) {
     for (i, (g, w)) in got.iter().zip(want).enumerate() {
@@ -114,6 +151,20 @@ fn main() {
     unsafe { scaled(x.as_ptr(), y.as_ptr(), r.as_mut_ptr()) };
     let want: Vec<f32> = (0..128).map(|i| x[i] * y[i / 16]).collect();
     check("scaled", &r, &want, 0.0);
+    // 19 a row: four vectors of four, then three one at a time.
+    let x19: Vec<f32> = (0..152).map(|i| ((i * 37 % 101) as f32 - 50.0) / 7.0).collect();
+    let mut r19 = vec![f32::NAN; 152];
+    unsafe { sums19(x19.as_ptr(), r19.as_mut_ptr()) };
+    let want: Vec<f32> = x19.chunks(19).map(|c| c.iter().sum()).collect();
+    check("sums19", &r19[..8], &want, 1e-5);
+    unsafe { exps19(x19.as_ptr(), r19.as_mut_ptr()) };
+    let want: Vec<f32> = x19.iter().map(|v| v.exp()).collect();
+    check("exps19", &r19, &want, 3e-7);
+    unsafe { lows19(r19.as_mut_ptr()) };
+    if r19.iter().any(|&v| v != f32::NEG_INFINITY) {
+        println!("lows19 is {:?}", &r19[..19]);
+        std::process::exit(1);
+    }
     println!("ok");
 }
 "#;

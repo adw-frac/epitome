@@ -702,7 +702,10 @@ to BF16 into `at` (`vcvtneps2bf16`); for each 64-column panel, the block's
 rows x 64 of C stay in registers (16 of the 32 for four rows) while each
 row of pairs of the panel is multiplied in: four vectors of B, a pair of A
 broadcast for each row (`vpbroadcastd`), and `vdpbf16ps`, which adds both
-products of a pair into each lane. The kernels' functions alone have AVX-512
+products of a pair into each lane. A's rows are then interleaved, each step's pairs
+side by side, so that one pointer and constant offsets reach every row's;
+the inner loop is four loads of B, four broadcasts and sixteen
+`vdpbf16ps`, nothing spilled. The kernels' functions alone have AVX-512
 (`"target-features"`, in `llvm.passthrough`); the description's 512-bit
 class, `zv`, is used only by functions with `avx512f`.
 
@@ -719,6 +722,10 @@ same tokens at each step for f32 and for BF16 respectively:
 | IEEE `maximum` and `minimum` of vectors as compares and selects, not `fmaximumf` a lane | 32 |
 | a contraction vectorized along a parallel loop when the innermost is not contiguous (attention's) | 21 |
 | `tanh` as arithmetic (GELU's), not a call of `tanhf` | 17 |
+| the kernel's accumulators in zmm16-31 too, not spilled (the allocator kept each value to its class's registers, so the vector file's 32 could be offered); A's pairs interleaved, one pointer for every row | 14 |
+| the logits' fill a memset (`loopidiom`), and vectors with tails for what is not a multiple of the width | 13.4 |
+| the logits worked out in the output argument, not a buffer copied there (`bufferize`) | 10.6 |
+| no fill: the kernel's twin whose sums start at zero, fills only of the columns loops do | 10.3 |
 
 `linalg-fold-constants` now also works out an element-wise
 `linalg.generic` whose result is only sliced (`tensor.extract_slice`, a

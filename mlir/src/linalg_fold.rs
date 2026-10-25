@@ -46,8 +46,14 @@ pub fn run(src: &Module) -> Result<Module, String> {
             users.entry(v).or_default().push(OpId(k as u32));
         }
     }
-    let mut cx =
-        Cx { resources: &resources, used: &used, users: &users, skip: HashSet::new(), made: &mut made, blobs: &mut blobs };
+    let mut cx = Cx {
+        resources: &resources,
+        used: &used,
+        users: &users,
+        skip: HashSet::new(),
+        made: &mut made,
+        blobs: &mut blobs,
+    };
     for top in src.top_ops().collect::<Vec<_>>() {
         copy(src, top, &mut out, None, &mut map, &mut cx)?;
     }
@@ -311,11 +317,15 @@ fn sliced(
     };
     let identity = Map::identity(rank);
     let all_identity = ms.iter().all(|&m| match src.attr(src.resolve_attr(m)) {
-        Attr::Builtin { keyword: "affine_map", body, .. } => Map::parse(&body[1..body.len() - 1]).ok() == Some(identity.clone()),
+        Attr::Builtin { keyword: "affine_map", body, .. } => {
+            Map::parse(&body[1..body.len() - 1]).ok() == Some(identity.clone())
+        }
         _ => false,
     });
     let parallel = match src.op_attr(op, "iterator_types").map(|a| src.attr(src.resolve_attr(a))) {
-        Some(Attr::Array(es)) => es.iter().all(|&e| matches!(src.attr(e), Attr::Dialect { body: Some(b), .. } if b.contains("parallel"))),
+        Some(Attr::Array(es)) => {
+            es.iter().all(|&e| matches!(src.attr(e), Attr::Dialect { body: Some(b), .. } if b.contains("parallel")))
+        }
         _ => false,
     };
     let body = src.regions[o.regions[0].index()].blocks[0];

@@ -419,6 +419,22 @@ pub fn run(m: &mut Module, opts: &Options) -> Report {
                             combine(*g, f, None);
                         }
                     }
+                    // Loops that only set memory to a byte, as memsets; then
+                    // the loop around them, once what is left of the inner one
+                    // is folded away.
+                    if opts.memory {
+                        for _ in 0..4 {
+                            let s = crate::loopidiom::run(sh, f);
+                            if s.memsets == 0 {
+                                break;
+                            }
+                            sh.remark(*g, format!("loopidiom: {} loops made memsets", s.memsets));
+                            if opts.combine {
+                                combine(*g, f, None);
+                            }
+                            simplify_cfg(*g, f);
+                        }
+                    }
                     let r = crate::lsr::run(sh, f);
                     if r.changed() {
                         sh.remark(

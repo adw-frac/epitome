@@ -760,6 +760,14 @@ impl Machine {
         self.relocs.iter().position(|r| r.usage == u)
     }
 
+    /// Whether register `r` is one of class `c`'s: in its file, and among
+    /// the registers it names (x86's 128- and 256-bit classes have 16 of
+    /// the vector file's 32).
+    pub fn in_class(&self, c: Class, r: u8) -> bool {
+        let d = self.def(c);
+        self.file_of(r) == d.file && (self.index(r) as usize) < d.names.len()
+    }
+
     /// The file register `r` is in.
     pub fn file_of(&self, r: u8) -> usize {
         self.files.iter().position(|f| r >= f.base && r < f.base.saturating_add(f.size)).unwrap_or(0)
