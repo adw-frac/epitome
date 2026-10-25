@@ -28,6 +28,10 @@
 //! products by the kernels of `mlir/targets/x86-avx512.mlir`, which need
 //! AVX-512 and AVX512-BF16 and so `--weights=bf16`; only they use them.
 //!
+//! The kernels' largest products (the LM head's) are split among threads
+//! (`linalg-to-kernels=...:parallel`), by `__epitome_parallel_for`, which
+//! the driver provides (`EPITOME_THREADS` threads, by default one a core).
+//!
 //! `--weights=bf16` (with `--sme` or `--avx512`) stores constant weights in that format,
 //! rounding them, for the kernels of that format; the program is then
 //! `llm-bf16`, and so on, so that the formats can be compared.
@@ -90,6 +94,8 @@ fn build(dir: &Path, dump: bool, sme: bool, weights: Option<&str>) -> Result<Pat
         Some(w) => format!("linalg-to-kernels={set}:{w}"),
         None => format!("linalg-to-kernels={set}"),
     };
+    // Large products split among the driver's threads.
+    let kernels = format!("{kernels}:parallel");
     let suffix = weights.map(|w| format!("-{w}")).unwrap_or_default();
     let mut passes: Vec<&str> = epitome_mlir::LINALG_TO_LLVM.to_vec();
     let mut at = passes.iter().position(|&p| p == "bufferize").unwrap() + 1;

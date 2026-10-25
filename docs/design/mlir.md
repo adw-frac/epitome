@@ -736,6 +736,7 @@ same tokens at each step for f32 and for BF16 respectively:
 | maximum reductions in vector registers, not a libm call a lane | 2.9 |
 | GELU's tanh(z) + 1 as 2 / (1 + e^-2z); a fused input read once | 2.5 |
 | q k^T by an AVX-512 f32 kernel: 4 rows x 64 columns in 16 registers, A broadcast once for all of them | 2.05 |
+| the LM head's columns split among 16 threads (`linalg-to-kernels=...:parallel`, the driver's `__epitome_parallel_for`) | 1.23 |
 
 `linalg-fold-constants` now also works out an element-wise
 `linalg.generic` whose result is only sliced (`tensor.extract_slice`, a

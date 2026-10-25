@@ -19,6 +19,11 @@
 //! The tokenizer is GPT-2's byte-level BPE, from `tokens.txt` and
 //! `merges.txt`, and the window, vocabulary and end token are in
 //! `config.txt`, all next to the program (written by `export.py`).
+//!
+//! The model's largest matrix products (the LM head) are split among
+//! threads: it calls `__epitome_parallel_for`, which this program
+//! provides, with a pool of threads made the first time, one a core (at
+//! most 16), or `EPITOME_THREADS` of them (1: none but the caller).
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -26,6 +31,116 @@ use std::time::Instant;
 
 unsafe extern "C" {
     fn forward(ids: *const i64, logits: *mut f32);
+}
+
+/// For the model: calls `task(context, i)` for each `i` in `0..chunks`,
+/// on the pool's threads and this one, and returns when all are done.
+///
+/// # Safety
+///
+/// `task` must be safe to call with `context` and each chunk, from any
+/// thread, the chunks at once.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn __epitome_parallel_for(task: extern "C" fn(*mut u8, i64), context: *mut u8, chunks: i64) {
+    pool::run(task, context, chunks);
+}
+
+/// Threads made once, parked between jobs. A job's chunks are taken one at
+/// a time by whichever thread is free (the caller too), from a counter
+/// that is the job's own, so a thread that wakes late finds its job done
+/// rather than taking another's chunks.
+mod pool {
+    use std::sync::atomic::{AtomicI64, Ordering};
+    use std::sync::{Arc, Condvar, Mutex, OnceLock};
+
+    struct Job {
+        task: extern "C" fn(*mut u8, i64),
+        context: usize,
+        chunks: i64,
+        next: AtomicI64,
+        done: AtomicI64,
+    }
+
+    impl Job {
+        fn work(&self) {
+            loop {
+                let i = self.next.fetch_add(1, Ordering::Relaxed);
+                if i >= self.chunks {
+                    return;
+                }
+                (self.task)(self.context as *mut u8, i);
+                self.done.fetch_add(1, Ordering::Release);
+            }
+        }
+    }
+
+    struct Pool {
+        threads: usize,
+        /// The latest job, and how many there have been.
+        current: Mutex<(u64, Option<Arc<Job>>)>,
+        wake: Condvar,
+    }
+
+    fn pool() -> &'static Pool {
+        static POOL: OnceLock<&'static Pool> = OnceLock::new();
+        POOL.get_or_init(|| {
+            let threads = std::env::var("EPITOME_THREADS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                // (Past 16, the LM head is as fast as memory lets it be, and
+                // waking more threads costs more than they save.)
+                .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()).min(16))
+                .max(1);
+            let p: &'static Pool =
+                Box::leak(Box::new(Pool { threads, current: Mutex::new((0, None)), wake: Condvar::new() }));
+            for _ in 1..threads {
+                std::thread::spawn(move || {
+                    let mut seen = 0;
+                    loop {
+                        let job = {
+                            let mut cur = p.current.lock().unwrap();
+                            while cur.0 == seen {
+                                cur = p.wake.wait(cur).unwrap();
+                            }
+                            seen = cur.0;
+                            cur.1.clone()
+                        };
+                        if let Some(job) = job {
+                            job.work();
+                        }
+                    }
+                });
+            }
+            p
+        })
+    }
+
+    pub fn run(task: extern "C" fn(*mut u8, i64), context: *mut u8, chunks: i64) {
+        let p = pool();
+        if p.threads == 1 || chunks <= 1 {
+            for i in 0..chunks {
+                task(context, i);
+            }
+            return;
+        }
+        let job = Arc::new(Job {
+            task,
+            context: context as usize,
+            chunks,
+            next: AtomicI64::new(0),
+            done: AtomicI64::new(0),
+        });
+        {
+            let mut cur = p.current.lock().unwrap();
+            cur.0 += 1;
+            cur.1 = Some(job.clone());
+        }
+        p.wake.notify_all();
+        job.work();
+        while job.done.load(Ordering::Acquire) < chunks {
+            std::hint::spin_loop();
+        }
+    }
 }
 
 fn main() {

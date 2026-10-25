@@ -37,6 +37,12 @@ const BUILT_IN: &[(&str, &str)] = &[
 /// constant weights are stored in that format (`weights = "bf16"`), which
 /// round them, and so are used only when asked for.
 pub fn run(src: &Module, kernels: &str) -> Result<Module, String> {
+    // `:parallel` last: large products' columns split among threads, by
+    // the program's `__epitome_parallel_for` (see `parallel_product`).
+    let (kernels, parallel) = match kernels.strip_suffix(":parallel") {
+        Some(k) => (k, true),
+        None => (kernels, false),
+    };
     let (name, weights) = match kernels.rsplit_once(':') {
         Some((n, w)) if !w.contains('/') => (n, Some(w.to_string())),
         _ => (kernels, None),
@@ -51,6 +57,8 @@ pub fn run(src: &Module, kernels: &str) -> Result<Module, String> {
         packed: HashMap::new(),
         blobs: Vec::new(),
         zero: None,
+        parallel,
+        tasks: 0,
     };
     for top in src.top_ops().collect::<Vec<_>>() {
         if src.op_name(top) != "builtin.module" {
@@ -103,7 +111,18 @@ struct Cx<'a> {
     /// For the operation being lowered: the zero its output was just filled
     /// with, the fill left out, for the kernels to do or redo.
     zero: Option<ValueId>,
+    /// Whether large products run on threads, and the tasks made so far.
+    parallel: bool,
+    tasks: usize,
 }
+
+/// The fewest multiply-adds a product split among threads has: below it,
+/// waking them costs more than they save.
+const PARALLEL_MACS: u64 = 1 << 23;
+
+/// Chunks of columns a product split among threads has, at most: several a
+/// thread, for the slower ones to share out.
+const PARALLEL_CHUNKS: u64 = 64;
 
 /// Removes `memref.get_global`s whose result nothing uses, then the
 /// constant `memref.global`s nothing gets.
@@ -630,7 +649,22 @@ fn tiles(
 
     // A transposed: AT[k, m] = A[m, k], packed; or, for a kernel that
     // transposes A itself, a buffer for a block of rows of it.
-    let at_rows = if k.transpose_a { k.tile.0 } else { m };
+    // A kernel of packed weights does the whole panels; the columns past
+    // them are left to a linalg.generic.
+    let nk = match (&k.weights, k.pack_b) {
+        (Some(_), Some(p)) => n / p * p,
+        _ => n,
+    };
+    // Split among threads: chunks of whole panels (or of the columns the
+    // kernel takes at a time), each with its own room in `at`.
+    let unit = k.pack_b.or(k.col_multiple).unwrap_or(k.tile.1);
+    let split = (cx.parallel && k.whole_rows && k.transpose_a && full * nk * kk >= PARALLEL_MACS && nk >= 2 * unit)
+        .then(|| {
+            let units = nk.div_ceil(unit);
+            let per = units.div_ceil(PARALLEL_CHUNKS.min(units)) * unit;
+            (nk.div_ceil(per), per)
+        });
+    let at_rows = if k.transpose_a { k.tile.0 * split.map_or(1, |s| s.0) } else { m };
     let at_ty = out.memref_type(&[kk, at_rows], elem, None);
     let i64a = out.int_attr(64, i64t);
     let segments = out.dense_array_attr("i32", &[0, 0]);
@@ -697,12 +731,6 @@ fn tiles(
         _ => (c64(out, lb.0[0] as i64), c64(out, lb.1 as i64), None),
     };
     let (kv, offc) = (c64(out, kk as i64), c64(out, lc.1 as i64));
-    // A kernel of packed weights does the whole panels; the columns past
-    // them are left to a linalg.generic.
-    let nk = match (&k.weights, k.pack_b) {
-        (Some(_), Some(p)) => n / p * p,
-        _ => n,
-    };
     let nv = c64(out, nk as i64);
 
     // for i in 0..full by tile rows, for j in 0..n by tile columns.
@@ -730,6 +758,41 @@ fn tiles(
         let r = OpSpec::new(name).operands(&[x, y]).results(&[i64t]).prop("overflowFlags", flags).build(out, Some(blk));
         out.result(r)
     };
+    if let Some((chunks, per)) = split {
+        let task = Task {
+            function: &fname,
+            k,
+            pointers: [pc, pa, pat, pb],
+            numbers: [ldc, lda, ldb, kv, nv, offa, offb, offc],
+            panel,
+            scale: scale_ptr,
+            full,
+            per,
+            unit,
+            chunks,
+            kk,
+        };
+        parallel_product(out, block, module_block, cx, &task);
+        if nk < n {
+            edge_columns(src, op, [a, b, c], props, out, block, map, full, nk, zeroed)?;
+        }
+        return rest_rows(
+            src,
+            op,
+            [a, b, c],
+            props,
+            out,
+            block,
+            module_block,
+            cx,
+            &ks[ki + 1..],
+            map,
+            full,
+            at,
+            zeroed,
+        )
+        .map(|()| true);
+    }
     let outer = OpSpec::new("scf.for").operands(&[zero, mend, rows]).regions(1).build(out, Some(block));
     let r1 = out.region_of(outer, 0);
     let ob = out.add_block(r1, &[index]);
@@ -813,6 +876,199 @@ fn tiles(
 
     rest_rows(src, op, [a, b, c], props, out, block, module_block, cx, &ks[ki + 1..], map, full, at, zeroed)?;
     Ok(true)
+}
+
+/// What a product split among threads needs: its kernel, the pointers to C,
+/// A, AT and B, and its numbers (ldc, lda, ldb, k, columns, offsets of A,
+/// B, C), as `tiles` has them.
+struct Task<'a> {
+    function: &'a str,
+    k: &'a Kernel,
+    pointers: [ValueId; 4],
+    numbers: [ValueId; 8],
+    panel: Option<ValueId>,
+    scale: Option<ValueId>,
+    full: u64,
+    per: u64,
+    unit: u64,
+    chunks: u64,
+    kk: u64,
+}
+
+/// A product's whole blocks of rows, its columns split into `chunks` of
+/// `per`, each worked out by a task function (made here: for each block of
+/// rows, the kernel on the chunk's columns, with its own room in AT), all
+/// of them by `__epitome_parallel_for(task, context, chunks)`, which the
+/// program provides: it calls `task(context, i)` for each chunk i, on as
+/// many threads as it has, and returns when all are done. The context is
+/// the product's pointers and numbers, 16 words on the stack.
+fn parallel_product(out: &mut Module, block: BlockId, module_block: BlockId, cx: &mut Cx<'_>, t: &Task) {
+    let i64t = out.int_type(64);
+    let ptr = out.dialect_type("llvm.ptr", None);
+    let index = out.index_type();
+    let i32t = out.int_type(32);
+    let f32t = out.float_type("f32");
+    let build = |out: &mut Module, blk: BlockId, spec: OpSpec| -> ValueId {
+        let op = spec.build(out, Some(blk));
+        out.result(op)
+    };
+    let constant = |out: &mut Module, blk: BlockId, v: i64| -> ValueId {
+        let attr = out.int_attr(v, i64t);
+        build(out, blk, OpSpec::new("llvm.mlir.constant").results(&[i64t]).prop("value", attr))
+    };
+    let gep = |out: &mut Module, blk: BlockId, p: ValueId, off: ValueId, elem: TypeId| -> ValueId {
+        let et = out.type_attr(elem);
+        let nw = out.int_attr(0, i32t);
+        let raw = out.dense_array_attr("i32", &[i32::MIN as i64]);
+        build(
+            out,
+            blk,
+            OpSpec::new("llvm.getelementptr")
+                .operands(&[p, off])
+                .results(&[ptr])
+                .prop("elem_type", et)
+                .prop("noWrapFlags", nw)
+                .prop("rawConstantIndices", raw),
+        )
+    };
+    let int = |out: &mut Module, blk: BlockId, name: &str, x: ValueId, y: ValueId| -> ValueId {
+        let mut spec = OpSpec::new(name).operands(&[x, y]).results(&[i64t]);
+        if matches!(name, "llvm.add" | "llvm.mul" | "llvm.sub") {
+            let flags = out.int_attr(0, i32t);
+            spec = spec.prop("overflowFlags", flags);
+        }
+        build(out, blk, spec)
+    };
+
+    // The context: 4 pointers, 8 numbers, the panel's distance, the scales.
+    let slots = 14;
+    let n = constant(out, block, slots);
+    let et = out.type_attr(i64t);
+    let ctx = build(out, block, OpSpec::new("llvm.alloca").operands(&[n]).results(&[ptr]).prop("elem_type", et));
+    let zero = constant(out, block, 0);
+    let mut words: Vec<ValueId> = Vec::new();
+    for &p in &t.pointers {
+        words.push(build(out, block, OpSpec::new("llvm.ptrtoint").operands(&[p]).results(&[i64t])));
+    }
+    words.extend(t.numbers);
+    words.push(t.panel.unwrap_or(zero));
+    words.push(match t.scale {
+        Some(s) => build(out, block, OpSpec::new("llvm.ptrtoint").operands(&[s]).results(&[i64t])),
+        None => zero,
+    });
+    for (k, &w) in words.iter().enumerate() {
+        let at = constant(out, block, k as i64);
+        let p = gep(out, block, ctx, at, i64t);
+        OpSpec::new("llvm.store").operands(&[w, p]).build(out, Some(block));
+    }
+
+    // The task: (context, chunk).
+    let name = format!("__epitome_task_{}", cx.tasks);
+    cx.tasks += 1;
+    let fty = out.function_type(&[ptr, i64t], &[]);
+    let fty_attr = out.type_attr(fty);
+    let sym = out.string_attr(&name);
+    let vis = out.string_attr("private");
+    let f = OpSpec::new("func.func")
+        .prop("function_type", fty_attr)
+        .prop("sym_name", sym)
+        .prop("sym_visibility", vis)
+        .regions(1)
+        .build(out, Some(module_block));
+    {
+        let ops = &mut out.blocks[module_block.index()].ops;
+        let new = ops.pop().unwrap();
+        ops.insert(0, new);
+    }
+    let region = out.region_of(f, 0);
+    let tb = out.add_block(region, &[ptr, i64t]);
+    let (tctx, chunk) = (out.blocks[tb.index()].args[0], out.blocks[tb.index()].args[1]);
+    let mut loaded = Vec::new();
+    for k in 0..slots {
+        let at = constant(out, tb, k);
+        let p = gep(out, tb, tctx, at, i64t);
+        let a8 = out.int_attr(8, i64t);
+        loaded.push(build(out, tb, OpSpec::new("llvm.load").operands(&[p]).results(&[i64t]).prop("alignment", a8)));
+    }
+    let as_ptr =
+        |out: &mut Module, v: ValueId| build(out, tb, OpSpec::new("llvm.inttoptr").operands(&[v]).results(&[ptr]));
+    let (pc, pa, pat, pb) =
+        (as_ptr(out, loaded[0]), as_ptr(out, loaded[1]), as_ptr(out, loaded[2]), as_ptr(out, loaded[3]));
+    let [ldc, lda, ldb, kv, nv, offa, offb, offc] = loaded[4..12] else { unreachable!() };
+    let (panel, scale) = (loaded[12], loaded[13]);
+    // This chunk's columns: from j0, per of them or what is left.
+    let per = constant(out, tb, t.per as i64);
+    let j0 = int(out, tb, "llvm.mul", chunk, per);
+    let left = int(out, tb, "llvm.sub", nv, j0);
+    let pred = out.int_attr(2, i64t); // slt
+    let i1 = out.int_type(1);
+    let short = build(out, tb, OpSpec::new("llvm.icmp").operands(&[left, per]).results(&[i1]).prop("predicate", pred));
+    let cols = build(out, tb, OpSpec::new("llvm.select").operands(&[short, left, per]).results(&[i64t]));
+    // Its room in AT, its columns of C and of B.
+    let room = constant(out, tb, (t.kk * t.k.tile.0) as i64);
+    let at_off = int(out, tb, "llvm.mul", chunk, room);
+    let at_t = gep(out, tb, pat, at_off, f32t);
+    let c_off = int(out, tb, "llvm.add", offc, j0);
+    let c_t = gep(out, tb, pc, c_off, f32t);
+    let b_cols = if t.panel.is_some() {
+        let unit = constant(out, tb, t.unit as i64);
+        let panels = build(out, tb, OpSpec::new("llvm.udiv").operands(&[j0, unit]).results(&[i64t]));
+        int(out, tb, "llvm.mul", panels, panel)
+    } else {
+        j0
+    };
+    let b_off = int(out, tb, "llvm.add", offb, b_cols);
+    let b_t = gep(out, tb, pb, b_off, f32t);
+    let a_t = gep(out, tb, pa, offa, f32t);
+    // For each block of rows, the kernel on the chunk.
+    let idx = |out: &mut Module, blk: BlockId, v: i64| {
+        let attr = out.int_attr(v, index);
+        build(out, blk, OpSpec::new("arith.constant").results(&[index]).prop("value", attr))
+    };
+    let (lo, hi, step) = (idx(out, tb, 0), idx(out, tb, t.full as i64), idx(out, tb, t.k.tile.0 as i64));
+    let lp = OpSpec::new("scf.for").operands(&[lo, hi, step]).regions(1).build(out, Some(tb));
+    let lr = out.region_of(lp, 0);
+    let lb = out.add_block(lr, &[index]);
+    let i = out.blocks[lb.index()].args[0];
+    let i64i = build(out, lb, OpSpec::new("arith.index_cast").operands(&[i]).results(&[i64t]));
+    let rc = int(out, lb, "llvm.mul", i64i, ldc);
+    let tc = gep(out, lb, c_t, rc, f32t);
+    let ra = int(out, lb, "llvm.mul", i64i, lda);
+    let ta = gep(out, lb, a_t, ra, f32t);
+    let mut args = vec![tc, ldc, ta, lda, at_t, b_t, ldb, kv, cols];
+    if t.panel.is_some() {
+        args.push(panel);
+    }
+    if t.scale.is_some() {
+        args.push(as_ptr(out, scale));
+    }
+    let callee = out.symbol_attr(t.function);
+    OpSpec::new("func.call").operands(&args).prop("callee", callee).build(out, Some(lb));
+    OpSpec::new("scf.yield").build(out, Some(lb));
+    OpSpec::new("func.return").build(out, Some(tb));
+
+    // The call: __epitome_parallel_for(&task, context, chunks).
+    if !cx.imported.contains_key("__epitome_parallel_for") {
+        let fty = out.function_type(&[ptr, ptr, i64t], &[]);
+        let fty_attr = out.type_attr(fty);
+        let sym = out.string_attr("__epitome_parallel_for");
+        let vis = out.string_attr("private");
+        OpSpec::new("func.func")
+            .prop("function_type", fty_attr)
+            .prop("sym_name", sym)
+            .prop("sym_visibility", vis)
+            .regions(1)
+            .build(out, Some(module_block));
+        let ops = &mut out.blocks[module_block.index()].ops;
+        let new = ops.pop().unwrap();
+        ops.insert(0, new);
+        cx.imported.insert("__epitome_parallel_for".into(), "__epitome_parallel_for".into());
+    }
+    let task_sym = out.symbol_attr(&name);
+    let fnptr = build(out, block, OpSpec::new("llvm.mlir.addressof").results(&[ptr]).prop("global_name", task_sym));
+    let chunks = constant(out, block, t.chunks as i64);
+    let callee = out.symbol_attr("__epitome_parallel_for");
+    OpSpec::new("func.call").operands(&[fnptr, ctx, chunks]).prop("callee", callee).build(out, Some(block));
 }
 
 /// Columns of C from `from` on, of its first `rows` rows: the original
