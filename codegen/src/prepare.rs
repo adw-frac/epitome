@@ -3351,7 +3351,8 @@ fn expand_small_mem_ops(cx: &mut Ctx, f: &mut Function) {
                             let lane = cx.int(i64t, (0..8).fold(0u64, |acc, _| (acc << 8) | b as u64) as i64);
                             let Value::Const(lane) = lane else { unreachable!() };
                             Value::Const(
-                                cx.m.consts.intern(Constant { ty, kind: ConstKind::Vector(vec![lane; (w / 8) as usize]) }),
+                                cx.m.consts
+                                    .intern(Constant { ty, kind: ConstKind::Vector(vec![lane; (w / 8) as usize]) }),
                             )
                         }
                         Some(b) => {

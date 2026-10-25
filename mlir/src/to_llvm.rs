@@ -368,6 +368,16 @@ struct Lower<'a> {
 }
 
 impl<'a> Lower<'a> {
+    /// For a vector of i1, the vector of i8 a buffer of them holds.
+    fn bytes_of_bools(&mut self, ty: TypeId) -> Option<TypeId> {
+        let Type::Vector { dims, elem } = self.out.ty(ty).clone() else { return None };
+        if !matches!(self.out.ty(elem), Type::Int { width: 1, .. }) {
+            return None;
+        }
+        let i8t = self.out.int_type(8);
+        Some(self.out.intern_type(Type::Vector { dims, elem: i8t }))
+    }
+
     fn emit(
         &mut self,
         name: &str,
@@ -771,12 +781,28 @@ impl<'a> Lower<'a> {
                 let ty = result_ty(self).unwrap();
                 let p = self.address(args[0], &args[1..])?;
                 let props = self.access_props();
-                self.emit("llvm.load", &[p], &[ty], props)
+                // A buffer of i1 holds a byte each, where a vector of i1 in
+                // memory is bits: bytes loaded, then compared with zero.
+                match self.bytes_of_bools(ty) {
+                    Some(bytes) => {
+                        let v = self.emit("llvm.load", &[p], &[bytes], props).unwrap();
+                        let zero = self.emit("llvm.mlir.zero", &[], &[bytes], vec![]).unwrap();
+                        let i64t = self.out.int_type(64);
+                        let ne = self.out.int_attr(1, i64t);
+                        self.emit("llvm.icmp", &[v, zero], &[ty], vec![("predicate", ne)])
+                    }
+                    None => self.emit("llvm.load", &[p], &[ty], props),
+                }
             }
             "vector.store" => {
                 let p = self.address(args[1], &args[2..])?;
                 let props = self.access_props();
-                self.emit("llvm.store", &[args[0], p], &[], props);
+                let ty = self.out.value_type(args[0]);
+                let value = match self.bytes_of_bools(ty) {
+                    Some(bytes) => self.emit("llvm.zext", &[args[0]], &[bytes], vec![]).unwrap(),
+                    None => args[0],
+                };
+                self.emit("llvm.store", &[value, p], &[], props);
                 None
             }
             "vector.broadcast" => {
