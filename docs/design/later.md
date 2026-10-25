@@ -198,6 +198,13 @@ these are for after.
   shapes. The allocator could weigh each register by the bytes its uses
   and definitions would take in it, from the encodings, preferring the
   cheaper for the values used most.
+- **Small memsets and memcpys with AVX-512 BW** (`prepare.rs`,
+  `expand_small_mem_ops`): up to 64 bytes, of a constant length or not,
+  is one masked store (`vmovdqu8` under a k mask of the length's bytes),
+  and a copy one masked load and store, where now a constant length is
+  pieces and any other a call. Needs the mask registers in selection.
+- **Pairs of vector stores**: AArch64's `stp q`, for written-out memsets
+  and copies (`peephole::pair_memory` pairs x and w registers only).
 - **The LLM on x86-64** (`examples/llm.rs`, TinyStories-1M with
   `--avx512 --weights=bf16`: 14 ms a forward pass on a Zen 5 core, M4's
   SME 3.5 ms). Left: the 64 x 50257 logits are zeroed (`linalg.fill`)

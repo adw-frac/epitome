@@ -98,13 +98,15 @@
 ; ===========================================================================
 ; Parameters.
 
-!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110, !1111, !1112, !1113, !1114, !1115, !1116, !1117, !1118, !1119, !1120, !1121, !1122}
+!target.params = !{!1100, !1101, !1102, !1103, !1104, !1105, !1106, !1107, !1108, !1109, !1110, !1111, !1112, !1113, !1114, !1115, !1116, !1117, !1118, !1119, !1120, !1121, !1122, !1123}
 !1100 = !{!"sp", !"%rsp"}
 !1101 = !{!"vector-bits", !"128"}
 ; 256 bits with AVX2; masks in the registers of the vectors in use.
 !1118 = !{!"vector-bits", !"256", !"avx2"}
 ; 512 with AVX-512 (avx512f).
 !1122 = !{!"vector-bits", !"512", !"avx512f"}
+; Unaligned loads and stores cost what aligned ones do (within a line).
+!1123 = !{!"unaligned-access", !"fast"}
 !1119 = !{!"mask-class", !"128", !"xv"}
 !1120 = !{!"mask-class", !"256", !"yv"}
 ; 64-bit vectors in xmm registers (their low halves) at any width.

@@ -36,6 +36,7 @@ pub mod fx;
 pub mod indvars;
 pub mod inline;
 pub mod licm;
+pub mod loopidiom;
 pub mod loops;
 pub mod lsr;
 pub mod mem2reg;

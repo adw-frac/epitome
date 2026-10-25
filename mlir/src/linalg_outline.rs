@@ -150,19 +150,20 @@ fn outline(
     map: &mut HashMap<ValueId, ValueId>,
 ) -> Result<(), String> {
     let o = &src.ops[op.index()];
-    let mut params: Vec<ValueId> = o.operands.clone();
-    // Scalar constants the body uses are copied in, not passed: they stay
-    // constants (x to the constant power 2 is then a multiply).
+    // Scalar constants, operands (a fill's value) or used by the body, are
+    // copied in, not passed: they stay constants (x to the constant power 2
+    // is then a multiply, and a fill of zeros a memset).
+    let is_constant = |v: ValueId| match src.values[v.index()].def {
+        ValueDef::Result { op: c, .. } => src.op_name(c) == "arith.constant" && src.shaped(src.value_type(v)).is_none(),
+        _ => false,
+    };
+    let mut params: Vec<ValueId> = Vec::new();
     let mut constants = Vec::new();
-    for v in captured(src, op) {
-        let constant = match src.values[v.index()].def {
-            ValueDef::Result { op: c, .. } => {
-                src.op_name(c) == "arith.constant" && src.shaped(src.value_type(v)).is_none()
+    for v in o.operands.iter().copied().chain(captured(src, op)) {
+        if is_constant(v) {
+            if !constants.contains(&v) {
+                constants.push(v);
             }
-            _ => false,
-        };
-        if constant {
-            constants.push(v);
         } else if !params.contains(&v) {
             params.push(v);
         }
