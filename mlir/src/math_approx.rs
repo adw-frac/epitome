@@ -8,9 +8,9 @@
 //! e^r is the polynomial of Cephes' `expf`, good to about an ulp; 2^k is k
 //! put in a float's exponent. k is rounded by adding 1.5 * 2^23, which
 //! leaves k in the low bits of the sum. x is clamped first (a NaN stays
-//! one), to where 2^k
-//! is a normal float: e^x underflows to about 1.2e-38 rather than 0 below
-//! -87.3, and stops at about 1.7e38 above 88.
+//! one), to where 2^k is a normal float; below -87.3 e^x is 0, as C's
+//! `expf` underflows (a denormal there would make what is worked out from
+//! it slow on x86), and it stops at about 1.7e38 above 88.
 //!
 //! `math.tanh` of `f32` likewise: for |x| below 1/4, the odd Taylor series
 //! to x^9 (the next term is under a hundredth of an ulp there); above, 1 -
@@ -294,6 +294,12 @@ impl Expand<'_> {
         let shift = self.constant(ity, "23".into());
         let e = self.op("arith.shli", &[e, shift], ity);
         let scale = self.op("arith.bitcast", &[e], self.ty);
+        // Below the range, 0, as C's expf underflows: what is worked out
+        // from a tiny e^x would be denormal (a masked score's probability,
+        // times a value), which x86 multiplies slowly. Zeroed before the
+        // multiply by 2^k, which would make a denormal itself.
+        let zero = self.float(0.0);
+        let p = self.select(below, zero, p);
         self.f("arith.mulf", p, scale)
     }
 }

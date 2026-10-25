@@ -12,12 +12,19 @@
 //!   the next value.
 //! - `memref.load` and `memref.store` become an `llvm.getelementptr` at
 //!   offset `offset + Σ index × stride`, and `llvm.load` or `llvm.store`.
-//! - `memref.alloc` and `memref.dealloc` call `malloc` and `free`;
+//! - `memref.alloc` and `memref.dealloc` call `malloc` and `free`; but the
+//!   buffers of fixed size a function's body allocates are places in one
+//!   arena, which it allocates once and frees before it returns: each
+//!   buffer is live from its allocation to its last use (through its
+//!   views), and buffers that are not live at once share memory. A model's
+//!   forward pass allocates dozens of buffers; one allocation, smaller
+//!   than their sum, is kept by `malloc` from call to call, rather than
+//!   memory given back and faulted in again each time;
 //!   `memref.global` becomes `llvm.mlir.global` and `memref.get_global`
 //!   `llvm.mlir.addressof`; `memref.copy` is `llvm.intr.memcpy` between
 //!   packed buffers, and loops otherwise.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::affine::{Expr, Map};
 use crate::build::{OpSpec, row_major_strides};
@@ -318,6 +325,7 @@ fn lower_func(
     let arg_types: Vec<TypeId> = inputs.iter().map(|&t| llvm_type(out, t)).collect();
     let new_region = out.region_of(func, 0);
     let entry = out.add_block(new_region, &arg_types);
+    let (arena, in_arena, arena_bytes) = plan_arena(src, body);
     let mut l = Lower {
         src,
         out,
@@ -327,7 +335,16 @@ fn lower_func(
         layouts: HashMap::new(),
         ints: HashMap::new(),
         decls,
+        arena,
+        in_arena,
+        arena_ptr: None,
     };
+    if arena_bytes > 0 {
+        let n = l.i64_const(arena_bytes as i64);
+        l.decls.need("malloc", "<ptr (i64)>");
+        let ptr = l.out.dialect_type("llvm.ptr", None);
+        l.arena_ptr = l.call("malloc", &[n], Some(ptr));
+    }
     for (k, &a) in src.blocks[body.index()].args.iter().enumerate() {
         let n = l.out.blocks[entry.index()].args[k];
         l.map.insert(a, n);
@@ -365,6 +382,90 @@ struct Lower<'a> {
     /// The value of each integer constant.
     ints: HashMap<ValueId, i64>,
     decls: &'a mut Decls,
+    /// The buffers placed in the function's arena, by their offsets in it
+    /// (see `plan_arena`), and the arena.
+    arena: HashMap<ValueId, u64>,
+    /// Those buffers and their views.
+    in_arena: HashSet<ValueId>,
+    arena_ptr: Option<ValueId>,
+}
+
+/// The buffers of fixed size that `body` allocates, each at an offset in
+/// one arena, and the arena's size: a buffer is live from its allocation
+/// to the last operation that uses it or a view of it, and the buffers are
+/// placed, largest first, at the lowest offset (a multiple of 64) where
+/// none live at the same time is.
+fn plan_arena(src: &Module, body: BlockId) -> (HashMap<ValueId, u64>, HashSet<ValueId>, u64) {
+    let ops = &src.blocks[body.index()].ops;
+    let mut size: HashMap<ValueId, u64> = HashMap::new();
+    let mut born: HashMap<ValueId, usize> = HashMap::new();
+    let mut root: HashMap<ValueId, ValueId> = HashMap::new();
+    let mut last: HashMap<ValueId, usize> = HashMap::new();
+    for (k, &op) in ops.iter().enumerate() {
+        let o = &src.ops[op.index()];
+        match src.op_name(op) {
+            "memref.alloc" if o.operands.is_empty() => {
+                let r = o.results[0];
+                if let Ok(layout) = Layout::of(src, src.value_type(r))
+                    && let Ok(eb) = elem_bytes(src, layout.elem)
+                {
+                    size.insert(r, (layout.numel() * eb).max(1).div_ceil(64) * 64);
+                    born.insert(r, k);
+                    root.insert(r, r);
+                }
+            }
+            "memref.subview" | "memref.expand_shape" | "memref.collapse_shape" => {
+                if let Some(&b) = o.operands.first().and_then(|v| root.get(v)) {
+                    root.insert(o.results[0], b);
+                }
+            }
+            _ => {}
+        }
+        if src.op_name(op) == "memref.dealloc" {
+            continue;
+        }
+        let mut used = Vec::new();
+        src.walk(op, &mut |x| used.extend(src.ops[x.index()].operands.iter().copied()));
+        for v in used {
+            if let Some(&b) = root.get(&v) {
+                last.insert(b, k);
+            }
+        }
+    }
+    // Largest first, each at the lowest offset clear of those live with it.
+    let mut buffers: Vec<ValueId> = size.keys().copied().collect();
+    buffers.sort_by_key(|b| (std::cmp::Reverse(size[b]), born[b]));
+    let live = |b: &ValueId| (born[b], last.get(b).copied().unwrap_or(born[b]));
+    let mut placed: Vec<(ValueId, u64)> = Vec::new();
+    let mut total = 0u64;
+    for b in buffers {
+        let (s, e) = live(&b);
+        let mut taken: Vec<(u64, u64)> = placed
+            .iter()
+            .filter(|(p, _)| {
+                let (ps, pe) = live(p);
+                ps <= e && s <= pe
+            })
+            .map(|&(p, off)| (off, off + size[&p]))
+            .collect();
+        taken.sort();
+        let mut at = 0u64;
+        for (lo, hi) in taken {
+            if at + size[&b] <= lo {
+                break;
+            }
+            at = at.max(hi);
+        }
+        placed.push((b, at));
+        total = total.max(at + size[&b]);
+    }
+    // One buffer gains nothing from an arena.
+    if placed.len() < 2 {
+        return (HashMap::new(), HashSet::new(), 0);
+    }
+    // The buffers and their views, whose frees go.
+    let within: HashSet<ValueId> = root.keys().copied().collect();
+    (placed.into_iter().collect(), within, total)
 }
 
 impl<'a> Lower<'a> {
@@ -735,6 +836,30 @@ impl<'a> Lower<'a> {
                 }
                 Some(self.affine(&map.results[0], &args)?)
             }
+            "memref.alloc" if self.arena.contains_key(&o.results[0]) => {
+                let ty = src.value_type(o.results[0]);
+                let layout = Layout::of(src, ty)?;
+                let at = self.i64_const(self.arena[&o.results[0]] as i64);
+                let arena = self.arena_ptr.ok_or("no arena")?;
+                let ptr = self.out.dialect_type("llvm.ptr", None);
+                let i8t = self.out.int_type(8);
+                let elem = self.out.type_attr(i8t);
+                let i32t = self.out.int_type(32);
+                let nowrap = self.out.int_attr(0, i32t);
+                let raw = self.out.dense_array_attr("i32", &[i32::MIN as i64]);
+                let p = self
+                    .emit(
+                        "llvm.getelementptr",
+                        &[arena, at],
+                        &[ptr],
+                        vec![("elem_type", elem), ("noWrapFlags", nowrap), ("rawConstantIndices", raw)],
+                    )
+                    .unwrap();
+                self.layouts.insert(p, layout);
+                Some(p)
+            }
+            // (A buffer in the arena is freed with it.)
+            "memref.dealloc" if o.operands.first().is_some_and(|v| self.in_arena.contains(v)) => None,
             "memref.alloc" => {
                 let ty = src.value_type(o.results[0]);
                 let layout = Layout::of(src, ty)?;
@@ -993,6 +1118,10 @@ impl<'a> Lower<'a> {
                 self.out.ops[new.index()].results.first().copied()
             }
             "func.return" => {
+                if let Some(arena) = self.arena_ptr {
+                    self.decls.need("free", "<void (ptr)>");
+                    self.call("free", &[arena], None);
+                }
                 self.emit("llvm.return", &args, &[], vec![]);
                 None
             }
