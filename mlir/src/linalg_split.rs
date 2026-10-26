@@ -241,23 +241,35 @@ fn func(
 
     // The operations, as a stream: a task gathered from it, those that wait
     // for the task the next stream.
-    let mut stream: Vec<OpId> = src.blocks[b.index()].ops.clone();
+    let ops = src.blocks[b.index()].ops.clone();
+    let mut stream = fills(src, ops, out);
     loop {
         let mut group: Option<Group> = None;
         let mut touched = Effects::default();
         let mut waiting: Vec<OpId> = Vec::new();
         let mut waits = Effects::default();
         let mut waiting_values: HashSet<ValueId> = HashSet::new();
+        // A fill of the output of the product after it, which goes where
+        // the product goes, just before it (split as it is, for the kernels
+        // to start their sums at zero rather than read the zeros).
+        let mut fill: Option<OpId> = None;
         let mut i = 0;
         while i < stream.len() {
             let op = stream[i];
             i += 1;
+            let free = !src.ops[op.index()].operands.iter().any(|v| waiting_values.contains(v));
+            if free && stream.get(i).is_some_and(|&p| starts(src, op, p)) {
+                fill = Some(op);
+                continue;
+            }
+            let fill = fill.take();
             let e = effects(src, op);
             let uses_waiting =
                 || src.ops[op.index()].operands.iter().chain(&captured(src, op)).any(|v| waiting_values.contains(v));
             if !waiting.is_empty() && (waits.conflicts(&e) || uses_waiting()) {
                 waits.add(&e);
                 waiting_values.extend(src.ops[op.index()].results.iter().copied());
+                waiting.extend(fill);
                 waiting.push(op);
                 continue;
             }
@@ -273,10 +285,16 @@ fn func(
                 if feeds && let Some((mut acc, ksplit)) = joins(src, op, g, cx) {
                     let mut partial = None;
                     if ksplit {
-                        // Its buffer of sums, a chunk's each, written.
+                        // Its buffer of sums, a chunk's each, written; its
+                        // output filled before they are added to it.
                         let p = partial_sums(src, op, g.chunks, &mut stream, i, out, nb, map)?;
                         acc.push(Access { value: p, at: Some((0, 1)), write: true });
                         partial = Some(p);
+                        if let Some(f) = fill {
+                            stream.insert(i, f);
+                        }
+                    } else if let Some(f) = fill {
+                        g.entries.push(fill_entry(src, f, &acc));
                     }
                     touched.add(&e);
                     g.entries.push(Entry { op, acc, partial });
@@ -287,6 +305,11 @@ fn func(
                 if let Some(regrouped) = regroup(src, op, g, cx) {
                     touched.add(&e);
                     *g = regrouped;
+                    if let Some(f) = fill {
+                        let n = g.entries.len() - 1;
+                        let entry = fill_entry(src, f, &g.entries[n].acc);
+                        g.entries.insert(n, entry);
+                    }
                     continue;
                 }
                 // Done before the task where nothing of it is in the task;
@@ -294,16 +317,25 @@ fn func(
                 if e.barrier || touched.conflicts(&e) || best(src, op, cx).is_some() {
                     waits.add(&e);
                     waiting_values.extend(src.ops[op.index()].results.iter().copied());
+                    waiting.extend(fill);
                     waiting.push(op);
                 } else {
+                    if let Some(f) = fill {
+                        out.clone_op(src, f, Some(nb), map)?;
+                    }
                     out.clone_op(src, op, Some(nb), map)?;
                 }
                 continue;
             }
             if let Some((chunks, acc)) = best(src, op, cx) {
                 touched.add(&e);
-                group = Some(Group { entries: vec![Entry { op, acc, partial: None }], chunks });
+                let mut entries: Vec<Entry> = fill.map(|f| fill_entry(src, f, &acc)).into_iter().collect();
+                entries.push(Entry { op, acc, partial: None });
+                group = Some(Group { entries, chunks });
                 continue;
+            }
+            if let Some(f) = fill {
+                out.clone_op(src, f, Some(nb), map)?;
             }
             out.clone_op(src, op, Some(nb), map)?;
         }
@@ -316,6 +348,113 @@ fn func(
         stream = waiting;
     }
     Ok(())
+}
+
+/// `ops` with their fills moved: a copy of a buffer just filled made a fill
+/// of its own (bufferize leaves a buffer of zeros copied to each product's
+/// output, which is then a fill of each output); a fill of a buffer that
+/// nothing else uses left out, with the buffer; and each fill just before
+/// the first operation after it that touches its buffer.
+fn fills(src: &mut Module, mut ops: Vec<OpId>, out: &mut Module) -> Vec<OpId> {
+    src.adopt_interned(out);
+    for k in 0..ops.len() {
+        let op = ops[k];
+        if src.op_name(op) != "memref.copy" {
+            continue;
+        }
+        let [from, to] = src.ops[op.index()].operands[..] else { continue };
+        if root(src, from) != from {
+            continue;
+        }
+        let last = ops[..k].iter().rev().find(|&&o| {
+            let e = effects(src, o);
+            e.barrier || e.writes.contains(&from)
+        });
+        let Some(&f) = last.filter(|&&o| src.op_name(o) == "linalg.fill" && src.ops[o.index()].operands[1] == from)
+        else {
+            continue;
+        };
+        let value = src.ops[f.index()].operands[0];
+        ops[k] = new_fill(src, value, to);
+    }
+    out.adopt_interned(src);
+
+    // Buffers that only fills and frees use.
+    let mut users: HashMap<ValueId, Vec<OpId>> = HashMap::new();
+    for &op in &ops {
+        src.walk(op, &mut |inner| {
+            for &v in &src.ops[inner.index()].operands {
+                users.entry(v).or_default().push(inner);
+            }
+        });
+    }
+    let mut dead: HashSet<OpId> = HashSet::new();
+    for &op in &ops {
+        if src.op_name(op) != "memref.alloc" {
+            continue;
+        }
+        let r = src.result(op);
+        let us = users.get(&r).map_or(&[][..], |u| &u[..]);
+        let only = us.iter().all(|&u| match src.op_name(u) {
+            "linalg.fill" => src.ops[u.index()].operands[1] == r,
+            "memref.dealloc" => true,
+            _ => false,
+        });
+        if only && us.iter().any(|&u| src.op_name(u) == "linalg.fill") {
+            dead.insert(op);
+            dead.extend(us);
+        }
+    }
+    ops.retain(|o| !dead.contains(o));
+
+    for p in (0..ops.len()).rev() {
+        let f = ops[p];
+        if src.op_name(f) != "linalg.fill" {
+            continue;
+        }
+        let r = root(src, src.ops[f.index()].operands[1]);
+        let next = ops[p + 1..].iter().position(|&o| {
+            let e = effects(src, o);
+            e.barrier || e.reads.contains(&r) || e.writes.contains(&r)
+        });
+        if let Some(q) = next.filter(|&q| q > 0) {
+            ops.remove(p);
+            ops.insert(p + q, f);
+        }
+    }
+    ops
+}
+
+/// A `linalg.fill` of `value` into `mem`, in no block yet.
+fn new_fill(src: &mut Module, value: ValueId, mem: ValueId) -> OpId {
+    let elem = src.value_type(value);
+    let segments = src.dense_array_attr("i32", &[1, 1]);
+    let f = OpSpec::new("linalg.fill")
+        .operands(&[value, mem])
+        .prop("operandSegmentSizes", segments)
+        .regions(1)
+        .build(src, None);
+    let region = src.region_of(f, 0);
+    let b = src.add_block(region, &[elem, elem]);
+    let x = src.blocks[b.index()].args[0];
+    OpSpec::new("linalg.yield").operands(&[x]).build(src, Some(b));
+    f
+}
+
+/// Whether `f` is a fill of the output of product `p`.
+fn starts(src: &Module, f: OpId, p: OpId) -> bool {
+    src.op_name(f) == "linalg.fill"
+        && product(src, p).is_some()
+        && src.ops[p.index()].operands.get(2) == src.ops[f.index()].operands.get(1)
+}
+
+/// Fill `f` of a product's output, split as the product's accesses `acc`
+/// split it.
+fn fill_entry(src: &Module, f: OpId, acc: &[Access]) -> Entry {
+    let [value, mem] = src.ops[f.index()].operands[..] else { unreachable!() };
+    let at = acc.iter().find(|a| a.write && a.value == mem).and_then(|a| a.at);
+    let acc = vec![Access { value, at: None, write: false }, Access { value: mem, at, write: true }];
+    Entry { op: f, acc, partial: None }
 }
 
 /// For product `op`, split by the columns it sums over into `chunks`: a

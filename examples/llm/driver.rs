@@ -291,7 +291,28 @@ mod pool {
     }
 }
 
+/// The model allocates its buffers as it goes, many of megabytes, each
+/// pass: glibc's malloc would map each of those afresh and give it back
+/// when freed (and every page of it then faults when first written, on
+/// the threads doing the work). Kept instead, once it has them.
+#[cfg(target_os = "linux")]
+fn keep_memory() {
+    unsafe extern "C" {
+        fn mallopt(param: i32, value: i32) -> i32;
+    }
+    const M_TRIM_THRESHOLD: i32 = -1;
+    const M_MMAP_MAX: i32 = -4;
+    unsafe {
+        // None mapped of its own (a larger threshold alone does not keep
+        // them), and the heap not trimmed.
+        mallopt(M_MMAP_MAX, 0);
+        mallopt(M_TRIM_THRESHOLD, i32::MAX);
+    }
+}
+
 fn main() {
+    #[cfg(target_os = "linux")]
+    keep_memory();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let show_ids = args.first().is_some_and(|a| a == "--ids");
     if show_ids {

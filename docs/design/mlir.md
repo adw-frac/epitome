@@ -770,6 +770,16 @@ An operation that cannot join the task waits, with what depends on it,
 while later operations that go on from what the task writes join it (Q's
 RoPE after Q's projection, past K's and V's).
 
+Fills go where their buffers are next used. `bufferize` leaves one buffer
+of zeros copied into each product's output; the copies become fills of
+the outputs (and the buffer of zeros goes), each fill moves to just
+before the first operation that touches its buffer, and a fill of a
+product's output goes wherever the product goes, split as it is, so that
+`linalg-to-kernels` sees it and calls the kernel's twin whose sums start
+at zero. (Depending on nothing, the fills and copies had all been done
+first, every layer's at once, in two tasks of four chunks: 19 ms of
+Qwen2.5-3B's pass, below.)
+
 Large matrix products of constant weights (2^23 multiply-adds or more)
 are split as tensor parallelism (Megatron) splits a layer, never by
 their rows, each of which would read all the weights:
@@ -823,6 +833,19 @@ AVX512-BF16, no AMX; 210 GB/s read by 8 threads or more), ms a pass:
 | --- | --- | --- | --- | --- | --- |
 | rows, and the kernels' split of large products by columns | 1259 | 218 | 155 | 160 | 275 |
 | tensor parallel (the products of weights by columns, or by what they sum over) | 1315 | 233 | 168 | 185 | 233 |
+| and fills with their products; malloc keeping its memory | 1230 | 176 | 109 | 122 | 126 |
+| and 32 chunks (`--chunks=32`) | | | 111 | 96 | 132 |
+
+The last two rows came after a profile of the passes found a third of
+their time in page faults, about 140,000 a pass: the forward pass's
+arena, far past the 32 MB above which glibc's malloc maps memory of its
+own, was mapped afresh each pass and every page faulted in again, on the
+threads doing the work. The driver now has malloc keep its memory
+(`mallopt`: `M_MMAP_MAX` 0, `M_TRIM_THRESHOLD` its most); see
+[later](later.md). Past 16 threads, 16 chunks leave half of them idle;
+`--chunks=32` splits into up to 32 (the MLP's 172 panels into 29 chunks
+of 6: 1.4 ms a layer, 6 TFLOP/s). The machine is shared, and at 32
+threads and more the times move with others' work by 10% or so.
 
 Tensor parallelism cuts the window's tasks from about 1900 to 437, 12 a
 layer, and each thread reads only its own part of the weights; it is a
@@ -860,6 +883,11 @@ off, logits for every position), ms a pass:
 
 PyTorch's bfloat16 rounds the activations too, where Epitome's kernels
 round only the weights and the rows of A they read, summing in f32.
+Its products are oneDNN's (`brg_matmul:avx512_core_bf16`, the same
+`vdpbf16ps`), each split among all its threads, about 72% of an eager
+pass; `torch.compile` leaves them as they are and fuses the element-wise
+work between them into generated loops, as `linalg-fuse-elementwise`
+does. Epitome's best, 96 ms at 32 threads, is bfloat16 `torch.compile`'s.
 
 ## 6. Dialect descriptions
 

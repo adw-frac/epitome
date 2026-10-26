@@ -34,6 +34,8 @@
 //! their columns, or by the columns they sum over, each thread its own
 //! part of the weights), by `__epitome_parallel_for`, which the driver
 //! provides (`EPITOME_THREADS` threads, by default one a core, up to 16).
+//! `--chunks=N` splits them into up to N chunks rather than 16, for as many
+//! threads.
 //!
 //! `--weights=bf16` (with `--sme` or `--avx512`) stores constant weights in that format,
 //! rounding them, for the kernels of that format; the program is then
@@ -66,12 +68,13 @@ fn main() -> ExitCode {
     let file = args.iter().any(|a| a == "--weights-file");
     let sme = args.iter().any(|a| a == "--sme" || a == "--avx512");
     let weights = args.iter().find_map(|a| a.strip_prefix("--weights=")).map(str::to_string);
+    let chunks = args.iter().find_map(|a| a.strip_prefix("--chunks=")).and_then(|c| c.parse().ok()).unwrap_or(16);
     let dir = args
         .iter()
         .find(|a| !a.starts_with("--"))
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("target/llm"));
-    match build(&dir, dump, sme, weights.as_deref(), file) {
+    match build(&dir, dump, sme, weights.as_deref(), file, chunks) {
         Ok(exe) => {
             println!("built {}", exe.display());
             ExitCode::SUCCESS
@@ -83,7 +86,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn build(dir: &Path, dump: bool, sme: bool, weights: Option<&str>, file: bool) -> Result<PathBuf, String> {
+fn build(dir: &Path, dump: bool, sme: bool, weights: Option<&str>, file: bool, chunks: u32) -> Result<PathBuf, String> {
     let step = |what: &str, start: Instant| println!("{what:<34} {:>6.2} s", start.elapsed().as_secs_f64());
 
     let path = dir.join("model.mlir");
@@ -112,7 +115,8 @@ fn build(dir: &Path, dump: bool, sme: bool, weights: Option<&str>, file: bool) -
     // of 64, as the kernels pack them) or by those they sum over.
     // (Another product's rows at least as many as a tile of the kernels':
     // four for AVX-512's, 64 for SME's.)
-    passes.insert(at, if x86 { "linalg-split=16:4" } else { "linalg-split=16:64" });
+    let split = format!("linalg-split={chunks}:{}", if x86 { 4 } else { 64 });
+    passes.insert(at, split.as_str());
     at += 1;
     if sme {
         passes.insert(at, kernels.as_str());

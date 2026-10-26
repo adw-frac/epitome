@@ -216,3 +216,13 @@ these are for after.
   memory; attention's A x V (4 columns) has no kernel.
 - **Acquire loads** use `ldar`; with RCpc (the M1 has it) `ldapr` is
   enough for C++'s and Rust's acquire, as LLVM's back end uses.
+- **A large arena, mapped afresh each call** (`mlir/src/to_llvm.rs`,
+  `plan_arena`): a function's buffers share one arena that it `malloc`s
+  on entry and frees on return. Qwen2.5-3B's forward pass's is far past
+  glibc's 32 MB mapping threshold, so each pass maps it afresh and every
+  page faults in again (about 140,000 faults a pass, a third of its
+  time at 16 threads); the LLM driver now has malloc keep its memory
+  (`mallopt`, `M_MMAP_MAX` 0). Better: the arena kept from call to call
+  (a global, for a function not called again before it returns), and
+  the buffers allocated within a task (the kernels' rows of A in BF16)
+  from it too.
