@@ -147,32 +147,39 @@ section yet.
 
 ## 5. A public target to test it on
 
-All of this should be exercised by a machine anyone can check. The plan is
-a description of AMD's TeraScale (R600 and Evergreen) shader cores, from
-AMD's published instruction-set documents. It suits because it is partial
-in the ways above (no stack, no calls, no general memory in the ALU
-clauses) and because it is VLIW: up to five operations issued together in
-a bundle, and loops counted by hardware. Its encodings can be checked
-word by word against `llvm-mc --arch=r600`, run as a program, as the
-RISC-V entries are checked against rustc's assembler.
+All of this should be exercised by a machine anyone can check: AMD's
+TeraScale (R600 and Evergreen) shader cores, from AMD's published
+instruction-set document. It suits because it is partial in the ways
+above (no stack, no calls, no general memory in the ALU clauses) and
+because it is VLIW: up to five operations issued together in a group, and
+loops counted by hardware.
 
-It also needs what the code generator does not yet have, and which belongs
-in a plan of its own:
+`codegen/targets/r600` describes it for assembly and disassembly, from the
+Evergreen document's microcode formats (`targets.md`, "AMD R600
+(Evergreen)"). LLVM's r600 back end has no assembler, so `llvm-mc` cannot
+check it; but `llc -show-mc-encoding` writes each instruction's bytes
+beside its assembly, and `tests/r600.rs` assembles every such line and
+compares.
 
-- instructions of more than one 32-bit word (`targets.md`, "What is still
-  built in");
-- bundles: slots, which entries may go in which slot, and a header word;
-  the packetiser of `codegen.md` (**Later** there);
+To compile for it, the code generator needs what it does not yet have,
+which belongs in a plan of its own:
+
+- groups: which instructions may go in which slot (four vector, one
+  transcendental), the reads each group may make of the register banks
+  and constants, and the last of a group marked; the packetiser of
+  `codegen.md` (**Later** there);
+- clauses: ALU, fetch and control-flow instructions in streams of their
+  own, the control flow pointing into the others;
 - loops whose count is set by an instruction and whose body is a range of
   bundles;
-- scheduling by latency, since results are not ready in the next bundle.
+- scheduling by latency, since results are not ready in the next group.
 
 ## Status
 
 | Item | Status |
 | --- | --- |
 | An empty `result` or `fp-result` list is an error, not a panic | **Done** |
-| `!target.lacks`, and the structure check waiving what it covers | **Planned** |
+| `!target.lacks`, and the structure check waiving what it covers | **Partial**: read; `stack` makes `sp` optional; the structure check waives nothing yet |
 | Conventions without `stack` or `fp-*` entries | **Planned** |
 | `fits`, in `epitome-llc` and `epitome-opt` | **Planned** |
 | Smoke program compiled per function, reporting what does not fit | **Planned** |
@@ -180,4 +187,5 @@ in a plan of its own:
 | `i64` narrowing | **Planned** |
 | `"epitome-opaque"` | **Planned** |
 | `"role"="launch"` | **Planned** |
-| TeraScale description | **Later**, after multi-word instructions and bundles |
+| TeraScale description, for assembly and disassembly | **Done**: ALU, control flow, a memory export and a vertex fetch, checked against `llc` |
+| TeraScale compilation: groups, clauses, hardware loops | **Later** |
