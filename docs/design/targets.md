@@ -444,30 +444,62 @@ selection never uses it. That makes it cheap to cover a whole instruction
 set from a machine-readable source, and to check the entries against
 another assembler rather than write their semantics. AArch64's `80-asm.ll`
 is made this way ([objects.md](objects.md)). So is RISC-V's: `gen_opcodes.py`
-writes 760 entries from riscv-opcodes (RISC-V International, BSD 3-clause).
-That source gives each instruction's fixed bits and the fields of its
-operands, but neither its assembly syntax nor which of its registers are
-integer and which floating-point. So:
+writes 2,773 entries from riscv-opcodes (RISC-V International, BSD
+3-clause). That source gives each instruction's fixed bits and the fields
+of its operands, but neither its assembly syntax nor which of its registers
+are integer and which floating-point. So:
 
-- operands are written in RISC-V's order (`rd, rs1, rs2, rs3`; loads
-  `rd, imm(rs1)`; stores `rs2, imm(rs1)`; branches `rs1, rs2, label`;
-  atomics `rd, rs2, (rs1)`);
-- immediates are laid out as the ISA manual lays them out (the I, S, B, J
-  and U forms);
-- the register files, and the bits of rounding modes (`rtz`) and orderings
-  (`.aqrl`), are found with LLVM's RISC-V assembler. rustc has it, in its
-  `riscv64gc-unknown-none-elf` target, which assembles a crate's
-  `global_asm!`.
+- scalar operands are written in RISC-V's order (`rd, rs1, rs2, rs3`;
+  loads `rd, imm(rs1)`; stores `rs2, imm(rs1)`; branches
+  `rs1, rs2, label`; atomics `rd, rs2, (rs1)`);
+- immediates are laid out as the ISA manual lays them out: the I, S, B, J
+  and U forms, and the compressed forms' scattered bits (`c.addi16sp`'s
+  `nzimm[9|4|6|8:7|5]`), which are a table in the generator;
+- the register files, and the bits of rounding modes (`rtz`), orderings
+  (`.aqrl`), vector types (`e32, m2, ta, ma`), segment counts
+  (`vlseg4e16.v`) and Zcmp's register lists (`{ra, s0-s3}`), are found
+  with LLVM's RISC-V assembler. rustc has it, in its
+  `riscv64gc-unknown-none-elf` and `riscv64imac-unknown-none-elf` targets,
+  which assemble a crate's `global_asm!`;
+- the vector and hypervisor instructions' operand order is found the same
+  way: each order is tried with every operand a different register (v8,
+  v16, v24), so that only the right one gives the assembler's word;
+- the constraints the assembler keeps on registers are found from the
+  lines it refuses, and become guards in the encoding: a vector register
+  group's alignment (`if(vd%4==0)` for `vl4r.v`), a destination other
+  than v0 under a mask, other than a source (`vrgather`, widening), or
+  outside a segment's index (`vloxseg8ei64.v`), and an even pair
+  (`amocas.q`). The compressed forms' x8-x15 is in their fields
+  (`rd_p:3=rd-8`). A constraint the assembler does not keep is left out:
+  `c.addi zero, 3` is a hint, and assembles.
 
-With it, the description has 300 of the 329 RV64 instructions of I, M, A,
-F, D, Zicsr, Zifencei, the Zb* and Zk* extensions, Zfh, Zfa, Zacas, Zabha,
-Zicbo and others. The rest: Zfa's `fli` (a table of constants), Zalasr
-(which this LLVM rejects), Zimop's numbered operations, and a few
-privileged ones. `tests/assemblers.rs` assembles RISC-V's 2,900 sample
-lines with `epitome-as` and with rustc, and they must agree word for
-word. That check found that our own `fcvt.d.w`, `fcvt.d.wu` and `fcvt.d.s`
-wrote a rounding mode other than LLVM's (they are exact, so it never
-mattered).
+The instructions are in three groups, each checked by an assembler of its
+own: the 32-bit ones; the compressed ones (C, Zcb, Zcmop and the
+compressed forms of Zicfiss and Zihintntl), with C on; and Zcmp's and
+Zcmt's, for a machine without D, as they take the encodings of C's
+double-precision loads and stores (so they are not disassembled).
+
+With it, the description has 866 of the 871 RV64 instructions of I, M, A,
+F, D, Q, C, V, H, Zicsr, Zifencei, the Zb*, Zk*, Zc* and Zvk* extensions,
+Zfh, Zfa, Zfbfmin, Zvfbfmin, Zvfbfwma, Zacas, Zabha, Zalasr, Zicbo, Zimop,
+Zicfilp, Zicfiss, Svinval, Sdext, Smrnmi and Ssctr. The rest: `fcvt.q.h`
+and `fcvt.h.q`, which this LLVM does not have, and the names riscv-opcodes
+gives families of numbered instructions (`mop.r.N`), whose members are all
+there. A pseudo-instruction is disassembled as itself where its
+instruction has no entry (`mop.r.5`, `sspopchk ra`); an old name is
+assembled but not disassembled where the description reads the word by
+another (`sbreak`, `fmv.x.s`). Zfinx, Zdinx and Zhinx are not described:
+they are F, D and Zfh on the integer registers, and a machine has them or
+the floating-point registers, not both.
+
+`tests/assemblers.rs` assembles RISC-V's 9,100 sample lines, in the same
+three groups, with `epitome-as` and with rustc, and they must agree
+instruction for instruction. That check found that our own `fcvt.d.w`,
+`fcvt.d.wu` and `fcvt.d.s` wrote a rounding mode other than LLVM's (they
+are exact, so it never mattered).
+
+The assembler reads a compressed form only where it is written (`c.add`):
+it does not compress `add`. The code generator uses neither C nor V.
 
 The checks apply to these entries as to any other: encodings, assembly
 round trips, and ambiguity. A register the encoding cannot hold (an odd
@@ -529,7 +561,8 @@ All 30 runs pass. The test was also what found the bugs listed above.
 
 Not yet:
 
-- compressed instructions (C) and vectors (V);
+- compressed instructions (C) and vectors (V) in the code generator (the
+  assembler and disassembler have them);
 - thread-local variables;
 - position-independent code and the GOT;
 - `varargs.c`, whose IR's `va_list` is AArch64's because clang here has
@@ -537,7 +570,8 @@ Not yet:
 
 Adding V would mean:
 
-1. a third register file (`v0`–`v31`), with its classes;
+1. classes holding values in the third register file (`v0`–`v31`, now
+   only named, for assembly);
 2. `vector-bits` with the feature `v`;
 3. vector entries tagged `"feature"="v"`.
 

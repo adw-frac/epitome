@@ -331,16 +331,29 @@ const IMMS: &[i64] = &[
     0x5555_5555,
 ];
 
-/// Operand values for instruction `i`, sample `k`, if its immediates fit.
-fn sample(t: &Target, i: usize, k: usize) -> Option<Env> {
+/// Operand values for instruction `i`: a sample for each of the sample
+/// immediates that fits. Registers are spread over their files; where that
+/// gives no sample at all, they are chosen otherwise (RISC-V's compressed
+/// forms take only x8-x15, and Zcmp's s0-s1 and s2-s7).
+fn samples(t: &Target, i: usize) -> Vec<Env> {
+    (0..64)
+        .map(|spread| (0..IMMS.len()).filter_map(|k| sample(t, i, k, spread)).collect::<Vec<Env>>())
+        .find(|envs| !envs.is_empty())
+        .unwrap_or_default()
+}
+
+/// Operand values for instruction `i`, sample `k`, if its immediates fit;
+/// `spread` chooses the registers (0 is the usual choice).
+fn sample(t: &Target, i: usize, k: usize, spread: usize) -> Option<Env> {
     let ins = &t.instrs[i];
     let imm = IMMS[k % IMMS.len()];
+    let (step, shift) = if spread < 32 { (7, spread) } else { (1, spread - 32) };
     let mut env = Env::new();
     for (j, o) in ins.operands.iter().enumerate() {
         let v = match o.kind {
             Kind::Reg(c) => {
                 let n = t.machine.def(c).names.len().max(1);
-                ((j * 7 + k * 3) % n.min(31)) as i64
+                ((j * step + k * 3 + shift) % n.min(31)) as i64
             }
             Kind::Imm => imm,
             Kind::Label => 0,
@@ -378,8 +391,7 @@ fn encodings(t: &Target) -> Section {
             continue; // A recipe, or a pseudo-instruction.
         }
         let (mut fitted, mut encoded) = (0, 0);
-        for k in 0..IMMS.len() {
-            let Some(env) = sample(t, i, k) else { continue };
+        for env in samples(t, i) {
             fitted += 1;
             // A register beyond a narrow field (v0-v15 only) does not
             // encode: another sample may.
@@ -444,9 +456,8 @@ fn encodings(t: &Target) -> Section {
         // Fine if one accepts fewer words (an alias: `mov` is `orr` with
         // both sources the same), or both write each word alike (one
         // instruction, described for several IR types).
-        let words = |k: usize| -> Vec<Vec<u8>> {
-            (0..IMMS.len()).filter_map(|n| sample(t, k, n)).filter_map(|e| t.instrs[k].encode(&e)).collect()
-        };
+        let words =
+            |k: usize| -> Vec<Vec<u8>> { samples(t, k).iter().filter_map(|e| t.instrs[k].encode(&e)).collect() };
         let takes =
             |k: usize, w: &[u8]| t.instrs[k].decode(w).and_then(|(e, _)| t.instrs[k].encode(&e)).as_deref() == Some(w);
         let (wi, wj) = (words(i), words(j));
@@ -551,7 +562,7 @@ fn assembly(t: &Target) -> Section {
                 continue;
             }
             // Three samples that fit.
-            let envs: Vec<Env> = (0..IMMS.len()).filter_map(|k| sample(t, i, k)).take(3).collect();
+            let envs: Vec<Env> = samples(t, i).into_iter().take(3).collect();
             for env in envs {
                 let Some((mut word, alt)) = ins.encode_alt(&env) else { continue };
                 // A symbol's field holds zero in an object (the relocation's
@@ -853,11 +864,10 @@ pub fn sample_assembly(t: &Target, syntax: Syntax, per: usize) -> String {
             continue;
         }
         let mut written = 0;
-        for k in 0..IMMS.len() {
+        for env in samples(t, i) {
             if written == per {
                 break;
             }
-            let Some(env) = sample(t, i, k) else { continue };
             if ins.enc.encode(&env).is_none() {
                 continue;
             }

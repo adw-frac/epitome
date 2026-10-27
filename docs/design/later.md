@@ -194,8 +194,9 @@ these are for after.
 - **Registers chosen for encodings' size**: x86's r8-r15 need a REX
   prefix, and some instructions have shorter forms for rax (the
   descriptions' `acc:0=d` alternatives, already there); RISC-V's
-  compressed forms (not yet described) need x8-x15 and two-address
-  shapes. The allocator could weigh each register by the bytes its uses
+  compressed forms (described for assembly only) need x8-x15 and
+  two-address shapes, and the assembler could choose them for
+  uncompressed instructions that fit, as LLVM's does with C on. The allocator could weigh each register by the bytes its uses
   and definitions would take in it, from the encodings, preferring the
   cheaper for the values used most.
 - **Small memsets and memcpys with AVX-512 BW** (`prepare.rs`,

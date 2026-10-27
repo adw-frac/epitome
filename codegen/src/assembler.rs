@@ -417,9 +417,10 @@ impl<'t> Assembler<'t> {
     /// Assembles `text`: Mach-O assembly if it says so (`.build_version`,
     /// or `__TEXT` and `__DATA` sections), or `syntax` says so; else ELF.
     pub fn assemble(&self, text: &str, syntax: Option<Syntax>) -> Result<Assembled, String> {
-        // Each instruction's length, by its line: the shortest a target's
-        // instructions are, until assembling it says otherwise. Lengths
-        // only grow, so distances do, so this ends.
+        // Each instruction's length, by its line: the target's usual one
+        // (the shortest, or on RISC-V the uncompressed), until assembling it
+        // says otherwise. After that first word, lengths only grow, so
+        // distances do, so this ends.
         let mut lens: HashMap<usize, usize> = HashMap::new();
         loop {
             match self.assemble_sized(text, syntax, &lens)? {
@@ -430,7 +431,8 @@ impl<'t> Assembler<'t> {
     }
 
     /// Assembles `text` with instructions of the lengths `lens` gives, or
-    /// gives the lengths of those that turned out longer.
+    /// gives the lengths of those that turned out longer (or, not yet
+    /// given one, shorter).
     fn assemble_sized(
         &self,
         text: &str,
@@ -795,6 +797,10 @@ impl<'t> Assembler<'t> {
                     };
                     let room = lens.get(&line).copied().unwrap_or(unit);
                     if bytes.len() > room {
+                        longer.insert(line, bytes.len());
+                        continue;
+                    }
+                    if bytes.len() < room && !lens.contains_key(&line) {
                         longer.insert(line, bytes.len());
                         continue;
                     }

@@ -13,7 +13,8 @@
 ;   60-recipes.ll   recipes: IR with no single instruction
 ;   70-abi.ll       the LP64D calling convention
 ;
-; Not yet: compressed instructions (C), vectors (V), PIC.
+; Compressed (C) and vector (V) instructions are for assembly and disassembly
+; only (80-asm.ll); the code generator does not use them. Not yet: PIC.
 
 ; ===========================================================================
 ; Registers, by their ABI names, in two files: the integer registers
@@ -22,7 +23,7 @@
 ; sign-extended to 64 bits ("narrow-results"="sign"); s and d are the
 ; floating-point registers holding floats and doubles.
 
-!target.registers = !{!1000, !1001, !1002, !1003, !1004, !1005, !1006, !1007}
+!target.registers = !{!1000, !1001, !1002, !1003, !1004, !1005, !1006, !1007, !1008}
 !1000 = !{!"x", !"zero", !"ra", !"sp", !"gp", !"tp", !"t{0-2}", !"s{0-1}", !"a{0-7}", !"s{2-11}", !"t{3-6}"}
 !1001 = !{!"w", !"zero", !"ra", !"sp", !"gp", !"tp", !"t{0-2}", !"s{0-1}", !"a{0-7}", !"s{2-11}", !"t{3-6}"}
 !1002 = !{!"xsp", !"zero", !"ra", !"sp", !"gp", !"tp", !"t{0-2}", !"s{0-1}", !"a{0-7}", !"s{2-11}", !"t{3-6}"}
@@ -32,8 +33,11 @@
 ; The registers by number too, as assembly may name them (x10, f8).
 !1006 = !{!"xn", !"x{0-31}"}
 !1007 = !{!"fn", !"f{0-31}"}
+; The vector registers, which only assembly names (V is not used by the code
+; generator).
+!1008 = !{!"v", !"v{0-31}"}
 
-!target.classes = !{!1010, !1011, !1012, !1013, !1014, !1015, !1016, !1017}
+!target.classes = !{!1010, !1011, !1012, !1013, !1014, !1015, !1016, !1017, !1018}
 !1010 = !{!"x", !"file", !"x", !"bits", !"64", !"holds", !"int"}
 !1011 = !{!"w", !"file", !"x", !"bits", !"32", !"holds", !"int"}
 !1012 = !{!"xsp", !"file", !"x", !"bits", !"64", !"holds", !"int", !"sp", !"yes"}
@@ -42,6 +46,7 @@
 !1015 = !{!"s", !"file", !"f", !"bits", !"32", !"holds", !"float"}
 !1016 = !{!"xn", !"file", !"x"}
 !1017 = !{!"fn", !"file", !"f"}
+!1018 = !{!"v", !"file", !"v"}
 
 ; ===========================================================================
 ; Parameters. No vector registers (V is not described): vectors are done
