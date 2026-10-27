@@ -183,7 +183,8 @@ impl<'t> Assembler<'t> {
                 continue;
             }
             let tpl = Template { instr: i, parts: split_template(&ins.asm) };
-            let m = mnemonic(&ins.asm);
+            // (By the mnemonic in lower case, as lines are looked up.)
+            let m = mnemonic(&ins.asm).to_ascii_lowercase();
             match m.find('{') {
                 Some(k) => by_prefix.push((m[..k].to_string(), tpl)),
                 None => by_mnemonic.entry(m.to_string()).or_default().push(tpl),
@@ -194,31 +195,68 @@ impl<'t> Assembler<'t> {
 
     /// The holes' texts, if `line` has the template's literal text.
     fn holes<'l>(&self, tpl: &Template, line: &'l str) -> Option<Vec<(String, &'l str)>> {
-        let mut pos = 0;
         let mut out = Vec::new();
-        for (k, part) in tpl.parts.iter().enumerate() {
-            match part {
-                Part::Lit(l) => {
-                    if !line[pos..].starts_with(l.as_str()) {
-                        return None;
+        self.holes_from(tpl, 0, line, 0, &mut out).then_some(out)
+    }
+
+    /// Whether `line` from `pos` matches the template from part `k`, the
+    /// holes' texts pushed to `out`. A hole of an enum operand is one of its
+    /// names (perhaps empty), each tried in turn until the rest matches, so
+    /// enum holes may be side by side (`{neg}{src}`); any other hole runs
+    /// to the next literal text, and is not empty.
+    fn holes_from<'l>(
+        &self,
+        tpl: &Template,
+        k: usize,
+        line: &'l str,
+        pos: usize,
+        out: &mut Vec<(String, &'l str)>,
+    ) -> bool {
+        let Some(part) = tpl.parts.get(k) else { return pos == line.len() };
+        match part {
+            Part::Lit(l) => {
+                line[pos..].starts_with(l.as_str()) && self.holes_from(tpl, k + 1, line, pos + l.len(), out)
+            }
+            Part::Hole(inner) => {
+                if let Some(e) = self.enum_of(tpl.instr, inner) {
+                    for (name, _) in &e.names {
+                        if line[pos..].starts_with(name.as_str()) {
+                            out.push((inner.clone(), &line[pos..pos + name.len()]));
+                            if self.holes_from(tpl, k + 1, line, pos + name.len(), out) {
+                                return true;
+                            }
+                            out.pop();
+                        }
                     }
-                    pos += l.len();
+                    return false;
                 }
-                Part::Hole(inner) => {
-                    let end = match tpl.parts.get(k + 1) {
-                        Some(Part::Lit(l)) => pos + line[pos..].find(l.as_str())?,
-                        Some(Part::Hole(_)) => return None,
-                        None => line.len(),
-                    };
-                    if end == pos {
-                        return None;
-                    }
-                    out.push((inner.clone(), &line[pos..end]));
-                    pos = end;
+                let end = match tpl.parts.get(k + 1) {
+                    Some(Part::Lit(l)) => match line[pos..].find(l.as_str()) {
+                        Some(e) => pos + e,
+                        None => return false,
+                    },
+                    Some(Part::Hole(_)) => return false,
+                    None => line.len(),
+                };
+                if end == pos {
+                    return false;
+                }
+                out.push((inner.clone(), &line[pos..end]));
+                self.holes_from(tpl, k + 1, line, end, out) || {
+                    out.pop();
+                    false
                 }
             }
         }
-        (pos == line.len()).then_some(out)
+    }
+
+    /// The enum a template's hole is an operand of, if it is one.
+    fn enum_of(&self, i: usize, hole: &str) -> Option<&crate::machine::EnumDef> {
+        let o = self.t.instrs[i].operands.iter().find(|o| o.name == hole)?;
+        match o.kind {
+            Kind::Enum(e) => Some(&self.t.machine.enums[e as usize]),
+            _ => None,
+        }
     }
 
     /// Reads a line as instruction `i`, by the holes' texts.
@@ -273,6 +311,7 @@ impl<'t> Assembler<'t> {
                     set(&mut r.env, name, text.parse::<f32>().ok()?.to_bits() as i64)?
                 }
                 Kind::Imm => set(&mut r.env, name, parse_int(text)?)?,
+                Kind::Enum(e) => set(&mut r.env, name, self.t.machine.enums[e as usize].value(text)?)?,
                 Kind::Cond => {
                     // (In either case: `NE` is `ne`.)
                     let c = self.t.conds.iter().find(|c| c.asm.eq_ignore_ascii_case(text))?;
