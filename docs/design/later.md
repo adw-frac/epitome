@@ -115,6 +115,11 @@ these are for after.
   again after each branch changed, which is quadratic in a function with
   many far branches. Better: one pass, adjusting the positions after the
   change.
+- **RISC-V's `li`** (`asm_text.rs`, `li`): the value's upper bits, then
+  shifts and 12-bit `addi`s, which is sometimes longer than it need be
+  (`(1 << 53) - 1` is `li 1; slli 53; addi -1` where `li -1; srli 11`
+  does). Better: also try the forms of a run of ones shifted, and of the
+  value's trailing zeros shifted out first, and take the shortest.
 - **`llvm.global_ctors` priorities on ELF**: one `.init_array` in
   priority order within the object, where `.init_array.N` sections would
   order them across objects.

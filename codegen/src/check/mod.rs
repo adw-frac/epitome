@@ -335,11 +335,9 @@ const IMMS: &[i64] = &[
 /// immediates that fits. Registers are spread over their files; where that
 /// gives no sample at all, they are chosen otherwise (RISC-V's compressed
 /// forms take only x8-x15, and Zcmp's s0-s1 and s2-s7).
-fn samples(t: &Target, i: usize) -> Vec<Env> {
-    (0..64)
-        .map(|spread| (0..IMMS.len()).filter_map(|k| sample(t, i, k, spread)).collect::<Vec<Env>>())
-        .find(|envs| !envs.is_empty())
-        .unwrap_or_default()
+fn samples(t: &Target, i: usize) -> impl Iterator<Item = Env> + '_ {
+    let spread = (0..64).find(|&s| (0..IMMS.len()).any(|k| sample(t, i, k, s).is_some())).unwrap_or(0);
+    (0..IMMS.len()).filter_map(move |k| sample(t, i, k, spread))
 }
 
 /// Operand values for instruction `i`, sample `k`, if its immediates fit;
@@ -456,8 +454,7 @@ fn encodings(t: &Target) -> Section {
         // Fine if one accepts fewer words (an alias: `mov` is `orr` with
         // both sources the same), or both write each word alike (one
         // instruction, described for several IR types).
-        let words =
-            |k: usize| -> Vec<Vec<u8>> { samples(t, k).iter().filter_map(|e| t.instrs[k].encode(&e)).collect() };
+        let words = |k: usize| -> Vec<Vec<u8>> { samples(t, k).filter_map(|e| t.instrs[k].encode(&e)).collect() };
         let takes =
             |k: usize, w: &[u8]| t.instrs[k].decode(w).and_then(|(e, _)| t.instrs[k].encode(&e)).as_deref() == Some(w);
         let (wi, wj) = (words(i), words(j));
@@ -562,7 +559,7 @@ fn assembly(t: &Target) -> Section {
                 continue;
             }
             // Three samples that fit.
-            let envs: Vec<Env> = samples(t, i).into_iter().take(3).collect();
+            let envs: Vec<Env> = samples(t, i).take(3).collect();
             for env in envs {
                 let Some((mut word, alt)) = ins.encode_alt(&env) else { continue };
                 // A symbol's field holds zero in an object (the relocation's

@@ -501,6 +501,43 @@ are exact, so it never mattered).
 The assembler reads a compressed form only where it is written (`c.add`):
 it does not compress `add`. The code generator uses neither C nor V.
 
+### The ISA tests
+
+`tests/riscv_tests.rs` runs riscv-tests (RISC-V International's ISA tests,
+`isa/` in the `p` environment: 237 RV64 tests of I, M, A, F, D, C, Zfh,
+Zba, Zbb, Zbc, Zbs, Zbkb, Zbkx, Zicond, Zicbo, Zabha, Zacas, Zalasr, the
+machine and supervisor modes, and the hypervisor) where
+`EPITOME_RISCV_TESTS` names a checkout. Each test is preprocessed by
+clang, assembled by epitome-as, linked by ld.lld with the tests' own
+linker script, and run on QEMU's spike machine (`-cpu max`), whose exit
+status says which test case failed. Each is assembled by clang too, and
+ours must end as clang's does.
+
+They are written for GNU's assembler, so to assemble them it reads what
+GNU's does (`asm_text.rs`):
+
+- macros, `.rept` and `.if`, and expressions of constants as operands
+  (`li a0, 0x6000 & (0x6000 >> 1)`), with GNU's precedence;
+- `li` of any 64-bit value (`lui` and `addiw`, then for 64-bit values,
+  shifts and `addi`s of 12 bits), `la` and `lla` (`auipc` of
+  `%pcrel_hi`, then `addi` of `%pcrel_lo` of the `auipc`'s label, which
+  is kept as a symbol, as linkers look for the high part there), and loads
+  and stores of a symbol (`sw gp, tohost, t5`);
+- CSRs by name (`!target.asm-names`, from riscv-opcodes' `csrs.csv`), the
+  registers by number (`x10`, a class's `names-of`), and the CSR, branch
+  and immediate forms GNU allows (`csrw`, `csrs mstatus, 8`, `bgtu`,
+  `sll a0, a0, 3`, `jalr a0, t1, 0`, an atomic's `0(a0)`), as aliases;
+- branches too far for 12 bits, as the other branch over a `j`
+  (`!target.asm-relax`); code padded with `nop`, not zeros; `.weak`; zeros
+  in `.bss`; `.text.*` sections, without flags, as code.
+
+With QEMU 8.2, all 237 assemble and 201 pass. The other 36 fail as
+clang's do, as this QEMU has neither Zabha, Zacas nor Zalasr (and four of
+the hypervisor's fail with either). Clang does not assemble the seven of
+Zfh (it has no `.float16`); ours pass. Our `li` is sometimes longer than
+LLVM's (`(1 << 53) - 1` is three instructions to its two,
+[later.md](later.md)).
+
 The checks apply to these entries as to any other: encodings, assembly
 round trips, and ambiguity. A register the encoding cannot hold (an odd
 one, for a pair; `v16` in a 4-bit field) does not fit, as an immediate out

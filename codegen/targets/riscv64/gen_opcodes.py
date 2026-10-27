@@ -727,7 +727,8 @@ def existing():
             continue
         for line in open(os.path.join(HERE, path)):
             m = re.match(r'define .*?@([A-Za-z0-9_.]+)\(.*?"enc"="([^"]*)" .*?"asm"="([a-z0-9.]+)', line)
-            if not m:
+            # (Those of a symbol are not those of a number: lui's of %hi.)
+            if not m or '"reloc"=' in line:
                 continue
             mask = value = 0
             pos = 32
@@ -860,7 +861,21 @@ def main():
         for k, v in sorted(stats.items(), key=lambda x: -x[1]):
             print(f"{v:6} {k}", file=sys.stderr)
     with open(os.path.join(HERE, "80-asm.ll"), "w") as f:
-        f.write(NOTICE + "".join(entries))
+        f.write(NOTICE + "".join(entries) + csr_names(root))
+
+
+def csr_names(root):
+    """The CSRs' names, for the operands of the CSR instructions
+    (`!target.asm-names`), from riscv-opcodes' csrs.csv."""
+    names = []
+    for line in open(os.path.join(root, "csrs.csv")):
+        m = re.match(r'\s*(0x[0-9a-fA-F]+),\s*"([a-z0-9_.]+)"', line)
+        if m:
+            names.append((m.group(2), m.group(1)))
+    ids = [f"!{9000 + k}" for k in range(len(names))]
+    out = "; The CSRs by name, in the operands of the CSR instructions (csrs.csv).\n"
+    out += "!target.asm-names = !{" + ", ".join(ids) + "}\n"
+    return out + "".join(f'{i} = !{{!"csr", !"{n}", !"{v}"}}\n' for i, (n, v) in zip(ids, names))
 
 
 CLASS = {"x": "x", "f": "d", "v": "v"}
