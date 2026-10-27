@@ -31,6 +31,10 @@ short) has to do to work like LLVM. They are split into two halves:
   modifiers as data.
 - [x86-64: a plan](x86.md): how x86 instructions are written in a
   description, and what the code generator must learn first.
+- [Partial machines: a plan](partial-machines.md): machines without
+  memory, a stack, calls or floating point; checking that a program fits
+  one; fencing off what Epitome must not optimise or lower; and a VLIW
+  GPU (TeraScale) to test it on.
 - [Object files, assembly and disassembly](objects.md): writing Mach-O
   and ELF object files that match clang's assembler; `epitome-as`, which
   assembles with the machine description run backwards; and
